@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "MultiRead",
+      "Bash",
+      "WebFetch",
+      "Edit",
+      "Write",
+      "SlashCommand"
+    ],
+    "deny": [],
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/cleanup_untracked_worktrees.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
