@@ -7,7 +7,7 @@ cd your-project-root
 git submodule add git@github.com:YoniChechik/claude-code-config.git .claude
 ```
 
-2. Include the base configuration in your `CLAUDE.md` file:
+2. Start from an empty `CLAUDE.md` file and only add this line:
 ```markdown
 @.claude/CLAUDE_BASE.md
 ```
