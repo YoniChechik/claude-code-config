@@ -24,7 +24,13 @@ git worktree add ./_worktrees/$FEATURE_NAME -b $FEATURE_NAME origin/main
 cd ./_worktrees/$FEATURE_NAME
 ```
 
-### Step 3: Notify User
-Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME`
+### Step 3: Initialize .claude Submodule
+Initialize the .claude submodule in the new worktree to ensure all configuration is available:
+```bash
+git submodule update --init --recursive .claude
+```
+
+### Step 4: Notify User
+Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME` and that the .claude submodule has been initialized
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**

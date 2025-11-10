@@ -36,11 +36,20 @@ Tell user to switch to the worktree:
 cd ./_worktrees/FEATURE_NAME
 ```
 
-### Step 3: Analyze Current Progress
+### Step 3: Ensure .claude Submodule is Initialized
+Check if .claude submodule is initialized, and initialize if needed:
+```bash
+# Check if .claude is empty or not initialized
+if [ ! -f .claude/CLAUDE_BASE.md ]; then
+    git submodule update --init --recursive .claude
+fi
+```
+
+### Step 4: Analyze Current Progress
 1. Check if sync with origin/main is needed. if so- run /merge command.
 2. Read current git state compared to origin/main to understand context
 3. Examine `plan.md` and documentation
 4. Identify next steps from the plan
 
-### Step 4: Summarization
+### Step 5: Summarization
 - Summarize next steps and ask user how to continue
