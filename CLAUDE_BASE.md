@@ -10,7 +10,7 @@
 3. **all other general operations as requested**
 
 ## Miscellaneous
-- **Project structure**: see @.claude/knowledge/architecture.md
+- **Project structure**: see architecture.md (in repo root)
 - **Package manager & testing**: `uv` - see @.claude/knowledge/uv.md
 - **Worktree Isolation**: Each feature in dedicated git worktree at `./_worktrees/feature_name`
 - **Never commit changes to git yourself unless explicitly stated!**

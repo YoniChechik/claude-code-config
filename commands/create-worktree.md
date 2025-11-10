@@ -18,13 +18,13 @@ Creates a git worktree for isolated feature development. This is a shared utilit
 ### Step 2: Create Git Worktree
 Set up isolated feature branch from origin/main (unless user stated a different branch)
 ```bash
-# Create worktree in dedicated worktrees directory
-git worktree add ./worktrees/$FEATURE_NAME -b $FEATURE_NAME origin/main
+# Create worktree in dedicated _worktrees directory
+git worktree add ./_worktrees/$FEATURE_NAME -b $FEATURE_NAME origin/main
 # move to new dir
-cd ./worktrees/$FEATURE_NAME
+cd ./_worktrees/$FEATURE_NAME
 ```
 
 ### Step 3: Notify User
-Tell user the worktree has been created at `./worktrees/$FEATURE_NAME`
+Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME`
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**

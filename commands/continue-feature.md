@@ -22,9 +22,9 @@ If worktree doesn't exist, check if feature branch exists and create worktree:
 ```bash
 git branch -a | grep feature
 # If local branch exists but no worktree:
-git worktree add ./worktrees/FEATURE_NAME FEATURE_NAME
+git worktree add ./_worktrees/FEATURE_NAME FEATURE_NAME
 # If only remote branch exists:
-git worktree add -b FEATURE_NAME ./worktrees/FEATURE_NAME origin/FEATURE_NAME
+git worktree add -b FEATURE_NAME ./_worktrees/FEATURE_NAME origin/FEATURE_NAME
 ```
 
 If couldn't find a right fit, stop and ask user for clarification.
@@ -33,7 +33,7 @@ If couldn't find a right fit, stop and ask user for clarification.
 ### Step 2: Navigate to Feature Worktree
 Tell user to switch to the worktree:
 ```bash
-cd ./worktrees/FEATURE_NAME
+cd ./_worktrees/FEATURE_NAME
 ```
 
 ### Step 3: Analyze Current Progress
