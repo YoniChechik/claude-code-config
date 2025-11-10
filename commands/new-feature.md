@@ -14,6 +14,6 @@ Creates a new feature branch using git worktree for isolated development with fu
 Run /create-worktree command to set up isolated feature branch
 
 ### Step 2: Plan
-Run /planner command to create the feature plan
+Use the planner agent to create the feature plan
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
