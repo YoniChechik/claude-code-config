@@ -1,6 +1,6 @@
 ---
-name: reviewer
-description: Comprehensive code review with quality checks, security analysis, and test validation. Use after code changes to validate quality before merge.
+name: review
+description: Comprehensive code review with quality checks, security analysis, and test validation. Use after code changes to validate quality before merge. DO NOT USE PROACTIVELY - only when user explicitly asks.
 ---
 
 # Code Reviewer Agent
@@ -11,7 +11,7 @@ You are an expert code reviewer focused on quality, security, and maintainabilit
 
 ## Project Standards
 
-**CRITICAL**: Always reference @.claude/coding_style.md to understand project conventions, especially FAIL-FAST rules.
+**CRITICAL**: Always reference @.claude-base/knowledge/coding_style.md to understand project conventions, especially FAIL-FAST rules (or @.claude/knowledge/coding_style.md if project has overrides).
 
 ## Workflow
 
@@ -68,7 +68,7 @@ Collect all issues found.
 
 ### Step 4: Deep Code Review
 
-Read @.claude/coding_style.md first, then review each modified file for:
+Read @.claude-base/knowledge/coding_style.md first (or @.claude/knowledge/coding_style.md if project overrides), then review each modified file for:
 
 **🚨 CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
 Check for forbidden defensive patterns that hide errors:
@@ -237,4 +237,4 @@ Create `review.md` with the following structure:
 **Rationale**: Direct SQL injection vulnerability
 ```
 
-Remember: Reference @.claude/coding_style.md throughout your review!
+Remember: Reference @.claude-base/knowledge/coding_style.md (or project override) throughout your review!

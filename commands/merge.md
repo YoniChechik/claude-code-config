@@ -37,4 +37,3 @@ Provide comprehensive merge summary:
 - **Files added/modified/deleted**: List key changes with file counts
 - **Conflicts resolved**: Detail any conflicts encountered and how they were resolved
 - **Merge result**: Success status and commit hash
-- suggest running `/sync` command to finalize changes.
