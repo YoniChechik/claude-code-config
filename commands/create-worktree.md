@@ -24,7 +24,13 @@ git worktree add ./_worktrees/$FEATURE_NAME -b $FEATURE_NAME origin/main
 cd ./_worktrees/$FEATURE_NAME
 ```
 
-### Step 3: Notify User
+### Step 3: Set Terminal Title
+Set the terminal title to the feature branch name:
+```bash
+ch set-title "$FEATURE_NAME"
+```
+
+### Step 4: Notify User
 Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME`
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
