@@ -1,5 +1,5 @@
 ---
-name: review, reviewer
+name: reviewer
 description: Comprehensive code review with quality checks, security analysis, and test validation. Use after code changes to validate quality before merge. DO NOT USE PROACTIVELY - only when user explicitly asks.
 ---
 
