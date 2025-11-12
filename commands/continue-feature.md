@@ -39,7 +39,9 @@ cd ./_worktrees/FEATURE_NAME
 ### Step 3: Set Terminal Title
 Set the terminal title to the feature branch name:
 ```bash
-ch set-title "FEATURE_NAME"
+curl -X POST http://localhost:3456 \
+  -H "Content-Type: application/json" \
+  -d "{\"command\":\"setTerminalTitle\",\"args\":[\"FEATURE_NAME\"]}"
 ```
 
 ### Step 4: Analyze Current Progress
