@@ -20,6 +20,11 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/cleanup_untracked_worktrees.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/install_vscode_extension.sh",
+            "timeout": 30
           }
         ]
       }
