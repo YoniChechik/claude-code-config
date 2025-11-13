@@ -19,7 +19,8 @@ Commands prefixed with `!` can be executed directly by Claude Code.
 ## Environment Variables
 
 - `$CLAUDE_HELPER_CURRENT_TERMINAL_TITLE` - Current terminal's unique title (set in Claude Helper terminals)
+- `$CLAUDE_HELPER_PORT` - HTTP port for sending commands (automatically assigned, starting from 3456)
 
 ## API Endpoint
 
-All commands use: `http://localhost:3456`
+All commands use: `http://localhost:$CLAUDE_HELPER_PORT`
