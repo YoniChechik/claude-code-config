@@ -25,7 +25,7 @@ cd ./_worktrees/$FEATURE_NAME
 ```
 
 ### Step 3: Set Terminal Title
-/setTerminalTitle "branch name"
+/setTerminalTitle "$FEATURE_NAME"
 
 ### Step 4: Notify User
 Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME`
