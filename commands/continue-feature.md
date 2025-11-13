@@ -37,7 +37,7 @@ cd ./_worktrees/FEATURE_NAME
 ```
 
 ### Step 3: Set Terminal Title
-/setTerminalTitle "branch name"
+/setTerminalTitle "FEATURE_NAME"
 
 ### Step 4: Analyze Current Progress
 1. Check if sync with origin/main is needed. if so- run /merge command.
