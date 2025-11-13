@@ -25,12 +25,7 @@ cd ./_worktrees/$FEATURE_NAME
 ```
 
 ### Step 3: Set Terminal Title
-Set the terminal title to the feature branch name:
-```bash
-curl -X POST http://localhost:3456 \
-  -H "Content-Type: application/json" \
-  -d "{\"command\":\"setTerminalTitle\",\"args\":[\"$FEATURE_NAME\"]}"
-```
+/setTerminalTitle "$FEATURE_NAME"
 
 ### Step 4: Notify User
 Tell user the worktree has been created at `./_worktrees/$FEATURE_NAME`
