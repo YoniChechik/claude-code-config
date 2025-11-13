@@ -11,6 +11,6 @@ Shows a notification in VS Code with optional message.
 ## Usage
 determine the message to show from user args and run:
 ```bash
-curl -X POST http://localhost:3456 -H "Content-Type: application/json" -d "{\"command\":\"ping\",\"args\":[\"$MESSAGE\"]}"
+curl -X POST http://localhost:$CLAUDE_HELPER_PORT -H "Content-Type: application/json" -d "{\"command\":\"ping\",\"args\":[\"$MESSAGE\"]}"
 ```
 

@@ -6,7 +6,8 @@
 TERMINAL_TITLE="Task complete"
 
 # Send notification via HTTP to VS Code extension
-curl -X POST http://localhost:3456 \
+# ${VAR:-default} - Use default if VAR is unset or empty
+curl -X POST http://localhost:${CLAUDE_HELPER_PORT:-3456} \
   -H "Content-Type: application/json" \
   -d "{\"command\":\"pingTerminalTitle\",\"args\":[]}" \
   &> /dev/null &

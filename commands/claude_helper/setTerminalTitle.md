@@ -12,7 +12,7 @@ Renames the current terminal to a new title.
 ## Usage
 determine the new terminal title from user args and run:
 ```bash
-curl -X POST http://localhost:3456 -H "Content-Type: application/json" -d "{\"command\":\"setTerminalTitle\",\"args\":[\"$NEW_TITLE\",\"$CLAUDE_HELPER_CURRENT_TERMINAL_TITLE\"]}"
+curl -X POST http://localhost:$CLAUDE_HELPER_PORT -H "Content-Type: application/json" -d "{\"command\":\"setTerminalTitle\",\"args\":[\"$NEW_TITLE\",\"$CLAUDE_HELPER_CURRENT_TERMINAL_TITLE\"]}"
 ```
 
 ## Notes

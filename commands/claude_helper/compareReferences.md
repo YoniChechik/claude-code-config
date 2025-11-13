@@ -12,7 +12,7 @@ Opens GitLens comparison view to compare two git references (branches, commits, 
 ## Usage
 determine the two references to compare from user args and run:
 ```bash
-curl -X POST http://localhost:3456 -H "Content-Type: application/json" -d "{\"command\":\"compareReferences\",\"args\":[\"$REF1\",\"$REF2\"]}"
+curl -X POST http://localhost:$CLAUDE_HELPER_PORT -H "Content-Type: application/json" -d "{\"command\":\"compareReferences\",\"args\":[\"$REF1\",\"$REF2\"]}"
 ```
 
 ## Examples
