@@ -9,10 +9,15 @@
     - **Call the `debugger` agent** only for complex debugging scenarios
 3. **all other general operations as requested**
 
+## Wrapper Architecture
+This projects use a **wrapper repository** pattern with submodules:
+- **Wrapper repo** - Orchestrates configuration and environment (`.claude/`, `docker/`, etc.)
+- **Main submodule** - Contains the actual codebase where development happens
+
+Identify the main submodule and work within it.
+
 ## Miscellaneous
-- **Project structure**: see architecture.md (in repo root)
 - **Package manager & testing**: `uv` - see @.claude/knowledge/uv.md
-- **Worktree Isolation**: Each feature in dedicated git worktree at `./_worktrees/feature_name`
 - **Never commit changes to git yourself unless explicitly stated!**
-- **MUST adhere to coding conventions**- see @.claude/knowledge/coding_style.md
-- **github CLI usage guidelines**: see @.claude/knowledge/github_cli_usage.md
+- **MUST adhere to coding conventions** - see @.claude/knowledge/coding_style.md
+- **github CLI usage guidelines** - see @.claude/knowledge/github_cli_usage.md
