@@ -20,26 +20,23 @@ git worktree list
 
 If worktree doesn't exist, check if feature branch exists and create worktree:
 ```bash
+# cd into main submodule
+cd main_submodule
 git branch -a | grep feature
 # If local branch exists but no worktree:
-git worktree add ./_worktrees/FEATURE_NAME FEATURE_NAME
+git worktree add ../FEATURE_NAME FEATURE_NAME
 # If only remote branch exists:
-git worktree add -b FEATURE_NAME ./_worktrees/FEATURE_NAME origin/FEATURE_NAME
+git worktree add -b FEATURE_NAME ../FEATURE_NAME origin/FEATURE_NAME
+# Move to new worktree dir
+cd ../$FEATURE_NAME
 ```
 
 If couldn't find a right fit, stop and ask user for clarification.
 
-
-### Step 2: Navigate to Feature Worktree
-Tell user to switch to the worktree:
-```bash
-cd ./_worktrees/FEATURE_NAME
-```
-
-### Step 3: Set Terminal Title
+### Step 2: Set Terminal Title
 /setTerminalTitle "FEATURE_NAME"
 
-### Step 4: Analyze Current Progress
+### Step 3: Analyze Current Progress
 1. Check if sync with origin/main is needed. if so- run /merge command.
 2. Read current git state compared to origin/main to understand context
 3. Examine `plan.md` and documentation
