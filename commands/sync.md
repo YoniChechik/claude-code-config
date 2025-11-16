@@ -1,6 +1,13 @@
 # Sync Changes
 
-Merges from origin/main, creates a commit with professional message generation, pushes to remote, and tracks phase completion. Ensures branch head is always >= origin/main.
+Merges from origin/main, commits any local changes with professional message generation, and pushes to remote. This ensures the current branch is always ahead of (or equal to) origin/main, never behind or diverged.
+
+**Goal**: Current branch HEAD >= origin/main (no divergence, no outdated commits)
+
+**What this means**:
+- "Ahead" = local branch has commits that origin/main doesn't have yet
+- "Equal" = local branch is at the same commit as origin/main
+- "Behind/Diverged" = ❌ Never allowed - always merge first to stay current
 
 ## Optional commit message hint from user input (can be empty string)
 "$ARGUMENTS"
@@ -34,7 +41,11 @@ After merge completes, provide brief summary:
 - **Conflicts resolved**: Detail any conflicts encountered and how they were resolved
 - **Merge result**: Success status
 
-This ensures our branch is always ahead of origin/main, never diverged.
+**Result**: Current branch now includes all commits from origin/main. The branch is either:
+- **Equal** to origin/main (if no local commits existed)
+- **Ahead** of origin/main (if local commits existed before merge)
+
+This ensures we're never behind or diverged from origin/main.
 
 ### Step 2: Analyze Changes for Commit Message
 Review staged/unstaged changes to understand:
@@ -42,6 +53,8 @@ Review staged/unstaged changes to understand:
 - Scope and impact
 - Key components modified
 Do this using git diff. Stage all unstaged changes.
+
+**Important**: If changes exist, committing them (Step 6) will make the current branch ahead of origin/main. If no changes exist, skip to Step 8 - we're already synced.
 
 ### Step 3: Check Plan Progress
 If `task.md` exists, review current phase status:
@@ -85,5 +98,9 @@ If this is the first push and the branch doesn't exist on remote yet:
 git push -u origin HEAD
 ```
 
+**Result**: After pushing, the current branch remains ahead of (or equal to) origin/main with all changes safely on remote.
+
 ### Step 8: Confirmation
 Report commit hash, push status, and summary to user.
+
+**Final State**: ✓ Current branch >= origin/main (ahead or equal, never behind or diverged)
