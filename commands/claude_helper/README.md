@@ -6,9 +6,7 @@ Quick reference commands for Claude Helper HTTP API.
 
 - **[ping](./ping.md)** - Show notification with message
 - **[setTerminalTitle](./setTerminalTitle.md)** - Rename terminal with tracking
-- **[compareReferences](./compareReferences.md)** - Compare two git references
-- **[compareHead](./compareHead.md)** - Compare HEAD with reference
-- **[clearComparisons](./clearComparisons.md)** - Clear GitLens comparisons
+- **[compareReferences](./compareReferences.md)** - Compare git refs or working tree (main repo or submodules, auto-clears)
 
 ## Usage
 
