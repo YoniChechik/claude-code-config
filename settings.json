@@ -23,6 +23,26 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo -e '\\a'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo -e '\\a'"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
