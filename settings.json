@@ -20,33 +20,6 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/cleanup_untracked_worktrees.sh"
-          },
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/install_vscode_extension.sh",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/notification_on_stop.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/notification_on_stop.sh",
-            "timeout": 10
           }
         ]
       }
@@ -55,5 +28,6 @@
   "statusLine": {
     "type": "command",
     "command": "printf '\\033[01;32m%s@%s\\033[00m:\\033[01;34m%s\\033[00m' \"$(whoami)\" \"$(hostname -s)\" \"$(pwd)\""
-  }
+  },
+  "alwaysThinkingEnabled": false
 }

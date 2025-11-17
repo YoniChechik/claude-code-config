@@ -10,3 +10,6 @@ settings.json
 shell-snapshots/
 statsig/
 todos/
+.claude.json*
+.claude/
+ide/

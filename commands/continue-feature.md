@@ -36,14 +36,11 @@ Tell user to switch to the worktree:
 cd ./_worktrees/FEATURE_NAME
 ```
 
-### Step 3: Set Terminal Title
-/setTerminalTitle "FEATURE_NAME"
-
-### Step 4: Analyze Current Progress
+### Step 3: Analyze Current Progress
 1. Check if sync with origin/main is needed. if so- run /merge command.
 2. Read current git state compared to origin/main to understand context
 3. Examine `plan.md` and documentation
 4. Identify next steps from the plan
 
-### Step 5: Summarization
+### Step 4: Summarization
 - Summarize next steps and ask user how to continue
