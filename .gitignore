@@ -1,0 +1,12 @@
+# Existing local files - added during repo setup
+.claude/
+.credentials.json
+debug/
+downloads/
+history.jsonl
+projects/
+session-env/
+settings.json
+shell-snapshots/
+statsig/
+todos/
