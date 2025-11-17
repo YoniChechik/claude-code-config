@@ -1,13 +1,11 @@
 # Claude Code Config
 
-## How to use this repo
-1. Add this repo as a git submodule:
-```bash
-cd your-project-root
-git submodule add git@github.com:YoniChechik/claude-code-config.git .claude
-```
+Personal Claude Code configuration (hooks, commands, agents, settings).
 
-2. Start from an empty `CLAUDE.md` file and only add this line:
-```markdown
-@.claude/CLAUDE_BASE.md
+## Installation
+
+```bash
+git clone https://github.com/YoniChechik/claude-code-config.git /tmp/claude-temp
+mv /tmp/claude-temp/.git ~/.claude/ && cd ~/.claude && git reset --hard HEAD
+rm -rf /tmp/claude-temp
 ```
