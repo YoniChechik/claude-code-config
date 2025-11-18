@@ -1,6 +1,6 @@
 # Quick Feature Setup
 
-Creates a new feature branch using git worktree and starts work immediately. No planning, no tests, no docs - just MVP implementation.
+Creates a new feature branch using git clone and starts work immediately. No planning, no tests, no docs - just MVP implementation.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -10,8 +10,8 @@ Creates a new feature branch using git worktree and starts work immediately. No 
 
 ## Process
 
-### Step 1: Create Worktree
-Run /create-worktree command to set up isolated feature branch
+### Step 1: Create Clone
+Run /create-worktree command to set up isolated feature clone
 
 ### Step 2: Start Implementation
 Begin MVP implementation immediately:

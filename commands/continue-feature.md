@@ -1,6 +1,6 @@
 # Continue Feature Development
 
-Continues work on an existing feature worktree with proper context analysis.
+Continues work on an existing feature clone with proper context analysis.
 
 
 ## Feature description from user input
@@ -12,28 +12,29 @@ Continues work on an existing feature worktree with proper context analysis.
 
 ## Process
 
-### Step 1: Find Feature Worktree
-Identify the appropriate worktree:
+### Step 1: Find Feature Clone
+Identify the appropriate clone:
 ```bash
-git worktree list
+# List existing clones
+ls -1 ./_clones/
 ```
 
-If worktree doesn't exist, check if feature branch exists and create worktree:
+If clone doesn't exist, check if feature branch exists remotely and create clone:
 ```bash
 git branch -a | grep feature
-# If local branch exists but no worktree:
-git worktree add ./_worktrees/FEATURE_NAME FEATURE_NAME
-# If only remote branch exists:
-git worktree add -b FEATURE_NAME ./_worktrees/FEATURE_NAME origin/FEATURE_NAME
+REPO_URL=$(git config --get remote.origin.url)
+
+# If remote branch exists:
+git clone -b FEATURE_NAME "$REPO_URL" ./_clones/FEATURE_NAME
 ```
 
 If couldn't find a right fit, stop and ask user for clarification.
 
 
-### Step 2: Navigate to Feature Worktree
-Tell user to switch to the worktree:
+### Step 2: Navigate to Feature Clone
+Tell user to switch to the clone:
 ```bash
-cd ./_worktrees/FEATURE_NAME
+cd ./_clones/FEATURE_NAME
 ```
 
 ### Step 3: Analyze Current Progress

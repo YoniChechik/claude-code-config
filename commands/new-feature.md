@@ -1,6 +1,6 @@
 # New Feature Setup
 
-Creates a new feature branch using git worktree for isolated development with full planning.
+Creates a new feature branch using git clone for isolated development with full planning.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -10,8 +10,8 @@ Creates a new feature branch using git worktree for isolated development with fu
 
 ## Process
 
-### Step 1: Create Worktree
-Run /create-worktree command to set up isolated feature branch
+### Step 1: Create Clone
+Run /create-worktree command to set up isolated feature clone
 
 ### Step 2: Plan
 Use the planner agent to create the feature plan
