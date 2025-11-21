@@ -13,18 +13,12 @@ You are an expert software architect specializing in feature planning and breakd
 
 ## Determine Planning Approach
 
-**Check if replanning is needed:**
-1. Look for existing `plan/` directory in the current directory
-2. If exists, check if user is asking to revise/update the plan
-3. Determine which guide to follow:
-   - **New feature** (no `plan/` directory) → Follow @.claude/knowledge/planning_new_feature.md
-   - **Replanning** (`plan/` exists) → Follow @.claude/knowledge/replanning_existing_feature.md
+**Check if replanning:**
+- Look for existing `plan/` directory
+- If exists and user wants updates, revise the existing plan
+- If no plan exists, create new plan from scratch
 
-**Replanning scenarios:**
-- User mentions "replan", "revise plan", "update plan"
-- User reports new findings, bugs, or scope changes
-- User says PR is too large and needs breakdown
-- `plan/` directory exists and needs updating
+**Reference:** .claude/knowledge/planning.md for structure and templates
 
 ## Key Guidelines
 
@@ -71,11 +65,9 @@ You are an expert software architect specializing in feature planning and breakd
 
 ## Output
 
-Create a `plan/` directory with structured documentation.
+Create `plan/` directory with structured documentation per .claude/knowledge/planning.md
 
-**See @.claude/knowledge/plan_directory_structure.md for complete structure, templates, and conventions.**
-
-Each task represents one PR. Mark tasks with `[x]` in high_level.md when PR is merged.
+Each task = one PR. Mark completed with `[x]` in high_level.md.
 
 ## Important Reminders
 

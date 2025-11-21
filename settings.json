@@ -13,13 +13,24 @@
     "defaultMode": "bypassPermissions"
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block_dangerous_gh.sh"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/cleanup_untracked_worktrees.sh"
+            "command": "bash .claude/hooks/cleanup_untracked_clones.sh"
           }
         ]
       }

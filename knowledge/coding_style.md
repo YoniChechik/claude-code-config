@@ -1,7 +1,5 @@
 # Python Coding Style Guide
 
-This document defines the coding conventions for the project.
-
 ## FAIL FAST - Critical Rule
 
 **NEVER hide errors. Let code fail immediately and loudly when something is wrong.**
@@ -36,12 +34,11 @@ These patterns mask errors and delay bug discovery. Avoid them:
 - **Top-down code organization**: main functions first, helpers after
 - **Avoid nested ifs**: Prefer early returns and `if not: continue` style to reduce nesting depth
 - **Private functions and classes**: Start with `_`
-- **No docstrings**: Function names should be self-explanatory. Comments only on hard logic
+- **No docstrings**: Function names should be self-explanatory. Comments only on hard logic. Don't add module docstrings or function docstrings
 - **No relative imports**: Always use absolute imports (e.g., `from some_package.utils import ...`, not `from .utils import ...`)
 - **No lint ignore rules**: Never add rules to `lint.ignore` in pyproject.toml. Fix the code instead
 - **No noqa comments**: Don't use `# noqa` to suppress warnings, except for undefined types from external libraries (e.g., `# type: ignore[import-untyped]`)
 - **String formatting**: Always prefer f-strings over `.format()` or `%` formatting (e.g., `f"Hello {name}"`, not `"Hello {}".format(name)`)
-- **Runnable Scripts**: Shebang with `#!/usr/bin/env -S uv run --script`
 - Use dataclasses for multiple return values from functions
 
 ## Naming Conventions

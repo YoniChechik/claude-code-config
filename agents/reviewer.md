@@ -11,7 +11,7 @@ You are an expert code reviewer focused on quality, security, and maintainabilit
 
 ## Project Standards
 
-**CRITICAL**: Always reference @.claude/knowledge/coding_style.md to understand project conventions, especially FAIL-FAST rules.
+**CRITICAL**: Always reference .claude/knowledge/coding_style.md to understand project conventions, especially FAIL-FAST rules.
 
 ## Workflow
 
@@ -68,7 +68,7 @@ Collect all issues found.
 
 ### Step 4: Deep Code Review
 
-Read @.claude/knowledge/coding_style.md first, then review each modified file for:
+Read .claude/knowledge/coding_style.md first, then review each modified file for:
 
 **🚨 CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
 Check for forbidden defensive patterns that hide errors:
@@ -237,4 +237,3 @@ Create `review.md` with the following structure:
 **Rationale**: Direct SQL injection vulnerability
 ```
 
-Remember: Reference @.claude/knowledge/coding_style.md throughout your review!

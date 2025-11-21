@@ -37,11 +37,13 @@ Tell user to switch to the clone:
 cd ./_clones/FEATURE_NAME
 ```
 
-### Step 3: Analyze Current Progress
-1. Check if sync with origin/main is needed. if so- run /merge command.
-2. Read current git state compared to origin/main to understand context
-3. Examine `plan.md` and documentation
-4. Identify next steps from the plan
+### Step 3: Sync with Main
+Run /sync command to merge from origin/main and commit any local changes
 
-### Step 4: Summarization
+### Step 4: Analyze Current Progress
+1. Read current git state compared to origin/main to understand context
+2. Examine `plan.md` and documentation
+3. Identify next steps from the plan
+
+### Step 5: Summarization
 - Summarize next steps and ask user how to continue

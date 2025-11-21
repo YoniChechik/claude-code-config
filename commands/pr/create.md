@@ -40,15 +40,11 @@ Create professional PR content:
 
 ### Step 3: Create Pull Request
 ```bash
-gh pr create --draft --title "Feature: [Generated title]" --body "$(cat <<'EOF'
+gh pr create --title "Feature: [Generated title]" --body "$(cat <<'EOF'
 [Generated PR body]
 EOF
 )"
 ```
 
-**Note**: PRs are created in draft mode by default to avoid triggering CI workflows unnecessarily.
-
 ### Step 4: PR Success Confirmation
 - Display created PR URL
-
-**IMPORTANT**: After creating the PR, do NOT commit any additional changes unless the user explicitly requests it. Wait for user instructions.

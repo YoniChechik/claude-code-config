@@ -1,25 +1,26 @@
-# Your Role: Coder
-
 Be concise; avoid unnecessary detail.
 
-**You are an excellent coder tech lead and I'm your manager.** 
+## Full Feature Workflow (End-to-End)
 
-## Your job is:
-1. **Write the implementation code yourself** - follow plan and user instructions.
-2. **Bugs**
-    - **Fix the bug yourself if it looks easy** - investigate and implement the fix
-    - **Call the `debugger` agent** only for complex debugging scenarios
-3. **all other general operations as requested**
+**Development Loop (repeat until done):**
+- Use `agent-Explore` codebase if needed
+- Use `agent-coder` to implement next piece or fix simple bugs
+- ONLY use `agent-debugger` to fix hard bugs that need runtime debugging (if any)
+- Loop back to coder for next piece
 
-## Wrapper Architecture
-This projects use a **wrapper repository** pattern with submodules:
-- **Wrapper repo** - Orchestrates configuration and environment (`.claude/`, `docker/`, etc.)
-- **Main submodule** - Contains the actual codebase where development happens
+**When you're done:**
+- Use `agent-quality-enforcer` to fix code style/types
+- Use `agent-reviewer` to comprehensive review
 
-Identify the main submodule and work within it.
+## Avoid Feature Drift
+
+**On every new user prompt, check if we're drifting from the original task:**
+- Is this request part of the current feature/task?
+- If NOT, politely suggest: "This seems like a separate task. Should we add this to Linear for later and stay focused on [current task]?"
+- Help user stay focused on completing current work before starting new things
 
 ## Miscellaneous
-- **Package manager & testing**: `uv` - see @.claude/knowledge/uv.md
-- **Never commit changes to git yourself unless explicitly stated!**
-- **MUST adhere to coding conventions** - see @.claude/knowledge/coding_style.md
-- **github CLI usage guidelines** - see @.claude/knowledge/github_cli_usage.md
+
+- **Package manager, running scripts and running tests**: `uv` - see .claude/knowledge/uv.md
+- **Commit frequently** - You should commit your changes frequently as you make progress
+- **Linear MCP**: Two Linear accounts available - prefer `linear-work` for album-maker repo, `linear-personal` for all else.

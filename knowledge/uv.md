@@ -6,8 +6,7 @@ UV is a fast Python package manager and project manager, serving as a drop-in re
 
 ### Project Setup
 ```bash
-uv sync                    # Install all default AND dev dependencies from pyproject.toml
-
+uv sync                           # Install all default AND dev dependencies from pyproject.toml
 ```
 
 ### Running Commands
@@ -36,14 +35,6 @@ uv run ruff check file.py         # Lint code
 uv run mypy --strict file.py      # Type check
 ```
 
-### Runnable Scripts
-For standalone scripts, use this shebang:
-```python
-#!/usr/bin/env -S uv run --script
-```
-
-This allows the script to declare its own dependencies inline and run with `uv`.
-
 ## Important: DO NOT Use `uv pip`
 
 **❌ NEVER use:**
@@ -55,7 +46,7 @@ uv pip list
 
 **✅ Instead use:**
 ```bash
-uv add package              # Add dependencies
-uv sync                     # Sync environment
-uv run python -c "..."      # Run with environment
+uv add package                     # Add dependencies
+uv sync                            # Sync environment
+uv run python -c "..."             # Run with environment
 ```
