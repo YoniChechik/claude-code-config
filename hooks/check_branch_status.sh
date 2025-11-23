@@ -5,24 +5,40 @@ CLAUDE_DIR="$HOME/.claude"
 
 # Check if .claude directory exists and is a git repository
 if [ ! -d "$CLAUDE_DIR" ]; then
-    exit 0  # .claude dir doesn't exist
+    echo "ERROR: Claude config directory does not exist at $CLAUDE_DIR" >&2
+    echo "Expected to find a git repository with Claude configuration." >&2
+    echo "" >&2
+    exit 2  # Blocking error
 fi
 
-cd "$CLAUDE_DIR" || exit 0
+cd "$CLAUDE_DIR" || {
+    echo "ERROR: Cannot access Claude config directory at $CLAUDE_DIR" >&2
+    echo "" >&2
+    exit 2
+}
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    exit 0  # Not a git repo, nothing to check
+    echo "ERROR: Claude config directory at $CLAUDE_DIR is not a git repository!" >&2
+    echo "Initialize it with: cd $CLAUDE_DIR && git init" >&2
+    echo "" >&2
+    exit 2  # Blocking error
 fi
 
-# Fetch origin/main silently
-git fetch origin main >/dev/null 2>&1 || exit 0
+# Fetch origin/main
+if ! git fetch origin main >/dev/null 2>&1; then
+    echo "WARNING: Failed to fetch origin/main for Claude config repository" >&2
+    echo "Check your network connection and git remote configuration." >&2
+    echo "" >&2
+    exit 2  # Blocking error
+fi
 
 # Get current branch
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
 
 # Only check if we're on a branch (not detached HEAD)
 if [ -z "$CURRENT_BRANCH" ]; then
-    exit 0
+    echo "INFO: Claude config repository is in detached HEAD state" >&2
+    exit 0  # Not an error, just info
 fi
 
 # Check if we are strictly >= origin/main (equal or ahead)
@@ -49,4 +65,11 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
 fi
 
 # We're equal to or ahead of origin/main - all good
+if git diff --quiet HEAD origin/main 2>/dev/null; then
+    echo "INFO: Claude config repository is up to date with origin/main" >&2
+else
+    AHEAD_COUNT=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo "unknown")
+    echo "INFO: Claude config repository is ahead of origin/main by $AHEAD_COUNT commit(s)" >&2
+fi
+
 exit 0
