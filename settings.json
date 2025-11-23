@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/block_dangerous_gh.sh"
+            "command": "bash hooks/block_dangerous_gh.sh"
           }
         ]
       }
@@ -31,11 +31,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/cleanup_untracked_clones.sh"
+            "command": "bash hooks/cleanup_untracked_clones.sh"
           },
           {
             "type": "command",
-            "command": "bash .claude/hooks/check_branch_status.sh"
+            "command": "bash hooks/check_branch_status.sh"
           }
         ]
       }
