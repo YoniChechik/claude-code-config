@@ -2,13 +2,8 @@
 # Only allow gh pr commands (except force push). Block everything else.
 # Exit code 2 = blocking error (per Claude Code hooks documentation)
 
-# Parse the command from CLAUDE_TOOL_INPUT
-if [ -z "$CLAUDE_TOOL_INPUT" ]; then
-    # If CLAUDE_TOOL_INPUT is not provided, allow the command
-    exit 0
-fi
-
-COMMAND=$(python3 -c "import sys, json; data = json.loads(sys.stdin.read()); print(data.get('parameters', {}).get('command', ''))" <<< "$CLAUDE_TOOL_INPUT" 2>/dev/null)
+# Read JSON from stdin and parse the command
+COMMAND=$(python3 -c "import sys, json; data = json.loads(sys.stdin.read()); print(data.get('tool_input', {}).get('command', ''))" 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
     # If we can't parse the command, allow it
