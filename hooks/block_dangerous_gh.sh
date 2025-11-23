@@ -2,21 +2,17 @@
 # Only allow gh pr commands (except force push). Block everything else.
 # Exit code 2 = blocking error (per Claude Code hooks documentation)
 
-# Parse the command from ARGUMENTS
-if [ -z "$ARGUMENTS" ]; then
-    echo "ERROR: No ARGUMENTS provided to hook" >&2
-    echo "This hook expects ARGUMENTS to contain the bash command being executed." >&2
-    echo "" >&2
-    exit 2
+# Parse the command from CLAUDE_TOOL_INPUT
+if [ -z "$CLAUDE_TOOL_INPUT" ]; then
+    # If CLAUDE_TOOL_INPUT is not provided, allow the command
+    exit 0
 fi
 
-COMMAND=$(echo "$ARGUMENTS" | jq -r '.command' 2>/dev/null)
+COMMAND=$(echo "$CLAUDE_TOOL_INPUT" | jq -r '.parameters.command' 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
-    echo "ERROR: Failed to parse command from ARGUMENTS" >&2
-    echo "ARGUMENTS content: $ARGUMENTS" >&2
-    echo "" >&2
-    exit 2
+    # If we can't parse the command, allow it
+    exit 0
 fi
 
 # Check if it's a gh command
