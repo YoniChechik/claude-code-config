@@ -35,10 +35,12 @@ fi
 # Get current branch
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
 
-# Only check if we're on a branch (not detached HEAD)
+# Check if we're on a branch (not detached HEAD)
 if [ -z "$CURRENT_BRANCH" ]; then
-    echo "INFO: Claude config repository is in detached HEAD state" >&2
-    exit 0  # Not an error, just info
+    echo "ERROR: Claude config repository is in detached HEAD state!" >&2
+    echo "You must be on a branch. Switch to a branch with: git checkout main" >&2
+    echo "" >&2
+    exit 2  # Blocking error
 fi
 
 # Check if we are strictly >= origin/main (equal or ahead)
