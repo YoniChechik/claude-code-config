@@ -8,7 +8,7 @@ if [ -z "$CLAUDE_TOOL_INPUT" ]; then
     exit 0
 fi
 
-COMMAND=$(echo "$CLAUDE_TOOL_INPUT" | jq -r '.parameters.command' 2>/dev/null)
+COMMAND=$(python3 -c "import sys, json; data = json.loads(sys.stdin.read()); print(data.get('parameters', {}).get('command', ''))" <<< "$CLAUDE_TOOL_INPUT" 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
     # If we can't parse the command, allow it
@@ -25,7 +25,7 @@ fi
 # ALLOWED: gh pr commands (except force push)
 if echo "$COMMAND" | grep -qE '^gh pr '; then
     # Block force push within PR commands
-    if echo "$COMMAND" | grep -qE '--force|-f'; then
+    if echo "$COMMAND" | grep -qE '(--force|-f)'; then
         echo "ERROR: Force push not allowed in gh pr commands!" >&2
         echo "Command attempted: $COMMAND" >&2
         echo "Force pushing can overwrite history and cause data loss." >&2
