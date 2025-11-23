@@ -1,6 +1,15 @@
 #!/bin/bash
 
-# Check if we're in a git repository
+# Get the .claude directory path
+CLAUDE_DIR="$HOME/.claude"
+
+# Check if .claude directory exists and is a git repository
+if [ ! -d "$CLAUDE_DIR" ]; then
+    exit 0  # .claude dir doesn't exist
+fi
+
+cd "$CLAUDE_DIR" || exit 0
+
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
     exit 0  # Not a git repo, nothing to check
 fi
