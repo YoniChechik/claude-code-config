@@ -41,9 +41,11 @@ if [[ -d "${git_root}/_clones" ]]; then
         # Skip main/master branches
         [[ $branch == "main" || $branch == "master" ]] && continue
 
-        # Check if remote tracking branch is gone
-        git branch -vv | grep "^..${branch}" | grep -q ': gone]'
-        [[ $? -ne 0 ]] && continue
+        # Check if remote branch still exists
+        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "refs/heads/$branch"; then
+            # Remote branch exists, keep the clone
+            continue
+        fi
 
         # Remove clone whose remote was deleted
         echo "INFO: Removing clone for branch '$branch' (remote deleted): $clone_dir" >&2
