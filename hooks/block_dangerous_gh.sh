@@ -1,5 +1,5 @@
 #!/bin/bash
-# Only allow gh pr commands (except force push). Block everything else.
+# Only allow gh pr commands (except merge). Block all other gh commands.
 # Exit code 2 = blocking error (per Claude Code hooks documentation)
 
 # Read JSON from stdin and parse the command
@@ -17,17 +17,15 @@ if ! echo "$COMMAND" | grep -qE '^gh '; then
     exit 0
 fi
 
-# ALLOWED: gh pr commands (except force push)
+# ALLOWED: gh pr commands (except merge)
 if echo "$COMMAND" | grep -qE '^gh pr '; then
-    # Block force push within PR commands
-    if echo "$COMMAND" | grep -qE '(--force|-f)'; then
-        echo "ERROR: Force push not allowed in gh pr commands!" >&2
+    # Block gh pr merge entirely
+    if echo "$COMMAND" | grep -qE '^gh pr merge(\s|$)'; then
+        echo "ERROR: gh pr merge not allowed (merge PRs manually via GitHub UI)" >&2
         echo "Command attempted: $COMMAND" >&2
-        echo "Force pushing can overwrite history and cause data loss." >&2
-        echo "" >&2
         exit 2
     fi
-    # Allow all other gh pr commands
+    # Note: -f is --fill, -F is --body-file - both are safe
     echo "INFO: Allowing gh pr command: $COMMAND" >&2
     exit 0
 fi
