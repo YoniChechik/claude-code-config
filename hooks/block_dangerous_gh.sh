@@ -2,10 +2,10 @@
 # Only allow gh pr commands (except merge). Block all other gh commands.
 # Exit code 2 = blocking error (per Claude Code hooks documentation)
 
-# Read JSON from stdin and parse the command
-COMMAND=$(python3 -c "import sys, json; data = json.loads(sys.stdin.read()); print(data.get('tool_input', {}).get('command', ''))" 2>/dev/null)
+# Read JSON from stdin and parse the command (simple sed extraction)
+COMMAND=$(cat | sed -n 's/.*"command": *"\([^"]*\)".*/\1/p')
 
-if [ $? -ne 0 ] || [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+if [ -z "$COMMAND" ]; then
     # If we can't parse the command, allow it
     exit 0
 fi
