@@ -31,7 +31,16 @@ cd ./_clones/$FEATURE_NAME
 git checkout -b $FEATURE_NAME
 ```
 
-### Step 3: Notify User
-Tell user the clone has been created at `./_clones/$FEATURE_NAME`
+### Step 3: Publish Branch to Remote
+Push the empty branch to remote to establish tracking:
+```bash
+# Push the branch to remote and set upstream
+git push -u origin $FEATURE_NAME
+```
+
+### Step 4: Notify User
+Tell user:
+- The clone has been created at `./_clones/$FEATURE_NAME`
+- The branch `$FEATURE_NAME` has been published to remote
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
