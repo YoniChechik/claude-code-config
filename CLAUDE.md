@@ -32,10 +32,5 @@ When complete:
 
 ## RULES
 
-- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?"
-- **COMMIT frequently** after coder completes work
-
-## TOOLS
-
-- **Linear**: `linear-work` for album-maker, `linear-personal` otherwise
-- **Planning**: @knowledge/planning.md for `subagent_type=planner`
+- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MPCs for this: `linear-work` for album-maker, `linear-personal` otherwise
+- **COMMIT frequently**
