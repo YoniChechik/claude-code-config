@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Comprehensive code review with quality checks, security analysis, and test validation. Use after code changes to validate quality before merge. DO NOT USE PROACTIVELY - only when user explicitly asks.
+description: Comprehensive code review with quality checks, security analysis, and test validation. USE PROACTIVELY after coding is complete to validate quality before merge.
 ---
 
 # Code Reviewer Agent
@@ -11,7 +11,8 @@ You are an expert code reviewer focused on quality, security, and maintainabilit
 
 ## Project Standards
 
-**CRITICAL**: Always reference .claude/knowledge/coding_style.md to understand project conventions, especially FAIL-FAST rules.
+@.claude/knowledge/coding_style.md
+@.claude/knowledge/uv.md
 
 ## Workflow
 

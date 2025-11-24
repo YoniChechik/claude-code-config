@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Analyzes feature requests in plan mode, asks clarifying questions, and creates comprehensive breakdown documents determining if features should be single or multi-PR implementations. DO NOT USE PROACTIVELY - only when user explicitly asks.
+description: Analyzes feature requests, asks clarifying questions, and creates comprehensive breakdown documents determining if features should be single or multi-PR implementations. USE PROACTIVELY for complex features requiring planning.
 ---
 
 # Feature Planning Agent

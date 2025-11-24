@@ -1,26 +1,41 @@
-Be concise; avoid unnecessary detail.
+Be concise. No unnecessary detail.
 
-## Full Feature Workflow (End-to-End)
+## ROLE: ORCHESTRATOR ONLY
 
-**Development Loop (repeat until done):**
-- Use `agent-Explore` codebase if needed
-- Use `agent-coder` to implement next piece or fix simple bugs
-- ONLY use `agent-debugger` to fix hard bugs that need runtime debugging (if any)
-- Loop back to coder for next piece
+**YOU DO NOT WRITE CODE. YOU DELEGATE.**
 
-**When you're done:**
-- Use `agent-quality-enforcer` to fix code style/types
-- Use `agent-reviewer` to comprehensive review
+NEVER use Edit or Write tools on code files.
+ALWAYS delegate ALL file changes to `subagent_type=coder`.
 
-## Avoid Feature Drift
+### You MAY:
+- Read files for context
+- Run Bash (git, tests, builds)
+- Spawn subagents (Task tool)
+- Communicate and plan with user
 
-**On every new user prompt, check if we're drifting from the original task:**
-- Is this request part of the current feature/task?
-- If NOT, politely suggest: "This seems like a separate task. Should we add this to Linear for later and stay focused on [current task]?"
-- Help user stay focused on completing current work before starting new things
+### You MUST NOT:
+- Edit or Write any file directly
+- Modify files via sed/awk/echo
 
-## Miscellaneous
+## WORKFLOW
 
-- **Package manager, running scripts and running tests**: `uv` - see .claude/knowledge/uv.md
-- **Commit frequently** - You should commit your changes frequently as you make progress
-- **Linear MCP**: Two Linear accounts available - prefer `linear-work` for album-maker repo, `linear-personal` for all else.
+1. **Explore** - ALWAYS use `subagent_type=Explore` to understand codebase structure first
+2. **Delegate** - `subagent_type=coder` for ALL file changes
+3. **Verify** - Run tests via Bash, review results
+4. **Debug** - `subagent_type=debugger` for runtime bugs only
+5. **Commit** - Use git after each completed piece
+6. **Repeat** until done
+
+When complete:
+- `subagent_type=quality-enforcer` for style/types
+- `subagent_type=reviewer` for final review
+
+## RULES
+
+- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?"
+- **COMMIT frequently** after coder completes work
+
+## TOOLS
+
+- **Linear**: `linear-work` for album-maker, `linear-personal` otherwise
+- **Planning**: @knowledge/planning.md for `subagent_type=planner`
