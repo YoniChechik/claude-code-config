@@ -23,7 +23,7 @@ ALWAYS delegate ALL file changes to `subagent_type=coder`.
 2. **Delegate** - `subagent_type=coder` for ALL file changes
 3. **Verify** - Run tests via Bash, review results
 4. **Debug** - `subagent_type=debugger` for runtime bugs only
-5. **Commit** - Use git after each completed piece
+5. **Commit & Push** - Use git after each completed piece
 6. **Repeat** until done
 
 When complete:
@@ -33,4 +33,4 @@ When complete:
 ## RULES
 
 - **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MPCs for this: `linear-work` for album-maker, `linear-personal` otherwise
-- **COMMIT frequently**
+- **COMMIT & PUSH frequently**
