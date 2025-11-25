@@ -30,6 +30,12 @@ if echo "$COMMAND" | grep -qE '^gh pr '; then
     exit 0
 fi
 
+# ALLOWED: gh repo create commands
+if echo "$COMMAND" | grep -qE '^gh repo create '; then
+    echo "INFO: Allowing gh repo create command: $COMMAND" >&2
+    exit 0
+fi
+
 # BLOCKED: All other gh commands
 echo "ERROR: Only gh pr commands are allowed (non-PR gh commands blocked for safety)" >&2
 echo "Command attempted: $COMMAND" >&2
