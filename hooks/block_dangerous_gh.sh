@@ -42,6 +42,12 @@ if echo "$COMMAND" | grep -qE '^gh repo rename '; then
     exit 0
 fi
 
+# ALLOWED: gh auth commands
+if echo "$COMMAND" | grep -qE '^gh auth '; then
+    echo "INFO: Allowing gh auth command: $COMMAND" >&2
+    exit 0
+fi
+
 # BLOCKED: All other gh commands
 echo "ERROR: Only gh pr commands are allowed (non-PR gh commands blocked for safety)" >&2
 echo "Command attempted: $COMMAND" >&2
