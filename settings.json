@@ -61,14 +61,7 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/cleanup_untracked_clones.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/check_branch_status.sh"
