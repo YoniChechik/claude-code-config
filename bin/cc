@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# cc - Claude Code wrapper with config checks
+# Runs branch status check before starting Claude
+
+CLAUDE_DIR="$HOME/.claude"
+
+# Check if .claude directory exists and is a git repository
+if [ ! -d "$CLAUDE_DIR" ]; then
+    echo "Error: Claude config directory does not exist at $CLAUDE_DIR"
+    echo "Expected a git repository with Claude configuration."
+    exit 1
+fi
+
+cd "$CLAUDE_DIR" || {
+    echo "Error: Cannot access Claude config directory at $CLAUDE_DIR"
+    exit 1
+}
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Error: Not a git repository at $CLAUDE_DIR"
+    echo "Initialize with: cd ~/.claude && git init"
+    exit 1
+fi
+
+# Fetch origin/main
+if ! git fetch origin main >/dev/null 2>&1; then
+    echo "Error: Failed to fetch origin/main"
+    echo "Check your network connection and git remote configuration."
+    exit 1
+fi
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+
+# Check if we're on a branch (not detached HEAD)
+if [ -z "$CURRENT_BRANCH" ]; then
+    echo "Error: Detached HEAD state detected. You must be on a branch."
+    echo "Switch with: cd ~/.claude && git checkout main"
+    exit 1
+fi
+
+# Check if we are strictly >= origin/main (equal or ahead)
+if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+    # origin/main is not an ancestor of HEAD - we're either behind or diverged
+
+    if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+        # HEAD is ancestor of origin/main - we're behind
+        BEHIND_COUNT=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "unknown")
+        echo "Error: Branch $CURRENT_BRANCH is BEHIND origin/main by $BEHIND_COUNT commit(s)"
+        echo "Run: cd ~/.claude && git pull"
+        exit 1
+    else
+        # Neither is ancestor of the other - we've diverged
+        echo "Error: Branch $CURRENT_BRANCH has DIVERGED from origin/main"
+        echo "Both local and remote have different commits."
+        echo "Run: cd ~/.claude && git pull"
+        exit 1
+    fi
+fi
+
+# All checks passed - exec claude with all arguments
+exec claude "$@"
