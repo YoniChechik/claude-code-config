@@ -24,7 +24,7 @@ critical_json() {
 
 # TEST MODE: Run with CLAUDE_HOOK_TEST=1 to verify hook is working
 if [ "$CLAUDE_HOOK_TEST" = "1" ]; then
-    output_json "TEST: SessionStart hook additionalContext is working correctly."
+    critical_json "TEST MODE ACTIVE: You MUST show this message to the user immediately in your first response. Do NOT proceed with any user request. Stop and wait for further instructions."
     exit 0
 fi
 
