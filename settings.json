@@ -10,21 +10,50 @@
       "Write",
       "SlashCommand"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(gh repo delete:*)",
+      "Bash(gh repo archive:*)",
+      "Bash(gh repo unarchive:*)",
+      "Bash(gh repo rename:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(gh repo autolink create:*)",
+      "Bash(gh repo autolink delete:*)",
+      "Bash(gh repo deploy-key add:*)",
+      "Bash(gh repo deploy-key delete:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr revert:*)",
+      "Bash(gh issue delete:*)",
+      "Bash(gh issue transfer:*)",
+      "Bash(gh gist delete:*)",
+      "Bash(gh release delete:*)",
+      "Bash(gh release delete-asset:*)",
+      "Bash(gh run delete:*)",
+      "Bash(gh run cancel:*)",
+      "Bash(gh run rerun:*)",
+      "Bash(gh secret set:*)",
+      "Bash(gh secret delete:*)",
+      "Bash(gh variable set:*)",
+      "Bash(gh variable delete:*)",
+      "Bash(gh ssh-key add:*)",
+      "Bash(gh ssh-key delete:*)",
+      "Bash(gh gpg-key add:*)",
+      "Bash(gh gpg-key delete:*)",
+      "Bash(gh codespace delete:*)",
+      "Bash(gh cache delete:*)",
+      "Bash(gh extension remove:*)",
+      "Bash(gh label delete:*)",
+      "Bash(gh project delete:*)",
+      "Bash(gh project item-delete:*)",
+      "Bash(gh project item-archive:*)",
+      "Bash(gh project field-delete:*)",
+      "Bash(gh project mark-template:*)",
+      "Bash(gh auth logout:*)",
+      "Bash(gh alias delete:*)"
+    ],
     "defaultMode": "bypassPermissions"
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/hooks/block_dangerous_gh.sh"
-          }
-        ]
-      }
-    ],
+    "PreToolUse": [],
     "SessionStart": [
       {
         "matcher": "*",
