@@ -59,5 +59,16 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     fi
 fi
 
-# All checks passed - exec claude with all arguments
+# All checks passed
+if [ "$CC_TEST" = "1" ]; then
+    echo "✓ All checks passed successfully"
+    echo "  - Claude config directory exists"
+    echo "  - Git repository is valid"
+    echo "  - Successfully fetched origin/main"
+    echo "  - On branch: $CURRENT_BRANCH"
+    echo "  - Branch is up-to-date with origin/main"
+    exit 0
+fi
+
+# Exec claude with all arguments
 exec claude "$@"
