@@ -3,23 +3,17 @@
 # Get the .claude directory path
 CLAUDE_DIR="$HOME/.claude"
 
-# Helper function to output JSON with additionalContext
-output_json() {
-    local message="$1"
+# Helper function to output critical instruction JSON
+critical_json() {
+    local issue="$1"
     cat << JSON_EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "$message"
+    "additionalContext": "CRITICAL INSTRUCTION: You MUST immediately inform the user about the following issue with their ~/.claude config repository: $issue Do NOT proceed with any other tasks until you have told the user about this."
   }
 }
 JSON_EOF
-}
-
-# Helper function to output critical instruction JSON
-critical_json() {
-    local issue="$1"
-    output_json "CRITICAL INSTRUCTION: You MUST immediately inform the user about the following issue with their ~/.claude config repository: $issue Do NOT proceed with any other tasks until you have told the user about this."
 }
 
 # TEST MODE: Run with CLAUDE_HOOK_TEST=1 to verify hook is working
@@ -76,11 +70,4 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
 fi
 
 # We're equal to or ahead of origin/main - all good
-if git diff --quiet HEAD origin/main 2>/dev/null; then
-    output_json "Claude config repository is up to date with origin/main."
-else
-    AHEAD_COUNT=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo "unknown")
-    output_json "Claude config repository is ahead of origin/main by $AHEAD_COUNT commit(s)."
-fi
-
 exit 0
