@@ -1,34 +1,59 @@
 #!/bin/bash
 
+# Helper function to print to both stdout and stderr for visibility
+print_both() {
+    echo "$1"
+    echo "$1" >&2
+}
+
 # Get the .claude directory path
 CLAUDE_DIR="$HOME/.claude"
 
 # Check if .claude directory exists and is a git repository
 if [ ! -d "$CLAUDE_DIR" ]; then
-    echo "ERROR: Claude config directory does not exist at $CLAUDE_DIR" >&2
-    echo "Expected to find a git repository with Claude configuration." >&2
-    echo "" >&2
+    print_both ""
+    print_both "╔════════════════════════════════════════════════════════════════╗"
+    print_both "║  ❌ ERROR: Claude config directory does not exist            ║"
+    print_both "╠════════════════════════════════════════════════════════════════╣"
+    print_both "║  Location: $CLAUDE_DIR"
+    print_both "║  Expected a git repository with Claude configuration.         ║"
+    print_both "╚════════════════════════════════════════════════════════════════╝"
+    print_both ""
     exit 2  # Blocking error
 fi
 
 cd "$CLAUDE_DIR" || {
-    echo "ERROR: Cannot access Claude config directory at $CLAUDE_DIR" >&2
-    echo "" >&2
+    print_both ""
+    print_both "╔════════════════════════════════════════════════════════════════╗"
+    print_both "║  ❌ ERROR: Cannot access Claude config directory             ║"
+    print_both "╠════════════════════════════════════════════════════════════════╣"
+    print_both "║  Location: $CLAUDE_DIR"
+    print_both "╚════════════════════════════════════════════════════════════════╝"
+    print_both ""
     exit 2
 }
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "ERROR: Claude config directory at $CLAUDE_DIR is not a git repository!" >&2
-    echo "Initialize it with: cd $CLAUDE_DIR && git init" >&2
-    echo "" >&2
+    print_both ""
+    print_both "╔════════════════════════════════════════════════════════════════╗"
+    print_both "║  ❌ ERROR: Not a git repository                               ║"
+    print_both "╠════════════════════════════════════════════════════════════════╣"
+    print_both "║  Location: $CLAUDE_DIR"
+    print_both "║  Initialize with: cd ~/.claude && git init                     ║"
+    print_both "╚════════════════════════════════════════════════════════════════╝"
+    print_both ""
     exit 2  # Blocking error
 fi
 
 # Fetch origin/main
 if ! git fetch origin main >/dev/null 2>&1; then
-    echo "WARNING: Failed to fetch origin/main for Claude config repository" >&2
-    echo "Check your network connection and git remote configuration." >&2
-    echo "" >&2
+    print_both ""
+    print_both "╔════════════════════════════════════════════════════════════════╗"
+    print_both "║  ⚠️  WARNING: Failed to fetch origin/main                     ║"
+    print_both "╠════════════════════════════════════════════════════════════════╣"
+    print_both "║  Check your network connection and git remote configuration.   ║"
+    print_both "╚════════════════════════════════════════════════════════════════╝"
+    print_both ""
     exit 2  # Blocking error
 fi
 
@@ -37,9 +62,14 @@ CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
 
 # Check if we're on a branch (not detached HEAD)
 if [ -z "$CURRENT_BRANCH" ]; then
-    echo "ERROR: Claude config repository is in detached HEAD state!" >&2
-    echo "You must be on a branch. Switch to a branch with: git checkout main" >&2
-    echo "" >&2
+    print_both ""
+    print_both "╔════════════════════════════════════════════════════════════════╗"
+    print_both "║  ❌ ERROR: Detached HEAD state                                ║"
+    print_both "╠════════════════════════════════════════════════════════════════╣"
+    print_both "║  You must be on a branch.                                      ║"
+    print_both "║  Switch with: cd ~/.claude && git checkout main                ║"
+    print_both "╚════════════════════════════════════════════════════════════════╝"
+    print_both ""
     exit 2  # Blocking error
 fi
 
@@ -53,16 +83,30 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
         # HEAD is ancestor of origin/main - we're behind
         BEHIND_COUNT=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "unknown")
-        echo "WARNING: Your branch '$CURRENT_BRANCH' is behind origin/main by $BEHIND_COUNT commit(s)!" >&2
-        echo "Consider running: git pull origin main" >&2
+        print_both ""
+        print_both "╔════════════════════════════════════════════════════════════════╗"
+        print_both "║  ⚠️  WARNING: ~/.claude is BEHIND origin/main                 ║"
+        print_both "╠════════════════════════════════════════════════════════════════╣"
+        print_both "║  Branch: $CURRENT_BRANCH"
+        print_both "║  Behind by: $BEHIND_COUNT commit(s)"
+        print_both "║                                                                ║"
+        print_both "║  Run: cd ~/.claude && git pull                                 ║"
+        print_both "╚════════════════════════════════════════════════════════════════╝"
+        print_both ""
     else
         # Neither is ancestor of the other - we've diverged
-        echo "WARNING: Your branch '$CURRENT_BRANCH' has diverged from origin/main!" >&2
-        echo "Both local and remote have different commits." >&2
-        echo "Consider running: git pull origin main" >&2
+        print_both ""
+        print_both "╔════════════════════════════════════════════════════════════════╗"
+        print_both "║  ⚠️  WARNING: ~/.claude has DIVERGED from origin/main         ║"
+        print_both "╠════════════════════════════════════════════════════════════════╣"
+        print_both "║  Branch: $CURRENT_BRANCH"
+        print_both "║  Both local and remote have different commits.                 ║"
+        print_both "║                                                                ║"
+        print_both "║  Run: cd ~/.claude && git pull                                 ║"
+        print_both "╚════════════════════════════════════════════════════════════════╝"
+        print_both ""
     fi
 
-    echo "" >&2
     exit 2  # Exit code 2 = blocking error, will show stderr to Claude
 fi
 
