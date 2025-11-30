@@ -4,6 +4,7 @@
 # Runs branch status check before starting Claude
 
 CLAUDE_DIR="$HOME/.claude"
+ORIG_DIR="$(pwd)"
 
 # Check if .claude directory exists and is a git repository
 if [ ! -d "$CLAUDE_DIR" ]; then
@@ -69,6 +70,12 @@ if [ "$CC_TEST" = "1" ]; then
     echo "  - Branch is up-to-date with origin/main"
     exit 0
 fi
+
+# Return to original directory before exec
+cd "$ORIG_DIR" || {
+    echo "Error: Cannot return to original directory"
+    exit 1
+}
 
 # Exec claude with all arguments
 exec claude "$@"
