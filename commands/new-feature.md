@@ -11,7 +11,7 @@ Creates a new feature branch using git clone for isolated development with full 
 ## Process
 
 ### Step 1: Create Clone
-Run /create-worktree command to set up isolated feature clone
+Run /create-clone command to set up isolated feature clone
 
 ### Step 2: Sync with Main
 Run /sync command to ensure branch is up to date with origin/main

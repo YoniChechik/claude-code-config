@@ -11,7 +11,7 @@ Creates a new feature branch using git clone and starts work immediately. No pla
 ## Process
 
 ### Step 1: Create Clone
-Run /create-worktree command to set up isolated feature clone
+Run /create-clone command to set up isolated feature clone
 
 ### Step 2: Start Implementation
 Begin MVP implementation immediately:
