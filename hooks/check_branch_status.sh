@@ -49,7 +49,7 @@ CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
 
 # Check if we're on a branch (not detached HEAD)
 if [ -z "$CURRENT_BRANCH" ]; then
-    critical_json "Detached HEAD state detected. They must be on a branch. They should switch with: cd ~/.claude && git checkout main."
+    critical_json "Detached HEAD state detected. They must be on a branch.\nRun in parentheses to run as a subshell:\n(cd ~/.claude && git checkout main)"
     exit 0
 fi
 
@@ -60,11 +60,11 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
         # HEAD is ancestor of origin/main - we're behind
         BEHIND_COUNT=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "unknown")
-        critical_json "The branch $CURRENT_BRANCH is BEHIND origin/main by $BEHIND_COUNT commit(s). They should run: cd ~/.claude && git pull."
+        critical_json "The branch $CURRENT_BRANCH is BEHIND origin/main by $BEHIND_COUNT commit(s).\nRun in parentheses to run as a subshell:\n(cd ~/.claude && git pull)"
         exit 0
     else
         # Neither is ancestor of the other - we've diverged
-        critical_json "The branch $CURRENT_BRANCH has DIVERGED from origin/main. Both local and remote have different commits. They should run: cd ~/.claude && git pull."
+        critical_json "The branch $CURRENT_BRANCH has DIVERGED from origin/main. Both local and remote have different commits.\nRun in parentheses to run as a subshell:\n(cd ~/.claude && git pull)"
         exit 0
     fi
 fi
