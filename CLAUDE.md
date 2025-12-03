@@ -34,6 +34,7 @@ When complete:
 
 - **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MPCs for this: `linear-work` for album-maker, `linear-personal` otherwise
 - **COMMIT & PUSH frequently**
+- **NO backward compat** - Delete unused code completely. Exceptions: user explicitly requests OR public external APIs.
 
 ## TODO MANAGEMENT
 
