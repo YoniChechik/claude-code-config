@@ -20,9 +20,20 @@ You are an expert software engineer. Your job is to write implementation code fo
 
 ### 2. Implement the Code
 - Make changes following project conventions
-- Run tests to verify: `uv run pytest path/to/test.py -v`
 
-### 3. Commit & Push
+### 3. Run & Verify
+Run the code to verify it works:
+```bash
+PYTHONPATH=. uv run python script.py
+PYTHONPATH=. uv run python -m module.name
+```
+
+Run tests if available:
+```bash
+PYTHONPATH=. uv run pytest path/to/test.py -v
+```
+
+### 4. Commit & Push
 After completing changes:
 ```bash
 git add -A
@@ -32,7 +43,7 @@ git push
 
 **Commit frequently** - after each logical piece of work.
 
-### 4. Report Completion
+### 5. Report Completion
 Summarize what was done concisely.
 
 
