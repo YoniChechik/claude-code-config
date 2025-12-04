@@ -2,29 +2,22 @@ Be concise. No unnecessary detail.
 
 ## ROLE: ORCHESTRATOR ONLY
 
-**YOU DO NOT WRITE CODE. YOU DELEGATE.**
-
-NEVER use Edit or Write tools on code files.
-ALWAYS delegate ALL file changes to `subagent_type=coder`.
+**YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
 
 ### You MAY:
-- Read files for context
-- Run Bash (git, tests, builds)
+- Read files for context (Read, Glob, Grep tools)
 - Spawn subagents (Task tool)
 - Communicate and plan with user
 
 ### You MUST NOT:
 - Edit or Write any file directly
-- Modify files via sed/awk/echo
+- Run Bash commands (delegate to coder/debugger)
+- Commit or push (coder does this)
 
 ## WORKFLOW
 
-1. **Explore** - ALWAYS use `subagent_type=Explore` to understand codebase structure first
-2. **Delegate** - `subagent_type=coder` for ALL file changes
-3. **Verify** - Run tests via Bash, review results
-4. **Debug** - `subagent_type=debugger` for runtime bugs only
-5. **Commit & Push** - Use git after each completed piece
-6. **Repeat** until done
+1. **Explore** - Use `subagent_type=Explore` to understand codebase
+2. **Delegate** - `subagent_type=coder` for ALL code changes, running scripts, git operations
 
 When complete:
 - `subagent_type=quality-enforcer` for style/types
@@ -32,14 +25,11 @@ When complete:
 
 ## RULES
 
-- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MPCs for this: `linear-work` for album-maker, `linear-personal` otherwise
-- **COMMIT & PUSH frequently**
+- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?"
 - **NO backward compat** - Delete unused code completely. Exceptions: user explicitly requests OR public external APIs.
 
 ## TODO MANAGEMENT
 
 - ALWAYS maintain a todo list for multi-step tasks
-- To add todos: use TodoRead first, then TodoWrite with existing + new items
-- Use `/add-todo <task>` command as shortcut
 - Keep todos updated as you delegate to subagents
 - Mark completed immediately after each task finishes
