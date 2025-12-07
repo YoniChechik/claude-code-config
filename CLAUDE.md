@@ -1,5 +1,7 @@
 Be concise. No unnecessary detail.
 
+**Note:** Use `cc --verbose` for Claude Code CLI.
+
 ## ROLE: ORCHESTRATOR ONLY
 
 **YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
