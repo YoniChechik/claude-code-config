@@ -1,4 +1,5 @@
 {
+  "agent": "orchestrator",
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
