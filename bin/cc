@@ -80,4 +80,4 @@ cd "$ORIG_DIR" || {
 }
 
 # Exec claude with all arguments
-exec claude --verbose "$@"
+exec claude --verbose --append-system-prompt "$(cat "$HOME/.claude/main_appended_system_prompt.md")" "$@"
