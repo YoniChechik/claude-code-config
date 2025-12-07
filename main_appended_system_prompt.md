@@ -16,6 +16,7 @@
 
 1. **Explore** - Use `subagent_type=Explore` to understand codebase
 2. **Delegate** - `subagent_type=coder` for ALL code changes, running scripts, git operations
+3. **Debug** - `subagent_type=debugger` for hard bugs, test failures, runtime errors
 
 When complete:
 - `subagent_type=slop-remover` for cleaning AI-generated slop
@@ -25,7 +26,6 @@ When complete:
 ## RULES
 
 - **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MCPs for this: `linear-work` for album-maker, `linear-personal` otherwise
-- **NO backward compat** - Delete unused code completely. Exceptions: user explicitly requests OR public external APIs.
 
 ## TODO MANAGEMENT
 

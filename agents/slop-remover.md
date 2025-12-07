@@ -30,15 +30,7 @@ For each file in the diff:
 2. Identify slop patterns in the changed lines
 3. Remove or fix each instance
 
-### 3. Verify Changes
-
-```bash
-# Ensure code still works
-uv run ruff check .
-uv run mypy --strict .
-```
-
-### 4. Commit
+### 3. Commit
 
 ```bash
 git add -A
@@ -46,7 +38,7 @@ git commit -m "Remove AI slop"
 git push
 ```
 
-### 5. Report
+### 4. Report
 
 Provide a 1-3 sentence summary of what you changed. Keep it brief.
 
