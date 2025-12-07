@@ -2,15 +2,6 @@
   "agent": "orchestrator",
   "includeCoAuthoredBy": false,
   "permissions": {
-    "allow": [
-      "Read",
-      "MultiRead",
-      "Bash",
-      "WebFetch",
-      "Edit",
-      "Write",
-      "SlashCommand"
-    ],
     "deny": [
       "Bash(gh repo delete:*)",
       "Bash(gh repo archive:*)",

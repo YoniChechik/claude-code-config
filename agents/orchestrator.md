@@ -26,6 +26,7 @@ Be concise. No unnecessary detail.
 2. **Delegate** - `subagent_type=coder` for ALL code changes, running scripts, git operations
 
 When complete:
+- `subagent_type=slop-remover` for removing AI code slop
 - `subagent_type=quality-enforcer` for style/types
 - `subagent_type=reviewer` for final review
 
