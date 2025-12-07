@@ -49,13 +49,15 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
         # HEAD is ancestor of origin/main - we're behind
         BEHIND_COUNT=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "unknown")
         echo "Error: Branch $CURRENT_BRANCH is BEHIND origin/main by $BEHIND_COUNT commit(s)"
-        echo "Run: cd ~/.claude && git pull"
+        echo "Run:"
+        echo "(cd ~/.claude && git pull)"
         exit 1
     else
         # Neither is ancestor of the other - we've diverged
         echo "Error: Branch $CURRENT_BRANCH has DIVERGED from origin/main"
         echo "Both local and remote have different commits."
-        echo "Run: cd ~/.claude && git pull"
+        echo "Run:"
+        echo "(cd ~/.claude && git pull)"
         exit 1
     fi
 fi
@@ -78,4 +80,4 @@ cd "$ORIG_DIR" || {
 }
 
 # Exec claude with all arguments
-exec claude "$@"
+exec claude --verbose "$@"
