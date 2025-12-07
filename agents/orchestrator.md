@@ -1,7 +1,6 @@
 ---
 name: orchestrator
 description: Main thread orchestrator that delegates all coding tasks to subagents
-tools: Read, Glob, Grep, Task, TodoWrite, AskUserQuestion, AgentOutputTool
 model: inherit
 ---
 
