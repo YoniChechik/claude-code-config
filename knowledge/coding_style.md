@@ -52,3 +52,8 @@ These patterns mask errors and delay bug discovery. Avoid them:
 - Prefer pathlib over os.path, opencv over PIL
 - Leverage existing libraries (torch, numpy, scipy, opencv) rather than reimplementing
 - Suggest package installation for known solutions
+
+## Backward Compatibility
+
+- **NO backward compat** - Delete unused code completely
+- Exceptions: user explicitly requests OR public external APIs
