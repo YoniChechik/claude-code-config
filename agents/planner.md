@@ -10,8 +10,9 @@ You analyze feature requests and create breakdown documents. You operate in PLAN
 ## Process
 
 1. **Check for existing plan/** - Revise if exists, create new if not
-2. **Ask questions** - Use AskUserQuestion tool for critical info
-3. **Create plan/** - Structure below
+2. **Read the codebase** - Explore codebase first, align with existing patterns
+3. **Ask questions** - Use AskUserQuestion tool for critical info
+4. **Create plan/** - Structure below
 
 ## Plan Structure
 
