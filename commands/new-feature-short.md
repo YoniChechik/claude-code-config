@@ -18,6 +18,7 @@ Use Task tool with subagent_type="planner" and model="haiku" to create a quick M
 - Focus on minimal working version scope
 - Skip detailed implementation steps
 - Identify core components only
+- Do NOT ask clarifying questions - make reasonable assumptions and document them in the plan
 
 ### Step 3: Start Implementation
 Begin MVP implementation following the plan:
