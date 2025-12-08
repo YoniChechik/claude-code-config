@@ -1,6 +1,6 @@
 # Quick Feature Setup
 
-Creates a new feature branch using git clone with lightweight planning. Uses fast planning for MVP scope, skips tests and docs.
+Creates a new feature branch using git clone with lightweight planning. Uses planner with haiku model for MVP scope, skips tests and docs.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -14,7 +14,7 @@ Creates a new feature branch using git clone with lightweight planning. Uses fas
 Run /create-clone command to set up isolated feature clone
 
 ### Step 2: Fast Plan
-Use Task tool with subagent_type="fast-planner" and model="haiku" to create a quick MVP plan:
+Use Task tool with subagent_type="planner" and model="haiku" to create a quick MVP plan:
 - Focus on minimal working version scope
 - Skip detailed implementation steps
 - Identify core components only
