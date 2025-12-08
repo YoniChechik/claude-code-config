@@ -1,6 +1,6 @@
 # Quick Feature Setup
 
-Creates a new feature branch using git clone and starts work immediately. No planning, no tests, no docs - just MVP implementation.
+Creates a new feature branch using git clone with lightweight planning. Uses planner with haiku model for MVP scope, skips tests and docs.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -13,11 +13,16 @@ Creates a new feature branch using git clone and starts work immediately. No pla
 ### Step 1: Create Clone
 Run /create-clone command to set up isolated feature clone
 
-### Step 2: Start Implementation
-Begin MVP implementation immediately:
-- Focus on minimal working version
-- Skip tests, docs, and plan.md
-- Build the core functionality only
+### Step 2: Fast Plan
+Use Task tool with subagent_type="planner" and model="haiku" to create a quick MVP plan:
+- Focus on minimal working version scope
+- Skip detailed implementation steps
+- Identify core components only
+- Do NOT ask clarifying questions - make reasonable assumptions and document them in the plan
+
+### Step 3: Start Implementation
+Begin MVP implementation following the plan:
+- Build core functionality from plan
 - Iterate quickly with user feedback
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
