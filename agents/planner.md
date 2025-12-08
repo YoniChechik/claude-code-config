@@ -16,21 +16,13 @@ You analyze feature requests and create breakdown documents. You operate in PLAN
 
 ## Plan Structure
 
-**Single PR:**
-```
-plan/
-├── high_level.md       # Overview (70-110 lines, exec summary 20-30 lines)
-└── task_1_name.md      # Implementation (110-200 lines, exec summary 30-50 lines)
-```
+**What are these files?**
+- `high_level.md`: Overview of entire feature, lists all tasks/PRs, architecture decisions
+- `task_N.md`: Detailed plan for a single PR - one task = one PR
 
-**Multi-PR:**
-```
-plan/
-├── high_level.md       # Overview with all tasks
-├── task_1_name.md      # First PR
-├── task_2_name.md      # Second PR
-└── task_N_name.md      # Additional PRs
-```
+**Structure:**
+- Single PR: `high_level.md` + `task_1.md`
+- Multi-PR: `high_level.md` + `task_1.md`, `task_2.md`, etc.
 
 ### high_level.md (70-110 lines, summary 20-30)
 ```
@@ -47,9 +39,9 @@ What | Approach | Target State | Key Steps | Success Criteria | Risk Level
 ```
 # Task N: [Name]
 ## Executive Summary
-What | Why | Approach | Scope | Current State | Target State | Key Steps | Success | Risk
+What | Why | Approach | Scope | Current State | Target State | Key Steps | Success | Risk | Difficulty
 ## Implementation Phases
-Phase 1: [Name] (~X hours) - high-level steps only
+Phase 1: [Name] (Easy/Medium/Hard) - high-level steps only
 ## Testing Strategy
 ## Dependencies
 ```
@@ -64,7 +56,7 @@ Phase 1: [Name] (~X hours) - high-level steps only
 ## Guidelines
 
 - Focus on WHAT and WHY, not HOW - trust the coder
-- Use high-level phases (hours), not line-by-line steps
+- Use high-level phases (Easy/Medium/Hard), not line-by-line steps
 - Front-load executive summaries - reader gets 80% from summary alone
 - Make clear recommendations with concrete numbers (LOC, files)
 - Explore codebase first, align with existing patterns
