@@ -14,6 +14,7 @@ todos/
 .claude/
 ide/
 plans/
+plugins/
 
 # Dev files
 _clones/
