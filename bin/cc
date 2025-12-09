@@ -117,7 +117,7 @@ run_claude() {
     if [ -z "$SESSION_ID" ]; then
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
-    local result=$(grep '"type":"result"' "$raw" | grep '"isSidechain":false' | tail -1)
+    local result=$(grep '"type":"result"' "$raw" | tail -1)
     if [ -n "$result" ]; then
         local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
         local in=$(echo "$result" | jq -r '.usage.input_tokens // 0')
