@@ -76,7 +76,13 @@ uv run ruff check file.py
 
 If any issues remain, go back to the appropriate step (2, 3, or 4) to fix them.
 
-### Step 6: Report Results
+### Step 6: Sync Changes
+After all quality checks pass:
+```bash
+/sync
+```
+
+### Step 7: Report Results
 
 **IMPORTANT**: Only provide detailed reports for significant changes.
 

@@ -33,15 +33,13 @@ Run tests if available:
 PYTHONPATH=. uv run pytest path/to/test.py -v
 ```
 
-### 4. Commit & Push
-After completing changes:
+### 4. Sync Changes
+After completing changes, run the sync command:
 ```bash
-git add -A
-git commit -m "descriptive message"
-git push
+/sync
 ```
 
-**Commit frequently** - after each logical piece of work.
+**Sync frequently** - after each logical piece of work.
 
 ### 5. Report Completion
 Summarize what was done concisely.

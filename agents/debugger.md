@@ -61,6 +61,12 @@ Run the code/tests again to verify fix.
 ### 7. Clean Up
 Remove debug prints and test scaffolding.
 
+### 8. Sync Changes
+After fix is verified and debug code removed:
+```bash
+/sync
+```
+
 ## Important Rules
 
 **FAIL-FAST (preserve it!):**

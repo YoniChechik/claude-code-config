@@ -30,12 +30,9 @@ For each file in the diff:
 2. Identify slop patterns in the changed lines
 3. Remove or fix each instance
 
-### 3. Commit
-
+### 3. Sync Changes
 ```bash
-git add -A
-git commit -m "Remove AI slop"
-git push
+/sync
 ```
 
 ### 4. Report
