@@ -168,18 +168,23 @@ then
     else empty end
 
 # ---------------------------------------------------------
-# ASSISTANT: Text response (only from subagents)
-# Main thread text is handled via streaming (content_block_delta)
-# so we skip it here to avoid duplicate output
+# ASSISTANT: Text response
+# For short responses, claude doesn't stream and sends complete text as assistant message
+# Handle both main thread (non-streaming fallback) and subagents
 # ---------------------------------------------------------
 elif .type == "assistant" and
-     ([.message.content[] | select(.type == "text")] | length > 0) and
-     $is_sub
+     ([.message.content[] | select(.type == "text")] | length > 0)
 then
     [.message.content[] | select(.type == "text") | .text] |
     join("\n") |
-    # Subagent text response - color and prefix each line
-    color_each_line(C_CYAN) | prefix_lines("SUB:")
+    if $is_sub then
+        # Subagent text response - color and prefix each line
+        color_each_line(C_CYAN) | prefix_lines("SUB:")
+    else
+        # Main thread non-streaming text - show with separator
+        "LINE:\nLINE:" + C_DIM + "━━━ Claude ━━━" + C_RESET + "\n" +
+        prefix_lines("LINE:")
+    end
 
 # ---------------------------------------------------------
 # USER: Tool results
