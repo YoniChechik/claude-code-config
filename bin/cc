@@ -65,15 +65,55 @@ run_claude() {
 
     # Ctrl+C during run just stops claude, doesn't exit REPL
     trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
+
+    # Run claude with timeout monitoring
+    local timeout_file=$(mktemp)
+    local claude_pid=""
+    local timed_out=false
+
+    # Start claude in background
     claude "${args[@]}" 2>&1 | tee "$raw" | \
         jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null | \
         while IFS= read -r line; do
+            # Reset timeout marker on each line
+            touch "$timeout_file"
             case "$line" in
                 TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
                 SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
                 LINE:*) printf "%s\n" "${line#LINE:}" ;;
             esac
+        done &
+    claude_pid=$!
+
+    # Monitor for timeout
+    (
+        local last_check=$(stat -c %Y "$timeout_file" 2>/dev/null || echo 0)
+        while kill -0 $claude_pid 2>/dev/null; do
+            sleep 5
+            local current_check=$(stat -c %Y "$timeout_file" 2>/dev/null || echo 0)
+            local idle=$(($(date +%s) - current_check))
+            if [ $idle -ge 30 ]; then
+                # No output for 30s - kill claude pipeline
+                kill -TERM $claude_pid 2>/dev/null
+                touch "${timeout_file}.timeout"
+                break
+            fi
         done
+    ) &
+    local timeout_monitor_pid=$!
+
+    # Wait for claude to finish
+    wait $claude_pid 2>/dev/null
+    kill $timeout_monitor_pid 2>/dev/null
+    wait $timeout_monitor_pid 2>/dev/null
+
+    # Check if timeout occurred
+    if [ -f "${timeout_file}.timeout" ]; then
+        timed_out=true
+        rm -f "${timeout_file}.timeout"
+    fi
+    rm -f "$timeout_file"
+
     trap - INT
 
     # Extract session and stats
@@ -92,6 +132,12 @@ run_claude() {
         TOTAL_OUT=$((TOTAL_OUT + out))
     fi
     rm -f "$raw"
+
+    # Auto-retry with "continue" if timeout occurred
+    if [ "$timed_out" = true ]; then
+        echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
+        run_claude "continue"
+    fi
 }
 
 # ============================================================
