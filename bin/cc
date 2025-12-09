@@ -62,6 +62,19 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     fi
 fi
 
+# Check if jq is installed
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is not installed"
+    echo "Installing jq..."
+    if sudo apt-get install -y jq >/dev/null 2>&1; then
+        echo "✓ jq installed successfully"
+    else
+        echo "Error: Failed to install jq"
+        echo "Please install manually: sudo apt-get install jq"
+        exit 1
+    fi
+fi
+
 # All checks passed
 if [ "$CC_TEST" = "1" ]; then
     echo "✓ All checks passed successfully"
@@ -73,11 +86,109 @@ if [ "$CC_TEST" = "1" ]; then
     exit 0
 fi
 
-# Return to original directory before exec
+# Return to original directory before starting REPL
 cd "$ORIG_DIR" || {
     echo "Error: Cannot return to original directory"
     exit 1
 }
 
-# Exec claude with all arguments
-exec claude --verbose --append-system-prompt "$(cat "$HOME/.claude/main_appended_system_prompt.md")" "$@"
+# Session management
+SESSION_FILE="$HOME/.claude/cc_session_id"
+APPEND_SYSTEM_PROMPT="$HOME/.claude/main_appended_system_prompt.md"
+
+# Variable to track current claude process
+CLAUDE_PID=""
+
+# Cleanup function
+cleanup() {
+    if [ -n "$CLAUDE_PID" ]; then
+        kill "$CLAUDE_PID" 2>/dev/null
+        wait "$CLAUDE_PID" 2>/dev/null
+    fi
+    exit 0
+}
+
+# Trap Ctrl+C for clean exit
+trap cleanup SIGINT SIGTERM
+
+# Function to run claude with a prompt
+run_claude() {
+    local prompt="$1"
+    local resume_arg="$2"
+    local temp_output=$(mktemp)
+    local raw_output=$(mktemp)
+
+    # Run claude and capture raw JSON output
+    claude -p "$prompt" \
+        --output-format stream-json \
+        --include-partial-messages \
+        --verbose \
+        --append-system-prompt "$(cat "$APPEND_SYSTEM_PROMPT")" \
+        $resume_arg 2>&1 | tee "$raw_output" | \
+        jq -r --unbuffered 'if .type == "content_block_delta" and .delta.type == "text_delta" then .delta.text else empty end' 2>/dev/null | tee "$temp_output" &
+
+    CLAUDE_PID=$!
+
+    # Monitor for ESC key while claude is running
+    (
+        while kill -0 "$CLAUDE_PID" 2>/dev/null; do
+            read -rsn1 -t 0.1 key
+            if [ "$key" = $'\e' ]; then
+                kill "$CLAUDE_PID" 2>/dev/null
+                echo -e "\n[Interrupted]"
+                break
+            fi
+        done
+    ) &
+    local monitor_pid=$!
+
+    # Wait for claude to finish
+    wait "$CLAUDE_PID" 2>/dev/null
+    local exit_code=$?
+
+    # Kill the monitor process
+    kill "$monitor_pid" 2>/dev/null
+    wait "$monitor_pid" 2>/dev/null
+
+    # Extract session_id from the first JSON line if this is a new session
+    if [ ! -f "$SESSION_FILE" ] && [ -s "$raw_output" ]; then
+        local session_id=$(head -1 "$raw_output" | jq -r '.session_id // empty' 2>/dev/null)
+        if [ -n "$session_id" ]; then
+            echo "$session_id" > "$SESSION_FILE"
+        fi
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_output" "$raw_output"
+
+    CLAUDE_PID=""
+    return $exit_code
+}
+
+# REPL loop
+while true; do
+    # Prompt for input
+    echo -n "> "
+    read -r user_input
+
+    # Check if user wants to quit
+    if [ -z "$user_input" ] || [ "$user_input" = "exit" ] || [ "$user_input" = "quit" ]; then
+        echo "Exiting..."
+        break
+    fi
+
+    # Determine if we're resuming a session
+    if [ -f "$SESSION_FILE" ]; then
+        SESSION_ID=$(cat "$SESSION_FILE")
+        RESUME_ARG="--resume $SESSION_ID"
+    else
+        RESUME_ARG=""
+    fi
+
+    # Run claude
+    run_claude "$user_input" "$RESUME_ARG"
+
+    echo ""
+done
+
+cleanup
