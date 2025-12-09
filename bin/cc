@@ -87,17 +87,12 @@ run_claude() {
     ) &
     local timeout_monitor_pid=$!
 
-    # Run claude pipeline synchronously
-    claude "${args[@]}" 2>&1 | tee "$raw" | \
-        jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null | \
+    # Run claude pipeline synchronously with line buffering to avoid output delays
+    stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
+        stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null | \
         while IFS= read -r line; do
             # Reset timeout marker on each line
             touch "$timeout_file"
-            # Check if timeout occurred
-            if [ -f "${timeout_file}.timeout" ]; then
-                timed_out=true
-                break
-            fi
             case "$line" in
                 TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
                 SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
@@ -105,9 +100,17 @@ run_claude() {
             esac
         done
 
+    # Wait for subshell to complete and flush output
+    wait
+
     # Stop timeout monitor
     kill $timeout_monitor_pid 2>/dev/null
     wait $timeout_monitor_pid 2>/dev/null
+
+    # Check if timeout occurred
+    if [ -f "${timeout_file}.timeout" ]; then
+        timed_out=true
+    fi
 
     # Clean up timeout files
     rm -f "$timeout_file" "${timeout_file}.timeout"
