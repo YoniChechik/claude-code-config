@@ -1,194 +1,125 @@
 #!/bin/bash
 
-# cc - Claude Code wrapper with config checks
-# Runs branch status check before starting Claude
+# cc - Claude Code wrapper with config checks and REPL
 
 CLAUDE_DIR="$HOME/.claude"
 ORIG_DIR="$(pwd)"
 
-# Check if .claude directory exists and is a git repository
+# ============================================================
+# GIT CHECKS
+# ============================================================
 if [ ! -d "$CLAUDE_DIR" ]; then
     echo "Error: Claude config directory does not exist at $CLAUDE_DIR"
-    echo "Expected a git repository with Claude configuration."
     exit 1
 fi
 
-cd "$CLAUDE_DIR" || {
-    echo "Error: Cannot access Claude config directory at $CLAUDE_DIR"
-    exit 1
-}
+cd "$CLAUDE_DIR" || exit 1
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
     echo "Error: Not a git repository at $CLAUDE_DIR"
-    echo "Initialize with: cd ~/.claude && git init"
     exit 1
 fi
 
-# Fetch origin/main
 if ! git fetch origin main >/dev/null 2>&1; then
     echo "Error: Failed to fetch origin/main"
-    echo "Check your network connection and git remote configuration."
     exit 1
 fi
 
-# Get current branch
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+[ -z "$CURRENT_BRANCH" ] && echo "Error: Detached HEAD state" && exit 1
 
-# Check if we're on a branch (not detached HEAD)
-if [ -z "$CURRENT_BRANCH" ]; then
-    echo "Error: Detached HEAD state detected. You must be on a branch."
-    echo "Switch with: cd ~/.claude && git checkout main"
-    exit 1
-fi
-
-# Check if we are strictly >= origin/main (equal or ahead)
 if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
-    # origin/main is not an ancestor of HEAD - we're either behind or diverged
-
-    if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-        # HEAD is ancestor of origin/main - we're behind
-        BEHIND_COUNT=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "unknown")
-        echo "Error: Branch $CURRENT_BRANCH is BEHIND origin/main by $BEHIND_COUNT commit(s)"
-        echo "Run:"
-        echo "(cd ~/.claude && git pull)"
-        exit 1
-    else
-        # Neither is ancestor of the other - we've diverged
-        echo "Error: Branch $CURRENT_BRANCH has DIVERGED from origin/main"
-        echo "Both local and remote have different commits."
-        echo "Run:"
-        echo "(cd ~/.claude && git pull)"
-        exit 1
-    fi
-fi
-
-# Check if jq is installed
-if ! command -v jq >/dev/null 2>&1; then
-    echo "Error: jq is not installed"
-    echo "Installing jq..."
-    if sudo apt-get install -y jq >/dev/null 2>&1; then
-        echo "✓ jq installed successfully"
-    else
-        echo "Error: Failed to install jq"
-        echo "Please install manually: sudo apt-get install jq"
-        exit 1
-    fi
-fi
-
-# All checks passed
-if [ "$CC_TEST" = "1" ]; then
-    echo "✓ All checks passed successfully"
-    echo "  - Claude config directory exists"
-    echo "  - Git repository is valid"
-    echo "  - Successfully fetched origin/main"
-    echo "  - On branch: $CURRENT_BRANCH"
-    echo "  - Branch is up-to-date with origin/main"
-    exit 0
-fi
-
-# Return to original directory before starting REPL
-cd "$ORIG_DIR" || {
-    echo "Error: Cannot return to original directory"
+    echo "Error: Branch $CURRENT_BRANCH is behind or diverged from origin/main"
+    echo "Run: (cd ~/.claude && git pull)"
     exit 1
-}
+fi
 
-# Session management
-SESSION_FILE="$HOME/.claude/cc_session_id"
-APPEND_SYSTEM_PROMPT="$HOME/.claude/main_appended_system_prompt.md"
+command -v jq >/dev/null 2>&1 || { echo "Error: jq not installed"; exit 1; }
 
-# Variable to track current claude process
-CLAUDE_PID=""
-
-# Cleanup function
-cleanup() {
-    if [ -n "$CLAUDE_PID" ]; then
-        kill "$CLAUDE_PID" 2>/dev/null
-        wait "$CLAUDE_PID" 2>/dev/null
-    fi
+# Test mode
+if [ "$CC_TEST" = "1" ]; then
+    echo "✓ All checks passed (branch: $CURRENT_BRANCH)"
     exit 0
-}
+fi
 
-# Trap Ctrl+C for clean exit
-trap cleanup SIGINT SIGTERM
+cd "$ORIG_DIR" || exit 1
 
-# Function to run claude with a prompt
+# ============================================================
+# STATE
+# ============================================================
+SESSION_ID=""
+TOTAL_COST=0
+TOTAL_IN=0
+TOTAL_OUT=0
+LAST_MS=0
+
+# ============================================================
+# RUN CLAUDE
+# ============================================================
 run_claude() {
-    local prompt="$1"
-    local resume_arg="$2"
-    local temp_output=$(mktemp)
-    local raw_output=$(mktemp)
+    local raw=$(mktemp)
+    local args=(-p "$1" --output-format stream-json --verbose)
+    [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
+    [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ] && \
+        args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
-    # Run claude and capture raw JSON output
-    claude -p "$prompt" \
-        --output-format stream-json \
-        --include-partial-messages \
-        --verbose \
-        --append-system-prompt "$(cat "$APPEND_SYSTEM_PROMPT")" \
-        $resume_arg 2>&1 | tee "$raw_output" | \
-        jq -r --unbuffered 'if .type == "content_block_delta" and .delta.type == "text_delta" then .delta.text else empty end' 2>/dev/null | tee "$temp_output" &
-
-    CLAUDE_PID=$!
-
-    # Monitor for ESC key while claude is running
-    (
-        while kill -0 "$CLAUDE_PID" 2>/dev/null; do
-            read -rsn1 -t 0.1 key
-            if [ "$key" = $'\e' ]; then
-                kill "$CLAUDE_PID" 2>/dev/null
-                echo -e "\n[Interrupted]"
-                break
-            fi
+    # Ctrl+C during run just stops claude, doesn't exit REPL
+    trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
+    claude "${args[@]}" 2>&1 | tee "$raw" | \
+        jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null | \
+        while IFS= read -r line; do
+            case "$line" in
+                TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
+                SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
+                LINE:*) printf "%s\n" "${line#LINE:}" ;;
+            esac
         done
-    ) &
-    local monitor_pid=$!
+    trap - INT
 
-    # Wait for claude to finish
-    wait "$CLAUDE_PID" 2>/dev/null
-    local exit_code=$?
-
-    # Kill the monitor process
-    kill "$monitor_pid" 2>/dev/null
-    wait "$monitor_pid" 2>/dev/null
-
-    # Extract session_id from the first JSON line if this is a new session
-    if [ ! -f "$SESSION_FILE" ] && [ -s "$raw_output" ]; then
-        local session_id=$(head -1 "$raw_output" | jq -r '.session_id // empty' 2>/dev/null)
-        if [ -n "$session_id" ]; then
-            echo "$session_id" > "$SESSION_FILE"
-        fi
+    # Extract session and stats
+    if [ -z "$SESSION_ID" ]; then
+        SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
-
-    # Cleanup temp files
-    rm -f "$temp_output" "$raw_output"
-
-    CLAUDE_PID=""
-    return $exit_code
+    local result=$(grep '"type":"result"' "$raw" | tail -1)
+    if [ -n "$result" ]; then
+        local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
+        local in=$(echo "$result" | jq -r '.usage.input_tokens // 0')
+        local out=$(echo "$result" | jq -r '.usage.output_tokens // 0')
+        local cache=$(echo "$result" | jq -r '.usage.cache_read_input_tokens // 0')
+        LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
+        TOTAL_COST=$(awk "BEGIN {print $TOTAL_COST + $cost}")
+        TOTAL_IN=$((TOTAL_IN + in + cache))
+        TOTAL_OUT=$((TOTAL_OUT + out))
+    fi
+    rm -f "$raw"
 }
 
-# REPL loop
+# ============================================================
+# PROMPT
+# ============================================================
+show_prompt() {
+    printf "\033[90m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
+    if [ "$TOTAL_IN" -gt 0 ]; then
+        local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
+        local in=$TOTAL_IN; [ "$in" -ge 1000 ] && in=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_IN/1000}")
+        local out=$TOTAL_OUT; [ "$out" -ge 1000 ] && out=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_OUT/1000}")
+        local cost=$(awk "BEGIN {printf \"%.4f\", $TOTAL_COST}")
+        printf " [%ss │ ↓%s ↑%s │ \$%s]" "$sec" "$in" "$out" "$cost"
+    fi
+    printf "\033[0m\n"
+}
+
+# ============================================================
+# MAIN
+# ============================================================
+echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
+echo ""
+
 while true; do
-    # Prompt for input
-    echo -n "> "
-    read -r user_input
-
-    # Check if user wants to quit
-    if [ -z "$user_input" ] || [ "$user_input" = "exit" ] || [ "$user_input" = "quit" ]; then
-        echo "Exiting..."
-        break
-    fi
-
-    # Determine if we're resuming a session
-    if [ -f "$SESSION_FILE" ]; then
-        SESSION_ID=$(cat "$SESSION_FILE")
-        RESUME_ARG="--resume $SESSION_ID"
-    else
-        RESUME_ARG=""
-    fi
-
-    # Run claude
-    run_claude "$user_input" "$RESUME_ARG"
-
-    echo ""
+    show_prompt
+    read -r -e -p "> " input || break
+    [ -z "$input" ] && continue
+    [[ "$input" =~ ^(exit|quit)$ ]] && break
+    history -s "$input"
+    run_claude "$input"
 done
-
-cleanup
