@@ -155,6 +155,20 @@ show_prompt() {
 }
 
 # ============================================================
+# SLASH COMPLETION
+# ============================================================
+source "$CLAUDE_DIR/bin/cc_readline.sh" 2>/dev/null || true
+
+# Fallback to simple readline if custom completion not available
+if ! type read_with_completion &>/dev/null; then
+    read_with_completion() {
+        read -r -e -p "> " input || return 1
+        echo "$input"
+        return 0
+    }
+fi
+
+# ============================================================
 # MAIN
 # ============================================================
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
@@ -162,9 +176,12 @@ echo ""
 
 while true; do
     show_prompt
-    read -r -e -p "> " input || break
+    input=$(read_with_completion)
+    ret=$?
+    [ $ret -eq 1 ] && break  # Ctrl+D
+    [ $ret -eq 2 ] && continue  # Ctrl+C
     [ -z "$input" ] && continue
     [[ "$input" =~ ^(exit|quit)$ ]] && break
-    history -s "$input"
+    history -s "$input" 2>/dev/null
     run_claude "$input"
 done
