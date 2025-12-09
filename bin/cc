@@ -148,8 +148,7 @@ show_prompt() {
         local in=$TOTAL_IN; [ "$in" -ge 1000 ] && in=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_IN/1000}")
         local out=$TOTAL_OUT; [ "$out" -ge 1000 ] && out=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_OUT/1000}")
         local cost=$(awk "BEGIN {printf \"%.4f\", $TOTAL_COST}")
-        local pct=$(awk "BEGIN {printf \"%.0f\", $TOTAL_IN/200000*100}")
-        printf " [%ss │ ↓%s ↑%s │ \$%s │ %s%%]" "$sec" "$in" "$out" "$cost" "$pct"
+        printf " [%ss │ ↓%s ↑%s │ \$%s]" "$sec" "$in" "$out" "$cost"
     fi
     printf "\033[0m\n"
 }
