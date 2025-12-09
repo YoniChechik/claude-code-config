@@ -16,7 +16,7 @@ Continues work on an existing feature clone with proper context analysis.
 Identify the appropriate clone:
 ```bash
 # List existing clones
-ls -1 ./_clones/
+ls -1 ../
 ```
 
 If clone doesn't exist, check if feature branch exists remotely and create clone:
@@ -25,7 +25,7 @@ git branch -a | grep feature
 REPO_URL=$(git config --get remote.origin.url)
 
 # If remote branch exists:
-git clone -b FEATURE_NAME "$REPO_URL" ./_clones/FEATURE_NAME
+git clone -b FEATURE_NAME "$REPO_URL" ../FEATURE_NAME
 ```
 
 If couldn't find a right fit, stop and ask user for clarification.
@@ -34,7 +34,7 @@ If couldn't find a right fit, stop and ask user for clarification.
 ### Step 2: Navigate to Feature Clone
 Tell user to switch to the clone:
 ```bash
-cd ./_clones/FEATURE_NAME
+cd ../FEATURE_NAME
 ```
 
 ### Step 3: Sync with Main
