@@ -51,7 +51,6 @@ SESSION_ID=""
 TOTAL_COST=0
 TOTAL_IN=0
 TOTAL_OUT=0
-LAST_IN=0
 LAST_MS=0
 
 # ============================================================
@@ -118,7 +117,7 @@ run_claude() {
     if [ -z "$SESSION_ID" ]; then
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
-    local result=$(grep '"type":"result"' "$raw" | tail -1)
+    local result=$(grep '"type":"result"' "$raw" | grep '"isSidechain":false' | tail -1)
     if [ -n "$result" ]; then
         local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
         local in=$(echo "$result" | jq -r '.usage.input_tokens // 0')
@@ -127,7 +126,6 @@ run_claude() {
         local cache_create=$(echo "$result" | jq -r '.usage.cache_creation_input_tokens // 0')
         LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
         TOTAL_COST=$(awk "BEGIN {print $TOTAL_COST + $cost}")
-        LAST_IN=$((in + cache + cache_create))
         TOTAL_IN=$((TOTAL_IN + in + cache + cache_create))
         TOTAL_OUT=$((TOTAL_OUT + out))
     fi
@@ -150,7 +148,7 @@ show_prompt() {
         local in=$TOTAL_IN; [ "$in" -ge 1000 ] && in=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_IN/1000}")
         local out=$TOTAL_OUT; [ "$out" -ge 1000 ] && out=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_OUT/1000}")
         local cost=$(awk "BEGIN {printf \"%.4f\", $TOTAL_COST}")
-        local pct=$(awk "BEGIN {printf \"%.0f\", $LAST_IN/200000*100}")
+        local pct=$(awk "BEGIN {printf \"%.0f\", $TOTAL_IN/200000*100}")
         printf " [%ss │ ↓%s ↑%s │ \$%s │ %s%%]" "$sec" "$in" "$out" "$cost" "$pct"
     fi
     printf "\033[0m\n"
