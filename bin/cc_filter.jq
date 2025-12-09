@@ -22,6 +22,11 @@ def C_BLUE:    "\u001b[34m";
 def C_CYAN:    "\u001b[36m";
 def C_DIM:     "\u001b[2m";
 
+# Background colors for Edit tool
+def C_BG_RED:   "\u001b[41m";
+def C_BG_GREEN: "\u001b[42m";
+def C_BLACK:    "\u001b[30m";
+
 # ============================================================
 # TOOL COLORS
 # ============================================================
@@ -35,13 +40,20 @@ def tool_color:
     end;
 
 # ============================================================
+# FORMAT: Edit tool
+# ============================================================
+def format_edit:
+    C_BLUE + "[Edit]" + C_RESET + " " + (.input.file_path // "?") + "\n" +
+    C_BLACK + C_BG_RED + (.input.old_string // "") + C_RESET + "\n" +
+    C_BLACK + C_BG_GREEN + (.input.new_string // "") + C_RESET;
+
+# ============================================================
 # FORMAT: Task tool
 # ============================================================
 def format_task:
     C_MAGENTA + "[Task]" + C_RESET + " " +
     (.input.subagent_type // "agent") + ": " +
-    (.input.description // (.input.prompt // "")[0:60] // "...") +
-    "\n    " + (.input | @json);
+    (.input.description // (.input.prompt // "")[0:60] // "...");
 
 # ============================================================
 # FORMAT: Bash tool
@@ -49,8 +61,7 @@ def format_task:
 def format_bash:
     C_YELLOW + "[Bash]" + C_RESET + " " +
     (.input.description // "command") +
-    "\n    $ " + (.input.command // "?") +
-    "\n    " + (.input | @json);
+    "\n    $ " + (.input.command // "?");
 
 # ============================================================
 # FORMAT: Generic tool
@@ -62,7 +73,8 @@ def format_tool_generic:
 # FORMAT: Tool dispatcher
 # ============================================================
 def format_tool:
-    if   .name == "Task" then format_task
+    if   .name == "Edit" then format_edit
+    elif .name == "Task" then format_task
     elif .name == "Bash" then format_bash
     else format_tool_generic
     end;

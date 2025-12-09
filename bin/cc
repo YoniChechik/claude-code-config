@@ -126,9 +126,10 @@ run_claude() {
         local in=$(echo "$result" | jq -r '.usage.input_tokens // 0')
         local out=$(echo "$result" | jq -r '.usage.output_tokens // 0')
         local cache=$(echo "$result" | jq -r '.usage.cache_read_input_tokens // 0')
+        local cache_create=$(echo "$result" | jq -r '.usage.cache_creation_input_tokens // 0')
         LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
         TOTAL_COST=$(awk "BEGIN {print $TOTAL_COST + $cost}")
-        TOTAL_IN=$((TOTAL_IN + in + cache))
+        TOTAL_IN=$((TOTAL_IN + in + cache + cache_create))
         TOTAL_OUT=$((TOTAL_OUT + out))
     fi
     rm -f "$raw"
@@ -150,7 +151,8 @@ show_prompt() {
         local in=$TOTAL_IN; [ "$in" -ge 1000 ] && in=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_IN/1000}")
         local out=$TOTAL_OUT; [ "$out" -ge 1000 ] && out=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_OUT/1000}")
         local cost=$(awk "BEGIN {printf \"%.4f\", $TOTAL_COST}")
-        printf " [%ss │ ↓%s ↑%s │ \$%s]" "$sec" "$in" "$out" "$cost"
+        local pct=$(awk "BEGIN {printf \"%.0f\", $TOTAL_IN/200000*100}")
+        printf " [%ss │ ↓%s ↑%s │ \$%s │ %s%%]" "$sec" "$in" "$out" "$cost" "$pct"
     fi
     printf "\033[0m\n"
 }
