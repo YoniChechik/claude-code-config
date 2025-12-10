@@ -24,34 +24,22 @@ uv add package-name               # Add to [project.dependencies]
 uv add --dev package-name         # Add to [dependency-groups.dev]
 ```
 
-### Testing
+## Important: Anty petterns
+
+### **NEVER use bare `python`**
 ```bash
-uv run pytest                     # Run all tests
-uv run pytest -n auto             # Parallel execution
-uv run pytest -m "not integration" # Skip integration tests
-uv run pytest -m "not slow"       # Skip slow tests
+python ...
+python3 ...
 ```
 
-### Code Quality (handled by agents, but for reference)
+INSTEAD- we have `uv run python ...`
+
+### **NEVER use `pip`**
 ```bash
-uv run ruff format file.py        # Format code
-uv run ruff check file.py         # Lint code
-uv run mypy --strict file.py      # Type check
+uv pip ...
+pip ...
+python -m pip ...
+uv run python -m pip ...
 ```
 
-## Important: DO NOT Use `uv pip`
-
-**NEVER use:**
-```bash
-uv pip install package
-uv pip install -e .
-uv pip list
-```
-
-**ALWAYS use:**
-```bash
-uv add package                     # Add dependencies
-uv sync                            # Sync environment
-uv run python -c "..."             # Run with environment
-```
-
+INSTEAD- we have `uv add` and `uv sync`
