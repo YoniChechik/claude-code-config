@@ -163,74 +163,16 @@ show_prompt() {
 }
 
 # ============================================================
-# SLASH COMPLETION (Tab key)
-# ============================================================
-_get_slash_commands() {
-    for f in "$CLAUDE_DIR"/commands/*.md; do
-        [ -f "$f" ] && basename "$f" .md
-    done
-}
-
-_cc_tab_complete() {
-    # Only complete if line starts with /
-    [[ "$READLINE_LINE" != /* ]] && return
-
-    local pattern="${READLINE_LINE:1}"
-    local matches=()
-    while IFS= read -r cmd; do
-        [ -z "$pattern" ] || [[ "${cmd,,}" == *"${pattern,,}"* ]] && matches+=("$cmd")
-    done < <(_get_slash_commands)
-
-    local n=${#matches[@]}
-    [ $n -eq 0 ] && return
-
-    if [ $n -eq 1 ]; then
-        # Single match - complete it
-        READLINE_LINE="/${matches[0]}"
-        READLINE_POINT=${#READLINE_LINE}
-    else
-        # Multiple matches - show options
-        echo ""
-        printf '  %s\n' "${matches[@]}"
-        # Find common prefix
-        local prefix="${matches[0]}"
-        for m in "${matches[@]}"; do
-            while [[ "$m" != "$prefix"* ]]; do
-                prefix="${prefix:0:${#prefix}-1}"
-            done
-        done
-        if [ ${#prefix} -gt ${#pattern} ]; then
-            READLINE_LINE="/$prefix"
-            READLINE_POINT=${#READLINE_LINE}
-        fi
-    fi
-}
-
-bind -x '"\t":_cc_tab_complete' 2>/dev/null
-
-# ============================================================
 # MAIN
 # ============================================================
-
-# Source dropdown completion
-source "$CLAUDE_DIR/bin/cc_readline.sh"
-
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
 while true; do
     show_prompt
-
-    # Use custom readline with dropdown completion
-    input=$(read_with_completion)
-    ret=$?
-
-    # Handle Ctrl+D and Ctrl+C
-    [ $ret -eq 1 ] && break  # Ctrl+D
-    [ $ret -eq 2 ] && continue  # Ctrl+C
-
+    read -r -e -p "> " input || break
     [ -z "$input" ] && continue
     [[ "$input" =~ ^(exit|quit)$ ]] && break
-
+    history -s "$input"
     run_claude "$input"
 done
