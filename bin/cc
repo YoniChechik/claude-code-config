@@ -211,14 +211,26 @@ bind -x '"\t":_cc_tab_complete' 2>/dev/null
 # ============================================================
 # MAIN
 # ============================================================
+
+# Source dropdown completion
+source "$CLAUDE_DIR/bin/cc_readline.sh"
+
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
 while true; do
     show_prompt
-    read -r -e -p "> " input || break
+
+    # Use custom readline with dropdown completion
+    input=$(read_with_completion)
+    ret=$?
+
+    # Handle Ctrl+D and Ctrl+C
+    [ $ret -eq 1 ] && break  # Ctrl+D
+    [ $ret -eq 2 ] && continue  # Ctrl+C
+
     [ -z "$input" ] && continue
     [[ "$input" =~ ^(exit|quit)$ ]] && break
-    history -s "$input"
+
     run_claude "$input"
 done
