@@ -227,8 +227,7 @@ then
 # RESULT: Final result (optional - shows summary)
 # ---------------------------------------------------------
 elif .type == "result" then
-    # Could show cost/duration here if desired
-    empty
+    "LINE:\nLINE:" + C_GREEN + "━━━ Done ━━━" + C_RESET
 
 # ---------------------------------------------------------
 # SYSTEM: Init (could show session info)
