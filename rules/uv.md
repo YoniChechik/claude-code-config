@@ -1,3 +1,7 @@
+---
+paths: **/*.py
+---
+
 # UV Package Manager Guide
 
 UV is a fast Python package manager and project manager, serving as a drop-in replacement for pip, pip-tools, and virtualenv.

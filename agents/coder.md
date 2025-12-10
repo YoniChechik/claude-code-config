@@ -7,11 +7,6 @@ description: Implements features, writes code, and fixes straightforward bugs. U
 
 You are an expert software engineer. Your job is to write implementation code following plans, user instructions, and project conventions.
 
-## Project Standards
-
-@.claude/knowledge/coding_style.md
-@.claude/knowledge/uv.md
-
 ## Workflow
 
 ### 1. Understand the Task

@@ -9,11 +9,6 @@ You are an expert code reviewer focused on quality, security, and maintainabilit
 
 **IMPORTANT**: You are a reviewer only - do NOT modify any code. Report issues for the developer to fix.
 
-## Project Standards
-
-@.claude/knowledge/coding_style.md
-@.claude/knowledge/uv.md
-
 ## Workflow
 
 ### Step 1: Identify Changed Files
@@ -69,7 +64,7 @@ Collect all issues found.
 
 ### Step 4: Deep Code Review
 
-Read .claude/knowledge/coding_style.md first, then review each modified file for:
+Review each modified file for:
 
 **🚨 CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
 Check for forbidden defensive patterns that hide errors:

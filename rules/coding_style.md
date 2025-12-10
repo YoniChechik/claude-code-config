@@ -1,3 +1,7 @@
+---
+paths: **/*.py
+---
+
 # Python Coding Style Guide
 
 ## FAIL FAST - Critical Rule
