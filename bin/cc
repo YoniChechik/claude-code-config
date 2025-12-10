@@ -58,6 +58,7 @@ TOTAL_COST=0
 TOTAL_IN=0
 TOTAL_OUT=0
 LAST_MS=0
+MODEL=""
 
 # ============================================================
 # RUN CLAUDE
@@ -124,6 +125,7 @@ run_claude() {
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
     local model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
+    [ -n "$model" ] && MODEL="$model"
     local result=$(grep '"type":"result"' "$raw" | tail -1)
     if [ -n "$result" ]; then
         local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
@@ -159,11 +161,7 @@ show_prompt() {
     printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
     if [ "$TOTAL_IN" -gt 0 ]; then
         local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
-        local in=$TOTAL_IN; [ "$in" -ge 1000 ] && in=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_IN/1000}")
-        local out=$TOTAL_OUT; [ "$out" -ge 1000 ] && out=$(awk "BEGIN {printf \"%.1fK\", $TOTAL_OUT/1000}")
-        local cost=$(awk "BEGIN {printf \"%.4f\", $TOTAL_COST}")
-        local pct=$(awk "BEGIN {printf \"%.0f\", $TOTAL_IN/200000*100}")
-        printf " [%ss │ ↓%s ↑%s │ \$%s │ %s%%]" "$sec" "$in" "$out" "$cost" "$pct"
+        printf " [%ss │ %s]" "$sec" "$MODEL"
     fi
     printf "\033[0m\n"
 }
