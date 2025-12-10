@@ -34,7 +34,13 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     exit 1
 fi
 
-command -v jq >/dev/null 2>&1 || { echo "Error: jq not installed"; exit 1; }
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq not installed"
+    echo ""
+    echo "To install jq on Ubuntu without sudo:"
+    echo "  apt update && apt install -y jq"
+    exit 1
+fi
 
 # Test mode
 if [ "$CC_TEST" = "1" ]; then
