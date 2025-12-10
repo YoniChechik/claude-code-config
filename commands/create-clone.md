@@ -21,11 +21,14 @@ Set up isolated feature branch from origin/main (unless user stated a different 
 # Get the current repo URL
 REPO_URL=$(git config --get remote.origin.url)
 
-# Create clone as sibling directory with branch name as folder
-git clone -b main "$REPO_URL" ../$FEATURE_NAME
+# Create _clones directory if it doesn't exist
+mkdir -p _clones
+
+# Create clone in _clones subdirectory with branch name as folder
+git clone -b main "$REPO_URL" _clones/$FEATURE_NAME
 
 # Move to new clone directory
-cd ../$FEATURE_NAME
+cd _clones/$FEATURE_NAME
 
 # Create and checkout the feature branch
 git checkout -b $FEATURE_NAME
@@ -46,7 +49,7 @@ uv venv
 
 ### Step 5: Notify User
 Tell user:
-- The clone has been created at `../$FEATURE_NAME`
+- The clone has been created at `_clones/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` has been published to remote
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**

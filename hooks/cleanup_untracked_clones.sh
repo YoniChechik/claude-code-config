@@ -29,42 +29,44 @@ fi
 
 # Remove clones whose remote branches have been deleted
 clones_removed=0
-parent_dir=$(dirname "$git_root")
-echo "INFO: Checking sibling directories for stale clones..." >&2
+clones_dir="${git_root}/_clones"
+echo "INFO: Checking _clones subdirectory for stale clones..." >&2
 
-for clone_dir in "${parent_dir}"/*; do
-    # Skip if not a directory
-    [[ ! -d "$clone_dir" ]] && continue
+# Skip if _clones directory doesn't exist
+if [[ ! -d "$clones_dir" ]]; then
+    echo "INFO: No _clones directory found, skipping clone cleanup" >&2
+else
+    for clone_dir in "${clones_dir}"/*; do
+        # Skip if not a directory
+        [[ ! -d "$clone_dir" ]] && continue
 
-    # Skip the current repo itself
-    [[ "$clone_dir" == "$git_root" ]] && continue
+        # Skip if not a git repo
+        [[ ! -d "$clone_dir/.git" ]] && continue
 
-    # Skip if not a git repo
-    [[ ! -d "$clone_dir/.git" ]] && continue
+        # Get the branch for this clone
+        branch=$(git -C "$clone_dir" branch --show-current 2>/dev/null)
 
-    # Get the branch for this clone
-    branch=$(git -C "$clone_dir" branch --show-current 2>/dev/null)
+        # Skip if no branch (detached HEAD or error)
+        [[ -z "$branch" ]] && continue
 
-    # Skip if no branch (detached HEAD or error)
-    [[ -z "$branch" ]] && continue
+        # Skip main/master branches
+        [[ $branch == "main" || $branch == "master" ]] && continue
 
-    # Skip main/master branches
-    [[ $branch == "main" || $branch == "master" ]] && continue
+        # Check if remote branch still exists
+        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "refs/heads/$branch"; then
+            # Remote branch exists, keep the clone
+            continue
+        fi
 
-    # Check if remote branch still exists
-    if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "refs/heads/$branch"; then
-        # Remote branch exists, keep the clone
-        continue
-    fi
-
-    # Remove clone whose remote was deleted
-    echo "INFO: Removing clone for branch '$branch' (remote deleted): $clone_dir" >&2
-    if rm -rf "$clone_dir" 2>/dev/null; then
-        ((clones_removed++))
-    else
-        echo "WARNING: Failed to remove clone directory: $clone_dir" >&2
-    fi
-done
+        # Remove clone whose remote was deleted
+        echo "INFO: Removing clone for branch '$branch' (remote deleted): $clone_dir" >&2
+        if rm -rf "$clone_dir" 2>/dev/null; then
+            ((clones_removed++))
+        else
+            echo "WARNING: Failed to remove clone directory: $clone_dir" >&2
+        fi
+    done
+fi
 
 if [ $clones_removed -eq 0 ]; then
     echo "INFO: No clones to remove" >&2
