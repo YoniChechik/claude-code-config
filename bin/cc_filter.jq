@@ -227,7 +227,7 @@ then
 # RESULT: Final result (optional - shows summary)
 # ---------------------------------------------------------
 elif .type == "result" then
-    "LINE:\nLINE:" + C_GREEN + "━━━ Done ━━━" + C_RESET
+    empty
 
 # ---------------------------------------------------------
 # SYSTEM: Init (could show session info)
