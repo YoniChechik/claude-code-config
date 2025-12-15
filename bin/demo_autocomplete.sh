@@ -70,14 +70,16 @@ render_demo_menu() {
 
     local show=$((count < max_show ? count : max_show))
 
-    # Show filtered items with selection highlight
+    # Show filtered items as horizontal line with selection highlight
+    printf '    '
     for ((i=0; i<show; i++)); do
         if [[ $i -eq $selected ]]; then
-            printf '    \033[7m /%s \033[0m\n' "${items[$i]}"
+            printf '\033[7m/%s\033[0m  ' "${items[$i]}"
         else
-            printf '    /%s\n' "${items[$i]}"
+            printf '/%s  ' "${items[$i]}"
         fi
     done
+    printf '\n'
 }
 
 # =============================================================================
@@ -134,7 +136,7 @@ demo_scenario_3() {
     scenario_header "User presses down arrow - Navigation highlight moves"
 
     info_text "After typing '/sy', the user presses Down arrow. The selection highlight"
-    info_text "moves to the next matching command. The inverted background shows current selection."
+    info_text "moves right to the next matching command. The inverted background shows current selection."
     echo
 
     show_prompt
@@ -149,11 +151,11 @@ demo_scenario_3() {
     mapfile -t filtered < <(printf '%s\n' "${all_cmds[@]}" | filter_commands "sy")
 
     # Show with different selected indices
-    echo -e "${INFO_COLOR}After 1st Down arrow press:${RESET}"
+    echo -e "${INFO_COLOR}Initial selection (first item):${RESET}"
     render_demo_menu filtered 0
     echo
 
-    echo -e "${INFO_COLOR}After 2nd Down arrow press:${RESET}"
+    echo -e "${INFO_COLOR}After Down arrow press (second item):${RESET}"
     render_demo_menu filtered 1
     echo
 }
@@ -206,8 +208,8 @@ demo_scenario_5() {
 demo_scenario_6() {
     scenario_header "Multiple matches - User can navigate between options"
 
-    info_text "Commands starting with similar prefixes are all shown. For example,"
-    info_text "typing '/new' shows both '/new-feature' and '/new-feature-short'."
+    info_text "Commands starting with similar prefixes are all shown horizontally."
+    info_text "For example, typing '/new' shows both '/new-feature' and '/new-feature-short'."
     echo
 
     show_prompt
@@ -225,7 +227,7 @@ demo_scenario_6() {
     render_demo_menu filtered 0
     echo
 
-    echo -e "${INFO_COLOR}After Down arrow - Selection on second match:${RESET}"
+    echo -e "${INFO_COLOR}After Down arrow - Selection moves right to second match:${RESET}"
     render_demo_menu filtered 1
     echo
 }
@@ -270,8 +272,8 @@ demo_scenario_8() {
     scenario_header "Key Bindings Reference"
 
     echo -e "${SUBHEADER_COLOR}Navigation:${RESET}"
-    echo "  • Up arrow         - Move selection up in the menu"
-    echo "  • Down arrow       - Move selection down in the menu"
+    echo "  • Up arrow         - Move selection left in the menu"
+    echo "  • Down arrow       - Move selection right in the menu"
     echo "  • Type characters  - Filter commands by prefix"
     echo "  • Backspace        - Delete last character, expand filter"
     echo
@@ -291,7 +293,7 @@ main() {
     demo_header "Interactive Slash Command Autocomplete UI Demo"
 
     echo "This demo shows how the autocomplete interface looks when using the 'cc' REPL."
-    echo "The selected item is shown with inverted colors (white on black background)."
+    echo "Commands appear as a horizontal list. The selected item is shown with inverted colors."
     echo
 
     # Run all scenarios

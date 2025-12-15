@@ -457,6 +457,48 @@ test_integration_progressive_filter() {
 }
 
 # ============================================================
+# TEST: Rendering - Regression tests for menu display
+# ============================================================
+
+# Source the clear_autocomplete_menu function from cc
+clear_autocomplete_menu() {
+    printf '\033[s'        # Save cursor
+    printf '\033[B\033[K'  # Move down one line, clear it
+    printf '\033[u'        # Restore cursor
+}
+
+test_clear_menu_uses_cursor_movement() {
+    # Capture the output of clear_autocomplete_menu
+    local output
+    output=$(clear_autocomplete_menu)
+
+    # Check that it uses \033[B (cursor down) exactly once and not \n (newline)
+    local has_cursor_down=false
+    local cursor_count=0
+    local has_newline=false
+
+    if [[ "$output" == *$'\033[B'* ]]; then
+        has_cursor_down=true
+        cursor_count=$(echo -n "$output" | grep -o $'\033\[B' | wc -l)
+    fi
+
+    if [[ "$output" == *$'\n'* ]]; then
+        has_newline=true
+    fi
+
+    # Test passes if: has cursor down escape code once, and no newlines
+    if [[ $has_cursor_down == true ]] && [[ $cursor_count -eq 1 ]] && [[ $has_newline == false ]]; then
+        pass "clear_menu uses cursor movement (\033[B) once, not newlines"
+    else
+        local issues=""
+        [[ $has_cursor_down == false ]] && issues+="missing \033[B; "
+        [[ $cursor_count -ne 1 ]] && issues+="found $cursor_count \033[B; "
+        [[ $has_newline == true ]] && issues+="contains \\n; "
+        fail "clear_menu uses cursor movement (\033[B) once, not newlines" "1 \033[B, no \\n" "$issues"
+    fi
+}
+
+# ============================================================
 # TEST: Edge cases
 # ============================================================
 
@@ -622,6 +664,10 @@ echo "--- Edge case tests ---"
 run_test test_edge_single_command
 run_test test_edge_special_chars_in_prefix
 run_test test_edge_very_long_command
+
+echo ""
+echo "--- Rendering tests ---"
+run_test test_clear_menu_uses_cursor_movement
 
 echo ""
 echo "--- Navigation simulation tests ---"
