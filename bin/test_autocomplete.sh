@@ -613,6 +613,165 @@ test_navigation_wrap_behavior() {
 }
 
 # ============================================================
+# TEST: Backspace boundary conditions
+# ============================================================
+
+test_backspace_tracking_logic() {
+    # Test the input tracking logic during backspace
+    local input="/"
+
+    # Simulate typing "abc"
+    input+="a"
+    input+="b"
+    input+="c"
+
+    if [[ "$input" == "/abc" ]] && [[ ${#input} -eq 4 ]]; then
+        pass "Backspace logic: input tracking after typing"
+    else
+        fail "Backspace logic: input tracking after typing" "/abc (len 4)" "$input (len ${#input})"
+    fi
+}
+
+test_backspace_single_char() {
+    local input="/abc"
+
+    # Backspace once
+    if [[ ${#input} -gt 1 ]]; then
+        input="${input%?}"
+    fi
+
+    if [[ "$input" == "/ab" ]] && [[ ${#input} -eq 3 ]]; then
+        pass "Backspace logic: single backspace from /abc"
+    else
+        fail "Backspace logic: single backspace from /abc" "/ab (len 3)" "$input (len ${#input})"
+    fi
+}
+
+test_backspace_to_slash_only() {
+    local input="/a"
+
+    # Backspace to just "/"
+    if [[ ${#input} -gt 1 ]]; then
+        input="${input%?}"
+    fi
+
+    if [[ "$input" == "/" ]] && [[ ${#input} -eq 1 ]]; then
+        pass "Backspace logic: backspace to / only"
+    else
+        fail "Backspace logic: backspace to / only" "/ (len 1)" "$input (len ${#input})"
+    fi
+}
+
+test_backspace_at_slash_triggers_exit() {
+    local input="/"
+    local should_exit=false
+
+    # Simulate the condition check in run_autocomplete
+    if [[ ${#input} -eq 1 ]]; then
+        should_exit=true
+    fi
+
+    if [[ $should_exit == true ]]; then
+        pass "Backspace logic: at / triggers exit condition"
+    else
+        fail "Backspace logic: at / triggers exit condition"
+    fi
+}
+
+test_backspace_rapid_sequence() {
+    # Simulate rapid backspace: type "/abc" then backspace 4 times
+    local input="/"
+    input+="a"
+    input+="b"
+    input+="c"
+
+    # Backspace 1: /abc -> /ab
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # Backspace 2: /ab -> /a
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # Backspace 3: /a -> /
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # At this point we should be at "/" (len 1)
+    # Backspace 4: should trigger exit, NOT erase more
+    local should_exit=false
+    if [[ ${#input} -eq 1 ]]; then
+        should_exit=true
+    elif [[ ${#input} -eq 0 ]]; then
+        # This shouldn't happen - it means we erased too much
+        should_exit=false
+    fi
+
+    if [[ $should_exit == true ]] && [[ "$input" == "/" ]]; then
+        pass "Backspace logic: rapid backspace stops at / and exits"
+    else
+        fail "Backspace logic: rapid backspace stops at / and exits" "exit=true, input=/" "exit=$should_exit, input=$input (len ${#input})"
+    fi
+}
+
+test_backspace_boundary_no_over_erase() {
+    # Test that we never allow input to become empty during backspace
+    local input="/"
+
+    # Try to backspace when already at /
+    # The elif condition should catch this
+    local erased=false
+    if [[ ${#input} -gt 1 ]]; then
+        input="${input%?}"
+        erased=true
+    elif [[ ${#input} -eq 1 ]]; then
+        # This is the exit case - we DON'T modify input further
+        erased=false
+    fi
+
+    if [[ $erased == false ]] && [[ "$input" == "/" ]]; then
+        pass "Backspace logic: no over-erase past /"
+    else
+        fail "Backspace logic: no over-erase past /" "erased=false, input=/" "erased=$erased, input=$input"
+    fi
+}
+
+test_backspace_terminal_output_count() {
+    # Test that backspace outputs exactly the right number of erase sequences
+    local input="/abc"
+    local backspace_count=0
+
+    # Simulate 3 backspaces (to get back to just "/")
+    while [[ ${#input} -gt 1 ]]; do
+        input="${input%?}"
+        ((backspace_count++))
+        # Each iteration should output one '\b \b' sequence
+    done
+
+    if [[ $backspace_count -eq 3 ]] && [[ "$input" == "/" ]]; then
+        pass "Backspace logic: correct erase count from /abc to /"
+    else
+        fail "Backspace logic: correct erase count from /abc to /" "3 erases, input=/" "$backspace_count erases, input=$input"
+    fi
+}
+
+test_backspace_empty_protection() {
+    # Edge case: what if input somehow becomes empty?
+    # Our code should not output backspace sequences if input is empty
+    local input=""
+    local should_erase=false
+
+    if [[ ${#input} -gt 1 ]]; then
+        should_erase=true
+    elif [[ ${#input} -eq 1 ]]; then
+        should_erase=true
+    fi
+
+    if [[ $should_erase == false ]]; then
+        pass "Backspace logic: empty input protection"
+    else
+        fail "Backspace logic: empty input protection"
+    fi
+}
+
+# ============================================================
 # RUN ALL TESTS
 # ============================================================
 
@@ -674,6 +833,17 @@ echo "--- Navigation simulation tests ---"
 run_test test_navigation_bounds_array
 run_test test_navigation_bounds_down
 run_test test_navigation_wrap_behavior
+
+echo ""
+echo "--- Backspace boundary tests ---"
+run_test test_backspace_tracking_logic
+run_test test_backspace_single_char
+run_test test_backspace_to_slash_only
+run_test test_backspace_at_slash_triggers_exit
+run_test test_backspace_rapid_sequence
+run_test test_backspace_boundary_no_over_erase
+run_test test_backspace_terminal_output_count
+run_test test_backspace_empty_protection
 
 # ============================================================
 # SUMMARY

@@ -214,8 +214,9 @@ run_autocomplete() {
 
             BACKSPACE)
                 if [[ ${#input} -gt 1 ]]; then
+                    # Only erase if we have characters after the /
                     input="${input%?}"
-                    printf '\b \b'  # Erase char
+                    printf '\b \b'  # Erase one char
                     # Re-filter
                     local prefix="${input#/}"
                     mapfile -t filtered_commands < <(
@@ -225,12 +226,14 @@ run_autocomplete() {
                     clear_autocomplete_menu
                     render_autocomplete_menu filtered_commands $selected
                 elif [[ ${#input} -eq 1 ]]; then
-                    # Backspacing the / itself - exit autocomplete
+                    # Backspacing the / itself - exit autocomplete cleanly
+                    # Clear menu first, then erase ONLY the /, leaving "> " intact
                     clear_autocomplete_menu
-                    printf '\b \b'  # Erase the /
+                    printf '\b \b'  # Erase the / char
                     AUTOCOMPLETE_RESULT=""
                     return 1
                 fi
+                # If input is empty (shouldn't happen), do nothing to prevent erasing prompt
                 ;;
 
             UP)
