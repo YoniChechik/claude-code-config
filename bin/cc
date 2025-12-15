@@ -51,6 +51,47 @@ fi
 cd "$ORIG_DIR" || exit 1
 
 # ============================================================
+# FUZZY MATCHING
+# ============================================================
+
+# Returns Levenshtein edit distance between two strings
+levenshtein() {
+    awk 'BEGIN {
+        s1=ARGV[1]; s2=ARGV[2]
+        l1=length(s1); l2=length(s2)
+        for(i=0;i<=l1;i++) d[i,0]=i
+        for(j=0;j<=l2;j++) d[0,j]=j
+        for(i=1;i<=l1;i++) {
+            for(j=1;j<=l2;j++) {
+                c = substr(s1,i,1)!=substr(s2,j,1)
+                d[i,j] = d[i-1,j]+1
+                if(d[i,j-1]+1 < d[i,j]) d[i,j]=d[i,j-1]+1
+                if(d[i-1,j-1]+c < d[i,j]) d[i,j]=d[i-1,j-1]+c
+            }
+        }
+        print d[l1,l2]
+    }' "$1" "$2"
+}
+
+# Find similar command from commands/ directory
+find_similar_command() {
+    local input="${1#/}"  # Remove leading slash
+    local best="" best_dist=999
+
+    for cmd_file in "$CLAUDE_DIR"/commands/*.md; do
+        [ -f "$cmd_file" ] || continue
+        local cmd=$(basename "$cmd_file" .md)
+        local dist=$(levenshtein "$input" "$cmd")
+        if [ "$dist" -lt "$best_dist" ] && [ "$dist" -le 3 ]; then
+            best="$cmd"
+            best_dist="$dist"
+        fi
+    done
+
+    [ -n "$best" ] && echo "/$best"
+}
+
+# ============================================================
 # STATE
 # ============================================================
 SESSION_ID=""
@@ -178,5 +219,20 @@ while true; do
     [ -z "$input" ] && continue
     [[ "$input" =~ ^(exit|quit)$ ]] && break
     history -s "$input"
+
+    # Check for unknown slash commands and suggest alternatives
+    if [[ "$input" == /* ]]; then
+        cmd="${input%% *}"
+        cmd_name="${cmd#/}"
+        if [ ! -f "$CLAUDE_DIR/commands/${cmd_name}.md" ]; then
+            suggestion=$(find_similar_command "$cmd")
+            if [ -n "$suggestion" ]; then
+                echo -e "\033[33mUnknown command: $cmd\033[0m"
+                echo -e "Did you mean: \033[32m$suggestion\033[0m?"
+                continue
+            fi
+        fi
+    fi
+
     run_claude "$input"
 done
