@@ -214,6 +214,13 @@ then
     end
 
 # ---------------------------------------------------------
+# ASSISTANT: Empty or other content (no action needed)
+# ---------------------------------------------------------
+elif .type == "assistant"
+then
+    empty
+
+# ---------------------------------------------------------
 # USER: Tool results
 # Prefer tool_use_result.content (pre-parsed) over message.content
 # ---------------------------------------------------------
