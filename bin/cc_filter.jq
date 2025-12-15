@@ -54,6 +54,25 @@ def format_write:
     C_BLUE + "[Write]" + C_RESET + " " + (.input.file_path // "?");
 
 # ============================================================
+# FORMAT: TodoWrite tool
+# ============================================================
+def format_todowrite:
+    def status_icon:
+        if . == "pending" then "⏳"
+        elif . == "in_progress" then "🔄"
+        elif . == "completed" then "✅"
+        else "📝"
+        end;
+
+    C_MAGENTA + "[TodoWrite]" + C_RESET + " Task list\n" +
+    ([.input.todos[] |
+        "  " + (.status | status_icon) + " " +
+        (if .status == "completed" then C_GRAY + C_DIM else "" end) +
+        .content +
+        (if .status == "completed" then C_RESET else "" end)
+    ] | join("\n"));
+
+# ============================================================
 # FORMAT: Task tool
 # ============================================================
 def format_task:
@@ -81,6 +100,7 @@ def format_tool_generic:
 def format_tool:
     if   .name == "Edit" then format_edit
     elif .name == "Write" then format_write
+    elif .name == "TodoWrite" then format_todowrite
     elif .name == "Task" then format_task
     elif .name == "Bash" then format_bash
     else format_tool_generic
