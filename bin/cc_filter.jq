@@ -214,11 +214,31 @@ then
     end
 
 # ---------------------------------------------------------
-# ASSISTANT: Empty or other content (no action needed)
+# ASSISTANT: Thinking content (non-streaming)
+# ---------------------------------------------------------
+elif .type == "assistant" and
+     ([.message.content[] | select(.type == "thinking")] | length > 0)
+then
+    [.message.content[] | select(.type == "thinking") | .thinking] |
+    join("\n") |
+    C_DIM + "[Thinking] " + . + C_RESET |
+    prefix_lines(if $is_sub then "SUB:" else "LINE:" end)
+
+# ---------------------------------------------------------
+# ASSISTANT: Unknown/unhandled content types (debugging)
 # ---------------------------------------------------------
 elif .type == "assistant"
 then
-    empty
+    # Show what content types are present for debugging
+    (.message.content | map(.type) | unique) as $types |
+    if ($types | length) > 0 then
+        "LINE:" + C_YELLOW + "[Assistant] unhandled content types: " + C_RESET +
+        ($types | join(", ")) + "\n" +
+        "LINE:" + C_DIM + "Full content: " + C_RESET + (.message.content | @json)
+    else
+        # Empty content array
+        "LINE:" + C_YELLOW + "[Assistant] empty content" + C_RESET
+    end
 
 # ---------------------------------------------------------
 # USER: Tool results
