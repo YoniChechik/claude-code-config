@@ -262,6 +262,9 @@ elif .type == "result" then
     elif .stop_reason == "error" then
         # Stop reason indicates error
         "LINE:" + C_YELLOW + "⚠ Command failed with error" + C_RESET
+    elif (.result == "" and .usage.output_tokens == 0) then
+        # Silent failure - empty result with no tokens (likely invalid slash command)
+        "LINE:" + C_YELLOW + "⚠ No response (possible invalid slash command)" + C_RESET
     else
         empty
     end
