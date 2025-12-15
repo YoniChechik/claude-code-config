@@ -238,7 +238,7 @@ run_autocomplete() {
                     # Backspacing the / itself - exit autocomplete cleanly
                     # Clear menu first, then erase ONLY the /, leaving "> " intact
                     clear_autocomplete_menu
-                    printf '\b \b'  # Erase the / char
+                    printf '\033[D\033[K'  # Move left one position and clear to end of line (works with wrapped lines)
                     AUTOCOMPLETE_RESULT=""
                     return 1
                 fi
