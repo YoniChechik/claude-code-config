@@ -64,9 +64,54 @@ else
 fi
 
 echo ""
+echo "Testing wrapped line backspace fix..."
+echo ""
+
+# Check that backspace uses '\033[D\033[K' for wrapped line support
+if grep -q "printf '\\\\033\[D\\\\033\[K'" "$SCRIPT_DIR/cc"; then
+    printf "${GREEN}PASS${RESET}: Backspace handler uses \\033[D\\033[K for wrapped line support\n"
+else
+    printf "${RED}FAIL${RESET}: Backspace handler doesn't use \\033[D\\033[K\n"
+    exit 1
+fi
+
+# Check that the old '\b \b' is NOT used in the "/" backspace context (regression check)
+if grep -A1 "Backspacing the / itself" "$SCRIPT_DIR/cc" | grep -q "printf '\\\\b \\\\b'"; then
+    printf "${RED}FAIL${RESET}: Found old \\b \\b in '/' backspace context (should be \\033[D\\033[K)\n"
+    exit 1
+else
+    printf "${GREEN}PASS${RESET}: '/' backspace context uses correct sequence (not old \\b \\b)\n"
+fi
+
+# Check that the backspace fix is at line 241 in the correct context
+backspace_line=$(grep -n "printf '\\\\033\[D\\\\033\[K'" "$SCRIPT_DIR/cc" | grep "241:" || true)
+if [[ -n "$backspace_line" ]]; then
+    printf "${GREEN}PASS${RESET}: Backspace fix is at expected line 241\n"
+else
+    # Allow for minor line number changes
+    actual_line=$(grep -n "printf '\\\\033\[D\\\\033\[K'" "$SCRIPT_DIR/cc" | head -1 | cut -d: -f1)
+    if [[ -n "$actual_line" ]]; then
+        printf "${GREEN}PASS${RESET}: Backspace fix found at line $actual_line (line numbers may have shifted)\n"
+    else
+        printf "${RED}FAIL${RESET}: Backspace fix not found\n"
+        exit 1
+    fi
+fi
+
+# Verify the fix is in the right context (backspacing "/" in autocomplete)
+if grep -B3 "033\[D" "$SCRIPT_DIR/cc" | grep -q "Backspacing the / itself"; then
+    printf "${GREEN}PASS${RESET}: Backspace fix is in correct context (backspacing '/' character)\n"
+else
+    printf "${RED}FAIL${RESET}: Backspace fix not in expected context\n"
+    exit 1
+fi
+
+echo ""
 printf "${GREEN}All regression tests passed!${RESET}\n"
 echo ""
-echo "Summary: The fix ensures that:"
+echo "Summary: The fixes ensure that:"
 echo "  1. First render creates the menu line with '\\n'"
 echo "  2. Subsequent renders move to existing line with '\\033[B'"
 echo "  3. No multiple lines accumulate during typing/backspacing"
+echo "  4. Backspace uses '\\033[D\\033[K' to properly erase '/' even with wrapped prompts"
+echo "  5. Old '\\b \\b' sequence is not present (prevents prompt erasure on wrapped lines)"
