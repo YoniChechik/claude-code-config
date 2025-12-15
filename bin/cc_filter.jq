@@ -48,6 +48,12 @@ def format_edit:
     C_BLACK + C_BG_GREEN + (.input.new_string // "") + C_RESET;
 
 # ============================================================
+# FORMAT: Write tool
+# ============================================================
+def format_write:
+    C_BLUE + "[Write]" + C_RESET + " " + (.input.file_path // "?");
+
+# ============================================================
 # FORMAT: Task tool
 # ============================================================
 def format_task:
@@ -74,6 +80,7 @@ def format_tool_generic:
 # ============================================================
 def format_tool:
     if   .name == "Edit" then format_edit
+    elif .name == "Write" then format_write
     elif .name == "Task" then format_task
     elif .name == "Bash" then format_bash
     else format_tool_generic
