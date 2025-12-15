@@ -71,9 +71,10 @@ render_autocomplete_menu() {
     if [[ "$create_line" == "true" ]]; then
         printf '\n'        # Create new line for menu
     else
-        printf '\033[B'    # Move down to existing line
-        printf '\033[K'    # Clear the line before writing
+        printf '\033[E'    # Move to beginning of next line (down + column 0)
     fi
+
+    printf '\033[K'        # Clear the line before writing
 
     # Render horizontal menu with space-separated items
     for ((i=0; i<show; i++)); do
@@ -90,7 +91,8 @@ render_autocomplete_menu() {
 # Clear the menu area (single horizontal line)
 clear_autocomplete_menu() {
     printf '\033[s'        # Save cursor
-    printf '\033[B\033[K'  # Move down one line, clear it
+    printf '\033[E'        # Move to beginning of next line
+    printf '\033[K'        # Clear it
     printf '\033[u'        # Restore cursor
 }
 

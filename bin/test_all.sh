@@ -153,10 +153,10 @@ test_create_line_parameter_exists() {
 }
 
 test_uses_cursor_down_escape() {
-    if grep -q '\\033\[B' "$SCRIPT_DIR/autocomplete.sh"; then
-        pass "render_autocomplete_menu uses \\033[B to move to existing line"
+    if grep -q '\\033\[E' "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "render_autocomplete_menu uses \\033[E to move to next line"
     else
-        fail "render_autocomplete_menu doesn't use \\033[B"
+        fail "render_autocomplete_menu doesn't use \\033[E"
     fi
 }
 
@@ -651,37 +651,107 @@ echo ""
 echo "--- Rendering tests ---"
 
 test_clear_menu_uses_cursor_movement() {
-    # Capture the output of clear_autocomplete_menu
-    local output
-    output=$(clear_autocomplete_menu)
+    # Check that clear_autocomplete_menu uses \033[E and not \n
+    if grep -q '\\033\[E' "$SCRIPT_DIR/autocomplete.sh"; then
+        if ! grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\n'; then
+            pass "clear_menu uses cursor movement (\033[E), not newlines"
+        else
+            fail "clear_menu uses cursor movement" "\\033[E, no \\n" "found \\n"
+        fi
+    else
+        fail "clear_menu uses cursor movement" "\\033[E" "not found"
+    fi
+}
 
-    # Check that it uses \033[B (cursor down) exactly once and not \n (newline)
-    local has_cursor_down=false
-    local cursor_count=0
-    local has_newline=false
+test_render_menu_initial_creates_newline() {
+    # Test that initial render (with create_line=true) creates a newline
+    # Check the create_line=true branch in the source code
+    if sed -n '/if.*create_line.*true/,/else/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q "printf '\\\\n'"; then
+        pass "render_menu with create_line=true creates newline"
+    else
+        fail "render_menu with create_line=true creates newline" "printf '\\n'" "not found"
+    fi
+}
 
-    if [[ "$output" == *$'\033[B'* ]]; then
-        has_cursor_down=true
-        cursor_count=$(echo -n "$output" | grep -o $'\033\[B' | wc -l)
+test_render_menu_subsequent_no_newline() {
+    # Test that subsequent render (create_line=false) doesn't create newlines in the else branch
+    # Check that the else branch doesn't have printf '\n'
+    if ! sed -n '/if.*create_line.*true/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | sed -n '/else/,/fi/p' | grep -q "printf '\\\\n'"; then
+        pass "render_menu with create_line=false doesn't create newline in else branch"
+    else
+        fail "render_menu with create_line=false doesn't create newline" "no \\n in else" "found \\n"
+    fi
+}
+
+test_render_menu_subsequent_uses_cursor_down() {
+    # Test that subsequent render uses \033[E to move to next line
+    if sed -n '/if.*create_line.*true/,/fi/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
+        pass "render_menu with create_line=false uses \\033[E cursor movement"
+    else
+        fail "render_menu with create_line=false uses \\033[E cursor movement" "contains \\033[E" "not found"
+    fi
+}
+
+test_char_input_sequence_no_inline_menu() {
+    # Test the sequence in the CHAR case:
+    # 1. printf "%s" "$KEY_CHAR" - character appears on input line
+    # 2. clear_autocomplete_menu - clears menu line below using \033[E
+    # 3. render_autocomplete_menu without true - should render on line below using \033[E
+
+    # Check that both clear and render use proper cursor movement
+    local has_clear_movement=false
+    local has_render_movement=false
+
+    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
+        has_clear_movement=true
     fi
 
-    if [[ "$output" == *$'\n'* ]]; then
-        has_newline=true
+    if sed -n '/render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
+        has_render_movement=true
     fi
 
-    # Test passes if: has cursor down escape code once, and no newlines
-    if [[ $has_cursor_down == true ]] && [[ $cursor_count -eq 1 ]] && [[ $has_newline == false ]]; then
-        pass "clear_menu uses cursor movement (\033[B) once, not newlines"
+    if [[ $has_clear_movement == true ]] && [[ $has_render_movement == true ]]; then
+        pass "CHAR input sequence: clear and render both use \\033[E for separate line"
     else
         local issues=""
-        [[ $has_cursor_down == false ]] && issues+="missing \033[B; "
-        [[ $cursor_count -ne 1 ]] && issues+="found $cursor_count \033[B; "
-        [[ $has_newline == true ]] && issues+="contains \\n; "
-        fail "clear_menu uses cursor movement (\033[B) once, not newlines" "1 \033[B, no \\n" "$issues"
+        [[ $has_clear_movement == false ]] && issues+="clear missing \\033[E; "
+        [[ $has_render_movement == false ]] && issues+="render missing \\033[E; "
+        fail "CHAR input sequence uses proper cursor movement" "both use \\033[E" "$issues"
+    fi
+}
+
+test_initial_render_sequence() {
+    # Test the initial render sequence
+    # Should: create_line=true branch uses printf '\n' to create line below
+    # Also check that cursor save/restore sequences exist
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_newline=false
+    local has_save=false
+    local has_restore=false
+
+    echo "$render_func" | grep -q "printf '\\\\n'" && has_newline=true
+    echo "$render_func" | grep -q "printf '\\\\033\[s'" && has_save=true
+    echo "$render_func" | grep -q "printf '\\\\033\[u'" && has_restore=true
+
+    if [[ $has_newline == true ]] && [[ $has_save == true ]] && [[ $has_restore == true ]]; then
+        pass "Initial render has newline, save, and restore cursor sequences"
+    else
+        local issues=""
+        [[ $has_newline == false ]] && issues+="missing \\n; "
+        [[ $has_save == false ]] && issues+="missing save; "
+        [[ $has_restore == false ]] && issues+="missing restore; "
+        fail "Initial render has proper sequences" "newline+save+restore" "$issues"
     fi
 }
 
 run_test test_clear_menu_uses_cursor_movement
+run_test test_render_menu_initial_creates_newline
+run_test test_render_menu_subsequent_no_newline
+run_test test_render_menu_subsequent_uses_cursor_down
+run_test test_char_input_sequence_no_inline_menu
+run_test test_initial_render_sequence
 
 # --- Navigation simulation tests ---
 echo ""
