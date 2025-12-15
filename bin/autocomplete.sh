@@ -52,6 +52,7 @@ read_key() {
 }
 
 # Render completion menu below current line
+# Handles wrapped lines correctly by clearing to end of screen
 render_autocomplete_menu() {
     local -n items=$1      # Array of items to show
     local selected=$2      # Currently selected index
@@ -64,17 +65,21 @@ render_autocomplete_menu() {
     # Limit display
     local show=$((count < max_show ? count : max_show))
 
-    printf '\033[s'        # Save cursor
+    printf '\033[s'        # Save cursor position (at end of input)
+
+    # Clear from cursor to end of screen - handles wrapped lines and old menu remnants
+    # This is essential for correct rendering when:
+    # 1. Input line wraps to next physical row
+    # 2. Previous menu was on a different row before wrap
+    printf '\033[J'
 
     # On first render, create the line; on subsequent renders, just move down.
     # This prevents accumulating multiple menu lines when re-rendering (e.g., during backspace).
     if [[ "$create_line" == "true" ]]; then
-        printf '\n'        # Create new line for menu
+        printf '\n'        # Create new line for menu (may scroll terminal)
     else
         printf '\033[E'    # Move to beginning of next line (down + column 0)
     fi
-
-    printf '\033[K'        # Clear the line before writing
 
     # Render horizontal menu with space-separated items
     for ((i=0; i<show; i++)); do
@@ -85,14 +90,13 @@ render_autocomplete_menu() {
         fi
     done
 
-    printf '\033[u'        # Restore cursor
+    printf '\033[u'        # Restore cursor to input position
 }
 
-# Clear the menu area (single horizontal line)
+# Clear the menu area and any wrapped line remnants
 clear_autocomplete_menu() {
     printf '\033[s'        # Save cursor
-    printf '\033[E'        # Move to beginning of next line
-    printf '\033[K'        # Clear it
+    printf '\033[J'        # Clear from cursor to end of screen (handles wrapped lines)
     printf '\033[u'        # Restore cursor
 }
 

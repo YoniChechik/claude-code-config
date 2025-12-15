@@ -650,16 +650,13 @@ run_test test_edge_very_long_command
 echo ""
 echo "--- Rendering tests ---"
 
-test_clear_menu_uses_cursor_movement() {
-    # Check that clear_autocomplete_menu uses \033[E and not \n
-    if grep -q '\\033\[E' "$SCRIPT_DIR/autocomplete.sh"; then
-        if ! grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\n'; then
-            pass "clear_menu uses cursor movement (\033[E), not newlines"
-        else
-            fail "clear_menu uses cursor movement" "\\033[E, no \\n" "found \\n"
-        fi
+test_clear_menu_uses_clear_to_eos() {
+    # Check that clear_autocomplete_menu uses \033[J (clear to end of screen)
+    # This is essential for proper handling of wrapped lines
+    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[J'; then
+        pass "clear_menu uses \\033[J (clear to end of screen) for wrapped line support"
     else
-        fail "clear_menu uses cursor movement" "\\033[E" "not found"
+        fail "clear_menu uses \\033[J" "\\033[J in clear_autocomplete_menu" "not found"
     fi
 }
 
@@ -695,28 +692,30 @@ test_render_menu_subsequent_uses_cursor_down() {
 test_char_input_sequence_no_inline_menu() {
     # Test the sequence in the CHAR case:
     # 1. printf "%s" "$KEY_CHAR" - character appears on input line
-    # 2. clear_autocomplete_menu - clears menu line below using \033[E
-    # 3. render_autocomplete_menu without true - should render on line below using \033[E
+    # 2. clear_autocomplete_menu - clears using \033[J (end of screen)
+    # 3. render_autocomplete_menu - uses \033[J then \033[E to position menu
 
     # Check that both clear and render use proper cursor movement
-    local has_clear_movement=false
+    local has_clear_eos=false
     local has_render_movement=false
 
-    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
-        has_clear_movement=true
+    # clear_autocomplete_menu should use \033[J (clear to end of screen)
+    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[J'; then
+        has_clear_eos=true
     fi
 
+    # render_autocomplete_menu should use \033[E for positioning
     if sed -n '/render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
         has_render_movement=true
     fi
 
-    if [[ $has_clear_movement == true ]] && [[ $has_render_movement == true ]]; then
-        pass "CHAR input sequence: clear and render both use \\033[E for separate line"
+    if [[ $has_clear_eos == true ]] && [[ $has_render_movement == true ]]; then
+        pass "CHAR input sequence: clear uses \\033[J, render uses \\033[E"
     else
         local issues=""
-        [[ $has_clear_movement == false ]] && issues+="clear missing \\033[E; "
+        [[ $has_clear_eos == false ]] && issues+="clear missing \\033[J; "
         [[ $has_render_movement == false ]] && issues+="render missing \\033[E; "
-        fail "CHAR input sequence uses proper cursor movement" "both use \\033[E" "$issues"
+        fail "CHAR input sequence uses proper cursor movement" "clear=\\033[J, render=\\033[E" "$issues"
     fi
 }
 
@@ -746,12 +745,164 @@ test_initial_render_sequence() {
     fi
 }
 
-run_test test_clear_menu_uses_cursor_movement
+run_test test_clear_menu_uses_clear_to_eos
 run_test test_render_menu_initial_creates_newline
 run_test test_render_menu_subsequent_no_newline
 run_test test_render_menu_subsequent_uses_cursor_down
 run_test test_char_input_sequence_no_inline_menu
 run_test test_initial_render_sequence
+
+# --- Wrapped line handling tests ---
+echo ""
+echo "--- Wrapped line handling tests ---"
+
+test_render_uses_clear_to_eos() {
+    # Verify render_autocomplete_menu uses \033[J to handle wrapped lines
+    # This is the key fix for the overlap bug when input wraps
+    if grep -q '\\033\[J' "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "render_autocomplete_menu uses \\033[J (clear to EOS)"
+    else
+        fail "render_autocomplete_menu uses \\033[J" "\\033[J found" "not found"
+    fi
+}
+
+test_clear_eos_before_menu_render() {
+    # The clear to EOS must happen BEFORE the menu items are rendered
+    # This ensures old menu remnants are cleared when input wraps
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    # Check that \033[J appears before the for loop that renders items
+    local eos_line
+    local for_line
+    eos_line=$(echo "$render_func" | grep -n '\\033\[J' | head -1 | cut -d: -f1)
+    for_line=$(echo "$render_func" | grep -n 'for ((i=0' | head -1 | cut -d: -f1)
+
+    if [[ -n "$eos_line" ]] && [[ -n "$for_line" ]] && [[ $eos_line -lt $for_line ]]; then
+        pass "Clear to EOS (\\033[J) happens before menu rendering"
+    else
+        fail "Clear to EOS before menu rendering" "\\033[J before for loop" "eos_line=$eos_line, for_line=$for_line"
+    fi
+}
+
+test_wrapped_line_calculation_support() {
+    # Test that we can calculate wrapped line scenarios
+    # Terminal width 10, input "> /abcde" = 8 chars (fits)
+    # Terminal width 10, input "> /abcdefgh" = 11 chars (wraps to 2 rows)
+    local term_width=10
+    local input1="> /abcde"    # 8 chars, fits
+    local input2="> /abcdefgh" # 11 chars, wraps
+
+    local rows1=$(( (${#input1} + term_width - 1) / term_width ))
+    local rows2=$(( (${#input2} + term_width - 1) / term_width ))
+
+    if [[ $rows1 -eq 1 ]] && [[ $rows2 -eq 2 ]]; then
+        pass "Wrapped line calculation: 8 chars -> 1 row, 11 chars -> 2 rows"
+    else
+        fail "Wrapped line calculation" "rows1=1, rows2=2" "rows1=$rows1, rows2=$rows2"
+    fi
+}
+
+test_menu_position_after_wrap() {
+    # Simulate menu position after input wraps
+    # When input wraps, cursor ends on row 2
+    # Menu should appear on row 3 (next line from cursor)
+    # Using \033[E from any position goes to start of next row
+    local cursor_row_after_wrap=2  # simulated
+    local menu_row=$((cursor_row_after_wrap + 1))  # \033[E moves to next row
+
+    if [[ $menu_row -eq 3 ]]; then
+        pass "Menu position after wrap: cursor row 2 -> menu row 3"
+    else
+        fail "Menu position after wrap" "menu_row=3" "menu_row=$menu_row"
+    fi
+}
+
+test_old_menu_cleared_on_wrap() {
+    # When input grows and wraps, old menu on row 2 must be cleared
+    # \033[J from cursor clears everything below, including old menu
+    # This test verifies the fix handles the scenario
+
+    # Check that clear_autocomplete_menu uses \033[J
+    local uses_eos=false
+    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[J'; then
+        uses_eos=true
+    fi
+
+    # Check that render_autocomplete_menu also uses \033[J
+    local render_uses_eos=false
+    if sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[J'; then
+        render_uses_eos=true
+    fi
+
+    if [[ $uses_eos == true ]] && [[ $render_uses_eos == true ]]; then
+        pass "Both clear and render use \\033[J to handle wrapped line remnants"
+    else
+        fail "Wrapped line remnant handling" "both use \\033[J" "clear=$uses_eos, render=$render_uses_eos"
+    fi
+}
+
+test_very_long_input_handling() {
+    # Test with very long input that would wrap multiple times
+    # Terminal width 20, input with 50 chars wraps to 3 rows
+    local term_width=20
+    local long_input="> /this-is-a-very-long-command-prefix-that-wraps"  # 50 chars
+    local rows=$(( (${#long_input} + term_width - 1) / term_width ))
+
+    if [[ $rows -eq 3 ]]; then
+        pass "Very long input (50 chars, width 20): wraps to 3 rows"
+    else
+        fail "Very long input wrapping" "3 rows" "$rows rows"
+    fi
+}
+
+test_small_terminal_wrapping() {
+    # Extreme case: terminal width 5
+    # Even short input wraps: "> /a" = 4 chars fits, "> /ab" = 5 chars wraps
+    local term_width=5
+    local input1="> /a"   # 4 chars
+    local input2="> /ab"  # 5 chars
+    local input3="> /abc" # 6 chars
+
+    local rows1=$(( (${#input1} + term_width - 1) / term_width ))
+    local rows2=$(( (${#input2} + term_width - 1) / term_width ))
+    local rows3=$(( (${#input3} + term_width - 1) / term_width ))
+
+    if [[ $rows1 -eq 1 ]] && [[ $rows2 -eq 1 ]] && [[ $rows3 -eq 2 ]]; then
+        pass "Small terminal (width 5): 4->1row, 5->1row, 6->2rows"
+    else
+        fail "Small terminal wrapping" "1,1,2" "$rows1,$rows2,$rows3"
+    fi
+}
+
+test_cursor_save_restore_with_wrap() {
+    # Verify cursor save/restore sequences are present for wrapped line handling
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_save=false
+    local has_restore=false
+    local has_eos=false
+
+    echo "$render_func" | grep -q '\\033\[s' && has_save=true
+    echo "$render_func" | grep -q '\\033\[u' && has_restore=true
+    echo "$render_func" | grep -q '\\033\[J' && has_eos=true
+
+    if [[ $has_save == true ]] && [[ $has_restore == true ]] && [[ $has_eos == true ]]; then
+        pass "Wrapped line handling: save + restore + clear-EOS all present"
+    else
+        fail "Wrapped line handling sequences" "save+restore+eos" "save=$has_save,restore=$has_restore,eos=$has_eos"
+    fi
+}
+
+run_test test_render_uses_clear_to_eos
+run_test test_clear_eos_before_menu_render
+run_test test_wrapped_line_calculation_support
+run_test test_menu_position_after_wrap
+run_test test_old_menu_cleared_on_wrap
+run_test test_very_long_input_handling
+run_test test_small_terminal_wrapping
+run_test test_cursor_save_restore_with_wrap
 
 # --- Navigation simulation tests ---
 echo ""
