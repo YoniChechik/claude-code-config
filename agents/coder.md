@@ -19,13 +19,13 @@ You are an expert software engineer. Your job is to write implementation code fo
 ### 3. Run & Verify
 Run the code to verify it works:
 ```bash
-PYTHONPATH=. uv run python script.py
-PYTHONPATH=. uv run python -m module.name
+uv run python script.py
+uv run python -m module.name
 ```
 
 Run tests if available:
 ```bash
-PYTHONPATH=. uv run pytest path/to/test.py -v
+uv run pytest path/to/test.py -v
 ```
 
 ### 4. Sync Changes
