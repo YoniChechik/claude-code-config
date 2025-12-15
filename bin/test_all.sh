@@ -1,23 +1,27 @@
 #!/bin/bash
-# test_autocomplete.sh - Automated tests for cc autocomplete feature
+# test_all.sh - Comprehensive test suite for cc command
+# Combines: test_multiline_regression.sh, test_autocomplete.sh, test_backspace_manual.sh
 
 set -u
 
-# Test counters
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-# Colors
-RED='\033[31m'
+# ============================================================
+# COLORS
+# ============================================================
 GREEN='\033[32m'
+RED='\033[31m'
 YELLOW='\033[33m'
 RESET='\033[0m'
 
 # ============================================================
+# TEST COUNTERS
+# ============================================================
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+# ============================================================
 # TEST UTILITIES
 # ============================================================
-
 pass() {
     ((TESTS_PASSED++))
     printf "${GREEN}PASS${RESET}: %s\n" "$1"
@@ -42,7 +46,6 @@ run_test() {
 # ============================================================
 # SETUP TEST ENVIRONMENT
 # ============================================================
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEST_CLAUDE_DIR=$(mktemp -d)
@@ -69,27 +72,13 @@ trap cleanup EXIT
 CLAUDE_DIR="$TEST_CLAUDE_DIR"
 
 # ============================================================
-# SOURCE FUNCTIONS (extract from cc script)
+# SOURCE AUTOCOMPLETE FUNCTIONS
 # ============================================================
+source "$SCRIPT_DIR/autocomplete.sh"
 
-# Get list of available slash commands
-get_slash_commands() {
-    local cmds=()
-    for f in "$CLAUDE_DIR"/commands/*.md; do
-        [[ -f "$f" ]] && cmds+=("$(basename "$f" .md)")
-    done
-    printf '%s\n' "${cmds[@]}" | sort
-}
-
-# Filter commands by prefix
-filter_commands() {
-    local prefix="$1"
-    local cmd
-    while IFS= read -r cmd; do
-        [[ "$cmd" == "$prefix"* ]] && echo "$cmd"
-    done
-}
-
+# ============================================================
+# SOURCE FUZZY MATCHING FUNCTIONS (from cc)
+# ============================================================
 # Levenshtein distance
 levenshtein() {
     awk 'BEGIN {
@@ -127,9 +116,117 @@ find_similar_command() {
     [ -n "$best" ] && echo "/$best"
 }
 
+echo "============================================"
+echo "CC Command Test Suite"
+echo "============================================"
+echo ""
+
 # ============================================================
-# TEST: get_slash_commands
+# SECTION 1: MULTI-LINE RENDERING REGRESSION TESTS
 # ============================================================
+echo "=========================================="
+echo "SECTION 1: Multi-line Rendering Tests"
+echo "=========================================="
+echo ""
+
+test_render_newline_count() {
+    # Count how many '\n' are in the render function
+    newline_count=$(grep -c 'printf.*\\n' "$SCRIPT_DIR/autocomplete.sh" | grep -c "render_autocomplete_menu" || true)
+
+    # Check in the actual render_autocomplete_menu function
+    newline_count=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -c 'printf.*\\n' || true)
+
+    # The function should have exactly 1 '\n' (for the initial create_line case)
+    if [[ $newline_count -eq 1 ]]; then
+        pass "render_autocomplete_menu has exactly 1 newline (for create_line=true case)"
+    else
+        fail "render_autocomplete_menu has $newline_count newlines (expected 1)"
+    fi
+}
+
+test_create_line_parameter_exists() {
+    if grep -q "create_line" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "render_autocomplete_menu has create_line parameter"
+    else
+        fail "render_autocomplete_menu missing create_line parameter"
+    fi
+}
+
+test_uses_cursor_down_escape() {
+    if grep -q '\\033\[B' "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "render_autocomplete_menu uses \\033[B to move to existing line"
+    else
+        fail "render_autocomplete_menu doesn't use \\033[B"
+    fi
+}
+
+test_initial_render_passes_true() {
+    if grep -q "render_autocomplete_menu filtered_commands.*true" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "Initial render call passes 'true' to create line"
+    else
+        fail "Initial render call doesn't pass 'true'"
+    fi
+}
+
+test_subsequent_renders_no_true() {
+    # Count subsequent render calls (should NOT have 'true')
+    subsequent_renders=$(grep -c "render_autocomplete_menu filtered_commands" "$SCRIPT_DIR/autocomplete.sh" || true)
+    renders_with_true=$(grep -c "render_autocomplete_menu filtered_commands.*true" "$SCRIPT_DIR/autocomplete.sh" || true)
+
+    if [[ $subsequent_renders -gt $renders_with_true ]]; then
+        pass "Subsequent render calls don't create new lines (${subsequent_renders} total, ${renders_with_true} with 'true')"
+    else
+        fail "All renders have 'true' - will create multiple lines!"
+    fi
+}
+
+test_backspace_wrapped_line_support() {
+    # Check that backspace uses '\033[D\033[K' for wrapped line support
+    if grep -q "printf '\\\\033\[D\\\\033\[K'" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "Backspace handler uses \\033[D\\033[K for wrapped line support"
+    else
+        fail "Backspace handler doesn't use \\033[D\\033[K"
+    fi
+}
+
+test_no_old_backspace_sequence() {
+    # Check that the old '\b \b' is NOT used in the "/" backspace context (regression check)
+    if grep -A1 "Backspacing the / itself" "$SCRIPT_DIR/autocomplete.sh" | grep -q "printf '\\\\b \\\\b'"; then
+        fail "Found old \\b \\b in '/' backspace context (should be \\033[D\\033[K)"
+    else
+        pass "'/' backspace context uses correct sequence (not old \\b \\b)"
+    fi
+}
+
+test_backspace_in_correct_context() {
+    # Verify the fix is in the right context (backspacing "/" in autocomplete)
+    if grep -B3 "033\[D" "$SCRIPT_DIR/autocomplete.sh" | grep -q "Backspacing the / itself"; then
+        pass "Backspace fix is in correct context (backspacing '/' character)"
+    else
+        fail "Backspace fix not in expected context"
+    fi
+}
+
+run_test test_render_newline_count
+run_test test_create_line_parameter_exists
+run_test test_uses_cursor_down_escape
+run_test test_initial_render_passes_true
+run_test test_subsequent_renders_no_true
+run_test test_backspace_wrapped_line_support
+run_test test_no_old_backspace_sequence
+run_test test_backspace_in_correct_context
+
+# ============================================================
+# SECTION 2: AUTOCOMPLETE FUNCTIONALITY TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 2: Autocomplete Functionality"
+echo "=========================================="
+echo ""
+
+# --- get_slash_commands tests ---
+echo "--- get_slash_commands tests ---"
 
 test_get_slash_commands_returns_all() {
     local result
@@ -187,9 +284,14 @@ test_get_slash_commands_empty_dir() {
     fi
 }
 
-# ============================================================
-# TEST: filter_commands
-# ============================================================
+run_test test_get_slash_commands_returns_all
+run_test test_get_slash_commands_sorted
+run_test test_get_slash_commands_no_extension
+run_test test_get_slash_commands_empty_dir
+
+# --- filter_commands tests ---
+echo ""
+echo "--- filter_commands tests ---"
 
 test_filter_commands_prefix_match() {
     local result
@@ -280,9 +382,17 @@ test_filter_commands_case_sensitive() {
     fi
 }
 
-# ============================================================
-# TEST: levenshtein
-# ============================================================
+run_test test_filter_commands_prefix_match
+run_test test_filter_commands_multiple_matches
+run_test test_filter_commands_no_match
+run_test test_filter_commands_empty_prefix
+run_test test_filter_commands_exact_match
+run_test test_filter_commands_hyphenated
+run_test test_filter_commands_case_sensitive
+
+# --- levenshtein tests ---
+echo ""
+echo "--- levenshtein tests ---"
 
 test_levenshtein_identical() {
     local dist
@@ -339,9 +449,15 @@ test_levenshtein_typo() {
     fi
 }
 
-# ============================================================
-# TEST: find_similar_command
-# ============================================================
+run_test test_levenshtein_identical
+run_test test_levenshtein_one_char_diff
+run_test test_levenshtein_substitution
+run_test test_levenshtein_empty_string
+run_test test_levenshtein_typo
+
+# --- find_similar_command tests ---
+echo ""
+echo "--- find_similar_command tests ---"
 
 test_find_similar_exact() {
     local result
@@ -403,9 +519,15 @@ test_find_similar_pr_typo() {
     fi
 }
 
-# ============================================================
-# TEST: Integration - prefix filtering pipeline
-# ============================================================
+run_test test_find_similar_exact
+run_test test_find_similar_typo
+run_test test_find_similar_no_match
+run_test test_find_similar_strips_slash
+run_test test_find_similar_pr_typo
+
+# --- Integration tests ---
+echo ""
+echo "--- Integration tests ---"
 
 test_integration_filter_pipeline() {
     local all_commands
@@ -456,51 +578,13 @@ test_integration_progressive_filter() {
     fi
 }
 
-# ============================================================
-# TEST: Rendering - Regression tests for menu display
-# ============================================================
+run_test test_integration_filter_pipeline
+run_test test_integration_empty_prefix_shows_all
+run_test test_integration_progressive_filter
 
-# Source the clear_autocomplete_menu function from cc
-clear_autocomplete_menu() {
-    printf '\033[s'        # Save cursor
-    printf '\033[B\033[K'  # Move down one line, clear it
-    printf '\033[u'        # Restore cursor
-}
-
-test_clear_menu_uses_cursor_movement() {
-    # Capture the output of clear_autocomplete_menu
-    local output
-    output=$(clear_autocomplete_menu)
-
-    # Check that it uses \033[B (cursor down) exactly once and not \n (newline)
-    local has_cursor_down=false
-    local cursor_count=0
-    local has_newline=false
-
-    if [[ "$output" == *$'\033[B'* ]]; then
-        has_cursor_down=true
-        cursor_count=$(echo -n "$output" | grep -o $'\033\[B' | wc -l)
-    fi
-
-    if [[ "$output" == *$'\n'* ]]; then
-        has_newline=true
-    fi
-
-    # Test passes if: has cursor down escape code once, and no newlines
-    if [[ $has_cursor_down == true ]] && [[ $cursor_count -eq 1 ]] && [[ $has_newline == false ]]; then
-        pass "clear_menu uses cursor movement (\033[B) once, not newlines"
-    else
-        local issues=""
-        [[ $has_cursor_down == false ]] && issues+="missing \033[B; "
-        [[ $cursor_count -ne 1 ]] && issues+="found $cursor_count \033[B; "
-        [[ $has_newline == true ]] && issues+="contains \\n; "
-        fail "clear_menu uses cursor movement (\033[B) once, not newlines" "1 \033[B, no \\n" "$issues"
-    fi
-}
-
-# ============================================================
-# TEST: Edge cases
-# ============================================================
+# --- Edge case tests ---
+echo ""
+echo "--- Edge case tests ---"
 
 test_edge_single_command() {
     local single_dir=$(mktemp -d)
@@ -558,9 +642,50 @@ test_edge_very_long_command() {
     fi
 }
 
-# ============================================================
-# TEST: Navigation simulation
-# ============================================================
+run_test test_edge_single_command
+run_test test_edge_special_chars_in_prefix
+run_test test_edge_very_long_command
+
+# --- Rendering tests ---
+echo ""
+echo "--- Rendering tests ---"
+
+test_clear_menu_uses_cursor_movement() {
+    # Capture the output of clear_autocomplete_menu
+    local output
+    output=$(clear_autocomplete_menu)
+
+    # Check that it uses \033[B (cursor down) exactly once and not \n (newline)
+    local has_cursor_down=false
+    local cursor_count=0
+    local has_newline=false
+
+    if [[ "$output" == *$'\033[B'* ]]; then
+        has_cursor_down=true
+        cursor_count=$(echo -n "$output" | grep -o $'\033\[B' | wc -l)
+    fi
+
+    if [[ "$output" == *$'\n'* ]]; then
+        has_newline=true
+    fi
+
+    # Test passes if: has cursor down escape code once, and no newlines
+    if [[ $has_cursor_down == true ]] && [[ $cursor_count -eq 1 ]] && [[ $has_newline == false ]]; then
+        pass "clear_menu uses cursor movement (\033[B) once, not newlines"
+    else
+        local issues=""
+        [[ $has_cursor_down == false ]] && issues+="missing \033[B; "
+        [[ $cursor_count -ne 1 ]] && issues+="found $cursor_count \033[B; "
+        [[ $has_newline == true ]] && issues+="contains \\n; "
+        fail "clear_menu uses cursor movement (\033[B) once, not newlines" "1 \033[B, no \\n" "$issues"
+    fi
+}
+
+run_test test_clear_menu_uses_cursor_movement
+
+# --- Navigation simulation tests ---
+echo ""
+echo "--- Navigation simulation tests ---"
 
 test_navigation_bounds_array() {
     # Simulate navigation bounds checking
@@ -612,9 +737,18 @@ test_navigation_wrap_behavior() {
     fi
 }
 
+run_test test_navigation_bounds_array
+run_test test_navigation_bounds_down
+run_test test_navigation_wrap_behavior
+
 # ============================================================
-# TEST: Backspace boundary conditions
+# SECTION 3: BACKSPACE BOUNDARY TESTS
 # ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 3: Backspace Boundary Tests"
+echo "=========================================="
+echo ""
 
 test_backspace_tracking_logic() {
     # Test the input tracking logic during backspace
@@ -771,71 +905,6 @@ test_backspace_empty_protection() {
     fi
 }
 
-# ============================================================
-# RUN ALL TESTS
-# ============================================================
-
-echo "============================================"
-echo "Autocomplete Feature Tests"
-echo "============================================"
-echo ""
-
-echo "--- get_slash_commands tests ---"
-run_test test_get_slash_commands_returns_all
-run_test test_get_slash_commands_sorted
-run_test test_get_slash_commands_no_extension
-run_test test_get_slash_commands_empty_dir
-
-echo ""
-echo "--- filter_commands tests ---"
-run_test test_filter_commands_prefix_match
-run_test test_filter_commands_multiple_matches
-run_test test_filter_commands_no_match
-run_test test_filter_commands_empty_prefix
-run_test test_filter_commands_exact_match
-run_test test_filter_commands_hyphenated
-run_test test_filter_commands_case_sensitive
-
-echo ""
-echo "--- levenshtein tests ---"
-run_test test_levenshtein_identical
-run_test test_levenshtein_one_char_diff
-run_test test_levenshtein_substitution
-run_test test_levenshtein_empty_string
-run_test test_levenshtein_typo
-
-echo ""
-echo "--- find_similar_command tests ---"
-run_test test_find_similar_exact
-run_test test_find_similar_typo
-run_test test_find_similar_no_match
-run_test test_find_similar_strips_slash
-run_test test_find_similar_pr_typo
-
-echo ""
-echo "--- Integration tests ---"
-run_test test_integration_filter_pipeline
-run_test test_integration_empty_prefix_shows_all
-run_test test_integration_progressive_filter
-
-echo ""
-echo "--- Edge case tests ---"
-run_test test_edge_single_command
-run_test test_edge_special_chars_in_prefix
-run_test test_edge_very_long_command
-
-echo ""
-echo "--- Rendering tests ---"
-run_test test_clear_menu_uses_cursor_movement
-
-echo ""
-echo "--- Navigation simulation tests ---"
-run_test test_navigation_bounds_array
-run_test test_navigation_bounds_down
-run_test test_navigation_wrap_behavior
-
-echo ""
-echo "--- Backspace boundary tests ---"
 run_test test_backspace_tracking_logic
 run_test test_backspace_single_char
 run_test test_backspace_to_slash_only
@@ -846,9 +915,8 @@ run_test test_backspace_terminal_output_count
 run_test test_backspace_empty_protection
 
 # ============================================================
-# SUMMARY
+# FINAL SUMMARY
 # ============================================================
-
 echo ""
 echo "============================================"
 echo "Test Summary"
