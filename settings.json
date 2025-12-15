@@ -1,5 +1,4 @@
 {
-  "model": "sonnet",
   "includeCoAuthoredBy": false,
   "permissions": {
     "deny": [
@@ -44,6 +43,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "opus",
   "hooks": {
     "PreToolUse": [],
     "SessionStart": [
