@@ -251,10 +251,20 @@ then
     prefix_lines("SUB:")
 
 # ---------------------------------------------------------
-# RESULT: Final result (optional - shows summary)
+# RESULT: Final result - check for errors
 # ---------------------------------------------------------
 elif .type == "result" then
-    empty
+    # Check for error conditions indicating bad command
+    # A bad slash command typically has .error set to an error message
+    if .error then
+        # Explicit error field present - this catches bad slash commands
+        "LINE:" + C_YELLOW + "⚠ " + C_RESET + (.error | tostring)
+    elif .stop_reason == "error" then
+        # Stop reason indicates error
+        "LINE:" + C_YELLOW + "⚠ Command failed with error" + C_RESET
+    else
+        empty
+    end
 
 # ---------------------------------------------------------
 # SYSTEM: Init (could show session info)
@@ -263,8 +273,14 @@ elif .type == "system" then
     empty
 
 # ---------------------------------------------------------
-# DEFAULT: Ignore
+# DEFAULT: Show unknown events for debugging
 # ---------------------------------------------------------
 else
-    empty
+    # In verbose mode, show unhandled events
+    if .type then
+        "LINE:" + C_YELLOW + "[Debug] Unhandled event: " + C_RESET + (.type // "unknown") +
+        (if .event.type then " / " + .event.type else "" end)
+    else
+        empty
+    end
 end
