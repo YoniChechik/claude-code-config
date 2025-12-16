@@ -1,8 +1,146 @@
 #!/bin/bash
 
-# ccui.sh - Claude Code with custom UI wrapper
+# ccui.sh - Claude Code REPL with UI enhancements
 
 CLAUDE_DIR="$HOME/.claude"
+ORIG_DIR="$(pwd)"
 
-# Run cc.sh with all arguments
-exec "$CLAUDE_DIR/bin/cc.sh" "$@"
+# Run validation from cc.sh
+CC_TEST=1 "$CLAUDE_DIR/bin/cc.sh" || exit 1
+
+# ============================================================
+# STATE
+# ============================================================
+SESSION_ID=""
+TOTAL_COST=0
+TOTAL_IN=0
+TOTAL_OUT=0
+LAST_MS=0
+MODEL=""
+
+# ============================================================
+# RUN CLAUDE
+# ============================================================
+run_claude() {
+    local raw=$(mktemp)
+    local args=(-p "$1" --output-format stream-json --verbose)
+    [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
+    [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ] && \
+        args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
+
+    # Ctrl+C during run just stops claude, doesn't exit REPL
+    trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
+
+    # Run claude with timeout monitoring
+    local timeout_file=$(mktemp)
+    local timed_out=false
+
+    # Start timeout monitor first
+    (
+        while [ -f "$timeout_file" ]; do
+            sleep 5
+            if [ -f "$timeout_file" ]; then
+                local current_check=$(stat -c %Y "$timeout_file" 2>/dev/null || echo 0)
+                local idle=$(($(date +%s) - current_check))
+                if [ $idle -ge 30 ]; then
+                    # No output for 30s - mark timeout
+                    touch "${timeout_file}.timeout"
+                    break
+                fi
+            fi
+        done
+    ) &
+    local timeout_monitor_pid=$!
+
+    # Run claude pipeline with process substitution to avoid subshell buffering issues
+    while IFS= read -r line; do
+        # Reset timeout marker on each line
+        touch "$timeout_file"
+        case "$line" in
+            TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
+            SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
+            LINE:*) printf "%s\n" "${line#LINE:}" ;;
+        esac
+    done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
+        stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
+
+    # Stop timeout monitor
+    kill $timeout_monitor_pid 2>/dev/null
+    wait $timeout_monitor_pid 2>/dev/null
+
+    # Check if timeout occurred
+    if [ -f "${timeout_file}.timeout" ]; then
+        timed_out=true
+    fi
+
+    # Clean up timeout files
+    rm -f "$timeout_file" "${timeout_file}.timeout"
+
+    trap - INT
+
+    # Extract session and stats
+    if [ -z "$SESSION_ID" ]; then
+        SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
+    fi
+    local model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
+    [ -n "$model" ] && MODEL="$model"
+    local result=$(grep '"type":"result"' "$raw" | tail -1)
+    if [ -n "$result" ]; then
+        local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
+        if [ -n "$model" ]; then
+            local in=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].inputTokens // 0')
+            local out=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].outputTokens // 0')
+            local cache=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].cacheReadInputTokens // 0')
+            local cache_create=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].cacheCreationInputTokens // 0')
+        else
+            local in=$(echo "$result" | jq -r '.inputTokens // 0')
+            local out=$(echo "$result" | jq -r '.outputTokens // 0')
+            local cache=$(echo "$result" | jq -r '.cacheReadInputTokens // 0')
+            local cache_create=$(echo "$result" | jq -r '.cacheCreationInputTokens // 0')
+        fi
+        LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
+        TOTAL_COST=$(awk "BEGIN {print $TOTAL_COST + $cost}")
+        TOTAL_IN=$((TOTAL_IN + in + cache + cache_create))
+        TOTAL_OUT=$((TOTAL_OUT + out))
+    fi
+    rm -f "$raw"
+
+    # Auto-retry with "continue" if timeout occurred
+    if [ "$timed_out" = true ]; then
+        echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
+        run_claude "continue"
+    fi
+}
+
+# ============================================================
+# PROMPT
+# ============================================================
+show_prompt() {
+    printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
+    if [ "$TOTAL_IN" -gt 0 ]; then
+        local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
+        printf " [%ss │ %s]" "$sec" "$MODEL"
+    fi
+    printf "\033[0m\n"
+}
+
+# ============================================================
+# MAIN
+# ============================================================
+echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
+echo ""
+
+while true; do
+    show_prompt
+
+    # Read input with readline support (prompt protected from backspace)
+    IFS= read -r -e -p "> " input
+
+    if [[ -z "$input" ]]; then
+        continue
+    fi
+    [[ "$input" =~ ^(exit|quit)$ ]] && break
+    history -s "$input"
+
+    run_claude "$input"
+done
