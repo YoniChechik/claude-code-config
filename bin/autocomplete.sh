@@ -131,8 +131,7 @@ run_autocomplete() {
     mapfile -t all_commands < <(get_slash_commands)
     filtered_commands=("${all_commands[@]}")
 
-    # Initial render
-    printf "/"
+    # Initial render (no visible character)
     render_autocomplete_menu filtered_commands $selected
 
     while true; do
@@ -141,7 +140,6 @@ run_autocomplete() {
         case "$KEY_TYPE" in
             CHAR)
                 input+="$KEY_CHAR"
-                printf "%s" "$KEY_CHAR"
                 # Re-filter
                 local prefix="${input#/}"
                 mapfile -t filtered_commands < <(
@@ -154,9 +152,8 @@ run_autocomplete() {
 
             BACKSPACE)
                 if [[ ${#input} -gt 1 ]]; then
-                    # Only erase if we have characters after the /
+                    # Only modify internal input - no visible changes
                     input="${input%?}"
-                    printf '\b \b'  # Erase one char
                     # Re-filter
                     local prefix="${input#/}"
                     mapfile -t filtered_commands < <(
@@ -167,9 +164,9 @@ run_autocomplete() {
                     render_autocomplete_menu filtered_commands $selected
                 elif [[ ${#input} -eq 1 ]]; then
                     # Backspacing the / itself - exit autocomplete cleanly
-                    # Clear menu first, then erase ONLY the /, leaving "> " intact
                     clear_autocomplete_menu
-                    printf '\033[D\033[K'  # Move left one position and clear to end of line (works with wrapped lines)
+                    # Erase the "/" character while keeping the "> " prompt
+                    printf '\033[D\033[K'
                     AUTOCOMPLETE_RESULT=""
                     return 1
                 fi
