@@ -34,12 +34,6 @@ if ! git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
     exit 1
 fi
 
-# Test mode - skip dependency checks
-if [ "$CC_TEST" = "1" ]; then
-    echo "✓ All checks passed (branch: $CURRENT_BRANCH)"
-    exit 0
-fi
-
 if ! command -v jq >/dev/null 2>&1; then
     echo "Error: jq not installed"
     echo ""
@@ -48,14 +42,10 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! command -v gum >/dev/null 2>&1; then
-    echo "Error: gum not installed"
-    echo ""
-    echo "Install gum:"
-    echo "  Ubuntu/Debian: sudo apt install gum"
-    echo "  macOS: brew install gum"
-    echo "  Other: https://github.com/charmbracelet/gum#installation"
-    exit 1
+# Test mode
+if [ "$CC_TEST" = "1" ]; then
+    echo "✓ All checks passed (branch: $CURRENT_BRANCH)"
+    exit 0
 fi
 
 cd "$ORIG_DIR" || exit 1
@@ -102,14 +92,9 @@ find_similar_command() {
 }
 
 # ============================================================
-# DISPLAY FUNCTIONS
-# ============================================================
-source "$CLAUDE_DIR/bin/display.sh"
-
-# ============================================================
 # AUTOCOMPLETE
 # ============================================================
-source "$CLAUDE_DIR/bin/gum_autocomplete.sh"
+source "$CLAUDE_DIR/bin/autocomplete.sh"
 
 # ============================================================
 # STATE
@@ -132,7 +117,7 @@ run_claude() {
         args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
     # Ctrl+C during run just stops claude, doesn't exit REPL
-    trap 'display_stopped' INT
+    trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
 
     # Run claude with timeout monitoring
     local timeout_file=$(mktemp)
@@ -161,7 +146,7 @@ run_claude() {
         touch "$timeout_file"
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
-            SUB:*)  printf "%s  %s\n" "$(display_subagent_prefix)" "${line#SUB:}" ;;
+            SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
             LINE:*) printf "%s\n" "${line#LINE:}" ;;
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
@@ -210,7 +195,7 @@ run_claude() {
 
     # Auto-retry with "continue" if timeout occurred
     if [ "$timed_out" = true ]; then
-        display_timeout
+        echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
         run_claude "continue"
     fi
 }
@@ -219,18 +204,18 @@ run_claude() {
 # PROMPT
 # ============================================================
 show_prompt() {
-    local text="$USER@$(hostname -s):$(pwd)"
+    printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
     if [ "$TOTAL_IN" -gt 0 ]; then
         local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
-        text+=" [${sec}s | $MODEL]"
+        printf " [%ss │ %s]" "$sec" "$MODEL"
     fi
-    display_prompt "$text"
+    printf "\033[0m\n"
 }
 
 # ============================================================
 # MAIN
 # ============================================================
-display_banner "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
+echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
 while true; do
@@ -241,12 +226,16 @@ while true; do
     IFS= read -rsn1 first_char
 
     if [[ "$first_char" == "/" ]]; then
-        # Enter autocomplete mode with gum
+        # Enter autocomplete mode
         autocomplete_status=0
-        run_autocomplete_gum || autocomplete_status=$?
+        run_autocomplete || autocomplete_status=$?
 
-        if [[ $autocomplete_status -ne 0 ]] || [[ -z "$AUTOCOMPLETE_RESULT" ]]; then
-            # Cancelled or error - continue REPL
+        if [[ $autocomplete_status -eq 2 ]]; then
+            # Ctrl+D - exit REPL
+            break
+        elif [[ $autocomplete_status -ne 0 ]] || [[ -z "$AUTOCOMPLETE_RESULT" ]]; then
+            # Cancelled - clear the prompt line before continuing
+            printf "\r\033[K"
             continue
         fi
         input="$AUTOCOMPLETE_RESULT"
@@ -279,8 +268,8 @@ while true; do
         if [ ! -f "$CLAUDE_DIR/commands/${cmd_name}.md" ]; then
             suggestion=$(find_similar_command "$cmd")
             if [ -n "$suggestion" ]; then
-                display_warning "Unknown command: $cmd"
-                display_success "Did you mean: $suggestion?"
+                echo -e "\033[33mUnknown command: $cmd\033[0m"
+                echo -e "Did you mean: \033[32m$suggestion\033[0m?"
                 continue
             fi
         fi
