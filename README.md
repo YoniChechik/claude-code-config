@@ -25,11 +25,12 @@ This makes your config trackable and syncable across machines while keeping Clau
 
 ## Quick Start Alias
 
-Add a shortcut to run Claude with config checks:
+Add shortcuts to run Claude with config checks:
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-alias cc="$HOME/.claude/bin/cc"
+alias cc="$HOME/.claude/bin/cc.sh"
+alias ccui="$HOME/.claude/bin/ccui.sh"
 ```
 
 Or add to PATH:
@@ -37,8 +38,12 @@ Or add to PATH:
 export PATH="$HOME/.claude/bin:$PATH"
 ```
 
-The `cc` command runs a configuration check before starting Claude:
-- Verifies `~/.claude` is a git repository
-- Checks that your config is up-to-date with `origin/main`
-- Shows helpful error messages if updates are needed
-- Passes all arguments through to claude (e.g., `cc -p "hello"` runs `claude -p "hello"`)
+### Available Scripts
+
+- **`cc.sh`** - Core Claude Code wrapper with configuration checks:
+  - Verifies `~/.claude` is a git repository
+  - Checks that your config is up-to-date with `origin/main`
+  - Shows helpful error messages if updates are needed
+  - Passes all arguments through to claude (e.g., `cc -p "hello"` runs `claude -p "hello"`)
+
+- **`ccui.sh`** - Runs `cc.sh` with custom UI wrapper (customize this file for your own UI enhancements)
