@@ -36,10 +36,4 @@ validate_environment() {
         echo "Run: (cd ~/.claude && git pull)" >&2
         exit 1
     fi
-
-    # Test mode output
-    if [ "$CC_TEST" = "1" ]; then
-        echo "✓ All checks passed (branch: $CURRENT_BRANCH)"
-        exit 0
-    fi
 }
