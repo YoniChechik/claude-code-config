@@ -37,15 +37,6 @@ validate_environment() {
         exit 1
     fi
 
-    # Check jq installed
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "Error: jq not installed" >&2
-        echo "" >&2
-        echo "To install jq on Ubuntu without sudo:" >&2
-        echo "  apt update && apt install -y jq" >&2
-        exit 1
-    fi
-
     # Test mode output
     if [ "$CC_TEST" = "1" ]; then
         echo "✓ All checks passed (branch: $CURRENT_BRANCH)"
