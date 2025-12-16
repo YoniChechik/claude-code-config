@@ -234,7 +234,8 @@ while true; do
             # Ctrl+D - exit REPL
             break
         elif [[ $autocomplete_status -ne 0 ]] || [[ -z "$AUTOCOMPLETE_RESULT" ]]; then
-            # Cancelled
+            # Cancelled - clear the prompt line before continuing
+            printf "\r\033[K"
             continue
         fi
         input="$AUTOCOMPLETE_RESULT"
@@ -253,7 +254,10 @@ while true; do
         input="${first_char}${rest}"
     fi
 
-    [[ -z "$input" ]] && continue
+    if [[ -z "$input" ]]; then
+        printf "\r\033[K"
+        continue
+    fi
     [[ "$input" =~ ^(exit|quit)$ ]] && break
     history -s "$input"
 

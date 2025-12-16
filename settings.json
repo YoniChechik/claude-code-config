@@ -53,6 +53,10 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/cleanup_untracked_clones.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/appended_system_prompt.sh"
           }
         ]
       }

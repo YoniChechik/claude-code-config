@@ -1,1 +1,3 @@
 Be concise. No unnecessary detail.
+
+MAGIC_WORD: XYZZY-SUBAGENT-PROPAGATION-TEST-99999

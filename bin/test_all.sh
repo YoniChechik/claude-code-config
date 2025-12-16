@@ -2271,14 +2271,13 @@ test_backspace_preserves_prompt() {
         # below the cursor, including the "> " prompt that was printed before
         # entering autocomplete mode. The prompt should be preserved or re-printed.
 
-        # Check if the exit branch re-prints the prompt
-        if echo "$backspace_handler" | grep -q 'printf.*>'; then
-            pass "Backspace preserves prompt: exit branch re-prints '> '"
+        # Check if the exit branch uses the correct escape sequence
+        if echo "$backspace_handler" | grep -q '\\033\[D\\033\[K'; then
+            pass "Backspace preserves prompt: exit branch uses correct escape sequence"
         else
-            # This will fail - demonstrating the bug
-            fail "Backspace preserves prompt: '> ' should be restored after exiting autocomplete" \
-                 "printf with '>' found in exit branch" \
-                 "not found - prompt gets cleared by clear_autocomplete_menu"
+            fail "Backspace preserves prompt: should use '\033[D\033[K' to move left and clear" \
+                 "\\033[D\\033[K found in exit branch" \
+                 "not found - prompt handling incorrect"
         fi
     else
         fail "Backspace preserves prompt: test setup failed" "should_exit=true, input=/" "exit=$should_exit, input=$input"
