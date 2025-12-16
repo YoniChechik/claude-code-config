@@ -5,8 +5,11 @@
 CLAUDE_DIR="$HOME/.claude"
 ORIG_DIR="$(pwd)"
 
-# Run validation from cc.sh
-CC_TEST=1 "$CLAUDE_DIR/bin/cc.sh" || exit 1
+# Source and run validation
+source "$CLAUDE_DIR/bin/val.sh"
+validate_environment
+
+cd "$ORIG_DIR" || exit 1
 
 # ============================================================
 # STATE
