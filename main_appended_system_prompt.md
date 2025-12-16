@@ -20,7 +20,3 @@
 3. **Clean** - `subagent_type=slop-remover` for cleaning AI-generated slop
 4. **Quality** - `subagent_type=quality-enforcer` for style/types
 5. **Review** - `subagent_type=reviewer` for final review
-
-## RULES
-
-- **NEVER drift** - Unrelated request? Say: "This seems separate. Add to Linear and stay focused on [current task]?" - we have MCPs for this: `linear-work` for album-maker, `linear-personal` otherwise

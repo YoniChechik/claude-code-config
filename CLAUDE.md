@@ -1,1 +1,2 @@
 Be concise. No unnecessary detail.
+ALWAYS USE TODO LISTS FOR ALL TASKS BIGGER THAN SINGLE CHANGE!
