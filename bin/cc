@@ -175,9 +175,8 @@ echo ""
 while true; do
     show_prompt
 
-    # Read input with readline support
-    printf "> "
-    IFS= read -r -e input
+    # Read input with readline support (prompt protected from backspace)
+    IFS= read -r -e -p "> " input
 
     if [[ -z "$input" ]]; then
         continue
