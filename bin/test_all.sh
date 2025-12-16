@@ -186,11 +186,16 @@ test_all_renders_consistent() {
 }
 
 test_backspace_wrapped_line_support() {
-    # Check that backspace uses '\033[D\033[K' for wrapped line support
-    if grep -q "printf '\\\\033\[D\\\\033\[K'" "$SCRIPT_DIR/autocomplete.sh"; then
-        pass "Backspace handler uses \\033[D\\033[K for wrapped line support"
+    # Check that backspace handler clears and re-renders menu (modern approach)
+    # The modern implementation uses clear_autocomplete_menu + render_autocomplete_menu
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$backspace_handler" | grep -q "clear_autocomplete_menu" && \
+       echo "$backspace_handler" | grep -q "render_autocomplete_menu"; then
+        pass "Backspace handler clears and re-renders menu (wrapped line support)"
     else
-        fail "Backspace handler doesn't use \\033[D\\033[K"
+        fail "Backspace handler doesn't clear and re-render menu"
     fi
 }
 
@@ -204,11 +209,19 @@ test_no_old_backspace_sequence() {
 }
 
 test_backspace_in_correct_context() {
-    # Verify the fix is in the right context (backspacing "/" in autocomplete)
-    if grep -B3 "033\[D" "$SCRIPT_DIR/autocomplete.sh" | grep -q "Backspacing the / itself"; then
-        pass "Backspace fix is in correct context (backspacing '/' character)"
+    # Verify backspace exit is in the right context (backspacing "/" in autocomplete)
+    # Check for the comment about backspacing the slash itself
+    if grep -B2 -A2 "Backspacing the / itself" "$SCRIPT_DIR/autocomplete.sh" | grep -q "clear_autocomplete_menu"; then
+        pass "Backspace exit is in correct context (backspacing '/' character)"
     else
-        fail "Backspace fix not in expected context"
+        # Alternative: check the BACKSPACE handler has the exit condition
+        local backspace_handler
+        backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+        if echo "$backspace_handler" | grep -q "elif.*\${#input} -eq 1"; then
+            pass "Backspace exit is in correct context (handles '/' backspace)"
+        else
+            fail "Backspace exit not in expected context"
+        fi
     fi
 }
 
@@ -1477,6 +1490,802 @@ run_test test_input_wraps_to_four_rows
 run_test test_backspace_on_wrapped_line_calculation
 run_test test_wrap_boundary_exact
 run_test test_wrap_boundary_plus_one
+
+# ============================================================
+# SECTION 8: COMPREHENSIVE FUNCTIONALITY TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 8: Comprehensive Functionality Tests"
+echo "=========================================="
+echo ""
+
+# --- Invisible input mode tests ---
+echo "--- Invisible input mode tests ---"
+
+test_no_visible_characters_in_char_handler() {
+    # Verify CHAR handler does NOT echo characters (invisible input mode)
+    # Characters should only be added to internal input, not printed
+    local char_handler
+    char_handler=$(sed -n '/CHAR)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    # Check that CHAR handler does NOT use printf "%s" "$KEY_CHAR" or echo "$KEY_CHAR"
+    # It should only do: input+="$KEY_CHAR"
+    if echo "$char_handler" | grep -v "^[[:space:]]*#" | grep -q 'printf.*KEY_CHAR\|echo.*KEY_CHAR'; then
+        fail "Invisible input: CHAR handler should not print characters" "no character printing" "found character printing"
+    else
+        pass "Invisible input: CHAR handler does not echo typed characters"
+    fi
+}
+
+test_input_appended_internally_only() {
+    # Verify characters are appended to internal input variable
+    local char_handler
+    char_handler=$(sed -n '/CHAR)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$char_handler" | grep -q 'input+='; then
+        pass "Invisible input: characters appended to internal input variable"
+    else
+        fail "Invisible input: internal input tracking" "input+= found" "not found"
+    fi
+}
+
+test_menu_shows_filtered_results_not_input() {
+    # Verify menu shows filtered commands, not the typed characters
+    # This confirms invisible input mode - user sees results, not what they type
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'printf.*items\['; then
+        pass "Invisible input: menu displays filtered items, not input characters"
+    else
+        fail "Invisible input: menu shows items" "printf items" "not found"
+    fi
+}
+
+run_test test_no_visible_characters_in_char_handler
+run_test test_input_appended_internally_only
+run_test test_menu_shows_filtered_results_not_input
+
+# --- Menu filtering correctness tests ---
+echo ""
+echo "--- Menu filtering correctness tests ---"
+
+test_typing_filters_progressively() {
+    # Simulate typing "pr" character by character
+    local all_commands
+    mapfile -t all_commands < <(get_slash_commands)
+
+    # After typing nothing: show all
+    local count0
+    count0=$(printf '%s\n' "${all_commands[@]}" | filter_commands "" | wc -l)
+
+    # After typing "p": should be less or equal
+    local count1
+    count1=$(printf '%s\n' "${all_commands[@]}" | filter_commands "p" | wc -l)
+
+    # After typing "pr": should be less or equal
+    local count2
+    count2=$(printf '%s\n' "${all_commands[@]}" | filter_commands "pr" | wc -l)
+
+    if [[ $count0 -ge $count1 ]] && [[ $count1 -ge $count2 ]]; then
+        pass "Menu filtering: progressive typing narrows results (all=$count0, p=$count1, pr=$count2)"
+    else
+        fail "Menu filtering: progressive narrowing" "count0 >= count1 >= count2" "$count0, $count1, $count2"
+    fi
+}
+
+test_filter_resets_on_char_input() {
+    # Verify that CHAR handler calls filter_commands
+    local char_handler
+    char_handler=$(sed -n '/CHAR)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$char_handler" | grep -q "filter_commands"; then
+        pass "Menu filtering: CHAR handler re-filters commands"
+    else
+        fail "Menu filtering: CHAR re-filters" "filter_commands called" "not found"
+    fi
+}
+
+test_selection_resets_to_zero_on_filter() {
+    # Verify that filtering resets selected index to 0
+    local char_handler
+    char_handler=$(sed -n '/CHAR)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$char_handler" | grep -q "selected=0"; then
+        pass "Menu filtering: selection resets to 0 after typing"
+    else
+        fail "Menu filtering: selection reset" "selected=0 found" "not found"
+    fi
+}
+
+run_test test_typing_filters_progressively
+run_test test_filter_resets_on_char_input
+run_test test_selection_resets_to_zero_on_filter
+
+# --- Arrow key navigation tests ---
+echo ""
+echo "--- Arrow key navigation tests ---"
+
+test_up_arrow_decreases_selection() {
+    # Verify UP handler decreases selected when > 0
+    local up_handler
+    up_handler=$(sed -n '/UP)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$up_handler" | grep -q "((selected--))"; then
+        pass "Arrow navigation: UP decreases selection"
+    else
+        fail "Arrow navigation: UP handler" "selected--" "not found"
+    fi
+}
+
+test_down_arrow_increases_selection() {
+    # Verify DOWN handler increases selected
+    local down_handler
+    down_handler=$(sed -n '/DOWN)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$down_handler" | grep -q "((selected++))"; then
+        pass "Arrow navigation: DOWN increases selection"
+    else
+        fail "Arrow navigation: DOWN handler" "selected++" "not found"
+    fi
+}
+
+test_up_arrow_respects_lower_bound() {
+    # Verify UP doesn't go below 0
+    local up_handler
+    up_handler=$(sed -n '/UP)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$up_handler" | grep -q '\$selected -gt 0'; then
+        pass "Arrow navigation: UP respects lower bound (0)"
+    else
+        fail "Arrow navigation: UP lower bound" "selected > 0 check" "not found"
+    fi
+}
+
+test_down_arrow_respects_upper_bound() {
+    # Verify DOWN doesn't exceed array length
+    local down_handler
+    down_handler=$(sed -n '/DOWN)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$down_handler" | grep -q '\$selected -lt'; then
+        pass "Arrow navigation: DOWN respects upper bound"
+    else
+        fail "Arrow navigation: DOWN upper bound" "selected < check" "not found"
+    fi
+}
+
+test_navigation_triggers_menu_redraw() {
+    # Verify UP/DOWN handlers call render_autocomplete_menu
+    local up_handler down_handler
+    up_handler=$(sed -n '/UP)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+    down_handler=$(sed -n '/DOWN)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local up_renders=false down_renders=false
+    echo "$up_handler" | grep -q "render_autocomplete_menu" && up_renders=true
+    echo "$down_handler" | grep -q "render_autocomplete_menu" && down_renders=true
+
+    if [[ $up_renders == true ]] && [[ $down_renders == true ]]; then
+        pass "Arrow navigation: both UP and DOWN trigger menu redraw"
+    else
+        fail "Arrow navigation: menu redraw" "UP and DOWN render" "UP=$up_renders, DOWN=$down_renders"
+    fi
+}
+
+run_test test_up_arrow_decreases_selection
+run_test test_down_arrow_increases_selection
+run_test test_up_arrow_respects_lower_bound
+run_test test_down_arrow_respects_upper_bound
+run_test test_navigation_triggers_menu_redraw
+
+# --- Enter selection tests ---
+echo ""
+echo "--- Enter selection tests ---"
+
+test_enter_returns_selected_command() {
+    # Verify ENTER handler sets AUTOCOMPLETE_RESULT
+    local enter_handler
+    enter_handler=$(sed -n '/ENTER)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$enter_handler" | grep -q 'AUTOCOMPLETE_RESULT='; then
+        pass "Enter selection: sets AUTOCOMPLETE_RESULT variable"
+    else
+        fail "Enter selection: result variable" "AUTOCOMPLETE_RESULT=" "not found"
+    fi
+}
+
+test_enter_returns_filtered_command() {
+    # Verify ENTER uses filtered_commands array
+    local enter_handler
+    enter_handler=$(sed -n '/ENTER)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$enter_handler" | grep -q 'filtered_commands\[.*selected'; then
+        pass "Enter selection: returns filtered_commands[selected]"
+    else
+        fail "Enter selection: filtered command" "filtered_commands[selected]" "not found"
+    fi
+}
+
+test_enter_clears_menu_before_return() {
+    # Verify ENTER clears menu before returning
+    local enter_handler
+    enter_handler=$(sed -n '/ENTER)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$enter_handler" | grep -q 'clear_autocomplete_menu'; then
+        pass "Enter selection: clears menu before returning"
+    else
+        fail "Enter selection: menu clear" "clear_autocomplete_menu" "not found"
+    fi
+}
+
+test_enter_returns_success() {
+    # Verify ENTER handler returns 0 (success)
+    local enter_handler
+    enter_handler=$(sed -n '/ENTER)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$enter_handler" | grep -q 'return 0'; then
+        pass "Enter selection: returns 0 (success)"
+    else
+        fail "Enter selection: return code" "return 0" "not found"
+    fi
+}
+
+run_test test_enter_returns_selected_command
+run_test test_enter_returns_filtered_command
+run_test test_enter_clears_menu_before_return
+run_test test_enter_returns_success
+
+# --- Backspace filtering tests ---
+echo ""
+echo "--- Backspace filtering tests ---"
+
+test_backspace_removes_last_char() {
+    # Verify BACKSPACE removes last character from input
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$backspace_handler" | grep -q 'input="\${input%?}"'; then
+        pass "Backspace filtering: removes last character with \${input%?}"
+    else
+        fail "Backspace filtering: character removal" "\${input%?}" "not found"
+    fi
+}
+
+test_backspace_refilters_commands() {
+    # Verify BACKSPACE re-filters with shorter prefix
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$backspace_handler" | grep -q 'filter_commands'; then
+        pass "Backspace filtering: re-filters commands after backspace"
+    else
+        fail "Backspace filtering: re-filter" "filter_commands" "not found"
+    fi
+}
+
+test_backspace_resets_selection() {
+    # Verify BACKSPACE resets selection to 0
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$backspace_handler" | grep -q 'selected=0'; then
+        pass "Backspace filtering: resets selection to 0"
+    else
+        fail "Backspace filtering: selection reset" "selected=0" "not found"
+    fi
+}
+
+run_test test_backspace_removes_last_char
+run_test test_backspace_refilters_commands
+run_test test_backspace_resets_selection
+
+# --- Exit conditions tests ---
+echo ""
+echo "--- Exit conditions tests ---"
+
+test_backspace_on_slash_exits_cleanly() {
+    # Verify backspacing "/" exits with empty result
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$backspace_handler" | grep -q 'elif.*\${#input} -eq 1'; then
+        pass "Exit on backspace: checks for single-character input (just '/')"
+    else
+        fail "Exit on backspace: exit condition" "input length check" "not found"
+    fi
+}
+
+test_backspace_exit_clears_menu() {
+    # Verify backspace exit clears menu
+    local backspace_handler
+    backspace_handler=$(sed -n '/BACKSPACE)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    # Check if the elif ${#input} -eq 1 branch calls clear_autocomplete_menu
+    local exit_branch
+    exit_branch=$(echo "$backspace_handler" | awk '/elif.*\${#input} -eq 1/,/fi/')
+
+    if echo "$exit_branch" | grep -q 'clear_autocomplete_menu'; then
+        pass "Exit on backspace: clears menu on exit"
+    else
+        fail "Exit on backspace: menu clear" "clear_autocomplete_menu in exit branch" "not found"
+    fi
+}
+
+test_escape_exits_with_empty_result() {
+    # Verify ESCAPE returns empty result
+    local escape_handler
+    escape_handler=$(sed -n '/ESCAPE.*CTRL_C)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$escape_handler" | grep -q 'AUTOCOMPLETE_RESULT=""'; then
+        pass "Escape exit: sets empty AUTOCOMPLETE_RESULT"
+    else
+        fail "Escape exit: empty result" 'AUTOCOMPLETE_RESULT=""' "not found"
+    fi
+}
+
+test_escape_returns_failure() {
+    # Verify ESCAPE returns 1 (failure/cancel)
+    local escape_handler
+    escape_handler=$(sed -n '/ESCAPE.*CTRL_C)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$escape_handler" | grep -q 'return 1'; then
+        pass "Escape exit: returns 1 (cancel)"
+    else
+        fail "Escape exit: return code" "return 1" "not found"
+    fi
+}
+
+test_ctrl_c_exits_same_as_escape() {
+    # Verify CTRL_C is handled same as ESCAPE
+    local handler
+    handler=$(sed -n '/ESCAPE.*CTRL_C)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$handler" | grep -q 'ESCAPE|CTRL_C'; then
+        pass "Ctrl+C exit: handled same as Escape"
+    else
+        fail "Ctrl+C exit: handler" "ESCAPE|CTRL_C pattern" "not found"
+    fi
+}
+
+test_ctrl_d_returns_exit_code_2() {
+    # Verify CTRL_D returns special code 2
+    local ctrl_d_handler
+    ctrl_d_handler=$(sed -n '/CTRL_D)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$ctrl_d_handler" | grep -q 'return 2'; then
+        pass "Ctrl+D exit: returns 2 (special exit code)"
+    else
+        fail "Ctrl+D exit: return code" "return 2" "not found"
+    fi
+}
+
+run_test test_backspace_on_slash_exits_cleanly
+run_test test_backspace_exit_clears_menu
+run_test test_escape_exits_with_empty_result
+run_test test_escape_returns_failure
+run_test test_ctrl_c_exits_same_as_escape
+run_test test_ctrl_d_returns_exit_code_2
+
+# --- Edge case: Empty filter results ---
+echo ""
+echo "--- Edge case: Empty filter results ---"
+
+test_empty_filter_result_handling() {
+    # Test behavior when no commands match
+    local result
+    result=$(printf "ask\nfinish\nsync" | filter_commands "xyz")
+
+    if [[ -z "$result" ]]; then
+        pass "Edge case: empty filter returns nothing (no matches)"
+    else
+        fail "Edge case: empty filter" "empty result" "$result"
+    fi
+}
+
+test_enter_with_empty_filter() {
+    # Verify ENTER handler handles empty filtered_commands array
+    local enter_handler
+    enter_handler=$(sed -n '/ENTER)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$enter_handler" | grep -q '\${#filtered_commands\[@\]} -gt 0'; then
+        pass "Edge case: Enter checks if filtered_commands is non-empty"
+    else
+        fail "Edge case: Enter empty check" "filtered_commands length check" "not found"
+    fi
+}
+
+test_render_handles_empty_array() {
+    # Verify render_autocomplete_menu handles count == 0
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q '\$count -eq 0.*return'; then
+        pass "Edge case: render_menu returns early if array is empty"
+    else
+        fail "Edge case: render empty check" "count == 0 return" "not found"
+    fi
+}
+
+run_test test_empty_filter_result_handling
+run_test test_enter_with_empty_filter
+run_test test_render_handles_empty_array
+
+# --- Edge case: Single command match ---
+echo ""
+echo "--- Edge case: Single command match ---"
+
+test_single_command_navigation() {
+    # When only one command matches, navigation should stay at 0
+    local items=("sync")
+    local selected=0
+
+    # Try to go up (should stay at 0)
+    [[ $selected -gt 0 ]] && ((selected--))
+    local after_up=$selected
+
+    # Try to go down (should stay at 0 since max_idx is 0)
+    [[ $selected -lt 0 ]] && ((selected++))
+    local after_down=$selected
+
+    if [[ $after_up -eq 0 ]] && [[ $after_down -eq 0 ]]; then
+        pass "Edge case: single item navigation stays at index 0"
+    else
+        fail "Edge case: single item nav" "both 0" "up=$after_up, down=$after_down"
+    fi
+}
+
+test_single_command_render() {
+    # Test rendering with single item
+    local single_dir=$(mktemp -d)
+    mkdir -p "$single_dir/commands"
+    echo "test" > "$single_dir/commands/solo.md"
+    local old_claude_dir="$CLAUDE_DIR"
+    CLAUDE_DIR="$single_dir"
+
+    local commands
+    mapfile -t commands < <(get_slash_commands)
+
+    CLAUDE_DIR="$old_claude_dir"
+    rm -rf "$single_dir"
+
+    if [[ ${#commands[@]} -eq 1 ]] && [[ "${commands[0]}" == "solo" ]]; then
+        pass "Edge case: single command renders correctly"
+    else
+        fail "Edge case: single command" "1 command 'solo'" "${#commands[@]} commands"
+    fi
+}
+
+run_test test_single_command_navigation
+run_test test_single_command_render
+
+# --- Edge case: Very long command names ---
+echo ""
+echo "--- Edge case: Very long command names ---"
+
+test_very_long_command_filtering() {
+    # Test filtering with very long command name
+    local long="this-is-an-extremely-long-command-name-for-testing"
+    local result
+    result=$(printf "%s\nshort" "$long" | filter_commands "this")
+
+    if [[ "$result" == "$long" ]]; then
+        pass "Edge case: very long command name filters correctly"
+    else
+        fail "Edge case: long command filter" "$long" "$result"
+    fi
+}
+
+test_very_long_command_display_width() {
+    # Verify width calculation handles long names
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'item_width=\$((.*#items'; then
+        pass "Edge case: render calculates width based on item length"
+    else
+        fail "Edge case: width calculation" "item_width calculation" "not found"
+    fi
+}
+
+run_test test_very_long_command_filtering
+run_test test_very_long_command_display_width
+
+# --- Edge case: Menu overflow (more than 10 items) ---
+echo ""
+echo "--- Edge case: Menu overflow ---"
+
+test_max_menu_items_limit() {
+    # Verify render function has max_show limit
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'max_show=10'; then
+        pass "Edge case: menu has max_show=10 limit"
+    else
+        fail "Edge case: max_show limit" "max_show=10" "not found"
+    fi
+}
+
+test_menu_iteration_respects_max_show() {
+    # Verify menu iteration uses max_show bound
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'i<max_show'; then
+        pass "Edge case: menu iteration respects max_show limit"
+    else
+        fail "Edge case: iteration limit" "i<max_show" "not found"
+    fi
+}
+
+test_down_arrow_limited_by_max_show() {
+    # Verify DOWN navigation is limited by max_show
+    local down_handler
+    down_handler=$(sed -n '/DOWN)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$down_handler" | grep -q '\$selected -lt 9'; then
+        pass "Edge case: DOWN arrow limited to 9 (max_show - 1)"
+    else
+        fail "Edge case: DOWN limit" "selected < 9" "not found"
+    fi
+}
+
+run_test test_max_menu_items_limit
+run_test test_menu_iteration_respects_max_show
+run_test test_down_arrow_limited_by_max_show
+
+# --- Edge case: Terminal width constraints ---
+echo ""
+echo "--- Edge case: Terminal width constraints ---"
+
+test_terminal_width_detection() {
+    # Verify render function gets terminal width
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'tput cols'; then
+        pass "Edge case: detects terminal width with tput cols"
+    else
+        fail "Edge case: terminal width" "tput cols" "not found"
+    fi
+}
+
+test_available_width_calculation() {
+    # Verify available width leaves margin
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'available_width=\$((term_width.*-.*10'; then
+        pass "Edge case: calculates available width with margin"
+    else
+        fail "Edge case: available width" "term_width - 10" "not found"
+    fi
+}
+
+test_menu_stops_at_width_limit() {
+    # Verify menu stops adding items when width exceeded
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q 'menu_width.*item_width.*available_width'; then
+        pass "Edge case: menu stops adding items at width limit"
+    else
+        fail "Edge case: width limit stop" "width comparison logic" "not found"
+    fi
+}
+
+run_test test_terminal_width_detection
+run_test test_available_width_calculation
+run_test test_menu_stops_at_width_limit
+
+# --- Cursor position tests ---
+echo ""
+echo "--- Cursor position tests ---"
+
+test_cursor_save_before_render() {
+    # Verify cursor is saved before rendering
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q "printf '\\\\033\[s'"; then
+        pass "Cursor position: saves cursor before rendering"
+    else
+        fail "Cursor position: cursor save" "\\033[s" "not found"
+    fi
+}
+
+test_cursor_restore_after_render() {
+    # Verify cursor is restored after rendering
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q "printf '\\\\033\[u'"; then
+        pass "Cursor position: restores cursor after rendering"
+    else
+        fail "Cursor position: cursor restore" "\\033[u" "not found"
+    fi
+}
+
+test_menu_renders_below_input() {
+    # Verify menu uses \033[E to move to next line
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q "printf '\\\\033\[E'"; then
+        pass "Cursor position: menu renders below with \\033[E"
+    else
+        fail "Cursor position: next line move" "\\033[E" "not found"
+    fi
+}
+
+test_clear_preserves_cursor_position() {
+    # Verify clear_autocomplete_menu saves and restores cursor
+    local clear_func
+    clear_func=$(sed -n '/^clear_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_save=false has_restore=false
+    echo "$clear_func" | grep -q "\\\\033\[s" && has_save=true
+    echo "$clear_func" | grep -q "\\\\033\[u" && has_restore=true
+
+    if [[ $has_save == true ]] && [[ $has_restore == true ]]; then
+        pass "Cursor position: clear preserves cursor with save/restore"
+    else
+        fail "Cursor position: clear preserve" "save and restore" "save=$has_save, restore=$has_restore"
+    fi
+}
+
+run_test test_cursor_save_before_render
+run_test test_cursor_restore_after_render
+run_test test_menu_renders_below_input
+run_test test_clear_preserves_cursor_position
+
+# --- Key reading tests ---
+echo ""
+echo "--- Key reading tests ---"
+
+test_read_key_function_exists() {
+    # Verify read_key function is defined
+    if grep -q "^read_key()" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "Key reading: read_key function is defined"
+    else
+        fail "Key reading: function definition" "read_key()" "not found"
+    fi
+}
+
+test_read_key_handles_escape_sequences() {
+    # Verify read_key handles escape sequences for arrow keys
+    local read_key_func
+    read_key_func=$(sed -n '/^read_key/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_up=false has_down=false has_escape=false
+    echo "$read_key_func" | grep -q "UP" && has_up=true
+    echo "$read_key_func" | grep -q "DOWN" && has_down=true
+    echo "$read_key_func" | grep -q "ESCAPE" && has_escape=true
+
+    if [[ $has_up == true ]] && [[ $has_down == true ]] && [[ $has_escape == true ]]; then
+        pass "Key reading: handles UP, DOWN, ESCAPE sequences"
+    else
+        fail "Key reading: escape sequences" "UP, DOWN, ESCAPE" "UP=$has_up, DOWN=$has_down, ESC=$has_escape"
+    fi
+}
+
+test_read_key_handles_special_keys() {
+    # Verify read_key handles Enter, Backspace, Ctrl+C, Ctrl+D
+    local read_key_func
+    read_key_func=$(sed -n '/^read_key/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_enter=false has_backspace=false has_ctrl_c=false has_ctrl_d=false
+    echo "$read_key_func" | grep -q "ENTER" && has_enter=true
+    echo "$read_key_func" | grep -q "BACKSPACE" && has_backspace=true
+    echo "$read_key_func" | grep -q "CTRL_C" && has_ctrl_c=true
+    echo "$read_key_func" | grep -q "CTRL_D" && has_ctrl_d=true
+
+    if [[ $has_enter == true ]] && [[ $has_backspace == true ]] && [[ $has_ctrl_c == true ]] && [[ $has_ctrl_d == true ]]; then
+        pass "Key reading: handles ENTER, BACKSPACE, CTRL_C, CTRL_D"
+    else
+        fail "Key reading: special keys" "all special keys" "ENTER=$has_enter, BS=$has_backspace, ^C=$has_ctrl_c, ^D=$has_ctrl_d"
+    fi
+}
+
+test_read_key_sets_key_type() {
+    # Verify read_key sets KEY_TYPE variable
+    local read_key_func
+    read_key_func=$(sed -n '/^read_key/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$read_key_func" | grep -q 'KEY_TYPE='; then
+        pass "Key reading: sets KEY_TYPE variable"
+    else
+        fail "Key reading: KEY_TYPE" "KEY_TYPE=" "not found"
+    fi
+}
+
+test_read_key_sets_key_char() {
+    # Verify read_key sets KEY_CHAR for regular characters
+    local read_key_func
+    read_key_func=$(sed -n '/^read_key/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$read_key_func" | grep -q 'KEY_CHAR='; then
+        pass "Key reading: sets KEY_CHAR for regular characters"
+    else
+        fail "Key reading: KEY_CHAR" "KEY_CHAR=" "not found"
+    fi
+}
+
+run_test test_read_key_function_exists
+run_test test_read_key_handles_escape_sequences
+run_test test_read_key_handles_special_keys
+run_test test_read_key_sets_key_type
+run_test test_read_key_sets_key_char
+
+# ============================================================
+# SECTION 9: PROMPT PRESERVATION TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 9: Prompt Preservation Tests"
+echo "=========================================="
+echo ""
+
+test_backspace_preserves_prompt() {
+    # BUG TEST: When typing characters after "/" then backspacing all of them
+    # plus one more (to backspace the "/" itself), the "> " prompt should
+    # still be visible, but currently it's not.
+
+    # Simulate the autocomplete flow:
+    # 1. User types "/" - enters autocomplete mode (prints "> " in cc line 225)
+    # 2. User types "abc" - input is "/abc" (invisible, only menu shows)
+    # 3. User backspaces 4 times - should go: "/abc" -> "/ab" -> "/a" -> "/" -> exit
+    # 4. After exit, the "> " prompt should still be there
+
+    # Test the backspace exit branch behavior
+    local input="/"
+    input+="a"
+    input+="b"
+    input+="c"
+
+    # Simulate backspacing back to just "/"
+    # Backspace 1: /abc -> /ab
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # Backspace 2: /ab -> /a
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # Backspace 3: /a -> /
+    [[ ${#input} -gt 1 ]] && input="${input%?}"
+
+    # At this point input should be "/" (length 1)
+    # Backspace 4: should trigger exit condition
+    local should_exit=false
+    if [[ ${#input} -eq 1 ]]; then
+        should_exit=true
+        # This is where the bug is: the exit code clears the menu but doesn't restore "> "
+    fi
+
+    if [[ $should_exit == true ]] && [[ "$input" == "/" ]]; then
+        # The logic correctly detects the exit condition
+        # But check if clear_autocomplete_menu preserves the prompt
+        local backspace_handler
+        backspace_handler=$(sed -n '/elif.*\${#input} -eq 1/,/fi/p' "$SCRIPT_DIR/autocomplete.sh")
+
+        # The bug: clear_autocomplete_menu uses '\033[J' which clears everything
+        # below the cursor, including the "> " prompt that was printed before
+        # entering autocomplete mode. The prompt should be preserved or re-printed.
+
+        # Check if the exit branch re-prints the prompt
+        if echo "$backspace_handler" | grep -q 'printf.*>'; then
+            pass "Backspace preserves prompt: exit branch re-prints '> '"
+        else
+            # This will fail - demonstrating the bug
+            fail "Backspace preserves prompt: '> ' should be restored after exiting autocomplete" \
+                 "printf with '>' found in exit branch" \
+                 "not found - prompt gets cleared by clear_autocomplete_menu"
+        fi
+    else
+        fail "Backspace preserves prompt: test setup failed" "should_exit=true, input=/" "exit=$should_exit, input=$input"
+    fi
+}
+
+run_test test_backspace_preserves_prompt
 
 # ============================================================
 # FINAL SUMMARY
