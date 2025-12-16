@@ -102,6 +102,11 @@ find_similar_command() {
 }
 
 # ============================================================
+# DISPLAY FUNCTIONS
+# ============================================================
+source "$CLAUDE_DIR/bin/display.sh"
+
+# ============================================================
 # AUTOCOMPLETE
 # ============================================================
 source "$CLAUDE_DIR/bin/gum_autocomplete.sh"
@@ -127,7 +132,7 @@ run_claude() {
         args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
     # Ctrl+C during run just stops claude, doesn't exit REPL
-    trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
+    trap 'display_stopped' INT
 
     # Run claude with timeout monitoring
     local timeout_file=$(mktemp)
@@ -156,7 +161,7 @@ run_claude() {
         touch "$timeout_file"
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
-            SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
+            SUB:*)  printf "%s  %s\n" "$(display_subagent_prefix)" "${line#SUB:}" ;;
             LINE:*) printf "%s\n" "${line#LINE:}" ;;
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
@@ -205,7 +210,7 @@ run_claude() {
 
     # Auto-retry with "continue" if timeout occurred
     if [ "$timed_out" = true ]; then
-        echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
+        display_timeout
         run_claude "continue"
     fi
 }
@@ -217,16 +222,15 @@ show_prompt() {
     local text="$USER@$(hostname -s):$(pwd)"
     if [ "$TOTAL_IN" -gt 0 ]; then
         local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
-        text+=" [${sec}s │ $MODEL]"
+        text+=" [${sec}s | $MODEL]"
     fi
-    gum style --foreground="yellow" "$text"
+    display_prompt "$text"
 }
 
 # ============================================================
 # MAIN
 # ============================================================
-gum style --border="rounded" --padding="0 1" \
-    "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
+display_banner "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
 while true; do
@@ -275,8 +279,8 @@ while true; do
         if [ ! -f "$CLAUDE_DIR/commands/${cmd_name}.md" ]; then
             suggestion=$(find_similar_command "$cmd")
             if [ -n "$suggestion" ]; then
-                gum style --foreground="yellow" "Unknown command: $cmd"
-                gum style --foreground="green" "Did you mean: $suggestion?"
+                display_warning "Unknown command: $cmd"
+                display_success "Did you mean: $suggestion?"
                 continue
             fi
         fi
