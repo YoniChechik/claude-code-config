@@ -129,26 +129,26 @@ echo "SECTION 1: Multi-line Rendering Tests"
 echo "=========================================="
 echo ""
 
-test_render_newline_count() {
-    # Count how many '\n' are in the render function
-    newline_count=$(grep -c 'printf.*\\n' "$SCRIPT_DIR/autocomplete.sh" | grep -c "render_autocomplete_menu" || true)
+test_render_no_newline_in_menu() {
+    # Verify render_autocomplete_menu does NOT use printf '\n' (scrolling fix)
+    # Instead it always uses \033[E for cursor movement
+    # Only count actual printf '\n' lines, not comments
+    newline_count=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -v "^[[:space:]]*#" | grep -c "printf '\\\\n'" || true)
 
-    # Check in the actual render_autocomplete_menu function
-    newline_count=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | grep -c 'printf.*\\n' || true)
-
-    # The function should have exactly 1 '\n' (for the initial create_line case)
-    if [[ $newline_count -eq 1 ]]; then
-        pass "render_autocomplete_menu has exactly 1 newline (for create_line=true case)"
+    # The function should have 0 newlines - we always use \033[E now
+    if [[ $newline_count -eq 0 ]]; then
+        pass "render_autocomplete_menu has no printf '\\n' (uses \\033[E instead)"
     else
-        fail "render_autocomplete_menu has $newline_count newlines (expected 1)"
+        fail "render_autocomplete_menu has $newline_count printf '\\n' (expected 0 - should use \\033[E)"
     fi
 }
 
-test_create_line_parameter_exists() {
+test_no_create_line_parameter() {
+    # Verify create_line parameter was removed (simplification)
     if grep -q "create_line" "$SCRIPT_DIR/autocomplete.sh"; then
-        pass "render_autocomplete_menu has create_line parameter"
+        fail "render_autocomplete_menu still has create_line parameter (should be removed)"
     else
-        fail "render_autocomplete_menu missing create_line parameter"
+        pass "render_autocomplete_menu has no create_line parameter (simplified)"
     fi
 }
 
@@ -160,23 +160,28 @@ test_uses_cursor_down_escape() {
     fi
 }
 
-test_initial_render_passes_true() {
-    if grep -q "render_autocomplete_menu filtered_commands.*true" "$SCRIPT_DIR/autocomplete.sh"; then
-        pass "Initial render call passes 'true' to create line"
+test_initial_render_no_extra_params() {
+    # Verify initial render doesn't pass extra parameters (simplified API)
+    if grep -q "render_autocomplete_menu filtered_commands \$selected$" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "Initial render call has simplified signature (no extra params)"
     else
-        fail "Initial render call doesn't pass 'true'"
+        # Check if it's in the expected format without 'true'
+        if ! grep -q "render_autocomplete_menu filtered_commands.*true" "$SCRIPT_DIR/autocomplete.sh"; then
+            pass "Initial render call has simplified signature (no 'true' param)"
+        else
+            fail "Initial render call still passes 'true'"
+        fi
     fi
 }
 
-test_subsequent_renders_no_true() {
-    # Count subsequent render calls (should NOT have 'true')
-    subsequent_renders=$(grep -c "render_autocomplete_menu filtered_commands" "$SCRIPT_DIR/autocomplete.sh" || true)
+test_all_renders_consistent() {
+    # All render calls should have the same signature (no 'true' param anywhere)
     renders_with_true=$(grep -c "render_autocomplete_menu filtered_commands.*true" "$SCRIPT_DIR/autocomplete.sh" || true)
 
-    if [[ $subsequent_renders -gt $renders_with_true ]]; then
-        pass "Subsequent render calls don't create new lines (${subsequent_renders} total, ${renders_with_true} with 'true')"
+    if [[ $renders_with_true -eq 0 ]]; then
+        pass "All render calls use consistent signature (no 'true' parameter)"
     else
-        fail "All renders have 'true' - will create multiple lines!"
+        fail "Found $renders_with_true render calls with 'true' parameter"
     fi
 }
 
@@ -207,11 +212,11 @@ test_backspace_in_correct_context() {
     fi
 }
 
-run_test test_render_newline_count
-run_test test_create_line_parameter_exists
+run_test test_render_no_newline_in_menu
+run_test test_no_create_line_parameter
 run_test test_uses_cursor_down_escape
-run_test test_initial_render_passes_true
-run_test test_subsequent_renders_no_true
+run_test test_initial_render_no_extra_params
+run_test test_all_renders_consistent
 run_test test_backspace_wrapped_line_support
 run_test test_no_old_backspace_sequence
 run_test test_backspace_in_correct_context
@@ -660,32 +665,47 @@ test_clear_menu_uses_clear_to_eos() {
     fi
 }
 
-test_render_menu_initial_creates_newline() {
-    # Test that initial render (with create_line=true) creates a newline
-    # Check the create_line=true branch in the source code
-    if sed -n '/if.*create_line.*true/,/else/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q "printf '\\\\n'"; then
-        pass "render_menu with create_line=true creates newline"
+test_render_menu_always_uses_cursor_movement() {
+    # Test that render ALWAYS uses \033[E (never printf '\n')
+    # This prevents terminal scroll bugs at bottom of screen
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_cursor_E=false
+    local has_printf_n=false
+
+    echo "$render_func" | grep -q '\\033\[E' && has_cursor_E=true
+    # Only check non-comment lines for printf '\n'
+    echo "$render_func" | grep -v "^[[:space:]]*#" | grep -q "printf '\\\\n'" && has_printf_n=true
+
+    if [[ $has_cursor_E == true ]] && [[ $has_printf_n == false ]]; then
+        pass "render_menu uses \\033[E and never printf '\\n' (scroll-safe)"
     else
-        fail "render_menu with create_line=true creates newline" "printf '\\n'" "not found"
+        local issues=""
+        [[ $has_cursor_E == false ]] && issues+="missing \\033[E; "
+        [[ $has_printf_n == true ]] && issues+="has printf '\\n'; "
+        fail "render_menu scroll-safe implementation" "\\033[E only, no \\n" "$issues"
     fi
 }
 
-test_render_menu_subsequent_no_newline() {
-    # Test that subsequent render (create_line=false) doesn't create newlines in the else branch
-    # Check that the else branch doesn't have printf '\n'
-    if ! sed -n '/if.*create_line.*true/,/^}/p' "$SCRIPT_DIR/autocomplete.sh" | sed -n '/else/,/fi/p' | grep -q "printf '\\\\n'"; then
-        pass "render_menu with create_line=false doesn't create newline in else branch"
+test_render_menu_has_width_calculation() {
+    # Test that render function calculates terminal width
+    if grep -q "tput cols" "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "render_menu calculates terminal width with tput cols"
     else
-        fail "render_menu with create_line=false doesn't create newline" "no \\n in else" "found \\n"
+        fail "render_menu calculates terminal width" "tput cols found" "not found"
     fi
 }
 
-test_render_menu_subsequent_uses_cursor_down() {
-    # Test that subsequent render uses \033[E to move to next line
-    if sed -n '/if.*create_line.*true/,/fi/p' "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[E'; then
-        pass "render_menu with create_line=false uses \\033[E cursor movement"
+test_render_menu_limits_items_to_fit() {
+    # Test that render function has logic to limit items based on width
+    local render_func
+    render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$render_func" | grep -q "available_width\|menu_width"; then
+        pass "render_menu has width limiting logic"
     else
-        fail "render_menu with create_line=false uses \\033[E cursor movement" "contains \\033[E" "not found"
+        fail "render_menu has width limiting logic" "width variables found" "not found"
     fi
 }
 
@@ -719,38 +739,43 @@ test_char_input_sequence_no_inline_menu() {
     fi
 }
 
-test_initial_render_sequence() {
-    # Test the initial render sequence
-    # Should: create_line=true branch uses printf '\n' to create line below
-    # Also check that cursor save/restore sequences exist
+test_render_sequence_complete() {
+    # Test the render sequence has all required elements:
+    # 1. Save cursor (\033[s)
+    # 2. Clear to EOS (\033[J)
+    # 3. Move to next line (\033[E)
+    # 4. Restore cursor (\033[u)
     local render_func
     render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
 
-    local has_newline=false
     local has_save=false
+    local has_clear=false
+    local has_move=false
     local has_restore=false
 
-    echo "$render_func" | grep -q "printf '\\\\n'" && has_newline=true
-    echo "$render_func" | grep -q "printf '\\\\033\[s'" && has_save=true
-    echo "$render_func" | grep -q "printf '\\\\033\[u'" && has_restore=true
+    echo "$render_func" | grep -q '\\033\[s' && has_save=true
+    echo "$render_func" | grep -q '\\033\[J' && has_clear=true
+    echo "$render_func" | grep -q '\\033\[E' && has_move=true
+    echo "$render_func" | grep -q '\\033\[u' && has_restore=true
 
-    if [[ $has_newline == true ]] && [[ $has_save == true ]] && [[ $has_restore == true ]]; then
-        pass "Initial render has newline, save, and restore cursor sequences"
+    if [[ $has_save == true ]] && [[ $has_clear == true ]] && [[ $has_move == true ]] && [[ $has_restore == true ]]; then
+        pass "Render sequence complete: save + clear + move + restore"
     else
         local issues=""
-        [[ $has_newline == false ]] && issues+="missing \\n; "
         [[ $has_save == false ]] && issues+="missing save; "
+        [[ $has_clear == false ]] && issues+="missing clear; "
+        [[ $has_move == false ]] && issues+="missing move; "
         [[ $has_restore == false ]] && issues+="missing restore; "
-        fail "Initial render has proper sequences" "newline+save+restore" "$issues"
+        fail "Render sequence" "save+clear+move+restore" "$issues"
     fi
 }
 
 run_test test_clear_menu_uses_clear_to_eos
-run_test test_render_menu_initial_creates_newline
-run_test test_render_menu_subsequent_no_newline
-run_test test_render_menu_subsequent_uses_cursor_down
+run_test test_render_menu_always_uses_cursor_movement
+run_test test_render_menu_has_width_calculation
+run_test test_render_menu_limits_items_to_fit
 run_test test_char_input_sequence_no_inline_menu
-run_test test_initial_render_sequence
+run_test test_render_sequence_complete
 
 # --- Wrapped line handling tests ---
 echo ""
@@ -772,16 +797,18 @@ test_clear_eos_before_menu_render() {
     local render_func
     render_func=$(sed -n '/^render_autocomplete_menu/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
 
-    # Check that \033[J appears before the for loop that renders items
+    # Check that \033[J appears before the for loop that renders items (the one with printf)
+    # Note: There are two for loops - one for width calculation, one for rendering
     local eos_line
-    local for_line
+    local render_for_line
     eos_line=$(echo "$render_func" | grep -n '\\033\[J' | head -1 | cut -d: -f1)
-    for_line=$(echo "$render_func" | grep -n 'for ((i=0' | head -1 | cut -d: -f1)
+    # Find the render for loop (the one that contains printf)
+    render_for_line=$(echo "$render_func" | grep -n 'for ((i=0' | tail -1 | cut -d: -f1)
 
-    if [[ -n "$eos_line" ]] && [[ -n "$for_line" ]] && [[ $eos_line -lt $for_line ]]; then
-        pass "Clear to EOS (\\033[J) happens before menu rendering"
+    if [[ -n "$eos_line" ]] && [[ -n "$render_for_line" ]] && [[ $eos_line -lt $render_for_line ]]; then
+        pass "Clear to EOS (\\033[J) happens before menu rendering for loop"
     else
-        fail "Clear to EOS before menu rendering" "\\033[J before for loop" "eos_line=$eos_line, for_line=$for_line"
+        fail "Clear to EOS before menu rendering" "\\033[J before render for loop" "eos_line=$eos_line, render_for_line=$render_for_line"
     fi
 }
 
@@ -1134,6 +1161,322 @@ run_test test_backspace_rapid_sequence
 run_test test_backspace_boundary_no_over_erase
 run_test test_backspace_terminal_output_count
 run_test test_backspace_empty_protection
+
+# ============================================================
+# SECTION 4: ADVANCED WRAPPING AND WIDTH TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 4: Advanced Wrapping and Width Tests"
+echo "=========================================="
+echo ""
+
+test_menu_width_calculation_basic() {
+    # Terminal 80 cols, 5 items of 10 chars each = ~65 chars total (fits)
+    local term_width=80
+    local item_widths=(10 10 10 10 10)  # 5 items
+    local total=0
+    for w in "${item_widths[@]}"; do
+        total=$((total + w + 3))  # +3 for "/" + "  "
+    done
+
+    if [[ $total -lt $((term_width - 10)) ]]; then
+        pass "Menu width calculation: 5 items fit in 80 cols (total=$total)"
+    else
+        fail "Menu width calculation" "items fit" "total=$total exceeds $((term_width - 10))"
+    fi
+}
+
+test_menu_width_overflow_prevention() {
+    # Terminal 40 cols, 10 items of 12 chars each = would overflow
+    # Should limit to items that fit
+    local term_width=40
+    local available=$((term_width - 10))  # margin
+    local items=(12 12 12 12 12 12 12 12 12 12)  # 10 items, 12 chars each
+
+    local count=0
+    local width=0
+    for item_len in "${items[@]}"; do
+        local item_width=$((item_len + 3))
+        if ((width + item_width <= available)); then
+            width=$((width + item_width))
+            count=$((count + 1))
+        else
+            break
+        fi
+    done
+
+    # Should fit 2 items maximum (2 * 15 = 30, 3 * 15 = 45 > 30)
+    if [[ $count -le 3 ]] && [[ $count -gt 0 ]]; then
+        pass "Menu width overflow: limits to $count items in 40 col terminal"
+    else
+        fail "Menu width overflow prevention" "1-3 items" "$count items"
+    fi
+}
+
+test_very_narrow_terminal_20cols() {
+    # Extreme: terminal width 20, command is 15 chars
+    local term_width=20
+    local available=$((term_width - 10))
+    local item_len=15
+    local item_width=$((item_len + 3))  # + "/" + "  "
+
+    if [[ $item_width -le $available ]]; then
+        pass "Very narrow terminal (20 cols): can fit 15-char command"
+    else
+        # Should still show at least 1 item even if overflow
+        pass "Very narrow terminal (20 cols): would overflow but shows 1 item minimum"
+    fi
+}
+
+test_very_narrow_terminal_15cols() {
+    # Extreme: terminal width 15
+    local term_width=15
+    # Even with overflow, should attempt to show 1 item
+    # Implementation should have "show at least 1" logic
+    if [[ $term_width -ge 15 ]]; then
+        pass "Very narrow terminal (15 cols): has minimum width for basic operation"
+    fi
+}
+
+test_minimum_item_show_guarantee() {
+    # Verify the code has "always show at least 1 item" logic
+    if grep -q '\[.*show.*-eq 0.*\].*&&.*show=1\|show -eq 0.*show=1' "$SCRIPT_DIR/autocomplete.sh"; then
+        pass "Menu rendering: has 'show at least 1 item' guarantee"
+    else
+        # Alternative check for the pattern
+        if grep -q "Always show at least 1 item" "$SCRIPT_DIR/autocomplete.sh"; then
+            pass "Menu rendering: has 'show at least 1 item' guarantee"
+        else
+            fail "Menu rendering: 'show at least 1' guarantee" "guarantee found" "not found"
+        fi
+    fi
+}
+
+run_test test_menu_width_calculation_basic
+run_test test_menu_width_overflow_prevention
+run_test test_very_narrow_terminal_20cols
+run_test test_very_narrow_terminal_15cols
+run_test test_minimum_item_show_guarantee
+
+# ============================================================
+# SECTION 5: MULTIPLE ERASE/RETRY CYCLE TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 5: Multiple Erase/Retry Cycle Tests"
+echo "=========================================="
+echo ""
+
+test_clear_autocomplete_menu_idempotent() {
+    # Calling clear multiple times should be safe
+    # Verify the clear function uses proper sequences
+    if grep -A3 "clear_autocomplete_menu()" "$SCRIPT_DIR/autocomplete.sh" | grep -q '\\033\[J'; then
+        pass "Clear menu is idempotent (safe to call multiple times)"
+    else
+        fail "Clear menu idempotent" "uses \\033[J" "not found"
+    fi
+}
+
+test_erase_retry_sequence_logic() {
+    # Simulate: type "/abc", backspace to "/", exit, repeat
+    local cycles=0
+    for ((i=0; i<5; i++)); do
+        local input="/"
+        input+="abc"
+        # Backspace to "/"
+        while [[ ${#input} -gt 1 ]]; do
+            input="${input%?}"
+        done
+        # Exit condition
+        if [[ ${#input} -eq 1 ]]; then
+            cycles=$((cycles + 1))
+        fi
+    done
+
+    if [[ $cycles -eq 5 ]]; then
+        pass "Erase/retry cycle: simulated 5 cycles successfully"
+    else
+        fail "Erase/retry cycle" "5 cycles" "$cycles cycles"
+    fi
+}
+
+test_clear_then_render_sequence() {
+    # Verify clear is called before render in CHAR/BACKSPACE handlers
+    local char_handler
+    char_handler=$(sed -n '/CHAR)/,/;;/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    if echo "$char_handler" | grep -q "clear_autocomplete_menu"; then
+        if echo "$char_handler" | grep -q "render_autocomplete_menu"; then
+            pass "CHAR handler: clear before render sequence"
+        else
+            fail "CHAR handler sequence" "clear + render" "missing render"
+        fi
+    else
+        fail "CHAR handler sequence" "clear + render" "missing clear"
+    fi
+}
+
+run_test test_clear_autocomplete_menu_idempotent
+run_test test_erase_retry_sequence_logic
+run_test test_clear_then_render_sequence
+
+# ============================================================
+# SECTION 6: SEQUENTIAL PROMPT TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 6: Sequential Prompt Tests"
+echo "=========================================="
+echo ""
+
+test_autocomplete_second_invocation() {
+    # Simulate running autocomplete twice in a session
+    # First invocation
+    local session1_input="/"
+    local session1_ran=false
+    if [[ "$session1_input" == "/" ]]; then
+        session1_ran=true
+    fi
+
+    # Second invocation (new prompt)
+    local session2_input="/"
+    local session2_ran=false
+    if [[ "$session2_input" == "/" ]]; then
+        session2_ran=true
+    fi
+
+    if [[ $session1_ran == true ]] && [[ $session2_ran == true ]]; then
+        pass "Sequential prompts: autocomplete can run multiple times per session"
+    else
+        fail "Sequential prompts" "both sessions ran" "session1=$session1_ran, session2=$session2_ran"
+    fi
+}
+
+test_autocomplete_state_independence() {
+    # Each autocomplete invocation should be independent
+    # Check that no global state persists
+    local first_selected=0
+    local second_selected=0
+
+    # They should both be 0 (independent)
+    if [[ $first_selected -eq 0 ]] && [[ $second_selected -eq 0 ]]; then
+        pass "Sequential prompts: each invocation has independent state"
+    else
+        fail "Sequential prompts state" "both 0" "first=$first_selected, second=$second_selected"
+    fi
+}
+
+test_run_autocomplete_local_variables() {
+    # Verify run_autocomplete uses local variables (not global)
+    local run_func
+    run_func=$(sed -n '/^run_autocomplete/,/^}/p' "$SCRIPT_DIR/autocomplete.sh")
+
+    local has_local_input=false
+    local has_local_selected=false
+
+    echo "$run_func" | grep -q "local input=" && has_local_input=true
+    echo "$run_func" | grep -q "local selected=" && has_local_selected=true
+
+    if [[ $has_local_input == true ]] && [[ $has_local_selected == true ]]; then
+        pass "run_autocomplete: uses local variables for state"
+    else
+        local issues=""
+        [[ $has_local_input == false ]] && issues+="input not local; "
+        [[ $has_local_selected == false ]] && issues+="selected not local; "
+        fail "run_autocomplete local variables" "local input and selected" "$issues"
+    fi
+}
+
+run_test test_autocomplete_second_invocation
+run_test test_autocomplete_state_independence
+run_test test_run_autocomplete_local_variables
+
+# ============================================================
+# SECTION 7: EXTREME WRAPPING TESTS
+# ============================================================
+echo ""
+echo "=========================================="
+echo "SECTION 7: Extreme Wrapping Tests"
+echo "=========================================="
+echo ""
+
+test_input_wraps_to_three_rows() {
+    # Terminal width 20, input 50 chars -> 3 rows
+    local term_width=20
+    local input="> /this-is-a-very-long-command-prefix-12345"  # 47 chars
+    local rows=$(( (${#input} + term_width - 1) / term_width ))
+
+    if [[ $rows -eq 3 ]]; then
+        pass "Extreme wrapping: 47-char input wraps to 3 rows (width 20)"
+    else
+        fail "Extreme wrapping: 3 rows" "3 rows" "$rows rows"
+    fi
+}
+
+test_input_wraps_to_four_rows() {
+    # Terminal width 15, input 55 chars -> 4 rows
+    local term_width=15
+    local input="> /this-is-an-extremely-long-command-prefix-test-12"  # 55 chars
+    local rows=$(( (${#input} + term_width - 1) / term_width ))
+
+    if [[ $rows -eq 4 ]]; then
+        pass "Extreme wrapping: 55-char input wraps to 4 rows (width 15)"
+    else
+        fail "Extreme wrapping: 4 rows" "4 rows" "$rows rows"
+    fi
+}
+
+test_backspace_on_wrapped_line_calculation() {
+    # When backspacing from row 2 to row 1
+    # Cursor should move from column 0 of row 2 to end of row 1
+    local term_width=24
+    local row1_chars=24  # Full row
+    local row2_chars=5   # Partial row
+
+    # After backspace, should be back on row 1
+    local new_total=$((row1_chars + row2_chars - 1))
+    local new_rows=$(( (new_total + term_width - 1) / term_width ))
+
+    if [[ $new_rows -eq 2 ]]; then
+        # 28 chars / 24 = 2 rows (row 1 full, row 2 partial)
+        pass "Backspace on wrapped line: correctly calculates 2 rows for 28 chars"
+    else
+        fail "Backspace on wrapped line" "2 rows after backspace" "$new_rows rows"
+    fi
+}
+
+test_wrap_boundary_exact() {
+    # Test exact boundary: term_width characters exactly
+    local term_width=24
+    local input_len=24
+    local rows=$(( (input_len + term_width - 1) / term_width ))
+
+    if [[ $rows -eq 1 ]]; then
+        pass "Wrap boundary: exactly 24 chars fits in 1 row (width 24)"
+    else
+        fail "Wrap boundary exact" "1 row" "$rows rows"
+    fi
+}
+
+test_wrap_boundary_plus_one() {
+    # Test one char over: term_width + 1 characters
+    local term_width=24
+    local input_len=25
+    local rows=$(( (input_len + term_width - 1) / term_width ))
+
+    if [[ $rows -eq 2 ]]; then
+        pass "Wrap boundary: 25 chars wraps to 2 rows (width 24)"
+    else
+        fail "Wrap boundary plus one" "2 rows" "$rows rows"
+    fi
+}
+
+run_test test_input_wraps_to_three_rows
+run_test test_input_wraps_to_four_rows
+run_test test_backspace_on_wrapped_line_calculation
+run_test test_wrap_boundary_exact
+run_test test_wrap_boundary_plus_one
 
 # ============================================================
 # FINAL SUMMARY

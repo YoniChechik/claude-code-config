@@ -57,13 +57,35 @@ render_autocomplete_menu() {
     local -n items=$1      # Array of items to show
     local selected=$2      # Currently selected index
     local max_show=10      # Max items to display
-    local create_line=${3:-false}  # Optional: create new line on first render
 
     local count=${#items[@]}
     [[ $count -eq 0 ]] && return
 
-    # Limit display
-    local show=$((count < max_show ? count : max_show))
+    # Get terminal width to prevent menu overflow
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo 80)
+
+    # Calculate how many items fit in terminal width
+    # Leave 10 char margin for safety
+    local available_width=$((term_width - 10))
+    local menu_width=0
+    local show=0
+
+    for ((i=0; i<count && i<max_show; i++)); do
+        # Each item: "/" + name + "  " (2 trailing spaces)
+        local item_width=$((${#items[$i]} + 3))
+
+        if ((menu_width + item_width > available_width)); then
+            # Would overflow, stop adding items
+            break
+        fi
+
+        menu_width=$((menu_width + item_width))
+        show=$((show + 1))
+    done
+
+    # Always show at least 1 item even if it overflows
+    [[ $show -eq 0 ]] && show=1
 
     printf '\033[s'        # Save cursor position (at end of input)
 
@@ -73,13 +95,10 @@ render_autocomplete_menu() {
     # 2. Previous menu was on a different row before wrap
     printf '\033[J'
 
-    # On first render, create the line; on subsequent renders, just move down.
-    # This prevents accumulating multiple menu lines when re-rendering (e.g., during backspace).
-    if [[ "$create_line" == "true" ]]; then
-        printf '\n'        # Create new line for menu (may scroll terminal)
-    else
-        printf '\033[E'    # Move to beginning of next line (down + column 0)
-    fi
+    # Always use cursor movement to go to next line.
+    # Never use printf '\n' as it can cause terminal scroll at bottom,
+    # which invalidates the saved cursor position.
+    printf '\033[E'        # Move to beginning of next line (down + column 0)
 
     # Render horizontal menu with space-separated items
     for ((i=0; i<show; i++)); do
@@ -114,7 +133,7 @@ run_autocomplete() {
 
     # Initial render
     printf "/"
-    render_autocomplete_menu filtered_commands $selected true
+    render_autocomplete_menu filtered_commands $selected
 
     while true; do
         read_key
