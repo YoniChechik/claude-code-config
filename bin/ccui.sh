@@ -3,7 +3,6 @@
 # ccui.sh - Claude Code REPL with UI enhancements
 
 CLAUDE_DIR="$HOME/.claude"
-ORIG_DIR="$(pwd)"
 
 # Check jq installed (required for REPL UI)
 if ! command -v jq >/dev/null 2>&1; then
@@ -17,8 +16,6 @@ fi
 # Source and run validation
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
-
-cd "$ORIG_DIR" || exit 1
 
 # ============================================================
 # STATE
