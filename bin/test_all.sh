@@ -2298,6 +2298,18 @@ printf "${GREEN}Passed: %d${RESET}\n" "$TESTS_PASSED"
 printf "${RED}Failed: %d${RESET}\n" "$TESTS_FAILED"
 echo ""
 
+# ============================================
+# GUM COMPONENT TESTS
+# ============================================
+
+echo ""
+echo "Running gum component tests..."
+bash "$SCRIPT_DIR/test_gum.sh" || exit 1
+
+# ============================================
+# FINAL SUMMARY
+# ============================================
+
 if [[ $TESTS_FAILED -eq 0 ]]; then
     printf "${GREEN}All tests passed!${RESET}\n"
     exit 0
