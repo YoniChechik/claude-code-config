@@ -55,9 +55,9 @@ uv run ruff format --check file.py
 uv run ruff check file.py
 ```
 
-**MyPy Type Check:**
+**Ty Type Check:**
 ```bash
-uv run mypy --strict file.py
+uv run ty check file.py
 ```
 
 Collect all issues found.
@@ -170,7 +170,7 @@ Create `review.md` with the following structure:
 ### Ruff Lint
 [Results for each file]
 
-### MyPy Type Check
+### Ty Type Check
 [Results for each file]
 
 ## Code Review Findings
