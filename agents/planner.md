@@ -30,7 +30,7 @@ Multi-PR: high_level.md + multiple task files
 ## PR Sizing
 
 Split into multiple PRs if ANY:
-- >200 LOC or >5 files
+- More than 200 LOC or more than 5 files
 - Breaking changes mixed with new features
 - Can deliver value incrementally
 
