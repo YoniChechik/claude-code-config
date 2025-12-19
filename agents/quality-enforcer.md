@@ -81,17 +81,3 @@ If any issues remain, go back to the appropriate step (2, 3, or 4) to fix them.
 ### Step 7: Report Results
 
 **IMPORTANT**: Only provide detailed reports for significant changes.
-
-**Report detailed summary when:**
-- New functions or classes were created
-- Major refactoring was performed (breaking down large functions, restructuring code)
-- Complex logic changes were required
-- User needs to review substantial modifications
-
-**Do NOT report for routine fixes:**
-- Formatting changes (ruff format)
-- Adding type annotations
-- Fixing simple linting issues
-- Removing defensive patterns (dict.get → dict[], hasattr checks)
-
-For routine fixes, just do the work silently. The user trusts you to handle standard quality fixes.
