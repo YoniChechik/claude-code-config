@@ -4,13 +4,11 @@ paths: **/*.py
 
 # Python Coding Style Guide
 
-## FAIL FAST - Critical Rule
+## Python-Specific FAIL FAST Patterns
 
-**NEVER hide errors. Let code fail immediately and loudly when something is wrong.**
+### FORBIDDEN patterns in Python
 
-### FORBIDDEN patterns that hide bugs
-
-These patterns mask errors and delay bug discovery. Avoid them:
+These Python-specific patterns mask errors and delay bug discovery. Avoid them:
 
 - `hasattr()` / `getattr()` → Use direct attribute access: `obj.attr`
 - `dict.get(key, default)` → Use `dict[key]` to fail on missing keys
@@ -21,29 +19,25 @@ These patterns mask errors and delay bug discovery. Avoid them:
 - `if len(items) > 0: items[0]` → Just access `items[0]` and let it fail
 - `vars(obj)` / `obj.__dict__` → Checking attributes indirectly, use direct access
 - `value = x or default` → Hides falsy values (None, False, 0, ''), use explicit None check if needed
-- Sentinel values → Never return `-1`, `None`, or `''` to indicate errors, raise exceptions instead
-- Catch-log-continue → `try: ... except: logger.error(); continue` hides failures
 - `try: ... except: pass` → Ultimate silent failure, never do this
+- `try: ... except: logger.error(); continue` → Catch-log-continue hides failures
 - `try/except` blocks → Use as few as possible. Let exceptions propagate naturally
 
-**Why**: Defensive programming delays bug discovery. We want crashes in development, not silent failures in production.
+## Type Annotations
 
-## General Conventions
-
-- **Type annotations**: Always annotate functions/classes
-- **Modern Python**: Use `list` over `List`, `dict` over `Dict`, `x | None` over `Optional[x]`
+- **Always annotate** functions and classes
+- **Modern Python syntax**: Use `list` over `List`, `dict` over `Dict`, `x | None` over `Optional[x]`
 - **Numpy types**: `npt.NDArray[np.floating]` for floats, `npt.NDArray[np.integer]` for integers
-- **No copy-paste**: Split code into functions, return multiple values as dataclasses
-- **Modular functions**: Keep functions small (~50 lines max) and focused on single responsibility
-- **Top-down code organization**: main functions first, helpers after
-- **Avoid nested ifs**: Prefer early returns and `if not: continue` style to reduce nesting depth
-- **Private functions and classes**: Start with `_`
+
+## Python Conventions
+
+- **Private members**: Start with `_` for private functions and classes
 - **No docstrings**: Function names should be self-explanatory. Comments only on hard logic. Don't add module docstrings or function docstrings
 - **No relative imports**: Always use absolute imports (e.g., `from some_package.utils import ...`, not `from .utils import ...`)
 - **No lint ignore rules**: Never add rules to `lint.ignore` in pyproject.toml. Fix the code instead
 - **No noqa comments**: Don't use `# noqa` to suppress warnings, except for undefined types from external libraries (e.g., `# type: ignore[import-untyped]`)
 - **String formatting**: Always prefer f-strings over `.format()` or `%` formatting (e.g., `f"Hello {name}"`, not `"Hello {}".format(name)`)
-- Use dataclasses for multiple return values from functions
+- **Multiple return values**: Use dataclasses for functions returning multiple values
 
 ## Naming Conventions
 
@@ -56,8 +50,3 @@ These patterns mask errors and delay bug discovery. Avoid them:
 - Prefer pathlib over os.path, opencv over PIL
 - Leverage existing libraries (torch, numpy, scipy, opencv) rather than reimplementing
 - Suggest package installation for known solutions
-
-## Backward Compatibility
-
-- **NO backward compat** - Delete unused code completely
-- Exceptions: user explicitly requests OR public external APIs
