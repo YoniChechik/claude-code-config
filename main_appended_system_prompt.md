@@ -14,6 +14,5 @@
 ## Who can you delegate those tasks?
 - **Codebase Exploring** - Use `subagent_type=Explore` to read and understand codebase
 - **Coding** - Use `subagent_type=coder` (default) or `subagent_type=debugger` (for hard bugs, test failures, runtime errors)
-- **Code cleaning** - `subagent_type=slop-remover` for cleaning AI-generated slop
-- **Quality enforcing** - `subagent_type=quality-enforcer` for style/types
+- **Quality enforcing** - `subagent_type=quality-enforcer` for style/types/AI slop removal
 - **Reviewing** - `subagent_type=reviewer` for final review
