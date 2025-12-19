@@ -31,9 +31,8 @@ For each file in the diff:
 3. Remove or fix each instance
 
 ### 3. Sync Changes
-```bash
 /sync
-```
+
 
 ### 4. Report
 
