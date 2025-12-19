@@ -41,13 +41,16 @@ Push the empty branch to remote to establish tracking:
 git push -u origin $FEATURE_NAME
 ```
 
-### Step 4: Create Python Virtual Environment (if python project)
+### Step 4: Sync with Main
+/sync
+
+### Step 5: Create Python Virtual Environment (if python project)
 Create a virtual environment using uv:
 ```bash
 uv venv
 ```
 
-### Step 5: Notify User
+### Step 6: Notify User
 Tell user:
 - The clone has been created at `_clones/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` has been published to remote
