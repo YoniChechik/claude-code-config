@@ -15,5 +15,3 @@ Creates a new feature branch using git clone for isolated development with full 
 
 ### Step 2: Plan
 Use the planner agent to create the feature plan
-
-**FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
