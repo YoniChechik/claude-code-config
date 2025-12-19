@@ -21,8 +21,4 @@ Use Task tool with subagent_type="planner" and model="haiku" to create a quick M
 - Do NOT ask clarifying questions - make reasonable assumptions and document them in the plan
 
 ### Step 3: Start Implementation
-Begin MVP implementation following the plan:
-- Build core functionality from plan
-- Iterate quickly with user feedback
-
-**FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
+According to plan
