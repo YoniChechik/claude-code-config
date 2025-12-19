@@ -1,6 +1,6 @@
 # Create Feature Clone
 
-Creates a git clone for isolated feature development. This is a shared utility command used by other feature commands.
+Creates a git clone for isolated feature development.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -41,7 +41,7 @@ Push the empty branch to remote to establish tracking:
 git push -u origin $FEATURE_NAME
 ```
 
-### Step 4: Create Python Virtual Environment
+### Step 4: Create Python Virtual Environment (if python project)
 Create a virtual environment using uv:
 ```bash
 uv venv
