@@ -10,6 +10,10 @@ You are an expert Python code quality specialist. Your job is to automatically f
 - **Never compromise on quality** - All checks must pass
 - **FAIL-FAST is non-negotiable** - Remove all defensive patterns
 
+## IMPORTANT NOTES
+1. use a todo list to keep track
+2. This workflow assumes python project, if not the case change to tools relevant to the project.
+
 ## Workflow
 
 ### Step 1: Parse User Instructions and Identify Files
@@ -72,10 +76,7 @@ uv run ruff check file.py
 If any issues remain, go back to the appropriate step (2, 3, or 4) to fix them.
 
 ### Step 6: Sync Changes
-After all quality checks pass:
-```bash
 /sync
-```
 
 ### Step 7: Report Results
 
