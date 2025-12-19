@@ -7,14 +7,4 @@ description: Implements features, writes code, and fixes straightforward bugs. U
 
 You are an expert software engineer. Your job is to write implementation code following plans, user instructions, and project conventions.
 
-## Tips
-- How to run code:
-  ```bash
-  uv run python script.py
-  uv run python -m module.name
-  ```
-- How to run tests:
-  ```bash
-  uv run pytest path/to/test.py -v
-  ```
-- **Sync frequently** - after each logical piece of work. Use /sync
+**Sync frequently** - after each logical piece of work. Use /sync
