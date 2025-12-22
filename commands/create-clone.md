@@ -44,10 +44,20 @@ git push -u origin $FEATURE_NAME
 ### Step 4: Sync with Main
 /sync
 
-### Step 5: Create Python Virtual Environment (if python project)
-Create a virtual environment using uv:
+### Step 5: Setup Environment
+Setup development environment based on project type:
 ```bash
-uv venv
+# Python project - create virtual environment
+if [ -f "pyproject.toml" ]; then
+  echo "Python project detected. Creating virtual environment..."
+  uv venv
+fi
+
+# npm project - install dependencies
+if [ -f "package-lock.json" ]; then
+  echo "npm project detected. Installing dependencies..."
+  npm install
+fi
 ```
 
 ### Step 6: Notify User
