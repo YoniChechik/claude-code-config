@@ -411,8 +411,57 @@ read_with_autosuggest() {
                 fi
                 ;;
 
-            PASTE_START|PASTE_END)
-                # Just update the PASTE_MODE flag (already done in read_key)
+            PASTE_START)
+                local pasted_content=""
+                while true; do
+                    # Read raw character without escape sequence interpretation
+                    local char
+                    IFS= read -rsn1 -t 0.5 char
+
+                    # Skip empty strings from timeout
+                    [[ -z "$char" ]] && continue
+
+                    # Check for PASTE_END sequence: \x1b[201~
+                    if [[ "$char" == $'\x1b' ]]; then
+                        local seq="$char"
+                        IFS= read -rsn1 -t 0.5 c2
+                        seq+="$c2"
+
+                        if [[ "$c2" == '[' ]]; then
+                            IFS= read -rsn1 -t 0.5 c3
+                            IFS= read -rsn1 -t 0.5 c4
+                            IFS= read -rsn1 -t 0.5 c5
+                            IFS= read -rsn1 -t 0.5 c6
+                            seq+="$c3$c4$c5$c6"
+
+                            if [[ "$c3$c4$c5$c6" == "201~" ]]; then
+                                PASTE_MODE=false
+                                break
+                            else
+                                pasted_content+="$seq"
+                            fi
+                        else
+                            pasted_content+="$seq"
+                        fi
+                    else
+                        pasted_content+="$char"
+                    fi
+                done
+
+                input="${input:0:$cursor_pos}${pasted_content}${input:$cursor_pos}"
+                cursor_pos=$((cursor_pos + ${#pasted_content}))
+
+                # Re-render with any current suggestion
+                local suggestion=""
+                if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                    local base="${input%/*}/"
+                    suggestion="${base}${matches[$match_idx]}"
+                fi
+                render_inline "$input" "$suggestion" "$cursor_pos"
+                ;;
+
+            PASTE_END)
+                # Should not reach here (handled inside PASTE_START loop)
                 ;;
         esac
     done
