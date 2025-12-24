@@ -41,7 +41,19 @@ test_fuzzy_empty() {
 test_fuzzy_all() {
     local matches=$(fuzzy_match "")
     local count=$(echo "$matches" | grep -c .)
-    [[ $count -ge 5 ]] && test_pass "All commands ($count found)" || test_fail "All commands: got $count"
+    # Should have user commands + built-ins (at least 15+)
+    [[ $count -ge 15 ]] && test_pass "All commands ($count found)" || test_fail "All commands: got $count"
+}
+
+test_builtins_included() {
+    local matches=$(fuzzy_match "")
+    echo "$matches" | grep -q "^help$" && \
+        test_pass "Built-in 'help' included" || test_fail "Built-in 'help' not found"
+}
+
+test_project_root() {
+    local root=$(find_project_root)
+    [[ -n "$root" ]] && test_pass "Project root found: $root" || test_fail "No project root"
 }
 
 test_score_ordering() {
@@ -118,7 +130,7 @@ test_key_char() {
 
 test_functions_exist() {
     local missing=()
-    for func in get_slash_commands fuzzy_score fuzzy_match save_terminal_state restore_terminal_state read_key render_inline clear_line read_with_autosuggest; do
+    for func in find_project_root get_slash_commands fuzzy_score fuzzy_match save_terminal_state restore_terminal_state read_key render_inline clear_line read_with_autosuggest; do
         declare -f "$func" >/dev/null || missing+=("$func")
     done
 
@@ -149,6 +161,8 @@ test_no_substring
 test_fuzzy_case
 test_fuzzy_empty
 test_fuzzy_all
+test_builtins_included
+test_project_root
 test_score_ordering
 test_score_no_match
 test_fuzzy_sorting

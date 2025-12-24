@@ -1,10 +1,50 @@
 #!/bin/bash
 
-get_slash_commands() {
-    local cmds=()
-    for f in "$CLAUDE_DIR"/commands/*.md; do
-        [[ -f "$f" ]] && cmds+=("$(basename "$f" .md)")
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.claude" ]]; then
+            echo "$dir"
+            return
+        fi
+        dir="$(dirname "$dir")"
     done
+}
+
+get_slash_commands() {
+    declare -A seen
+    local cmds=()
+
+    # 1. User commands (highest priority) - always from ~/.claude
+    if [[ -d "$HOME/.claude/commands" ]]; then
+        for f in "$HOME/.claude/commands"/*.md; do
+            [[ -f "$f" ]] || continue
+            local name="$(basename "$f" .md)"
+            cmds+=("$name")
+            seen[$name]=1
+        done
+    fi
+
+    # 2. Project commands (from .claude/commands in project root)
+    local project_root
+    project_root=$(find_project_root)
+    if [[ -n "$project_root" && -d "$project_root/.claude/commands" ]]; then
+        for f in "$project_root/.claude/commands"/*.md; do
+            [[ -f "$f" ]] || continue
+            local name="$(basename "$f" .md)"
+            [[ ${seen[$name]+_} ]] && continue
+            cmds+=("$name")
+            seen[$name]=1
+        done
+    fi
+
+    # 3. Claude built-in commands (lowest priority)
+    local builtins=(bug clear compact config cost doctor help init login logout mcp memory model permissions review status terminal-setup vim)
+    for name in "${builtins[@]}"; do
+        [[ ${seen[$name]+_} ]] && continue
+        cmds+=("$name")
+    done
+
     printf '%s\n' "${cmds[@]}" | sort
 }
 
