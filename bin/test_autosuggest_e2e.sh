@@ -122,47 +122,47 @@ catch {close}
 catch {wait}
 
 # ============================================================================
-# Test 2: Tab cycles through suggestions
+# Test 2: Arrow keys cycle through suggestions
 # ============================================================================
-log_test "Tab cycles: Type '/' then Tab multiple times"
+log_test "Arrow cycles: Type '/' then Down arrow multiple times"
 
 start_ccui
 
 send "/"
 sleep 0.3
 
-# First Tab
-send "\t"
+# First Down arrow
+send "\033\[B"
 sleep 0.3
 
 set first_match ""
 expect {
     timeout {}
-    -re "(ask|continue-feature|create-clone|finish|new-feature|pr-comments|pr-create|pr-walkthrough|sync|new-feature-short)" {
+    -re "(ask|bug|clear|compact|config|continue-feature|create-clone|finish|help|new-feature)" {
         set first_match $expect_out(1,string)
     }
 }
 
-# Second Tab
-send "\t"
+# Second Down arrow
+send "\033\[B"
 sleep 0.3
 
 set second_match ""
 expect {
     timeout {}
-    -re "(ask|continue-feature|create-clone|finish|new-feature|pr-comments|pr-create|pr-walkthrough|sync|new-feature-short)" {
+    -re "(ask|bug|clear|compact|config|continue-feature|create-clone|finish|help|new-feature)" {
         set second_match $expect_out(1,string)
     }
 }
 
 if {$first_match != "" && $second_match != ""} {
     if {$first_match != $second_match} {
-        pass "Tab cycled from '$first_match' to '$second_match'"
+        pass "Arrow cycled from '$first_match' to '$second_match'"
     } else {
-        pass "Tab cycling works (might be only one or wrapped)"
+        pass "Arrow cycling works (might be only one or wrapped)"
     }
 } else {
-    pass "Tab cycling triggered (suggestions present)"
+    pass "Arrow cycling triggered (suggestions present)"
 }
 
 stop_ccui
@@ -433,17 +433,17 @@ catch {close}
 catch {wait}
 
 # ============================================================================
-# Test 11: Enter accepts suggestion with space, continues editing
+# Test 11: Tab accepts suggestion with space, continues editing
 # ============================================================================
-log_test "Enter + space: Type '/as' + Enter → adds space, continues editing"
+log_test "Tab + space: Type '/as' + Tab → adds space, continues editing"
 
 start_ccui
 
 send "/as"
 sleep 0.4
 
-# Press Enter - should accept suggestion and add space
-send "\r"
+# Press Tab - should accept suggestion and add space
+send "\t"
 sleep 0.3
 
 # Now type more text after the space
@@ -460,9 +460,9 @@ expect {
 }
 
 if {$continued_editing == 1} {
-    pass "Enter accepted suggestion with space, continued editing"
+    pass "Tab accepted suggestion with space, continued editing"
 } else {
-    pass "Enter + continue editing works"
+    pass "Tab + continue editing works"
 }
 
 # Force exit
@@ -474,20 +474,16 @@ catch {close}
 catch {wait}
 
 # ============================================================================
-# Test 12: Second Enter (no suggestion) sends command
+# Test 12: Enter sends command directly (accepts suggestion if present)
 # ============================================================================
-log_test "Double Enter: Type '/ask' + Enter + Enter → sends command"
+log_test "Enter sends: Type '/ask' + Enter → sends command"
 
 start_ccui
 
 send "/ask"
 sleep 0.4
 
-# First Enter - accepts suggestion (even though exact match)
-send "\r"
-sleep 0.3
-
-# Second Enter - should send (no more suggestion)
+# Enter - sends command (accepts suggestion and sends)
 send "\r"
 sleep 0.5
 
@@ -501,9 +497,9 @@ expect {
 }
 
 if {$command_sent == 1} {
-    pass "Double Enter sent command"
+    pass "Enter sent command"
 } else {
-    pass "Double Enter processing works"
+    pass "Enter processing works"
 }
 
 # Force exit

@@ -90,7 +90,16 @@ read_key() {
         $'\x7f'|$'\x08') KEY_TYPE="BACKSPACE" ;;
         $'\x03')         KEY_TYPE="CTRL_C" ;;
         $'\x04')         KEY_TYPE="CTRL_D" ;;
-        $'\x1b')         KEY_TYPE="ESCAPE" ;;
+        $'\x1b')
+            # Read escape sequence for arrow keys
+            IFS= read -rsn1 -t 0.1 char2
+            IFS= read -rsn1 -t 0.1 char3
+            case "$char2$char3" in
+                '[A') KEY_TYPE="ARROW_UP" ;;
+                '[B') KEY_TYPE="ARROW_DOWN" ;;
+                *)    KEY_TYPE="ESCAPE" ;;
+            esac
+            ;;
         '')              KEY_TYPE="ENTER" ;;
         *)               KEY_TYPE="CHAR"; KEY_VALUE="$char" ;;
     esac
@@ -160,8 +169,27 @@ read_with_autosuggest() {
 
             TAB)
                 if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
-                    match_idx=$(( (match_idx + 1) % ${#matches[@]} ))
+                    # Accept suggestion, append space, continue editing
+                    local base="${input%/*}/"
+                    input="${base}${matches[$match_idx]} "
+                    suggest_mode=false
+                    matches=()
+                    render_inline "$input" ""
+                fi
+                ;;
 
+            ARROW_DOWN)
+                if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                    match_idx=$(( (match_idx + 1) % ${#matches[@]} ))
+                    local base="${input%/*}/"
+                    local suggestion="${base}${matches[$match_idx]}"
+                    render_inline "$input" "$suggestion"
+                fi
+                ;;
+
+            ARROW_UP)
+                if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                    match_idx=$(( (match_idx - 1 + ${#matches[@]}) % ${#matches[@]} ))
                     local base="${input%/*}/"
                     local suggestion="${base}${matches[$match_idx]}"
                     render_inline "$input" "$suggestion"
@@ -169,20 +197,15 @@ read_with_autosuggest() {
                 ;;
 
             ENTER)
+                # Send the input (with or without suggestion)
                 if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
-                    # Accept suggestion, append space, continue editing
                     local base="${input%/*}/"
-                    input="${base}${matches[$match_idx]} "
-                    suggest_mode=false
-                    matches=()
-                    render_inline "$input" ""
-                else
-                    # No suggestion - send the input
-                    restore_terminal_state
-                    echo "" > /dev/tty
-                    echo "$input"
-                    return 0
+                    input="${base}${matches[$match_idx]}"
                 fi
+                restore_terminal_state
+                echo "" > /dev/tty
+                echo "$input"
+                return 0
                 ;;
 
             BACKSPACE)
