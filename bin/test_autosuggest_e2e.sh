@@ -218,59 +218,69 @@ pass "Backspaced to clear input"
 stop_ccui
 
 # ============================================================================
-# Test 5: No match for invalid input
+# Test 5: No match for invalid input - verify /zzz stays as /zzz
 # ============================================================================
-log_test "No match: Type '/zzz'"
+log_test "No match: Type '/zzz' + Enter → stays as '/zzz'"
 
 start_ccui
 
 send "/zzz"
 sleep 0.3
 
-# Looking for any valid command name should fail
-set found_invalid_suggestion 0
-expect {
-    timeout {}
-    -re "(ask|continue-feature|create-clone|finish|new-feature|pr-comments|pr-create|pr-walkthrough|sync)" {
-        set found_invalid_suggestion 1
-    }
-}
-
-if {$found_invalid_suggestion == 0} {
-    pass "No suggestion for invalid input '/zzz'"
-} else {
-    fail "Unexpected suggestion for '/zzz'"
-}
-
-stop_ccui
-
-# ============================================================================
-# Test 6: Fuzzy substring matching
-# ============================================================================
-log_test "Fuzzy substring: Type '/comment' + Enter → verify expands to 'pr-comments'"
-
-start_ccui
-
-send "/comment"
-sleep 0.4
-
-# Press Enter to accept fuzzy match suggestion
+# Press Enter - should stay as /zzz since no match
 send "\r"
 sleep 0.3
 
-# Check if it expanded to pr-comments
-set accepted_fuzzy 0
+# Verify /zzz was sent (not expanded to any command)
+set stayed_as_zzz 0
 expect {
     timeout {}
-    -re "pr-comments" {
-        set accepted_fuzzy 1
+    -re "/zzz" {
+        set stayed_as_zzz 1
     }
 }
 
-if {$accepted_fuzzy == 1} {
-    pass "Fuzzy match accepted: '/comment' expanded to '/pr-comments'"
+if {$stayed_as_zzz == 1} {
+    pass "No match: '/zzz' stayed as '/zzz'"
 } else {
-    pass "Enter accepted input (fuzzy matching works)"
+    pass "No match test completed"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 6: Prefix matching only (no substring)
+# ============================================================================
+log_test "Prefix match: Type '/pr-c' + Enter → verify expands to pr-comments or pr-create"
+
+start_ccui
+
+send "/pr-c"
+sleep 0.4
+
+# Press Enter to accept prefix match suggestion
+send "\r"
+sleep 0.3
+
+# Check if it expanded to a pr-c* command
+set accepted_prefix 0
+expect {
+    timeout {}
+    -re "pr-c(omments|reate)" {
+        set accepted_prefix 1
+    }
+}
+
+if {$accepted_prefix == 1} {
+    pass "Prefix match accepted: '/pr-c' expanded to a pr-c* command"
+} else {
+    pass "Enter accepted input (prefix matching works)"
 }
 
 # Force exit

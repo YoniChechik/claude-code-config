@@ -15,9 +15,6 @@ fuzzy_score() {
     [[ "$pattern" == "$candidate" ]] && { echo 0; return; }
     [[ "$candidate" == "$pattern"* ]] && { echo 1; return; }
 
-    local before="${candidate%%$pattern*}"
-    [[ "$before" != "$candidate" ]] && { echo $((100 + ${#before})); return; }
-
     echo 999
 }
 
