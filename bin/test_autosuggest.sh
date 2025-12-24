@@ -126,6 +126,20 @@ test_functions_exist() {
         test_pass "All functions exist" || test_fail "Missing functions: ${missing[*]}"
 }
 
+test_stty_min1() {
+    if ! tty -s 2>/dev/null; then
+        echo "⊘ stty min 1 (skipped - no TTY)"
+        return
+    fi
+
+    save_terminal_state
+    local settings=$(stty -a 2>/dev/null)
+    restore_terminal_state
+
+    echo "$settings" | grep -q "min = 1" && \
+        test_pass "stty min 1 set" || test_fail "stty min 1 not set"
+}
+
 echo "Running autosuggest tests..."
 echo ""
 
@@ -140,6 +154,7 @@ test_score_no_match
 test_fuzzy_sorting
 
 test_terminal_state
+test_stty_min1
 
 test_key_tab
 test_key_backspace
