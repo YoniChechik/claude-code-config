@@ -97,6 +97,8 @@ read_key() {
             case "$char2$char3" in
                 '[A') KEY_TYPE="ARROW_UP" ;;
                 '[B') KEY_TYPE="ARROW_DOWN" ;;
+                '[C') KEY_TYPE="ARROW_RIGHT" ;;
+                '[D') KEY_TYPE="ARROW_LEFT" ;;
                 *)    KEY_TYPE="ESCAPE" ;;
             esac
             ;;
@@ -112,6 +114,7 @@ PREV_RENDER_LINES=1
 render_inline() {
     local input="$1"
     local suggestion="$2"
+    local cursor_pos="$3"
 
     # Move up to first line of our output (if we wrapped before)
     if [[ $PREV_RENDER_LINES -gt 1 ]]; then
@@ -140,8 +143,18 @@ render_inline() {
     PREV_RENDER_LINES=$(( (display_len + term_width - 1) / term_width ))
     [[ $PREV_RENDER_LINES -lt 1 ]] && PREV_RENDER_LINES=1
 
-    # Move cursor back to end of input (before suggestion)
-    local backtrack=$((${#suggestion} - ${#input}))
+    # Position cursor at cursor_pos within input
+    # First, calculate total length displayed (prompt + input + suggestion)
+    local total_len=$((2 + ${#input}))
+    if [[ -n "$suggestion" ]]; then
+        total_len=$((total_len + ${#suggestion} - ${#input}))
+    fi
+
+    # Calculate where cursor should be (prompt + cursor_pos)
+    local cursor_target=$((2 + cursor_pos))
+
+    # Move cursor back from end to target position
+    local backtrack=$((total_len - cursor_target))
     [[ $backtrack -gt 0 ]] && printf '\033[%dD' "$backtrack" > /dev/tty
 }
 
@@ -156,6 +169,7 @@ clear_line() {
 
 read_with_autosuggest() {
     local input=""
+    local cursor_pos=0
     local matches=()
     local match_idx=0
     local suggest_mode=false
@@ -170,7 +184,9 @@ read_with_autosuggest() {
 
         case "$KEY_TYPE" in
             CHAR)
-                input="${input}${KEY_VALUE}"
+                # Insert character at cursor position
+                input="${input:0:$cursor_pos}${KEY_VALUE}${input:$cursor_pos}"
+                cursor_pos=$((cursor_pos + 1))
 
                 if [[ "$KEY_VALUE" == "/" ]] && [[ "$input" =~ ^/$ || "$input" =~ [[:space:]]/$ ]]; then
                     suggest_mode=true
@@ -189,7 +205,7 @@ read_with_autosuggest() {
                     local base="${input%/*}/"
                     suggestion="${base}${matches[$match_idx]}"
                 fi
-                render_inline "$input" "$suggestion"
+                render_inline "$input" "$suggestion" "$cursor_pos"
                 ;;
 
             TAB)
@@ -197,9 +213,10 @@ read_with_autosuggest() {
                     # Accept suggestion, append space, continue editing
                     local base="${input%/*}/"
                     input="${base}${matches[$match_idx]} "
+                    cursor_pos=${#input}
                     suggest_mode=false
                     matches=()
-                    render_inline "$input" ""
+                    render_inline "$input" "" "$cursor_pos"
                 fi
                 ;;
 
@@ -208,7 +225,7 @@ read_with_autosuggest() {
                     match_idx=$(( (match_idx + 1) % ${#matches[@]} ))
                     local base="${input%/*}/"
                     local suggestion="${base}${matches[$match_idx]}"
-                    render_inline "$input" "$suggestion"
+                    render_inline "$input" "$suggestion" "$cursor_pos"
                 fi
                 ;;
 
@@ -217,7 +234,31 @@ read_with_autosuggest() {
                     match_idx=$(( (match_idx - 1 + ${#matches[@]}) % ${#matches[@]} ))
                     local base="${input%/*}/"
                     local suggestion="${base}${matches[$match_idx]}"
-                    render_inline "$input" "$suggestion"
+                    render_inline "$input" "$suggestion" "$cursor_pos"
+                fi
+                ;;
+
+            ARROW_RIGHT)
+                if [[ $cursor_pos -lt ${#input} ]]; then
+                    cursor_pos=$((cursor_pos + 1))
+                    local suggestion=""
+                    if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                        local base="${input%/*}/"
+                        suggestion="${base}${matches[$match_idx]}"
+                    fi
+                    render_inline "$input" "$suggestion" "$cursor_pos"
+                fi
+                ;;
+
+            ARROW_LEFT)
+                if [[ $cursor_pos -gt 0 ]]; then
+                    cursor_pos=$((cursor_pos - 1))
+                    local suggestion=""
+                    if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                        local base="${input%/*}/"
+                        suggestion="${base}${matches[$match_idx]}"
+                    fi
+                    render_inline "$input" "$suggestion" "$cursor_pos"
                 fi
                 ;;
 
@@ -234,8 +275,10 @@ read_with_autosuggest() {
                 ;;
 
             BACKSPACE)
-                if [[ -n "$input" ]]; then
-                    input="${input:0:${#input}-1}"
+                if [[ $cursor_pos -gt 0 ]]; then
+                    # Delete character before cursor
+                    input="${input:0:$((cursor_pos-1))}${input:$cursor_pos}"
+                    cursor_pos=$((cursor_pos - 1))
 
                     if [[ ! "$input" =~ / ]]; then
                         suggest_mode=false
@@ -251,7 +294,7 @@ read_with_autosuggest() {
                         local base="${input%/*}/"
                         suggestion="${base}${matches[$match_idx]}"
                     fi
-                    render_inline "$input" "$suggestion"
+                    render_inline "$input" "$suggestion" "$cursor_pos"
                 fi
                 ;;
 
