@@ -107,26 +107,51 @@ read_key() {
 
 C_GRAY='\033[90m'
 C_RESET='\033[0m'
+PREV_RENDER_LINES=1
 
 render_inline() {
     local input="$1"
     local suggestion="$2"
 
-    printf '\r\033[K' > /dev/tty
+    # Move up to first line of our output (if we wrapped before)
+    if [[ $PREV_RENDER_LINES -gt 1 ]]; then
+        printf '\033[%dA' $((PREV_RENDER_LINES - 1)) > /dev/tty
+    fi
+
+    # Move to column 0 and clear to end of screen
+    printf '\r\033[J' > /dev/tty
+
+    # Print prompt and input
     printf '> %s' "$input" > /dev/tty
 
+    # Print suggestion if any
     if [[ -n "$suggestion" ]]; then
         local remaining="${suggestion:${#input}}"
         printf "${C_GRAY}%s${C_RESET}" "$remaining" > /dev/tty
     fi
 
-    local backtrack=${#suggestion}
-    backtrack=$((backtrack - ${#input}))
+    # Calculate how many lines we just used
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo 80)
+    local display_len=$((2 + ${#input}))  # "> " + input
+    if [[ -n "$suggestion" ]]; then
+        display_len=$((display_len + ${#suggestion} - ${#input}))
+    fi
+    PREV_RENDER_LINES=$(( (display_len + term_width - 1) / term_width ))
+    [[ $PREV_RENDER_LINES -lt 1 ]] && PREV_RENDER_LINES=1
+
+    # Move cursor back to end of input (before suggestion)
+    local backtrack=$((${#suggestion} - ${#input}))
     [[ $backtrack -gt 0 ]] && printf '\033[%dD' "$backtrack" > /dev/tty
 }
 
 clear_line() {
-    printf '\r\033[K> ' > /dev/tty
+    # Clear all lines from previous render
+    if [[ $PREV_RENDER_LINES -gt 1 ]]; then
+        printf '\033[%dA' $((PREV_RENDER_LINES - 1)) > /dev/tty
+    fi
+    printf '\r\033[J> ' > /dev/tty
+    PREV_RENDER_LINES=1
 }
 
 read_with_autosuggest() {

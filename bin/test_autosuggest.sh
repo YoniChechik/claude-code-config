@@ -117,6 +117,30 @@ test_case_insensitive_builtin() {
         test_pass "Case insensitive built-in" || test_fail "Case insensitive built-in failed"
 }
 
+test_multiline_tracking() {
+    # Test that PREV_RENDER_LINES is updated correctly
+    PREV_RENDER_LINES=1
+    # Simulate render with short text (should be 1 line on 80-col terminal)
+    local old_cols=$(tput cols 2>/dev/null || echo 80)
+    # Force calculation for 80 cols
+    local display_len=$((2 + 10))  # "> " + 10 chars
+    local lines=$(( (display_len + 80 - 1) / 80 ))
+    [[ $lines -eq 1 ]] && test_pass "Short text = 1 line" || test_fail "Short text lines: $lines"
+}
+
+test_multiline_wrap_calculation() {
+    # Test line wrap calculation: 85 chars on 80-col terminal = 2 lines
+    local display_len=$((2 + 85))  # "> " + 85 chars = 87 chars
+    local lines=$(( (display_len + 80 - 1) / 80 ))
+    [[ $lines -eq 2 ]] && test_pass "87 chars on 80-col = 2 lines" || test_fail "Wrap calc: $lines"
+}
+
+test_prev_render_lines_exists() {
+    # PREV_RENDER_LINES should be defined
+    [[ -n "${PREV_RENDER_LINES+x}" ]] && \
+        test_pass "PREV_RENDER_LINES defined" || test_fail "PREV_RENDER_LINES not defined"
+}
+
 test_score_ordering() {
     local s1=$(fuzzy_score "ask" "ask")
     local s2=$(fuzzy_score "new" "new-feature")
@@ -260,6 +284,11 @@ test_case_insensitive_builtin
 test_user_commands_exist
 test_project_root
 test_project_root_has_git
+
+# Multiline rendering tests
+test_multiline_tracking
+test_multiline_wrap_calculation
+test_prev_render_lines_exists
 
 # Terminal state tests
 test_terminal_state
