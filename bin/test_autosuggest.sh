@@ -21,10 +21,10 @@ test_fuzzy_prefix() {
         test_pass "Prefix match" || test_fail "Prefix match: got '$first'"
 }
 
-test_fuzzy_substring() {
+test_no_substring() {
     local matches=$(fuzzy_match "comment")
-    echo "$matches" | grep -q "pr-comments" && \
-        test_pass "Substring match" || test_fail "Substring match"
+    [[ -z "$matches" ]] && \
+        test_pass "No substring match" || test_fail "No substring match: got '$matches'"
 }
 
 test_fuzzy_case() {
@@ -49,8 +49,8 @@ test_score_ordering() {
     local s2=$(fuzzy_score "new" "new-feature")
     local s3=$(fuzzy_score "comment" "pr-comments")
 
-    [[ $s1 -eq 0 && $s2 -eq 1 && $s3 -gt 100 ]] && \
-        test_pass "Score ordering ($s1 < $s2 < $s3)" || test_fail "Score ordering: $s1 $s2 $s3"
+    [[ $s1 -eq 0 && $s2 -eq 1 && $s3 -eq 999 ]] && \
+        test_pass "Score ordering ($s1 < $s2, $s3=999)" || test_fail "Score ordering: $s1 $s2 $s3"
 }
 
 test_score_no_match() {
@@ -145,7 +145,7 @@ echo ""
 
 test_fuzzy_exact
 test_fuzzy_prefix
-test_fuzzy_substring
+test_no_substring
 test_fuzzy_case
 test_fuzzy_empty
 test_fuzzy_all
