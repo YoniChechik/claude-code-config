@@ -299,6 +299,121 @@ test_paste_end_clears_mode() {
     )) && test_pass "Paste end sets PASTE_MODE=false" || test_fail "Paste end mode change"
 }
 
+test_paste_with_escape_chars() {
+    # Test that raw read preserves escape characters correctly
+    # Simulate reading: hello\x1bXworld followed by PASTE_END
+    # Use \x1bX (ESC followed by X) to test that non-sequence escapes are preserved
+    local test_content=$'hello\x1bXworld'
+    local result=$(echo -en "${test_content}\x1b[201~" | (
+        save_terminal_state 2>/dev/null
+        local pasted_content=""
+        local found_end=false
+
+        while true; do
+            local char
+            IFS= read -rsn1 -t 0.1 char || break
+
+            if [[ "$char" == $'\x1b' ]]; then
+                local seq="$char"
+                IFS= read -rsn1 -t 0.1 c2 || break
+                seq+="$c2"
+
+                if [[ "$c2" == '[' ]]; then
+                    IFS= read -rsn1 -t 0.1 c3 || break
+                    IFS= read -rsn1 -t 0.1 c4 || break
+                    IFS= read -rsn1 -t 0.1 c5 || break
+                    IFS= read -rsn1 -t 0.1 c6 || break
+                    seq+="$c3$c4$c5$c6"
+
+                    if [[ "$c3$c4$c5$c6" == "201~" ]]; then
+                        found_end=true
+                        break
+                    else
+                        pasted_content+="$seq"
+                    fi
+                else
+                    pasted_content+="$seq"
+                fi
+            else
+                pasted_content+="$char"
+            fi
+        done
+
+        restore_terminal_state 2>/dev/null
+        if [[ "$found_end" == true && "$pasted_content" == "$test_content" ]]; then
+            echo "PASS"
+        else
+            echo "FAIL: got '$(echo -n "$pasted_content" | od -A n -t x1)', expected '$(echo -n "$test_content" | od -A n -t x1)', found_end=$found_end"
+        fi
+    ))
+
+    [[ "$result" == "PASS" ]] && test_pass "Paste with escape chars" || test_fail "Paste with escape chars: $result"
+}
+
+test_paste_no_empty_strings() {
+    # Test that empty strings from timeouts are not added to pasted content
+    # Simulate slow paste: "abc" with delays causing timeouts
+    local result=$( (
+        # Simulate: 'a', timeout, 'b', timeout, 'c', timeout, PASTE_END
+        echo -en "a"
+        sleep 0.15
+        echo -en "b"
+        sleep 0.15
+        echo -en "c"
+        sleep 0.15
+        echo -en '\x1b[201~'
+    ) | (
+        save_terminal_state 2>/dev/null
+        local pasted_content=""
+        local found_end=false
+
+        while true; do
+            local char
+            IFS= read -rsn1 -t 0.1 char
+
+            # Exit on timeout only if we haven't seen any chars yet
+            if [[ -z "$char" ]]; then
+                # Empty char from timeout - should skip
+                continue
+            fi
+
+            if [[ "$char" == $'\x1b' ]]; then
+                local seq="$char"
+                IFS= read -rsn1 -t 0.1 c2
+                seq+="$c2"
+
+                if [[ "$c2" == '[' ]]; then
+                    IFS= read -rsn1 -t 0.1 c3
+                    IFS= read -rsn1 -t 0.1 c4
+                    IFS= read -rsn1 -t 0.1 c5
+                    IFS= read -rsn1 -t 0.1 c6
+                    seq+="$c3$c4$c5$c6"
+
+                    if [[ "$c3$c4$c5$c6" == "201~" ]]; then
+                        found_end=true
+                        break
+                    else
+                        pasted_content+="$seq"
+                    fi
+                else
+                    pasted_content+="$seq"
+                fi
+            else
+                pasted_content+="$char"
+            fi
+        done
+
+        restore_terminal_state 2>/dev/null
+        if [[ "$found_end" == true && "$pasted_content" == "abc" ]]; then
+            echo "PASS"
+        else
+            echo "FAIL: got '$(echo -n "$pasted_content" | od -A n -t x1)' (length ${#pasted_content}), expected 'abc', found_end=$found_end"
+        fi
+    ))
+
+    [[ "$result" == "PASS" ]] && test_pass "Paste filters empty strings" || test_fail "Paste filters empty strings: $result"
+}
+
 test_functions_exist() {
     local missing=()
     for func in find_project_root get_slash_commands fuzzy_score fuzzy_match save_terminal_state restore_terminal_state read_key render_inline clear_line read_with_autosuggest; do
@@ -379,6 +494,8 @@ test_paste_mode_variable_exists
 test_paste_mode_initial_state
 test_paste_start_sets_mode
 test_paste_end_clears_mode
+test_paste_with_escape_chars
+test_paste_no_empty_strings
 
 # Function existence test
 test_functions_exist
