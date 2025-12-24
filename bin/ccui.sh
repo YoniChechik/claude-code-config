@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# ccui.sh - Claude Code REPL with UI enhancements
-
 CLAUDE_DIR="$HOME/.claude"
 
-# Check jq installed (required for REPL UI)
 if ! command -v jq >/dev/null 2>&1; then
     echo "Error: jq not installed" >&2
     echo "" >&2
@@ -13,13 +10,11 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-# Source and run validation
+source "$CLAUDE_DIR/bin/autosuggest.sh"
+
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
 
-# ============================================================
-# STATE
-# ============================================================
 SESSION_ID=""
 TOTAL_COST=0
 TOTAL_IN=0
@@ -27,9 +22,6 @@ TOTAL_OUT=0
 LAST_MS=0
 MODEL=""
 
-# ============================================================
-# RUN CLAUDE
-# ============================================================
 run_claude() {
     local raw=$(mktemp)
     local args=(-p "$1" --output-format stream-json --verbose)
@@ -37,14 +29,11 @@ run_claude() {
     [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ] && \
         args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
-    # Ctrl+C during run just stops claude, doesn't exit REPL
     trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
 
-    # Run claude with timeout monitoring
     local timeout_file=$(mktemp)
     local timed_out=false
 
-    # Start timeout monitor first
     (
         while [ -f "$timeout_file" ]; do
             sleep 5
@@ -52,7 +41,6 @@ run_claude() {
                 local current_check=$(stat -c %Y "$timeout_file" 2>/dev/null || echo 0)
                 local idle=$(($(date +%s) - current_check))
                 if [ $idle -ge 30 ]; then
-                    # No output for 30s - mark timeout
                     touch "${timeout_file}.timeout"
                     break
                 fi
@@ -61,9 +49,7 @@ run_claude() {
     ) &
     local timeout_monitor_pid=$!
 
-    # Run claude pipeline with process substitution to avoid subshell buffering issues
     while IFS= read -r line; do
-        # Reset timeout marker on each line
         touch "$timeout_file"
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
@@ -73,21 +59,17 @@ run_claude() {
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
         stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
 
-    # Stop timeout monitor
     kill $timeout_monitor_pid 2>/dev/null
     wait $timeout_monitor_pid 2>/dev/null
 
-    # Check if timeout occurred
     if [ -f "${timeout_file}.timeout" ]; then
         timed_out=true
     fi
 
-    # Clean up timeout files
     rm -f "$timeout_file" "${timeout_file}.timeout"
 
     trap - INT
 
-    # Extract session and stats
     if [ -z "$SESSION_ID" ]; then
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
@@ -114,16 +96,12 @@ run_claude() {
     fi
     rm -f "$raw"
 
-    # Auto-retry with "continue" if timeout occurred
     if [ "$timed_out" = true ]; then
         echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
         run_claude "continue"
     fi
 }
 
-# ============================================================
-# PROMPT
-# ============================================================
 show_prompt() {
     printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
     if [ "$TOTAL_IN" -gt 0 ]; then
@@ -133,17 +111,16 @@ show_prompt() {
     printf "\033[0m\n"
 }
 
-# ============================================================
-# MAIN
-# ============================================================
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
 while true; do
     show_prompt
 
-    # Read input with readline support (prompt protected from backspace)
-    IFS= read -r -e -p "> " input
+    input=$(read_with_autosuggest)
+    ret=$?
+    [[ $ret -eq 1 ]] && break     # Ctrl+D exits
+    [[ $ret -eq 2 ]] && continue  # Ctrl+C cancels
 
     if [[ -z "$input" ]]; then
         continue
