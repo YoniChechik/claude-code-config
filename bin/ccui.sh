@@ -1,7 +1,15 @@
 #!/bin/bash
 # Claude Code REPL - Interactive command-line interface for Claude
 
-CLAUDE_DIR="$HOME/.claude"
+# For testing in clones, use local directory if available, otherwise fall back to ~/.claude
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLONE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "$CLONE_ROOT/bin/autosuggest.sh" ]; then
+    CLAUDE_DIR="$CLONE_ROOT"
+else
+    CLAUDE_DIR="$HOME/.claude"
+fi
 
 # Check for required jq dependency
 if ! command -v jq >/dev/null 2>&1; then
