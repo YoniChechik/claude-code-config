@@ -35,7 +35,7 @@ SAVED_TTY=""
 
 save_terminal_state() {
     SAVED_TTY=$(stty -g 2>/dev/null)
-    stty -echo -icanon min 0 time 0 2>/dev/null
+    stty -echo -icanon min 1 2>/dev/null
 }
 
 restore_terminal_state() {
