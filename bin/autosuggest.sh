@@ -130,14 +130,19 @@ read_with_autosuggest() {
 
             ENTER)
                 if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                    # Accept suggestion, append space, continue editing
                     local base="${input%/*}/"
-                    input="${base}${matches[$match_idx]}"
+                    input="${base}${matches[$match_idx]} "
+                    suggest_mode=false
+                    matches=()
+                    render_inline "$input" ""
+                else
+                    # No suggestion - send the input
+                    restore_terminal_state
+                    echo "" > /dev/tty
+                    echo "$input"
+                    return 0
                 fi
-
-                restore_terminal_state
-                echo "" > /dev/tty
-                echo "$input"
-                return 0
                 ;;
 
             BACKSPACE)
