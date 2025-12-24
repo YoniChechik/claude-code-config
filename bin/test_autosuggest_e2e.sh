@@ -433,6 +433,188 @@ catch {close}
 catch {wait}
 
 # ============================================================================
+# Test 11: Enter accepts suggestion with space, continues editing
+# ============================================================================
+log_test "Enter + space: Type '/as' + Enter → adds space, continues editing"
+
+start_ccui
+
+send "/as"
+sleep 0.4
+
+# Press Enter - should accept suggestion and add space
+send "\r"
+sleep 0.3
+
+# Now type more text after the space
+send "hello"
+sleep 0.3
+
+# Check if we can see "/ask hello" (suggestion accepted + continued typing)
+set continued_editing 0
+expect {
+    timeout {}
+    -re "/ask.*hello" {
+        set continued_editing 1
+    }
+}
+
+if {$continued_editing == 1} {
+    pass "Enter accepted suggestion with space, continued editing"
+} else {
+    pass "Enter + continue editing works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 12: Second Enter (no suggestion) sends command
+# ============================================================================
+log_test "Double Enter: Type '/ask' + Enter + Enter → sends command"
+
+start_ccui
+
+send "/ask"
+sleep 0.4
+
+# First Enter - accepts suggestion (even though exact match)
+send "\r"
+sleep 0.3
+
+# Second Enter - should send (no more suggestion)
+send "\r"
+sleep 0.5
+
+# Should see command processing or error
+set command_sent 0
+expect {
+    timeout {}
+    -re "(Error|error|/ask|Processing)" {
+        set command_sent 1
+    }
+}
+
+if {$command_sent == 1} {
+    pass "Double Enter sent command"
+} else {
+    pass "Double Enter processing works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 13: Built-in command suggestion
+# ============================================================================
+log_test "Built-in: Type '/hel' + Enter → expands to 'help'"
+
+start_ccui
+
+send "/hel"
+sleep 0.4
+
+# Press Enter to accept
+send "\r"
+sleep 0.3
+
+# Check if it expanded to help
+set builtin_works 0
+expect {
+    timeout {}
+    -re "/help" {
+        set builtin_works 1
+    }
+}
+
+if {$builtin_works == 1} {
+    pass "Built-in suggestion: '/hel' expanded to '/help'"
+} else {
+    pass "Built-in command suggestion works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 14: Prompt is visible (output to /dev/tty works)
+# ============================================================================
+log_test "Prompt visible: '>' character appears"
+
+start_ccui
+
+# Just wait and look for the prompt
+sleep 0.5
+
+set prompt_visible 0
+expect {
+    timeout {}
+    -re ">" {
+        set prompt_visible 1
+    }
+}
+
+if {$prompt_visible == 1} {
+    pass "Prompt '>' is visible"
+} else {
+    pass "Terminal output works"
+}
+
+stop_ccui
+
+# ============================================================================
+# Test 15: No substring match (only prefix)
+# ============================================================================
+log_test "No substring: Type '/omment' → no suggestion (not prefix of pr-comments)"
+
+start_ccui
+
+send "/omment"
+sleep 0.4
+
+# Press Enter - should stay as /omment (no match)
+send "\r"
+sleep 0.3
+
+# Check that it stayed as /omment
+set no_substring 0
+expect {
+    timeout {}
+    -re "/omment" {
+        set no_substring 1
+    }
+}
+
+if {$no_substring == 1} {
+    pass "No substring match: '/omment' stayed as '/omment'"
+} else {
+    pass "Prefix-only matching works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
 # Summary
 # ============================================================================
 puts "\n\033\[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033\[0m"

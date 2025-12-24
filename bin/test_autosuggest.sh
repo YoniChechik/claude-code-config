@@ -51,9 +51,70 @@ test_builtins_included() {
         test_pass "Built-in 'help' included" || test_fail "Built-in 'help' not found"
 }
 
+test_multiple_builtins() {
+    local matches=$(fuzzy_match "")
+    local found=0
+    for cmd in clear compact config help vim; do
+        echo "$matches" | grep -q "^${cmd}$" && found=$((found + 1))
+    done
+    [[ $found -eq 5 ]] && test_pass "Multiple built-ins ($found/5)" || test_fail "Multiple built-ins: $found/5"
+}
+
+test_builtin_prefix_match() {
+    local matches=$(fuzzy_match "hel")
+    echo "$matches" | grep -q "^help$" && \
+        test_pass "Built-in prefix 'hel' → help" || test_fail "Built-in prefix match failed"
+}
+
 test_project_root() {
     local root=$(find_project_root)
     [[ -n "$root" ]] && test_pass "Project root found: $root" || test_fail "No project root"
+}
+
+test_project_root_has_git() {
+    local root=$(find_project_root)
+    [[ -d "$root/.git" ]] && test_pass "Project root has .git" || test_fail "Project root missing .git"
+}
+
+test_user_commands_exist() {
+    local matches=$(fuzzy_match "")
+    echo "$matches" | grep -q "^ask$" && \
+        test_pass "User command 'ask' exists" || test_fail "User command 'ask' not found"
+}
+
+test_no_middle_substring() {
+    # "eature" is in "new-feature" but not at start
+    local matches=$(fuzzy_match "eature")
+    [[ -z "$matches" ]] && \
+        test_pass "No middle substring 'eature'" || test_fail "Middle substring matched: $matches"
+}
+
+test_prefix_only_strict() {
+    # "ync" should NOT match "sync" (not prefix)
+    local matches=$(fuzzy_match "ync")
+    echo "$matches" | grep -q "^sync$" && \
+        test_fail "Non-prefix 'ync' matched sync" || test_pass "Non-prefix 'ync' rejected"
+}
+
+test_score_exact_zero() {
+    local score=$(fuzzy_score "help" "help")
+    [[ $score -eq 0 ]] && test_pass "Exact match score = 0" || test_fail "Exact score: $score"
+}
+
+test_score_prefix_one() {
+    local score=$(fuzzy_score "hel" "help")
+    [[ $score -eq 1 ]] && test_pass "Prefix match score = 1" || test_fail "Prefix score: $score"
+}
+
+test_score_nonmatch_999() {
+    local score=$(fuzzy_score "xyz" "help")
+    [[ $score -eq 999 ]] && test_pass "Non-match score = 999" || test_fail "Non-match score: $score"
+}
+
+test_case_insensitive_builtin() {
+    local matches=$(fuzzy_match "HELP")
+    echo "$matches" | grep -q "^help$" && \
+        test_pass "Case insensitive built-in" || test_fail "Case insensitive built-in failed"
 }
 
 test_score_ordering() {
@@ -155,26 +216,44 @@ test_stty_min1() {
 echo "Running autosuggest tests..."
 echo ""
 
+# Matching tests
 test_fuzzy_exact
 test_fuzzy_prefix
 test_no_substring
+test_no_middle_substring
+test_prefix_only_strict
 test_fuzzy_case
 test_fuzzy_empty
 test_fuzzy_all
-test_builtins_included
-test_project_root
-test_score_ordering
-test_score_no_match
 test_fuzzy_sorting
 
+# Score tests
+test_score_exact_zero
+test_score_prefix_one
+test_score_nonmatch_999
+test_score_ordering
+test_score_no_match
+
+# Multi-source command tests
+test_builtins_included
+test_multiple_builtins
+test_builtin_prefix_match
+test_case_insensitive_builtin
+test_user_commands_exist
+test_project_root
+test_project_root_has_git
+
+# Terminal state tests
 test_terminal_state
 test_stty_min1
 
+# Key detection tests
 test_key_tab
 test_key_backspace
 test_key_enter
 test_key_char
 
+# Function existence test
 test_functions_exist
 
 echo ""
