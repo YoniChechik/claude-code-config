@@ -162,6 +162,24 @@ test_key_tab() {
     )) && test_pass "Tab detection" || test_fail "Tab detection"
 }
 
+test_key_arrow_up() {
+    (echo -en '\x1b[A' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "ARROW_UP" ]]
+    )) && test_pass "Arrow up detection" || test_fail "Arrow up detection"
+}
+
+test_key_arrow_down() {
+    (echo -en '\x1b[B' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "ARROW_DOWN" ]]
+    )) && test_pass "Arrow down detection" || test_fail "Arrow down detection"
+}
+
 test_key_backspace() {
     (echo -en '\x7f' | (
         save_terminal_state
@@ -249,6 +267,8 @@ test_stty_min1
 
 # Key detection tests
 test_key_tab
+test_key_arrow_up
+test_key_arrow_down
 test_key_backspace
 test_key_enter
 test_key_char
