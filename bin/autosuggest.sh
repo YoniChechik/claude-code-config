@@ -66,21 +66,21 @@ render_inline() {
     local input="$1"
     local suggestion="$2"
 
-    printf '\r\033[K'
-    printf '> %s' "$input"
+    printf '\r\033[K' > /dev/tty
+    printf '> %s' "$input" > /dev/tty
 
     if [[ -n "$suggestion" ]]; then
         local remaining="${suggestion:${#input}}"
-        printf "${C_GRAY}%s${C_RESET}" "$remaining"
+        printf "${C_GRAY}%s${C_RESET}" "$remaining" > /dev/tty
     fi
 
     local backtrack=${#suggestion}
     backtrack=$((backtrack - ${#input}))
-    [[ $backtrack -gt 0 ]] && printf '\033[%dD' "$backtrack"
+    [[ $backtrack -gt 0 ]] && printf '\033[%dD' "$backtrack" > /dev/tty
 }
 
 clear_line() {
-    printf '\r\033[K> '
+    printf '\r\033[K> ' > /dev/tty
 }
 
 read_with_autosuggest() {
@@ -138,7 +138,7 @@ read_with_autosuggest() {
                 fi
 
                 restore_terminal_state
-                echo ""
+                echo "" > /dev/tty
                 echo "$input"
                 return 0
                 ;;
@@ -167,14 +167,14 @@ read_with_autosuggest() {
 
             CTRL_C)
                 restore_terminal_state
-                echo "^C"
+                echo "^C" > /dev/tty
                 return 2
                 ;;
 
             CTRL_D)
                 if [[ -z "$input" ]]; then
                     restore_terminal_state
-                    echo ""
+                    echo "" > /dev/tty
                     return 1
                 fi
                 ;;
