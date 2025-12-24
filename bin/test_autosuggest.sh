@@ -204,6 +204,24 @@ test_key_arrow_down() {
     )) && test_pass "Arrow down detection" || test_fail "Arrow down detection"
 }
 
+test_key_arrow_left() {
+    (echo -en '\x1b[D' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "ARROW_LEFT" ]]
+    )) && test_pass "Arrow left detection" || test_fail "Arrow left detection"
+}
+
+test_key_arrow_right() {
+    (echo -en '\x1b[C' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "ARROW_RIGHT" ]]
+    )) && test_pass "Arrow right detection" || test_fail "Arrow right detection"
+}
+
 test_key_backspace() {
     (echo -en '\x7f' | (
         save_terminal_state
@@ -298,6 +316,8 @@ test_stty_min1
 test_key_tab
 test_key_arrow_up
 test_key_arrow_down
+test_key_arrow_left
+test_key_arrow_right
 test_key_backspace
 test_key_enter
 test_key_char
