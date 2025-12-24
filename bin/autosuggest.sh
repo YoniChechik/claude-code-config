@@ -96,8 +96,8 @@ read_key() {
         $'\x04')         KEY_TYPE="CTRL_D" ;;
         $'\x1b')
             # Read escape sequence for arrow keys, Ctrl+Arrow keys, and bracketed paste
-            IFS= read -rsn1 -t 0.1 char2
-            IFS= read -rsn1 -t 0.1 char3
+            IFS= read -rsn1 -t 0.5 char2
+            IFS= read -rsn1 -t 0.5 char3
             case "$char2$char3" in
                 '[A') KEY_TYPE="ARROW_UP" ;;
                 '[B') KEY_TYPE="ARROW_DOWN" ;;
@@ -105,9 +105,9 @@ read_key() {
                 '[D') KEY_TYPE="ARROW_LEFT" ;;
                 '[1')
                     # Possibly Ctrl+Arrow (needs more bytes: [1;5C or [1;5D)
-                    IFS= read -rsn1 -t 0.1 char4
-                    IFS= read -rsn1 -t 0.1 char5
-                    IFS= read -rsn1 -t 0.1 char6
+                    IFS= read -rsn1 -t 0.5 char4
+                    IFS= read -rsn1 -t 0.5 char5
+                    IFS= read -rsn1 -t 0.5 char6
                     case "$char4$char5$char6" in
                         ';5C') KEY_TYPE="CTRL_ARROW_RIGHT" ;;
                         ';5D') KEY_TYPE="CTRL_ARROW_LEFT" ;;
@@ -116,9 +116,9 @@ read_key() {
                     ;;
                 '[2')
                     # Possibly bracketed paste start: [200~ or end: [201~
-                    IFS= read -rsn1 -t 0.1 char4
-                    IFS= read -rsn1 -t 0.1 char5
-                    IFS= read -rsn1 -t 0.1 char6
+                    IFS= read -rsn1 -t 0.5 char4
+                    IFS= read -rsn1 -t 0.5 char5
+                    IFS= read -rsn1 -t 0.5 char6
                     case "$char4$char5$char6" in
                         '00~') KEY_TYPE="PASTE_START"; PASTE_MODE=true ;;
                         '01~') KEY_TYPE="PASTE_END"; PASTE_MODE=false ;;
