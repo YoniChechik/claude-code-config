@@ -249,6 +249,56 @@ test_key_char() {
     )) && test_pass "Char detection" || test_fail "Char detection"
 }
 
+test_key_paste_start() {
+    (echo -en '\x1b[200~' | (
+        save_terminal_state
+        PASTE_MODE=false
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "PASTE_START" && "$PASTE_MODE" == true ]]
+    )) && test_pass "Paste start detection" || test_fail "Paste start detection"
+}
+
+test_key_paste_end() {
+    (echo -en '\x1b[201~' | (
+        save_terminal_state
+        PASTE_MODE=true
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "PASTE_END" && "$PASTE_MODE" == false ]]
+    )) && test_pass "Paste end detection" || test_fail "Paste end detection"
+}
+
+test_paste_mode_initial_state() {
+    [[ "$PASTE_MODE" == false ]] && \
+        test_pass "PASTE_MODE initial state is false" || test_fail "PASTE_MODE initial state"
+}
+
+test_paste_mode_variable_exists() {
+    [[ -n "${PASTE_MODE+x}" ]] && \
+        test_pass "PASTE_MODE variable exists" || test_fail "PASTE_MODE variable not defined"
+}
+
+test_paste_start_sets_mode() {
+    (echo -en '\x1b[200~' | (
+        save_terminal_state
+        PASTE_MODE=false
+        read_key
+        restore_terminal_state
+        [[ "$PASTE_MODE" == true ]]
+    )) && test_pass "Paste start sets PASTE_MODE=true" || test_fail "Paste start mode change"
+}
+
+test_paste_end_clears_mode() {
+    (echo -en '\x1b[201~' | (
+        save_terminal_state
+        PASTE_MODE=true
+        read_key
+        restore_terminal_state
+        [[ "$PASTE_MODE" == false ]]
+    )) && test_pass "Paste end sets PASTE_MODE=false" || test_fail "Paste end mode change"
+}
+
 test_functions_exist() {
     local missing=()
     for func in find_project_root get_slash_commands fuzzy_score fuzzy_match save_terminal_state restore_terminal_state read_key render_inline clear_line read_with_autosuggest; do
@@ -321,6 +371,14 @@ test_key_arrow_right
 test_key_backspace
 test_key_enter
 test_key_char
+test_key_paste_start
+test_key_paste_end
+
+# Bracketed paste mode tests
+test_paste_mode_variable_exists
+test_paste_mode_initial_state
+test_paste_start_sets_mode
+test_paste_end_clears_mode
 
 # Function existence test
 test_functions_exist

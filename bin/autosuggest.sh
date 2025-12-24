@@ -69,13 +69,16 @@ fuzzy_match() {
 }
 
 SAVED_TTY=""
+PASTE_MODE=false
 
 save_terminal_state() {
     SAVED_TTY=$(stty -g 2>/dev/null)
     stty -echo -icanon min 1 2>/dev/null
+    printf '\033[?2004h' > /dev/tty
 }
 
 restore_terminal_state() {
+    printf '\033[?2004l' > /dev/tty
     [[ -n "$SAVED_TTY" ]] && stty "$SAVED_TTY" 2>/dev/null
     SAVED_TTY=""
 }
@@ -88,10 +91,11 @@ read_key() {
         $'\t')           KEY_TYPE="TAB" ;;
         $'\n')           KEY_TYPE="ENTER" ;;
         $'\x7f'|$'\x08') KEY_TYPE="BACKSPACE" ;;
+        $'\x17')         KEY_TYPE="CTRL_BACKSPACE" ;;
         $'\x03')         KEY_TYPE="CTRL_C" ;;
         $'\x04')         KEY_TYPE="CTRL_D" ;;
         $'\x1b')
-            # Read escape sequence for arrow keys
+            # Read escape sequence for arrow keys, Ctrl+Arrow keys, and bracketed paste
             IFS= read -rsn1 -t 0.1 char2
             IFS= read -rsn1 -t 0.1 char3
             case "$char2$char3" in
@@ -99,6 +103,28 @@ read_key() {
                 '[B') KEY_TYPE="ARROW_DOWN" ;;
                 '[C') KEY_TYPE="ARROW_RIGHT" ;;
                 '[D') KEY_TYPE="ARROW_LEFT" ;;
+                '[1')
+                    # Possibly Ctrl+Arrow (needs more bytes: [1;5C or [1;5D)
+                    IFS= read -rsn1 -t 0.1 char4
+                    IFS= read -rsn1 -t 0.1 char5
+                    IFS= read -rsn1 -t 0.1 char6
+                    case "$char4$char5$char6" in
+                        ';5C') KEY_TYPE="CTRL_ARROW_RIGHT" ;;
+                        ';5D') KEY_TYPE="CTRL_ARROW_LEFT" ;;
+                        *)     KEY_TYPE="ESCAPE" ;;
+                    esac
+                    ;;
+                '[2')
+                    # Possibly bracketed paste start: [200~ or end: [201~
+                    IFS= read -rsn1 -t 0.1 char4
+                    IFS= read -rsn1 -t 0.1 char5
+                    IFS= read -rsn1 -t 0.1 char6
+                    case "$char4$char5$char6" in
+                        '00~') KEY_TYPE="PASTE_START"; PASTE_MODE=true ;;
+                        '01~') KEY_TYPE="PASTE_END"; PASTE_MODE=false ;;
+                        *)     KEY_TYPE="ESCAPE" ;;
+                    esac
+                    ;;
                 *)    KEY_TYPE="ESCAPE" ;;
             esac
             ;;
@@ -124,8 +150,14 @@ render_inline() {
     # Move to column 0 and clear to end of screen
     printf '\r\033[J' > /dev/tty
 
-    # Print prompt and input
-    printf '> %s' "$input" > /dev/tty
+    # Print prompt and input up to cursor
+    printf '> %s' "${input:0:$cursor_pos}" > /dev/tty
+
+    # Save cursor position
+    printf '\033[s' > /dev/tty
+
+    # Print rest of input
+    printf '%s' "${input:$cursor_pos}" > /dev/tty
 
     # Print suggestion if any
     if [[ -n "$suggestion" ]]; then
@@ -143,19 +175,8 @@ render_inline() {
     PREV_RENDER_LINES=$(( (display_len + term_width - 1) / term_width ))
     [[ $PREV_RENDER_LINES -lt 1 ]] && PREV_RENDER_LINES=1
 
-    # Position cursor at cursor_pos within input
-    # First, calculate total length displayed (prompt + input + suggestion)
-    local total_len=$((2 + ${#input}))
-    if [[ -n "$suggestion" ]]; then
-        total_len=$((total_len + ${#suggestion} - ${#input}))
-    fi
-
-    # Calculate where cursor should be (prompt + cursor_pos)
-    local cursor_target=$((2 + cursor_pos))
-
-    # Move cursor back from end to target position
-    local backtrack=$((total_len - cursor_target))
-    [[ $backtrack -gt 0 ]] && printf '\033[%dD' "$backtrack" > /dev/tty
+    # Restore cursor to saved position
+    printf '\033[u' > /dev/tty
 }
 
 clear_line() {
@@ -262,16 +283,58 @@ read_with_autosuggest() {
                 fi
                 ;;
 
-            ENTER)
-                # Send the input (with or without suggestion)
+            CTRL_ARROW_RIGHT)
+                # Jump to next word boundary (space or end)
+                while [[ $cursor_pos -lt ${#input} ]]; do
+                    cursor_pos=$((cursor_pos + 1))
+                    [[ $cursor_pos -ge ${#input} ]] && break
+                    [[ "${input:$cursor_pos:1}" == " " ]] && { cursor_pos=$((cursor_pos + 1)); break; }
+                done
+                local suggestion=""
                 if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
                     local base="${input%/*}/"
-                    input="${base}${matches[$match_idx]}"
+                    suggestion="${base}${matches[$match_idx]}"
                 fi
-                restore_terminal_state
-                echo "" > /dev/tty
-                echo "$input"
-                return 0
+                render_inline "$input" "$suggestion" "$cursor_pos"
+                ;;
+
+            CTRL_ARROW_LEFT)
+                # Jump to previous word boundary (space or start)
+                [[ $cursor_pos -gt 0 ]] && cursor_pos=$((cursor_pos - 1))
+                while [[ $cursor_pos -gt 0 ]]; do
+                    [[ "${input:$((cursor_pos-1)):1}" == " " ]] && break
+                    cursor_pos=$((cursor_pos - 1))
+                done
+                local suggestion=""
+                if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                    local base="${input%/*}/"
+                    suggestion="${base}${matches[$match_idx]}"
+                fi
+                render_inline "$input" "$suggestion" "$cursor_pos"
+                ;;
+
+            ENTER)
+                if [[ "$PASTE_MODE" == true ]]; then
+                    # Inside bracketed paste: insert literal newline
+                    input="${input:0:$cursor_pos}"$'\n'"${input:$cursor_pos}"
+                    cursor_pos=$((cursor_pos + 1))
+                    local suggestion=""
+                    if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                        local base="${input%/*}/"
+                        suggestion="${base}${matches[$match_idx]}"
+                    fi
+                    render_inline "$input" "$suggestion" "$cursor_pos"
+                else
+                    # Send the input (with or without suggestion)
+                    if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                        local base="${input%/*}/"
+                        input="${base}${matches[$match_idx]}"
+                    fi
+                    restore_terminal_state
+                    echo "" > /dev/tty
+                    echo "$input"
+                    return 0
+                fi
                 ;;
 
             BACKSPACE)
@@ -298,7 +361,43 @@ read_with_autosuggest() {
                 fi
                 ;;
 
+            CTRL_BACKSPACE)
+                if [[ $cursor_pos -gt 0 ]]; then
+                    local new_pos=$cursor_pos
+                    # Skip whitespace backward
+                    while [[ $new_pos -gt 0 ]] && [[ "${input:$((new_pos-1)):1}" =~ [[:space:]] ]]; do
+                        ((new_pos--))
+                    done
+                    # Skip word characters backward
+                    while [[ $new_pos -gt 0 ]] && [[ ! "${input:$((new_pos-1)):1}" =~ [[:space:]] ]]; do
+                        ((new_pos--))
+                    done
+                    # Delete from new_pos to cursor_pos
+                    input="${input:0:$new_pos}${input:$cursor_pos}"
+                    cursor_pos=$new_pos
+
+                    if [[ ! "$input" =~ / ]]; then
+                        suggest_mode=false
+                        matches=()
+                    elif [[ "$suggest_mode" == true ]]; then
+                        local pattern="${input##*/}"
+                        mapfile -t matches < <(fuzzy_match "$pattern")
+                        match_idx=0
+                    fi
+
+                    local suggestion=""
+                    if [[ "$suggest_mode" == true ]] && [[ ${#matches[@]} -gt 0 ]]; then
+                        local base="${input%/*}/"
+                        suggestion="${base}${matches[$match_idx]}"
+                    fi
+                    render_inline "$input" "$suggestion" "$cursor_pos"
+                fi
+                ;;
+
             CTRL_C)
+                # Clear display and show cursor before restoring terminal
+                printf '\r\033[J' > /dev/tty
+                printf '\033[?25h' > /dev/tty
                 restore_terminal_state
                 echo "^C" > /dev/tty
                 return 2
@@ -310,6 +409,10 @@ read_with_autosuggest() {
                     echo "" > /dev/tty
                     return 1
                 fi
+                ;;
+
+            PASTE_START|PASTE_END)
+                # Just update the PASTE_MODE flag (already done in read_key)
                 ;;
         esac
     done

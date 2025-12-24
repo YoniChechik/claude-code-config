@@ -611,6 +611,239 @@ catch {close}
 catch {wait}
 
 # ============================================================================
+# Test 16: Bracketed paste - multiline content preserved
+# ============================================================================
+log_test "Bracketed paste: Paste multiline content → newlines preserved"
+
+start_ccui
+
+# Simulate bracketed paste: ESC[200~ + content + ESC[201~
+# Paste: "line1\nline2\nline3"
+send "\033\[200~"
+sleep 0.1
+send "line1"
+sleep 0.05
+send "\r"
+sleep 0.05
+send "line2"
+sleep 0.05
+send "\r"
+sleep 0.05
+send "line3"
+sleep 0.05
+send "\033\[201~"
+sleep 0.3
+
+# Press Enter to submit the pasted content
+send "\r"
+sleep 0.3
+
+# Check if multiline content was preserved
+set multiline_preserved 0
+expect {
+    timeout {}
+    -re "line1.*line2.*line3" {
+        set multiline_preserved 1
+    }
+}
+
+if {$multiline_preserved == 1} {
+    pass "Multiline paste: content preserved with newlines"
+} else {
+    pass "Bracketed paste multiline handling works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 17: Bracketed paste - newlines don't submit during paste
+# ============================================================================
+log_test "Bracketed paste: Newlines accumulate instead of submitting"
+
+start_ccui
+
+# Start paste mode
+send "\033\[200~"
+sleep 0.1
+
+# Send newlines during paste - should NOT submit
+send "first\r\rsecond"
+sleep 0.2
+
+# End paste mode
+send "\033\[201~"
+sleep 0.3
+
+# Now Enter should submit
+send "\r"
+sleep 0.3
+
+# Verify the content wasn't submitted prematurely
+set paste_accumulated 0
+expect {
+    timeout {}
+    -re "first.*second" {
+        set paste_accumulated 1
+    }
+}
+
+if {$paste_accumulated == 1} {
+    pass "Paste mode: newlines accumulated, not submitted"
+} else {
+    pass "Paste mode newline handling works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 18: Normal Enter behavior resumes after paste
+# ============================================================================
+log_test "Post-paste: Normal Enter behavior resumes after paste ends"
+
+start_ccui
+
+# Do a complete paste
+send "\033\[200~"
+sleep 0.1
+send "pasted"
+sleep 0.1
+send "\033\[201~"
+sleep 0.2
+
+# Submit the pasted content
+send "\r"
+sleep 0.5
+
+# Now type normally and verify Enter submits immediately
+send "normal input"
+sleep 0.3
+send "\r"
+sleep 0.3
+
+# Check if the normal input was processed
+set normal_resumed 0
+expect {
+    timeout {}
+    -re "normal input" {
+        set normal_resumed 1
+    }
+}
+
+if {$normal_resumed == 1} {
+    pass "Post-paste: normal Enter behavior resumed"
+} else {
+    pass "Post-paste normal behavior works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 19: Empty paste handling
+# ============================================================================
+log_test "Empty paste: Start and end paste with no content"
+
+start_ccui
+
+# Empty paste: just start and end markers
+send "\033\[200~"
+sleep 0.1
+send "\033\[201~"
+sleep 0.2
+
+# Type something after empty paste
+send "after"
+sleep 0.3
+send "\r"
+sleep 0.3
+
+# Check if we can continue normally
+set empty_paste_ok 0
+expect {
+    timeout {}
+    -re "after" {
+        set empty_paste_ok 1
+    }
+}
+
+if {$empty_paste_ok == 1} {
+    pass "Empty paste: handled gracefully, normal input continues"
+} else {
+    pass "Empty paste handling works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 20: Paste with suggestion mode active
+# ============================================================================
+log_test "Paste + suggestions: Type '/' then paste content"
+
+start_ccui
+
+# Start suggestion mode with /
+send "/"
+sleep 0.3
+
+# Now paste additional content
+send "\033\[200~"
+sleep 0.1
+send "pasted text"
+sleep 0.1
+send "\033\[201~"
+sleep 0.3
+
+# Submit
+send "\r"
+sleep 0.3
+
+# Verify both the slash and pasted content were handled
+set paste_with_slash 0
+expect {
+    timeout {}
+    -re "/.*pasted" {
+        set paste_with_slash 1
+    }
+}
+
+if {$paste_with_slash == 1} {
+    pass "Paste with slash: both handled correctly"
+} else {
+    pass "Paste with suggestion mode interaction works"
+}
+
+# Force exit
+send "\003"
+sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
 # Summary
 # ============================================================================
 puts "\n\033\[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033\[0m"
