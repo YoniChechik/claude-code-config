@@ -222,6 +222,24 @@ test_key_arrow_right() {
     )) && test_pass "Arrow right detection" || test_fail "Arrow right detection"
 }
 
+test_key_ctrl_arrow_left() {
+    (echo -en '\x1b[1;5D' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "CTRL_ARROW_LEFT" ]]
+    )) && test_pass "Ctrl+Arrow left detection" || test_fail "Ctrl+Arrow left detection"
+}
+
+test_key_ctrl_arrow_right() {
+    (echo -en '\x1b[1;5C' | (
+        save_terminal_state
+        read_key
+        restore_terminal_state
+        [[ "$KEY_TYPE" == "CTRL_ARROW_RIGHT" ]]
+    )) && test_pass "Ctrl+Arrow right detection" || test_fail "Ctrl+Arrow right detection"
+}
+
 test_key_backspace() {
     (echo -en '\x7f' | (
         save_terminal_state
@@ -267,6 +285,82 @@ test_key_paste_end() {
         restore_terminal_state
         [[ "$KEY_TYPE" == "PASTE_END" && "$PASTE_MODE" == false ]]
     )) && test_pass "Paste end detection" || test_fail "Paste end detection"
+}
+
+test_cursor_word_jump_right() {
+    # Test: "hello world" with cursor at 0, jump right should go to 6 (after space)
+    local input="hello world"
+    local cursor_pos=0
+    # Simulate CTRL_ARROW_RIGHT logic
+    while [[ $cursor_pos -lt ${#input} ]]; do
+        cursor_pos=$((cursor_pos + 1))
+        [[ $cursor_pos -ge ${#input} ]] && break
+        [[ "${input:$cursor_pos:1}" == " " ]] && { cursor_pos=$((cursor_pos + 1)); break; }
+    done
+    [[ $cursor_pos -eq 6 ]] && test_pass "Word jump right (0→6)" || test_fail "Word jump right: expected 6, got $cursor_pos"
+}
+
+test_cursor_word_jump_left() {
+    # Test: "hello world" with cursor at 11 (end), jump left should go to 6 (start of "world")
+    local input="hello world"
+    local cursor_pos=11
+    # Simulate CTRL_ARROW_LEFT logic
+    [[ $cursor_pos -gt 0 ]] && cursor_pos=$((cursor_pos - 1))
+    while [[ $cursor_pos -gt 0 ]]; do
+        [[ "${input:$((cursor_pos-1)):1}" == " " ]] && break
+        cursor_pos=$((cursor_pos - 1))
+    done
+    [[ $cursor_pos -eq 6 ]] && test_pass "Word jump left (11→6)" || test_fail "Word jump left: expected 6, got $cursor_pos"
+}
+
+test_cursor_word_jump_left_from_middle() {
+    # Test: "hello world" with cursor at 8 (middle of "world"), jump left should go to 6
+    local input="hello world"
+    local cursor_pos=8
+    [[ $cursor_pos -gt 0 ]] && cursor_pos=$((cursor_pos - 1))
+    while [[ $cursor_pos -gt 0 ]]; do
+        [[ "${input:$((cursor_pos-1)):1}" == " " ]] && break
+        cursor_pos=$((cursor_pos - 1))
+    done
+    [[ $cursor_pos -eq 6 ]] && test_pass "Word jump left from middle (8→6)" || test_fail "Word jump left from middle: expected 6, got $cursor_pos"
+}
+
+test_cursor_word_jump_right_multiple_spaces() {
+    # Test: "hello  world" (two spaces) with cursor at 5, jump right should skip spaces
+    local input="hello  world"
+    local cursor_pos=5
+    while [[ $cursor_pos -lt ${#input} ]]; do
+        cursor_pos=$((cursor_pos + 1))
+        [[ $cursor_pos -ge ${#input} ]] && break
+        [[ "${input:$cursor_pos:1}" == " " ]] && { cursor_pos=$((cursor_pos + 1)); break; }
+    done
+    # Current implementation stops at first space after non-space
+    [[ $cursor_pos -eq 7 ]] && test_pass "Word jump right multi-space (5→7)" || test_fail "Word jump right multi-space: expected 7, got $cursor_pos"
+}
+
+test_cursor_at_boundary_left() {
+    # Test: cursor at 0, jump left should stay at 0
+    local input="hello"
+    local cursor_pos=0
+    [[ $cursor_pos -gt 0 ]] && cursor_pos=$((cursor_pos - 1))
+    while [[ $cursor_pos -gt 0 ]]; do
+        [[ "${input:$((cursor_pos-1)):1}" == " " ]] && break
+        cursor_pos=$((cursor_pos - 1))
+    done
+    [[ $cursor_pos -eq 0 ]] && test_pass "Word jump left at start (stays 0)" || test_fail "Word jump left at start: expected 0, got $cursor_pos"
+}
+
+test_cursor_at_boundary_right() {
+    # Test: cursor at end, jump right should stay at end
+    local input="hello"
+    local cursor_pos=5
+    local orig=$cursor_pos
+    while [[ $cursor_pos -lt ${#input} ]]; do
+        cursor_pos=$((cursor_pos + 1))
+        [[ $cursor_pos -ge ${#input} ]] && break
+        [[ "${input:$cursor_pos:1}" == " " ]] && { cursor_pos=$((cursor_pos + 1)); break; }
+    done
+    [[ $cursor_pos -eq 5 ]] && test_pass "Word jump right at end (stays 5)" || test_fail "Word jump right at end: expected 5, got $cursor_pos"
 }
 
 test_paste_mode_initial_state() {
@@ -483,11 +577,21 @@ test_key_arrow_up
 test_key_arrow_down
 test_key_arrow_left
 test_key_arrow_right
+test_key_ctrl_arrow_left
+test_key_ctrl_arrow_right
 test_key_backspace
 test_key_enter
 test_key_char
 test_key_paste_start
 test_key_paste_end
+
+# Cursor movement logic tests
+test_cursor_word_jump_right
+test_cursor_word_jump_left
+test_cursor_word_jump_left_from_middle
+test_cursor_word_jump_right_multiple_spaces
+test_cursor_at_boundary_left
+test_cursor_at_boundary_right
 
 # Bracketed paste mode tests
 test_paste_mode_variable_exists

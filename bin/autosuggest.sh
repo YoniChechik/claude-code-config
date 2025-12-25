@@ -142,21 +142,51 @@ render_inline() {
     local suggestion="$2"
     local cursor_pos="$3"
 
+    # Calculate how many lines our content will occupy
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo 80)
+
+    # Calculate cursor line position (0-indexed from start of our content)
+    local cursor_col=$((2 + cursor_pos))  # "> " + cursor_pos
+    local cursor_line=$((cursor_col / term_width))
+
+    # Calculate total display length
+    local display_len=$((2 + ${#input}))  # "> " + input
+    if [[ -n "$suggestion" ]]; then
+        display_len=$((display_len + ${#suggestion} - ${#input}))
+    fi
+    local total_lines=$(( (display_len + term_width - 1) / term_width ))
+    [[ $total_lines -lt 1 ]] && total_lines=1
+
     # Move up to first line of our output (if we wrapped before)
     if [[ $PREV_RENDER_LINES -gt 1 ]]; then
         printf '\033[%dA' $((PREV_RENDER_LINES - 1)) > /dev/tty
     fi
 
-    # Move to column 0 and clear to end of screen
-    printf '\r\033[J' > /dev/tty
+    # Move to column 0
+    printf '\r' > /dev/tty
+
+    # Clear each line we previously occupied (using \033[K per line, not \033[J)
+    for ((i = 0; i < PREV_RENDER_LINES; i++)); do
+        printf '\033[K' > /dev/tty
+        if [[ $i -lt $((PREV_RENDER_LINES - 1)) ]]; then
+            printf '\033[B' > /dev/tty  # Move down
+        fi
+    done
+
+    # Move back up to first line
+    if [[ $PREV_RENDER_LINES -gt 1 ]]; then
+        printf '\033[%dA' $((PREV_RENDER_LINES - 1)) > /dev/tty
+    fi
+    printf '\r' > /dev/tty
 
     # Print prompt and input up to cursor
     printf '> %s' "${input:0:$cursor_pos}" > /dev/tty
 
-    # Save cursor position
+    # Save cursor position (this is where cursor should end up)
     printf '\033[s' > /dev/tty
 
-    # Print rest of input
+    # Print rest of input after cursor
     printf '%s' "${input:$cursor_pos}" > /dev/tty
 
     # Print suggestion if any
@@ -165,17 +195,10 @@ render_inline() {
         printf "${C_GRAY}%s${C_RESET}" "$remaining" > /dev/tty
     fi
 
-    # Calculate how many lines we just used
-    local term_width
-    term_width=$(tput cols 2>/dev/null || echo 80)
-    local display_len=$((2 + ${#input}))  # "> " + input
-    if [[ -n "$suggestion" ]]; then
-        display_len=$((display_len + ${#suggestion} - ${#input}))
-    fi
-    PREV_RENDER_LINES=$(( (display_len + term_width - 1) / term_width ))
-    [[ $PREV_RENDER_LINES -lt 1 ]] && PREV_RENDER_LINES=1
+    # Update line count for next render
+    PREV_RENDER_LINES=$total_lines
 
-    # Restore cursor to saved position
+    # Restore cursor to saved position (where user is editing)
     printf '\033[u' > /dev/tty
 }
 
