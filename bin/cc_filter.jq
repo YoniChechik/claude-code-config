@@ -278,6 +278,14 @@ then
     prefix_lines("SUB:")
 
 # ---------------------------------------------------------
+# USER: Catch-all for unhandled user events (debug)
+# ---------------------------------------------------------
+elif .type == "user"
+then
+    "LINE:" + C_YELLOW + "[Debug] Unhandled user event:" + C_RESET + "\n" +
+    "LINE:" + C_DIM + (. | @json) + C_RESET
+
+# ---------------------------------------------------------
 # RESULT: Final result - check for errors
 # ---------------------------------------------------------
 elif .type == "result" then
