@@ -39,26 +39,7 @@ run_claude() {
 
     trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
 
-    local timeout_file=$(mktemp)
-    local timed_out=false
-
-    (
-        while [ -f "$timeout_file" ]; do
-            sleep 5
-            if [ -f "$timeout_file" ]; then
-                local current_check=$(stat -c %Y "$timeout_file" 2>/dev/null || echo 0)
-                local idle=$(($(date +%s) - current_check))
-                if [ $idle -ge 30 ]; then
-                    touch "${timeout_file}.timeout"
-                    break
-                fi
-            fi
-        done
-    ) &
-    local timeout_monitor_pid=$!
-
     while IFS= read -r line; do
-        touch "$timeout_file"
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
             SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
@@ -66,15 +47,6 @@ run_claude() {
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
         stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
-
-    kill $timeout_monitor_pid 2>/dev/null
-    wait $timeout_monitor_pid 2>/dev/null
-
-    if [ -f "${timeout_file}.timeout" ]; then
-        timed_out=true
-    fi
-
-    rm -f "$timeout_file" "${timeout_file}.timeout"
 
     trap - INT
 
@@ -103,11 +75,6 @@ run_claude() {
         TOTAL_OUT=$((TOTAL_OUT + out))
     fi
     rm -f "$raw"
-
-    if [ "$timed_out" = true ]; then
-        echo -e "\n\033[33mTimeout: No response for 30s. Sending 'continue'...\033[0m\n"
-        run_claude "continue"
-    fi
 }
 
 show_prompt() {
