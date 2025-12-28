@@ -66,7 +66,7 @@ run_claude() {
 
 # Display prompt with session statistics
 show_prompt() {
-    printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
+    printf "\033[33m%s" "$(pwd)"
     if [ "$LAST_MS" -gt 0 ]; then
         local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
         printf " [%ss │ %s]" "$sec" "$MODEL"
