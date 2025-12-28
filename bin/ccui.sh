@@ -20,11 +20,13 @@ validate_environment
 SESSION_ID=""
 LAST_MS=0
 MODEL=""
+SESSION_CWD=""
 
 # Execute Claude with user prompt and display streaming output
 run_claude() {
     local raw=$(mktemp)
-    local args=(-p "$1" --output-format stream-json --verbose)
+    local schema='{"type":"object","properties":{"cwd":{"type":"string","description":"Current working directory path"},"response":{"type":"string","description":"Response to user"}},"required":["cwd","response"]}'
+    local args=(-p "$1" --output-format stream-json --verbose --json-schema "$schema")
 
     # Resume previous session if exists
     [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
@@ -61,7 +63,17 @@ run_claude() {
     local result=$(grep '"type":"result"' "$raw" | tail -1)
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
+    # Extract cwd from structured output
+    if [ -n "$result" ]; then
+        SESSION_CWD=$(echo "$result" | jq -r '.structured_output.cwd // empty' 2>/dev/null)
+    fi
+
     rm -f "$raw"
+
+    # Change to final session directory if captured
+    if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
+        cd "$SESSION_CWD" 2>/dev/null || true
+    fi
 }
 
 # Display prompt with session statistics
