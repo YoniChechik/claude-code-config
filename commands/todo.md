@@ -17,3 +17,5 @@ Parse user input and create todo items.
    - Append to existing todo list if it exists (don't replace)
 
 4. **Report**: Print todo in claude format using TodoWrite tool's list output.
+
+5. **Execute**: Continue working on next items in todo and push when done.
