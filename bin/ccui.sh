@@ -1,15 +1,9 @@
 #!/bin/bash
+# Claude Code REPL - Interactive command-line interface for Claude
 
-# For testing in clones, use local directory if available, otherwise fall back to ~/.claude
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLONE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLAUDE_DIR="$HOME/.claude"
 
-if [ -f "$CLONE_ROOT/bin/autosuggest.sh" ]; then
-    CLAUDE_DIR="$CLONE_ROOT"
-else
-    CLAUDE_DIR="$HOME/.claude"
-fi
-
+# Check for required jq dependency
 if ! command -v jq >/dev/null 2>&1; then
     echo "Error: jq not installed" >&2
     echo "" >&2
@@ -18,27 +12,31 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-source "$CLAUDE_DIR/bin/autosuggest.sh"
-
+# Validate environment setup
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
 
+# Session tracking variables
 SESSION_ID=""
-TOTAL_COST=0
-TOTAL_IN=0
-TOTAL_OUT=0
 LAST_MS=0
 MODEL=""
 
+# Execute Claude with user prompt and display streaming output
 run_claude() {
     local raw=$(mktemp)
     local args=(-p "$1" --output-format stream-json --verbose)
+
+    # Resume previous session if exists
     [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
+
+    # Append custom system prompt if available
     [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ] && \
         args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
+    # Handle Ctrl+C gracefully
     trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
 
+    # Stream and parse Claude output
     while IFS= read -r line; do
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
@@ -50,36 +48,26 @@ run_claude() {
 
     trap - INT
 
+    # Extract session ID from first response
     if [ -z "$SESSION_ID" ]; then
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
+
+    # Extract model information
     local model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
     [ -n "$model" ] && MODEL="$model"
+
+    # Extract duration for prompt display
     local result=$(grep '"type":"result"' "$raw" | tail -1)
-    if [ -n "$result" ]; then
-        local cost=$(echo "$result" | jq -r '.total_cost_usd // 0')
-        if [ -n "$model" ]; then
-            local in=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].inputTokens // 0')
-            local out=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].outputTokens // 0')
-            local cache=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].cacheReadInputTokens // 0')
-            local cache_create=$(echo "$result" | jq -r --arg m "$model" '.modelUsage[$m].cacheCreationInputTokens // 0')
-        else
-            local in=$(echo "$result" | jq -r '.inputTokens // 0')
-            local out=$(echo "$result" | jq -r '.outputTokens // 0')
-            local cache=$(echo "$result" | jq -r '.cacheReadInputTokens // 0')
-            local cache_create=$(echo "$result" | jq -r '.cacheCreationInputTokens // 0')
-        fi
-        LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
-        TOTAL_COST=$(awk "BEGIN {print $TOTAL_COST + $cost}")
-        TOTAL_IN=$((TOTAL_IN + in + cache + cache_create))
-        TOTAL_OUT=$((TOTAL_OUT + out))
-    fi
+    [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
+
     rm -f "$raw"
 }
 
+# Display prompt with session statistics
 show_prompt() {
     printf "\033[33m%s@%s:%s" "$USER" "$(hostname -s)" "$(pwd)"
-    if [ "$TOTAL_IN" -gt 0 ]; then
+    if [ "$LAST_MS" -gt 0 ]; then
         local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
         printf " [%ss │ %s]" "$sec" "$MODEL"
     fi
@@ -89,19 +77,21 @@ show_prompt() {
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
+# Main REPL loop
 while true; do
     show_prompt
 
-    input=$(read_with_autosuggest)
-    ret=$?
-    [[ $ret -eq 1 ]] && break     # Ctrl+D exits
-    [[ $ret -eq 2 ]] && continue  # Ctrl+C cancels
+    # Read user input with readline support (Ctrl+D exits)
+    read -r -e -p "> " input || break
 
+    # Skip empty input
     if [[ -z "$input" ]]; then
         continue
     fi
-    [[ "$input" =~ ^(exit|quit)$ ]] && break
+
+    # Save to bash history
     history -s "$input"
 
+    # Execute Claude with user input
     run_claude "$input"
 done
