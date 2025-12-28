@@ -47,7 +47,6 @@ run_claude() {
             JSON:*)
                 json="${line#JSON:}"
                 SESSION_CWD=$(echo "$json" | jq -r '.cwd // empty' 2>/dev/null)
-                echo "$json" | jq . 2>/dev/null || echo "$json"
                 ;;
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
