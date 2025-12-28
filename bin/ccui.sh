@@ -86,6 +86,21 @@ show_prompt() {
     printf "\033[0m\n"
 }
 
+# Read input with bracketed paste support
+read_input() {
+    local input=""
+
+    printf '\033[?2004h> '
+    IFS= read -r input
+    printf '\033[?2004l'
+
+    # Strip bracketed paste escape sequences
+    input="${input#$'\033[200~'}"
+    input="${input%$'\033[201~'}"
+
+    echo "$input"
+}
+
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
@@ -93,16 +108,13 @@ echo ""
 while true; do
     show_prompt
 
-    # Read user input with readline support (Ctrl+D exits)
-    read -r -e -p "> " input || break
+    # Read user input with bracketed paste support (Ctrl+D exits)
+    input=$(read_input) || break
 
     # Skip empty input
     if [[ -z "$input" ]]; then
         continue
     fi
-
-    # Save to bash history
-    history -s "$input"
 
     # Execute Claude with user input
     run_claude "$input"
