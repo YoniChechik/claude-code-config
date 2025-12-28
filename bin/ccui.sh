@@ -89,15 +89,33 @@ show_prompt() {
 # Read input with bracketed paste support
 read_input() {
     local input=""
+    local read_status
 
-    echo -n '> '
-    printf '\033[?2004h'
+    echo -n '> ' >&2
+    printf '\033[?2004h' >&2
     IFS= read -r input
-    printf '\033[?2004l'
+    read_status=$?
+    printf '\033[?2004l' >&2
 
-    # Strip bracketed paste escape sequences
-    input="${input#$'\033[200~'}"
-    input="${input%$'\033[201~'}"
+    # Return immediately if read failed (EOF)
+    [ $read_status -ne 0 ] && return $read_status
+
+    # Handle multiline bracketed paste
+    # If input starts with paste start marker, keep reading until end marker
+    if [[ "$input" == $'\033[200~'* ]]; then
+        # Strip the start marker
+        input="${input#$'\033[200~'}"
+
+        # Keep reading lines until we find the end marker
+        while [[ "$input" != *$'\033[201~'* ]]; do
+            local line=""
+            IFS= read -r line || break
+            input+=$'\n'"$line"
+        done
+
+        # Strip the end marker
+        input="${input%$'\033[201~'}"
+    fi
 
     echo "$input"
 }
