@@ -90,7 +90,8 @@ show_prompt() {
 read_input() {
     local input=""
 
-    printf '\033[?2004h> '
+    printf '> '
+    printf '\033[?2004h'
     IFS= read -r input
     printf '\033[?2004l'
 
