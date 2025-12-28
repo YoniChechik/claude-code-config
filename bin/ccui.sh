@@ -44,6 +44,11 @@ run_claude() {
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
             SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
             LINE:*) printf "%s\n" "${line#LINE:}" ;;
+            JSON:*)
+                json="${line#JSON:}"
+                SESSION_CWD=$(echo "$json" | jq -r '.cwd // empty' 2>/dev/null)
+                echo "$json" | jq . 2>/dev/null || echo "$json"
+                ;;
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
         stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
@@ -62,11 +67,6 @@ run_claude() {
     # Extract duration for prompt display
     local result=$(grep '"type":"result"' "$raw" | tail -1)
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
-
-    # Extract cwd from structured output
-    if [ -n "$result" ]; then
-        SESSION_CWD=$(echo "$result" | jq -r '.structured_output.cwd // empty' 2>/dev/null)
-    fi
 
     rm -f "$raw"
 
@@ -90,7 +90,7 @@ show_prompt() {
 read_input() {
     local input=""
 
-    printf '> '
+    echo -n '> '
     printf '\033[?2004h'
     IFS= read -r input
     printf '\033[?2004l'

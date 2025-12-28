@@ -286,7 +286,7 @@ then
     "LINE:" + C_DIM + (. | @json) + C_RESET
 
 # ---------------------------------------------------------
-# RESULT: Final result - check for errors
+# RESULT: Final result - check for errors and structured output
 # ---------------------------------------------------------
 elif .type == "result" then
     # Check for error conditions indicating bad command
@@ -300,6 +300,12 @@ elif .type == "result" then
     elif (.result == "" and .usage.output_tokens == 0) then
         # Silent failure - empty result with no tokens (likely invalid slash command)
         "LINE:" + C_YELLOW + "⚠ No response (possible invalid slash command)" + C_RESET
+    elif .structured_output then
+        # Output response line by line, then rest of structured_output as JSON
+        (if .structured_output.response then
+            .structured_output.response | split("\n") | map("LINE:" + .) | join("\n")
+        else empty end),
+        (.structured_output | del(.response) | "JSON:" + @json)
     else
         empty
     end
