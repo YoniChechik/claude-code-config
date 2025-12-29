@@ -189,7 +189,7 @@ then
 elif .type == "assistant" and
      ([.message.content[] | select(.type == "tool_use")] | length > 0)
 then
-    [.message.content[] | select(.type == "tool_use") | format_tool] |
+    [.message.content[] | select(.type == "tool_use") | select(.name != "StructuredOutput") | format_tool] |
     if length > 0 then
         join("\n") | prefix_lines(if $is_sub then "SUB:" else "LINE:" end)
     else empty end
