@@ -1,7 +1,15 @@
 #!/bin/bash
 # Claude Code REPL - Interactive command-line interface for Claude
 
-CLAUDE_DIR="$HOME/.claude"
+# For testing in clones, use local directory if available, otherwise fall back to ~/.claude
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLONE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "$CLONE_ROOT/bin/autosuggest.sh" ]; then
+    CLAUDE_DIR="$CLONE_ROOT"
+else
+    CLAUDE_DIR="$HOME/.claude"
+fi
 
 # Check for required jq dependency
 if ! command -v jq >/dev/null 2>&1; then
@@ -11,6 +19,9 @@ if ! command -v jq >/dev/null 2>&1; then
     echo "  apt update && apt install -y jq" >&2
     exit 1
 fi
+
+# Source autosuggest module
+source "$CLAUDE_DIR/bin/autosuggest.sh"
 
 # Validate environment setup
 source "$CLAUDE_DIR/bin/val.sh"
@@ -85,40 +96,6 @@ show_prompt() {
     printf "\033[0m\n"
 }
 
-# Read input with bracketed paste support
-read_input() {
-    local input=""
-    local read_status
-
-    echo -n '> ' >&2
-    printf '\033[?2004h' >&2
-    IFS= read -r input
-    read_status=$?
-    printf '\033[?2004l' >&2
-
-    # Return immediately if read failed (EOF)
-    [ $read_status -ne 0 ] && return $read_status
-
-    # Handle multiline bracketed paste
-    # If input starts with paste start marker, keep reading until end marker
-    if [[ "$input" == $'\033[200~'* ]]; then
-        # Strip the start marker
-        input="${input#$'\033[200~'}"
-
-        # Keep reading lines until we find the end marker
-        while [[ "$input" != *$'\033[201~'* ]]; do
-            local line=""
-            IFS= read -r line || break
-            input+=$'\n'"$line"
-        done
-
-        # Strip the end marker
-        input="${input%$'\033[201~'}"
-    fi
-
-    echo "$input"
-}
-
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
@@ -126,8 +103,11 @@ echo ""
 while true; do
     show_prompt
 
-    # Read user input with bracketed paste support (Ctrl+D exits)
-    input=$(read_input) || break
+    # Read user input with autosuggest (Ctrl+D exits, Ctrl+C cancels)
+    input=$(read_with_autosuggest)
+    ret=$?
+    [[ $ret -eq 1 ]] && break     # Ctrl+D exits
+    [[ $ret -eq 2 ]] && continue  # Ctrl+C cancels
 
     # Skip empty input
     if [[ -z "$input" ]]; then
