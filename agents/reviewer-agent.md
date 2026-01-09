@@ -41,28 +41,7 @@ This allows tests to execute while you perform quality checks and code review. Y
 
 **MAKE SURE TO RUN TESTS IN BACKGROUND**
 
-### Step 3: Run Quality Tools
-
-For each modified Python file, run quality checks in parallel:
-
-**Ruff Format Check:**
-```bash
-uv run ruff format --check file.py
-```
-
-**Ruff Lint Check:**
-```bash
-uv run ruff check file.py
-```
-
-**Ty Type Check:**
-```bash
-uv run ty check file.py
-```
-
-Collect all issues found.
-
-### Step 4: Deep Code Review
+### Step 3: Deep Code Review
 
 Review each modified file for:
 
@@ -115,7 +94,7 @@ For each issue found, provide:
 - Detailed explanation
 - Suggested fix
 
-### Step 5: Check Test Results
+### Step 4: Check Test Results
 
 By now, the background tests from Step 2 should be complete or nearly complete.
 
@@ -132,7 +111,7 @@ Report:
 
 If tests are still running, wait for them to complete before proceeding to the report.
 
-### Step 6: Review Git Diff
+### Step 5: Review Git Diff
 
 Get the actual changes:
 ```bash
@@ -145,7 +124,7 @@ Review the diff to ensure:
 - No commented-out code
 - Clean commit hygiene
 
-### Step 7: Generate Review Report
+### Step 6: Generate Review Report
 
 Create `review.md` with the following structure:
 
@@ -161,17 +140,6 @@ Create `review.md` with the following structure:
 [High-level summary of changes and overall assessment]
 
 **Overall Status**: ✅ APPROVED / ⚠️ CHANGES REQUESTED / ❌ REJECTED
-
-## Quality Checks
-
-### Ruff Format
-[Results for each file]
-
-### Ruff Lint
-[Results for each file]
-
-### Ty Type Check
-[Results for each file]
 
 ## Code Review Findings
 
@@ -195,12 +163,28 @@ Create `review.md` with the following structure:
 
 [List of all files checked with brief notes]
 
-## Recommendations
-
-[Overall recommendations for next steps]
 ```
 
 **Write the report to `review.md` in the current directory.**
+
+### Step 7: Commit Review Report (Optional)
+
+If requested, commit the review report:
+
+1. Stage report: `git add review.md`
+2. Commit:
+   ```bash
+   git commit -m "$(cat <<'EOF'
+   Add code review report
+   EOF
+   )"
+   ```
+3. Push: `git push`
+
+**Git Safety:**
+- NEVER use --amend unless HEAD commit was created by you AND not yet pushed
+- NEVER force push to main/master
+- Don't commit code fixes (you're a reviewer, not a fixer)
 
 ## Important Notes
 
@@ -210,26 +194,3 @@ Create `review.md` with the following structure:
 - **Explain the "why"** - don't just say what's wrong, explain why it matters
 - **Be constructive** - suggest fixes, not just criticism
 - **Don't modify code** - you're a reviewer, not a fixer
-
-## Examples
-
-**BLOCKING Issue:**
-```markdown
-### 🚨 BLOCKING: FAIL-FAST Violation
-**File**: `album_maker/core/utils.py:45`
-**Issue**: Using `dict.get(key, default)` hides missing key errors
-**Code**: `result = config.get("api_key", "")`
-**Fix**: Use `result = config["api_key"]` to fail immediately if key is missing
-**Rationale**: Silent failures delay bug discovery. We want crashes in development.
-```
-
-**High Priority Issue:**
-```markdown
-### ⚠️ HIGH: Potential SQL Injection
-**File**: `album_maker/api/users.py:123`
-**Issue**: Unsanitized user input in SQL query
-**Code**: `cursor.execute(f"SELECT * FROM users WHERE name = '{user_input}'")`
-**Fix**: Use parameterized queries: `cursor.execute("SELECT * FROM users WHERE name = ?", (user_input,))`
-**Rationale**: Direct SQL injection vulnerability
-```
-

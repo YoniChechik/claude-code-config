@@ -42,8 +42,25 @@ Run the code/tests again to verify fix.
 ### 7. Clean Up
 Remove debug prints and test scaffolding.
 
-### 8. Sync Changes
-/sync
+### 8. Commit and Push Changes
+
+After fixes are verified:
+
+1. Run `git status` and `git diff` to review changes
+2. Stage files: `git add <files>`
+3. Commit with descriptive message:
+   ```bash
+   git commit -m "$(cat <<'EOF'
+   Fix: [brief description of bug and fix]
+   EOF
+   )"
+   ```
+4. Push: `git push`
+
+**Git Safety:**
+- NEVER use --amend unless HEAD commit was created by you AND not yet pushed
+- NEVER force push to main/master
+- If commit fails, fix the issue and create a NEW commit
 
 ## Important Rules
 
