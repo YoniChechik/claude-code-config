@@ -26,3 +26,4 @@ Replace these defensive patterns with direct access:
 - `try: ... except: pass` → never do this
 
 Report what was removed/fixed.
+Commit and push changes.

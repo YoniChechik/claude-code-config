@@ -20,3 +20,4 @@ Enforce proper code structure in each file.
 - No relative imports (use absolute imports)
 
 Report what was reorganized.
+Commit and push changes.

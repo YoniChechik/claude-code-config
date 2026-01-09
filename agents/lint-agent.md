@@ -17,6 +17,7 @@ Format and auto-fix linting and type issues on changed Python files.
 2. If errors remain, read files and fix manually:
    - Type annotations: use modern syntax (`list` not `List`, `x | None` not `Optional[x]`)
    - Only use `# type: ignore` as last resort
+   - commit and push changes
 
 3. Re-run script without --fix to verify:
 ```bash
