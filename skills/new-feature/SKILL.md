@@ -1,6 +1,6 @@
 ---
 name: "new-feature"
-description: "New Feature Setup"
+description: "Start new feature with full planning"
 ---
 
 Creates a new feature branch using git clone for isolated development with full planning.

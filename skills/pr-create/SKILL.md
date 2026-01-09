@@ -1,6 +1,6 @@
 ---
 name: "pr-create"
-description: "Create Pull Request"
+description: "Create pull request from feature branch"
 ---
 
 Creates a professional pull request when a feature is complete and ready for review.

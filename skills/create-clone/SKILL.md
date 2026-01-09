@@ -1,6 +1,6 @@
 ---
 name: "create-clone"
-description: "Create Feature Clone"
+description: "Create isolated git clone for feature"
 ---
 
 Creates a git clone for isolated feature development.

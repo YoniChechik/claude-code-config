@@ -1,6 +1,6 @@
 ---
 name: "finish"
-description: "Finish Feature"
+description: "Run quality checks and review before PR"
 ---
 
 Runs quality checks before PR creation. Use when implementation is complete.

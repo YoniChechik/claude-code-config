@@ -1,6 +1,6 @@
 ---
 name: "continue-feature"
-description: "Continue Feature Development"
+description: "Resume work on existing feature clone"
 ---
 
 Continues work on an existing feature clone with proper context analysis.

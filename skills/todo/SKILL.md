@@ -1,6 +1,6 @@
 ---
 name: "todo"
-description: "Add Todo Items"
+description: "Parse input and create todo items"
 ---
 
 Parse user input and create todo items.

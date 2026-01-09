@@ -1,6 +1,6 @@
 ---
 name: "new-feature-short"
-description: "Quick Feature Setup"
+description: "Start MVP feature with lightweight planning"
 ---
 
 Creates a new feature branch using git clone with lightweight planning. Uses planner with haiku model for MVP scope, skips tests and docs.
