@@ -1,4 +1,7 @@
-# PR Comments and Tests - Interactive Triage
+---
+name: "pr-comments"
+description: "PR Comments and Tests - Interactive Triage"
+---
 
 Displays all comments (from users and bots) and test results for a pull request, then helps triage them interactively.
 

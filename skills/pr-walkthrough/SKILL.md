@@ -1,4 +1,7 @@
-# PR Walkthrough - Interactive Code Review
+---
+name: "pr-walkthrough"
+description: "PR Walkthrough - Interactive Code Review"
+---
 
 Walks through a PR's changes interactively, explaining one file and one section at a time - like a human would sit and explain their code. Each step requires user to say "next" to continue.
 

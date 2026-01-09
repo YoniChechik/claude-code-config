@@ -1,5 +1,5 @@
 ---
-name: coder
+name: coder-agent
 description: Implements features, writes code, and fixes straightforward bugs. Use for ALL coding tasks including new features, bug fixes, and file modifications. USE PROACTIVELY for any file changes.
 ---
 

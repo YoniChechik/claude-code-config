@@ -1,4 +1,7 @@
-# New Feature Setup
+---
+name: "new-feature"
+description: "New Feature Setup"
+---
 
 Creates a new feature branch using git clone for isolated development with full planning.
 
@@ -11,7 +14,7 @@ Creates a new feature branch using git clone for isolated development with full 
 ## Process
 
 ### Step 1: Create Clone
-/create-clone 
+/create-clone
 
 ### Step 2: Plan
 Use the planner subagent to create the feature plan

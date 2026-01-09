@@ -1,4 +1,7 @@
-# Continue Feature Development
+---
+name: "continue-feature"
+description: "Continue Feature Development"
+---
 
 Continues work on an existing feature clone with proper context analysis.
 

@@ -1,4 +1,7 @@
-# Add Todo Items
+---
+name: "todo"
+description: "Add Todo Items"
+---
 
 Parse user input and create todo items.
 

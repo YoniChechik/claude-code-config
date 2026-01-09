@@ -1,4 +1,7 @@
-# Sync Changes
+---
+name: "sync"
+description: "Sync Changes"
+---
 
 Merges from origin/main, commits any local changes with professional message generation, and pushes to remote. This ensures the current branch is always ahead of (or equal to) origin/main, never behind or diverged.
 

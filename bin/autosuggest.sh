@@ -25,7 +25,18 @@ get_slash_commands() {
         done
     fi
 
-    # 2. Project commands (from .claude/commands in project root)
+    # 2. User skills (from ~/.claude/skills/*/
+    if [[ -d "$HOME/.claude/skills" ]]; then
+        for d in "$HOME/.claude/skills"/*/; do
+            [[ -d "$d" ]] || continue
+            local name="$(basename "$d")"
+            [[ ${seen[$name]+_} ]] && continue
+            cmds+=("$name")
+            seen[$name]=1
+        done
+    fi
+
+    # 3. Project commands (from .claude/commands in project root)
     local project_root
     project_root=$(find_project_root)
     if [[ -n "$project_root" && -d "$project_root/.claude/commands" ]]; then
@@ -38,7 +49,18 @@ get_slash_commands() {
         done
     fi
 
-    # 3. Claude built-in commands (lowest priority)
+    # 4. Project skills (from .claude/skills/*/ in project root)
+    if [[ -n "$project_root" && -d "$project_root/.claude/skills" ]]; then
+        for d in "$project_root/.claude/skills"/*/; do
+            [[ -d "$d" ]] || continue
+            local name="$(basename "$d")"
+            [[ ${seen[$name]+_} ]] && continue
+            cmds+=("$name")
+            seen[$name]=1
+        done
+    fi
+
+    # 5. Claude built-in commands (lowest priority)
     local builtins=(bug clear compact config cost doctor help init login logout mcp memory model permissions review status terminal-setup vim)
     for name in "${builtins[@]}"; do
         [[ ${seen[$name]+_} ]] && continue

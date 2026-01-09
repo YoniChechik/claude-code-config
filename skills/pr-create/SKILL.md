@@ -1,4 +1,7 @@
-# Create Pull Request
+---
+name: "pr-create"
+description: "Create Pull Request"
+---
 
 Creates a professional pull request when a feature is complete and ready for review.
 

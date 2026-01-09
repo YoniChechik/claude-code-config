@@ -1,4 +1,7 @@
-# Quality Command
+---
+name: "quality"
+description: "Run quality checks, fix code quality issues, check code style, format code, or perform lint checks"
+---
 
 Runs quality checks and fixes in a single pass.
 

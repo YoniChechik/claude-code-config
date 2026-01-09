@@ -17,7 +17,6 @@ Enforce proper code structure in each file.
 
 ## Rules
 - All private items MUST start with `_` prefix
-- Functions over ~50 lines should be split
 - No relative imports (use absolute imports)
 
 Report what was reorganized.

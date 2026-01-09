@@ -1,5 +1,5 @@
 ---
-name: planner
+name: planner-agent
 description: Analyzes feature requests, asks clarifying questions, and creates comprehensive breakdown documents determining if features should be single or multi-PR implementations.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: reviewer
+name: reviewer-agent
 description: Comprehensive code review with quality checks, security analysis, and test validation. USE PROACTIVELY after coding is complete to validate quality before merge.
 ---
 

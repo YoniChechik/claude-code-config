@@ -1,5 +1,5 @@
 ---
-name: debugger
+name: debugger-agent
 description: Diagnoses and fixes bugs, test failures, and runtime errors. Investigates issues systematically and provides fixes. USE PROACTIVELY when code has errors or tests are failing.
 ---
 

@@ -1,4 +1,7 @@
-# Create Feature Clone
+---
+name: "create-clone"
+description: "Create Feature Clone"
+---
 
 Creates a git clone for isolated feature development.
 
