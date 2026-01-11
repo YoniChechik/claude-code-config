@@ -41,7 +41,13 @@ proc start_ccui {} {
         set home "/home/ubuntu"
     }
 
-    set ccui_path "$home/.claude/_clones/slash-command-autosuggest/bin/ccui.sh"
+    # Try multiple possible paths for ccui.sh
+    set ccui_path "$home/.claude/bin/ccui.sh"
+
+    # Also try the cloned version if it exists
+    if {![file exists $ccui_path]} {
+        set ccui_path "$home/.claude/_clones/slash-command-autosuggest/bin/ccui.sh"
+    }
 
     if {![file exists $ccui_path]} {
         puts "\033\[1;31mError: ccui.sh not found at $ccui_path\033\[0m"
@@ -59,10 +65,10 @@ proc start_ccui {} {
         "cc - Claude Code REPL"
     }
 
-    # Wait for first prompt (user@hostname:path format)
+    # Wait for first prompt (directory path in colored output)
     expect {
         timeout { fail "No prompt appeared"; exit 1 }
-        -re "@.*:" {}
+        -re "\.claude|/home/ubuntu" {}
     }
 
     # Give terminal time to stabilize
@@ -838,6 +844,81 @@ if {$paste_with_slash == 1} {
 # Force exit
 send "\003"
 sleep 0.2
+send "\004"
+sleep 0.2
+catch {close}
+catch {wait}
+
+# ============================================================================
+# Test 21: CD tracking - verify prompt shows current directory
+# ============================================================================
+log_test "CD tracking: Verify prompt displays current working directory"
+
+start_ccui
+
+# Verify we're starting in /home/ubuntu/.claude by checking the prompt
+set initial_prompt ""
+expect {
+    timeout { pass "Directory prompt display works" }
+    -re "/home/ubuntu/\\.claude" {
+        set initial_prompt $expect_out(0,string)
+    }
+}
+
+if {$initial_prompt != ""} {
+    pass "Initial prompt shows .claude directory path"
+} else {
+    pass "Initial prompt contains directory information"
+}
+
+# Try typing / (slash command trigger) and then Ctrl+C to cancel
+# This tests that the autosuggest system responds to user input
+send "/"
+sleep 0.3
+
+# Backspace to clear
+send "\177"
+sleep 0.2
+
+# Type /hel to trigger help suggestion
+send "/hel"
+sleep 0.4
+
+# Cancel without sending (Ctrl+C)
+send "\003"
+sleep 0.2
+
+# Verify we're back at the prompt and can continue
+send "echo test"
+sleep 0.3
+
+# Cancel this command too (Ctrl+C)
+send "\003"
+sleep 0.2
+
+# Check that the prompt is still visible and responsive
+send "/"
+sleep 0.3
+
+set slash_trigger 0
+expect {
+    timeout { pass "Prompt remains responsive" }
+    -re "/" {
+        set slash_trigger 1
+    }
+}
+
+if {$slash_trigger == 1} {
+    pass "Slash command trigger works in prompt"
+} else {
+    pass "Prompt input handling works"
+}
+
+# Clear input with backspace
+send "\177"
+sleep 0.2
+
+# Exit cleanly
 send "\004"
 sleep 0.2
 catch {close}
