@@ -1,7 +1,5 @@
 #!/bin/bash
-# Claude Code REPL - Interactive command-line interface for Claude
 
-# For testing in clones, use local directory if available, otherwise fall back to ~/.claude
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLONE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -11,7 +9,6 @@ else
     CLAUDE_DIR="$HOME/.claude"
 fi
 
-# Check for required jq dependency
 if ! command -v jq >/dev/null 2>&1; then
     echo "Error: jq not installed" >&2
     echo "" >&2
@@ -20,36 +17,28 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-# Source autosuggest module
 source "$CLAUDE_DIR/bin/autosuggest.sh"
 
-# Validate environment setup
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
 
-# Session tracking variables
 SESSION_ID=""
 LAST_MS=0
 MODEL=""
 SESSION_CWD=""
 
-# Execute Claude with user prompt and display streaming output
 run_claude() {
     local raw=$(mktemp)
     local schema='{"type":"object","properties":{"cwd":{"type":"string","description":"Current working directory path"},"response":{"type":"string","description":"Response to user"}},"required":["cwd","response"]}'
     local args=(-p "$1" --output-format stream-json --verbose --json-schema "$schema")
 
-    # Resume previous session if exists
     [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
 
-    # Append custom system prompt if available
     [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ] && \
         args+=(--append-system-prompt "$(cat "$CLAUDE_DIR/main_appended_system_prompt.md")")
 
-    # Handle Ctrl+C gracefully
     trap 'echo -e "\n\033[90m[Stopped]\033[0m"' INT
 
-    # Stream and parse Claude output
     while IFS= read -r line; do
         case "$line" in
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
@@ -65,28 +54,23 @@ run_claude() {
 
     trap - INT
 
-    # Extract session ID from first response
     if [ -z "$SESSION_ID" ]; then
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
 
-    # Extract model information
     local model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
     [ -n "$model" ] && MODEL="$model"
 
-    # Extract duration for prompt display
     local result=$(grep '"type":"result"' "$raw" | tail -1)
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
     rm -f "$raw"
 
-    # Change to final session directory if captured
     if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
         cd "$SESSION_CWD" 2>/dev/null || true
     fi
 }
 
-# Display prompt with session statistics
 show_prompt() {
     printf "\033[33m%s" "$(pwd)"
     if [ "$LAST_MS" -gt 0 ]; then
@@ -99,21 +83,17 @@ show_prompt() {
 echo "cc - Claude Code REPL (Ctrl+C to stop, Ctrl+D to exit)"
 echo ""
 
-# Main REPL loop
 while true; do
     show_prompt
 
-    # Read user input with autosuggest (Ctrl+D exits, Ctrl+C cancels)
     input=$(read_with_autosuggest)
     ret=$?
-    [[ $ret -eq 1 ]] && break     # Ctrl+D exits
-    [[ $ret -eq 2 ]] && continue  # Ctrl+C cancels
+    [[ $ret -eq 1 ]] && break
+    [[ $ret -eq 2 ]] && continue
 
-    # Skip empty input
     if [[ -z "$input" ]]; then
         continue
     fi
 
-    # Execute Claude with user input
     run_claude "$input"
 done
