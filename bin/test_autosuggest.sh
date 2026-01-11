@@ -1,6 +1,7 @@
 #!/bin/bash
 
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
+TEST_MODE=true
 source "$(dirname "$0")/autosuggest.sh"
 
 PASS=0
