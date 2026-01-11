@@ -925,6 +925,20 @@ catch {close}
 catch {wait}
 
 # ============================================================================
+# Test 22: CD output visibility - test cc_filter.jq structured output handling
+# ============================================================================
+log_test "CD output visibility: Verify cc_filter.jq shows response for cd commands"
+
+# Run the cd output unit test
+set filter_test_result [catch {exec /home/ubuntu/.claude/bin/test_cd_output.sh} output]
+
+if {$filter_test_result == 0} {
+    pass "cc_filter.jq structured output tests pass"
+} else {
+    fail "cc_filter.jq structured output tests: $output"
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 puts "\n\033\[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033\[0m"
