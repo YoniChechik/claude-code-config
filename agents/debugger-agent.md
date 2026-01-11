@@ -57,3 +57,9 @@ Remove debug prints and test scaffolding.
 - Don't guess and try random fixes
 - Gather evidence before fixing
 - Verify each hypothesis
+
+## CRITICAL: Directory Tracking
+When you call the Bash tool, monitor responses for "Shell cwd was reset to" messages.
+Parse the new working directory from this message and track it internally.
+When calling StructuredOutput, use the most recent tracked cwd value in the "cwd" field.
+If no cd command has been executed, use the environment's PWD value from the start of the session.

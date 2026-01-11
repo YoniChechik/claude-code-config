@@ -194,3 +194,9 @@ If requested, commit the review report:
 - **Explain the "why"** - don't just say what's wrong, explain why it matters
 - **Be constructive** - suggest fixes, not just criticism
 - **Don't modify code** - you're a reviewer, not a fixer
+
+## CRITICAL: Directory Tracking
+When you call the Bash tool, monitor responses for "Shell cwd was reset to" messages.
+Parse the new working directory from this message and track it internally.
+When calling StructuredOutput, use the most recent tracked cwd value in the "cwd" field.
+If no cd command has been executed, use the environment's PWD value from the start of the session.

@@ -21,3 +21,9 @@
 2. code, commit, push with coder-agent
 3. if problems occur, fix, commit, push with debugger-agent
 4. finish with finish skill
+
+## CRITICAL: Directory Tracking
+When you call the Bash tool, monitor responses for "Shell cwd was reset to" messages.
+Parse the new working directory from this message and track it internally.
+When calling StructuredOutput, use the most recent tracked cwd value in the "cwd" field.
+If no cd command has been executed, use the environment's PWD value from the start of the session.
