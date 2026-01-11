@@ -114,6 +114,112 @@ test_cd_response_format() {
     fi
 }
 
+# E2E Test: Simulate cd command followed by another command
+# Verifies both outputs are visible through the cc_filter.jq pipeline
+test_e2e_cd_then_command() {
+    # Simulate a session with:
+    # 1. User runs "cd /home/ubuntu/project"
+    # 2. Claude responds with StructuredOutput containing "Changed to /home/ubuntu/project"
+    # 3. User runs "ls"
+    # 4. Claude responds with file listing
+
+    # First command: cd
+    local cd_result='{"type":"result","structured_output":{"cwd":"/home/ubuntu/project","response":"Changed to /home/ubuntu/project"}}'
+    local cd_output
+    cd_output=$(echo "$cd_result" | jq -r -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
+
+    # Verify cd output is visible
+    if ! echo "$cd_output" | grep -q "LINE:Changed to /home/ubuntu/project"; then
+        test_fail "E2E cd then command: cd response not visible"
+        return
+    fi
+
+    # Second command: ls (simulated output)
+    local ls_result='{"type":"result","structured_output":{"cwd":"/home/ubuntu/project","response":"Listed directory contents:\nfile1.txt\nfile2.txt\nsubdir/"}}'
+    local ls_output
+    ls_output=$(echo "$ls_result" | jq -r -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
+
+    # Verify ls output is visible
+    if ! echo "$ls_output" | grep -q "LINE:Listed directory contents"; then
+        test_fail "E2E cd then command: ls response not visible"
+        return
+    fi
+
+    # Verify both cwd values are tracked in JSON output
+    if ! echo "$cd_output" | grep -q 'JSON:{"cwd":"/home/ubuntu/project"}'; then
+        test_fail "E2E cd then command: cd cwd not in JSON"
+        return
+    fi
+
+    if ! echo "$ls_output" | grep -q 'JSON:{"cwd":"/home/ubuntu/project"}'; then
+        test_fail "E2E cd then command: ls cwd not preserved in JSON"
+        return
+    fi
+
+    test_pass "E2E cd then command: both outputs visible"
+}
+
+# E2E Test: Empty response is clearly identifiable as a bug
+test_e2e_empty_response_bug_detection() {
+    # This tests that an empty response shows no LINE: output
+    # which allows us to detect the bug when Claude sends empty response
+    local empty_result='{"type":"result","structured_output":{"cwd":"/home/ubuntu","response":""}}'
+    local output
+    output=$(echo "$empty_result" | jq -r -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
+
+    # Empty response should produce only JSON cwd output, no LINE:
+    # This is the "bug state" - we can detect it
+    local has_line_prefix
+    has_line_prefix=$(echo "$output" | grep "^LINE:" || true)
+
+    if [[ -z "$has_line_prefix" ]] && echo "$output" | grep -q "^JSON:"; then
+        test_pass "E2E empty response bug detectable (no visible text)"
+    else
+        test_fail "E2E empty response: unexpected output '$output'"
+    fi
+}
+
+# E2E Test: Full ccui.sh pipeline simulation
+test_e2e_ccui_pipeline() {
+    # Simulate what ccui.sh does: parse JSON output and display
+    # This tests the TEXT:, LINE:, JSON: prefix handling
+
+    local cd_result='{"type":"result","structured_output":{"cwd":"/tmp/test","response":"Changed to /tmp/test"}}'
+
+    # Run through cc_filter.jq
+    local filter_output
+    filter_output=$(echo "$cd_result" | jq -r -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
+
+    # Simulate ccui.sh processing
+    local visible_output=""
+    local session_cwd=""
+
+    while IFS= read -r line; do
+        case "$line" in
+            TEXT:*) visible_output+="${line#TEXT:}" ;;
+            LINE:*) visible_output+="${line#LINE:}"$'\n' ;;
+            JSON:*)
+                json="${line#JSON:}"
+                session_cwd=$(echo "$json" | jq -r '.cwd // empty' 2>/dev/null)
+                ;;
+        esac
+    done <<< "$filter_output"
+
+    # Verify visible output contains the cd message
+    if ! echo "$visible_output" | grep -q "Changed to /tmp/test"; then
+        test_fail "E2E ccui pipeline: visible output missing cd message"
+        return
+    fi
+
+    # Verify cwd was parsed
+    if [[ "$session_cwd" != "/tmp/test" ]]; then
+        test_fail "E2E ccui pipeline: cwd not parsed correctly (got '$session_cwd')"
+        return
+    fi
+
+    test_pass "E2E ccui pipeline: cd message visible and cwd tracked"
+}
+
 echo "Running cd output visibility tests..."
 echo ""
 
@@ -124,6 +230,14 @@ test_structured_output_cwd_json
 test_result_without_structured_output
 test_ccui_json_parsing
 test_cd_response_format
+
+echo ""
+echo "Running E2E tests..."
+echo ""
+
+test_e2e_cd_then_command
+test_e2e_empty_response_bug_detection
+test_e2e_ccui_pipeline
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

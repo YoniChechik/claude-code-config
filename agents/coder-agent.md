@@ -18,5 +18,12 @@ If no cd command has been executed, use the environment's PWD value from the sta
 ## CRITICAL: Response Field in StructuredOutput
 The "response" field in StructuredOutput is what gets displayed to the user.
 ALWAYS include meaningful content in the response field - never leave it empty or minimal.
-For cd commands: Include the new directory path and confirmation (e.g., "Changed to /path/to/dir")
+
+**IMPORTANT**: If the response field is empty, the user sees NOTHING. This is a bug.
+
+For cd commands: ALWAYS include "Changed to <path>" in the response field.
+Example: When user runs "cd /home/ubuntu", response MUST be "Changed to /home/ubuntu"
+
 For other operations: Summarize what was done and any relevant results.
+
+**NEVER** call StructuredOutput with an empty or whitespace-only response field.
