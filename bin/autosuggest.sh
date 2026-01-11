@@ -437,6 +437,32 @@ read_key() {
     esac
 }
 
+count_visual_lines() {
+    local text="$1"
+    local term_width="$2"
+    local prefix_len="${3:-0}"
+
+    local total_lines=0
+    local line
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        local line_len=${#line}
+        if [[ $total_lines -eq 0 ]]; then
+            line_len=$((line_len + prefix_len))
+        fi
+
+        if [[ $line_len -eq 0 ]]; then
+            ((total_lines++))
+        else
+            total_lines=$((total_lines + (line_len + term_width - 1) / term_width))
+        fi
+    done <<< "$text"
+
+    [[ "$text" == *$'\n' ]] && ((total_lines++))
+    [[ $total_lines -lt 1 ]] && total_lines=1
+    echo "$total_lines"
+}
+
 render_inline() {
     local input="$1"
     local suggestion="$2"
@@ -446,13 +472,13 @@ render_inline() {
     local term_width
     term_width=$(tput cols 2>/dev/null || echo 80)
 
-    # Calculate total display length
-    local display_len=$((2 + ${#input}))  # "> " + input
+    # Calculate actual visual lines needed (accounting for newlines)
+    local display_text="$input"
     if [[ -n "$suggestion" ]]; then
-        display_len=$((display_len + ${#suggestion} - ${#input}))
+        display_text="${suggestion}"
     fi
-    local total_lines=$(( (display_len + term_width - 1) / term_width ))
-    [[ $total_lines -lt 1 ]] && total_lines=1
+    local total_lines
+    total_lines=$(count_visual_lines "$display_text" "$term_width" 2)
 
     # Move up to first line of our output (if we wrapped before)
     if [[ $PREV_RENDER_LINES -gt 1 ]]; then
