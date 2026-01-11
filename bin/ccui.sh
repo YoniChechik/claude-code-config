@@ -17,8 +17,10 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
+# shellcheck source=/dev/null
 source "$CLAUDE_DIR/bin/autosuggest.sh"
 
+# shellcheck source=/dev/null
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
 
@@ -28,7 +30,8 @@ MODEL=""
 SESSION_CWD=""
 
 run_claude() {
-    local raw=$(mktemp)
+    local raw
+    raw=$(mktemp)
     local schema='{"type":"object","properties":{"cwd":{"type":"string","description":"Current working directory path"},"response":{"type":"string","description":"Response to user"}},"required":["cwd","response"]}'
     local args=(-p "$1" --output-format stream-json --verbose --json-schema "$schema")
 
@@ -58,10 +61,12 @@ run_claude() {
         SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
     fi
 
-    local model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
+    local model
+    model=$(grep '"subtype":"init"' "$raw" | jq -r '.model // empty' 2>/dev/null)
     [ -n "$model" ] && MODEL="$model"
 
-    local result=$(grep '"type":"result"' "$raw" | tail -1)
+    local result
+    result=$(grep '"type":"result"' "$raw" | tail -1)
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
     rm -f "$raw"
@@ -74,7 +79,8 @@ run_claude() {
 show_prompt() {
     printf "\033[33m%s" "$(pwd)"
     if [ "$LAST_MS" -gt 0 ]; then
-        local sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
+        local sec
+        sec=$(awk "BEGIN {printf \"%.1f\", $LAST_MS/1000}")
         printf " [%ss │ %s]" "$sec" "$MODEL"
     fi
     printf "\033[0m\n"

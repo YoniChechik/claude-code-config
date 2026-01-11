@@ -19,7 +19,8 @@ get_slash_commands() {
     if [[ -d "$HOME/.claude/commands" ]]; then
         for f in "$HOME/.claude/commands"/*.md; do
             [[ -f "$f" ]] || continue
-            local name="$(basename "$f" .md)"
+            local name
+            name="$(basename "$f" .md)"
             cmds+=("$name")
             seen[$name]=1
         done
@@ -29,7 +30,8 @@ get_slash_commands() {
     if [[ -d "$HOME/.claude/skills" ]]; then
         for d in "$HOME/.claude/skills"/*/; do
             [[ -d "$d" ]] || continue
-            local name="$(basename "$d")"
+            local name
+            name="$(basename "$d")"
             [[ ${seen[$name]+_} ]] && continue
             cmds+=("$name")
             seen[$name]=1
@@ -42,7 +44,8 @@ get_slash_commands() {
     if [[ -n "$project_root" && -d "$project_root/.claude/commands" ]]; then
         for f in "$project_root/.claude/commands"/*.md; do
             [[ -f "$f" ]] || continue
-            local name="$(basename "$f" .md)"
+            local name
+            name="$(basename "$f" .md)"
             [[ ${seen[$name]+_} ]] && continue
             cmds+=("$name")
             seen[$name]=1
@@ -53,7 +56,8 @@ get_slash_commands() {
     if [[ -n "$project_root" && -d "$project_root/.claude/skills" ]]; then
         for d in "$project_root/.claude/skills"/*/; do
             [[ -d "$d" ]] || continue
-            local name="$(basename "$d")"
+            local name
+            name="$(basename "$d")"
             [[ ${seen[$name]+_} ]] && continue
             cmds+=("$name")
             seen[$name]=1
@@ -167,10 +171,6 @@ render_inline() {
     # Calculate how many lines our content will occupy
     local term_width
     term_width=$(tput cols 2>/dev/null || echo 80)
-
-    # Calculate cursor line position (0-indexed from start of our content)
-    local cursor_col=$((2 + cursor_pos))  # "> " + cursor_pos
-    local cursor_line=$((cursor_col / term_width))
 
     # Calculate total display length
     local display_len=$((2 + ${#input}))  # "> " + input
