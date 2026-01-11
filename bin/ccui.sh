@@ -70,10 +70,6 @@ run_claude() {
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
     rm -f "$raw"
-
-    if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
-        cd "$SESSION_CWD" 2>/dev/null || true
-    fi
 }
 
 show_prompt() {
@@ -102,4 +98,8 @@ while true; do
     fi
 
     run_claude "$input"
+
+    if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
+        cd "$SESSION_CWD" 2>/dev/null || true
+    fi
 done
