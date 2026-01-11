@@ -36,7 +36,8 @@ SESSION_CWD=""
 # Execute Claude with user prompt and display streaming output
 run_claude() {
     local raw=$(mktemp)
-    local args=(-p "$1" --output-format stream-json --verbose)
+    local schema='{"type":"object","properties":{"cwd":{"type":"string","description":"Current working directory path"},"response":{"type":"string","description":"Response to user"}},"required":["cwd","response"]}'
+    local args=(-p "$1" --output-format stream-json --verbose --json-schema "$schema")
 
     # Resume previous session if exists
     [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
@@ -54,6 +55,10 @@ run_claude() {
             TEXT:*) printf "%s" "${line#TEXT:}" | sed 's/@@NEWLINE@@/\n/g' ;;
             SUB:*)  printf "\033[90m│\033[0m  %s\n" "${line#SUB:}" ;;
             LINE:*) printf "%s\n" "${line#LINE:}" ;;
+            JSON:*)
+                json="${line#JSON:}"
+                SESSION_CWD=$(echo "$json" | jq -r '.cwd // empty' 2>/dev/null)
+                ;;
         esac
     done < <(stdbuf -oL claude "${args[@]}" 2>&1 | stdbuf -oL tee "$raw" | \
         stdbuf -oL jq -r --unbuffered -f "$CLAUDE_DIR/bin/cc_filter.jq" 2>/dev/null)
@@ -74,6 +79,11 @@ run_claude() {
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
     rm -f "$raw"
+
+    # Change to final session directory if captured
+    if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
+        cd "$SESSION_CWD" 2>/dev/null || true
+    fi
 }
 
 # Display prompt with session statistics

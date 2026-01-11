@@ -107,7 +107,7 @@ restore_terminal_state() {
 
 read_key() {
     local char
-    IFS= read -rsn1 char
+    IFS= read -rsn1 char < /dev/tty
 
     case "$char" in
         $'\t')           KEY_TYPE="TAB" ;;
@@ -118,8 +118,8 @@ read_key() {
         $'\x04')         KEY_TYPE="CTRL_D" ;;
         $'\x1b')
             # Read escape sequence for arrow keys, Ctrl+Arrow keys, and bracketed paste
-            IFS= read -rsn1 -t 0.5 char2
-            IFS= read -rsn1 -t 0.5 char3
+            IFS= read -rsn1 -t 0.5 char2 < /dev/tty
+            IFS= read -rsn1 -t 0.5 char3 < /dev/tty
             case "$char2$char3" in
                 '[A') KEY_TYPE="ARROW_UP" ;;
                 '[B') KEY_TYPE="ARROW_DOWN" ;;
@@ -127,9 +127,9 @@ read_key() {
                 '[D') KEY_TYPE="ARROW_LEFT" ;;
                 '[1')
                     # Possibly Ctrl+Arrow (needs more bytes: [1;5C or [1;5D)
-                    IFS= read -rsn1 -t 0.5 char4
-                    IFS= read -rsn1 -t 0.5 char5
-                    IFS= read -rsn1 -t 0.5 char6
+                    IFS= read -rsn1 -t 0.5 char4 < /dev/tty
+                    IFS= read -rsn1 -t 0.5 char5 < /dev/tty
+                    IFS= read -rsn1 -t 0.5 char6 < /dev/tty
                     case "$char4$char5$char6" in
                         ';5C') KEY_TYPE="CTRL_ARROW_RIGHT" ;;
                         ';5D') KEY_TYPE="CTRL_ARROW_LEFT" ;;
@@ -138,9 +138,9 @@ read_key() {
                     ;;
                 '[2')
                     # Possibly bracketed paste start: [200~ or end: [201~
-                    IFS= read -rsn1 -t 0.5 char4
-                    IFS= read -rsn1 -t 0.5 char5
-                    IFS= read -rsn1 -t 0.5 char6
+                    IFS= read -rsn1 -t 0.5 char4 < /dev/tty
+                    IFS= read -rsn1 -t 0.5 char5 < /dev/tty
+                    IFS= read -rsn1 -t 0.5 char6 < /dev/tty
                     case "$char4$char5$char6" in
                         '00~') KEY_TYPE="PASTE_START"; PASTE_MODE=true ;;
                         '01~') KEY_TYPE="PASTE_END"; PASTE_MODE=false ;;
@@ -461,7 +461,7 @@ read_with_autosuggest() {
                 while true; do
                     # Read raw character without escape sequence interpretation
                     local char
-                    IFS= read -rsn1 -t 0.5 char
+                    IFS= read -rsn1 -t 0.5 char < /dev/tty
 
                     # Skip empty strings from timeout
                     [[ -z "$char" ]] && continue
@@ -469,14 +469,14 @@ read_with_autosuggest() {
                     # Check for PASTE_END sequence: \x1b[201~
                     if [[ "$char" == $'\x1b' ]]; then
                         local seq="$char"
-                        IFS= read -rsn1 -t 0.5 c2
+                        IFS= read -rsn1 -t 0.5 c2 < /dev/tty
                         seq+="$c2"
 
                         if [[ "$c2" == '[' ]]; then
-                            IFS= read -rsn1 -t 0.5 c3
-                            IFS= read -rsn1 -t 0.5 c4
-                            IFS= read -rsn1 -t 0.5 c5
-                            IFS= read -rsn1 -t 0.5 c6
+                            IFS= read -rsn1 -t 0.5 c3 < /dev/tty
+                            IFS= read -rsn1 -t 0.5 c4 < /dev/tty
+                            IFS= read -rsn1 -t 0.5 c5 < /dev/tty
+                            IFS= read -rsn1 -t 0.5 c6 < /dev/tty
                             seq+="$c3$c4$c5$c6"
 
                             if [[ "$c3$c4$c5$c6" == "201~" ]]; then
