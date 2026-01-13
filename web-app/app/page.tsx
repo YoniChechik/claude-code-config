@@ -28,7 +28,7 @@ export default function Home() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, clientHostname: window.location.hostname }),
       });
 
       const data = await response.json();
@@ -82,7 +82,7 @@ export default function Home() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, clientHostname: window.location.hostname }),
       });
 
       const data = await response.json();

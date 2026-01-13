@@ -14,9 +14,9 @@ class SessionManager {
   /**
    * Create a new session
    */
-  createSession(cwd: string): Session {
+  createSession(cwd: string, clientHostname?: string): Session {
     // Detect session type from environment variables
-    const { sessionType, hostname, distroName } = this.detectSessionType();
+    const { sessionType, hostname, distroName } = this.detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
@@ -39,7 +39,7 @@ class SessionManager {
   /**
    * Detect session type from environment variables
    */
-  private detectSessionType(): {
+  private detectSessionType(clientHostname?: string): {
     sessionType: 'ssh' | 'wsl' | 'local';
     hostname?: string;
     distroName?: string;
@@ -48,8 +48,8 @@ class SessionManager {
     if (process.env.SSH_CONNECTION) {
       let hostname = 'unknown';
       try {
-        // First check if user set CCWEB_SSH_HOST env var (SSH alias from their config)
-        hostname = process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
+        // Prefer client-provided hostname, fallback to env var or hostname command
+        hostname = clientHostname || process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
       } catch {
         // Fallback to 'unknown' if hostname command fails
       }

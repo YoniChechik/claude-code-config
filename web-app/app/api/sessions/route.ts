@@ -15,13 +15,13 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as CreateSessionRequest;
-  const { cwd } = body;
+  const { cwd, clientHostname } = body;
 
   if (!cwd) {
     return NextResponse.json({ error: "cwd is required" }, { status: 400 });
   }
 
-  const session = sessionManager.createSession(cwd);
+  const session = sessionManager.createSession(cwd, clientHostname);
 
   const response: CreateSessionResponse = { session };
   return NextResponse.json(response);
