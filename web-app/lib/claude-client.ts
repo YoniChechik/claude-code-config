@@ -99,7 +99,6 @@ export class ClaudeClient {
 
       const claude = spawn("/home/ubuntu/.local/bin/claude", args, {
         stdio: ["pipe", "pipe", "pipe"],
-        timeout: 30000,
       });
 
       // Close stdin since we're not sending any input
