@@ -31,18 +31,17 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
     : contentStr;
 
   return (
-    <div className="text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono text-sm whitespace-pre-wrap">
-      {displayContent}
+    <div className="flex">
       {shouldCollapse && (
-        <div className="mt-2 pt-2 border-t border-gray-700">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-blue-400 hover:text-blue-300 text-xs font-semibold"
-          >
-            {isExpanded ? '▲ Show less' : `▼ Show ${lines.length - 3} more lines`}
-          </button>
-        </div>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex-shrink-0 w-2 bg-blue-600 hover:bg-blue-500 cursor-pointer transition-colors rounded-l"
+          title={isExpanded ? 'Collapse' : `Expand ${lines.length - 3} more lines`}
+        />
       )}
+      <div className={`text-gray-300 bg-gray-800 px-3 py-2 font-mono text-sm whitespace-pre-wrap flex-1 ${shouldCollapse ? 'rounded-r' : 'rounded'}`}>
+        {displayContent}
+      </div>
     </div>
   );
 }
