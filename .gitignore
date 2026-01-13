@@ -31,3 +31,11 @@ test-results/
 # Dev server
 web-app/dev.log
 web-app/dev.pid
+dev.log
+dev.pid
+
+# Feature clones
+_clones/
+
+# Temporary plan files
+plan.md
