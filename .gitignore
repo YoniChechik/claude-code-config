@@ -18,3 +18,16 @@ plugins/
 cache/
 telemetry/
 stats-cache.json
+
+# Next.js / Node.js
+node_modules/
+.next/
+next-env.d.ts
+
+# Playwright
+playwright-report/
+test-results/
+
+# Dev server
+web-app/dev.log
+web-app/dev.pid
