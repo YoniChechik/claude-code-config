@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   // Add user message to session
   sessionManager.addMessage(sessionId, {
     role: "user",
-    content: prompt,
+    content: [{ type: "text", text: prompt }],
     timestamp: new Date(),
   });
 

@@ -33,8 +33,9 @@ export interface ClaudeStreamEvent {
     | "error";
   content?: string;
   tool?: {
+    id: string;
     name: string;
-    input: unknown;
+    input: Record<string, any>;
   };
   model?: string;
   session_id?: string;
@@ -145,6 +146,7 @@ export class ClaudeClient {
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
               for (const block of event.message.content) {
+                // Text blocks
                 if (block.type === "text" && block.text) {
                   eventQueue.push({
                     type: "text",
@@ -155,12 +157,29 @@ export class ClaudeClient {
                     resolveNext = null;
                   }
                 }
-                // Handle tool_use blocks (e.g., StructuredOutput)
-                if (block.type === "tool_use" && block.name === "StructuredOutput" && block.input?.response) {
-                  eventQueue.push({
-                    type: "text",
-                    content: block.input.response,
-                  });
+
+                // Tool use blocks (ALL tools, not just StructuredOutput)
+                if (block.type === "tool_use") {
+                  // Extract text from StructuredOutput for display
+                  if (block.name === "StructuredOutput" && block.input?.response) {
+                    eventQueue.push({
+                      type: "text",
+                      content: block.input.response,
+                    });
+                  }
+
+                  // Send tool_use event for all tools (skip StructuredOutput for display)
+                  if (block.name !== "StructuredOutput") {
+                    eventQueue.push({
+                      type: "tool_use",
+                      tool: {
+                        id: block.id,
+                        name: block.name,
+                        input: block.input || {},
+                      },
+                    });
+                  }
+
                   if (resolveNext) {
                     resolveNext();
                     resolveNext = null;

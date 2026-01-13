@@ -5,7 +5,7 @@ import SessionHeader from "./SessionHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import DirectoryNav from "./DirectoryNav";
-import type { Session, Message, SlashCommand } from "@/lib/types";
+import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 
 interface ChatPaneProps {
   sessionId: string;
@@ -43,11 +43,15 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       const data = await response.json();
       if (data.session) {
         setSession(data.session);
-        // Convert timestamp strings back to Date objects
+        // Convert timestamp strings back to Date objects and handle old string content
         const messagesWithDates = (data.session.messages || []).map(
           (msg: Message) => ({
             ...msg,
             timestamp: new Date(msg.timestamp),
+            // Convert old string content to ContentBlock format
+            content: typeof msg.content === "string"
+              ? [{ type: "text" as const, text: msg.content }]
+              : msg.content,
           })
         );
         setMessages(messagesWithDates);
@@ -64,7 +68,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     if (!isAutoContinue) {
       const userMessage: Message = {
         role: "user",
-        content: prompt,
+        content: [{ type: "text", text: prompt }],
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMessage]);
@@ -72,7 +76,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       // Add auto-continue message marked as internal
       const autoContinueMsg: Message = {
         role: "user",
-        content: prompt,
+        content: [{ type: "text", text: prompt }],
         timestamp: new Date(),
         isAutoContinueMessage: true,
       };
@@ -98,6 +102,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       }
 
       let assistantText = "";
+      const assistantBlocks: ContentBlock[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -121,8 +126,25 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
               if (event.type === "text") {
                 assistantText += event.content || "";
                 setStreamingText(assistantText);
+                // Add text block
+                assistantBlocks.push({
+                  type: "text",
+                  text: event.content || "",
+                });
               } else if (event.type === "thinking") {
-                // Could show thinking indicator
+                // Add thinking block
+                assistantBlocks.push({
+                  type: "thinking",
+                  thinking: event.content || "",
+                });
+              } else if (event.type === "tool_use") {
+                // Add tool use block
+                assistantBlocks.push({
+                  type: "tool_use",
+                  id: event.tool.id,
+                  name: event.tool.name,
+                  input: event.tool.input,
+                });
               } else if (event.type === "error") {
                 console.error("Stream error:", event.error);
               }
@@ -134,10 +156,10 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       }
 
       // Add assistant message
-      if (assistantText) {
+      if (assistantBlocks.length > 0) {
         const assistantMessage: Message = {
           role: "assistant",
-          content: assistantText,
+          content: assistantBlocks,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMessage]);

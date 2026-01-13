@@ -10,12 +10,18 @@ export interface Session {
   claudeSessionId?: string;
 }
 
+// Content block types (matches Claude API output)
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, any> }
+  | { type: "tool_result"; tool_use_id: string; content: string };
+
 // Message types
 export interface Message {
   role: "user" | "assistant";
-  content: string;
+  content: ContentBlock[]; // Changed from string to ContentBlock[]
   timestamp: Date;
-  type?: "text" | "thinking" | "tool" | "error";
   isAutoContinueMessage?: boolean; // Mark internal system messages
 }
 

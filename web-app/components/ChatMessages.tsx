@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Message } from "@/lib/types";
+import ContentBlockRenderer from "./message/ContentBlockRenderer";
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -46,22 +47,11 @@ export default function ChatMessages({
             {message.role === "user" ? "You" : "Claude"}
           </div>
           <div className="text-sm leading-relaxed">
-            {message.type === "thinking" && (
-              <div className="inline-block px-2.5 py-1 mb-2 bg-purple-100 text-purple-700 text-xs font-medium rounded-lg">
-                💭 Thinking
-              </div>
-            )}
-            {message.type === "tool" && (
-              <div className="inline-block px-2.5 py-1 mb-2 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg">
-                🔧 Tool Use
-              </div>
-            )}
-            {message.type === "error" && (
-              <div className="inline-block px-2.5 py-1 mb-2 bg-red-100 text-red-700 text-xs font-medium rounded-lg">
-                ⚠️ Error
-              </div>
-            )}
-            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+            <div className="whitespace-pre-wrap break-words">
+              {message.content.map((block, blockIdx) => (
+                <ContentBlockRenderer key={blockIdx} block={block} />
+              ))}
+            </div>
           </div>
           <div className={`text-xs ${
             message.role === "user" ? "text-blue-200" : "text-gray-400"
