@@ -39,13 +39,6 @@ export default function ChatInput({
         disabled={disabled}
         onFocusRef={onFocusRef}
       />
-      <button
-        onClick={handleSubmit}
-        disabled={disabled || !input.trim()}
-        className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-none flex items-center justify-center min-w-[80px]"
-      >
-        Send
-      </button>
     </div>
   );
 }

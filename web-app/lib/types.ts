@@ -14,7 +14,7 @@ export interface Session {
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown>; timestamp?: Date }
   | { type: "tool_result"; tool_use_id: string; content: string | ContentBlock[] };
 
 // Message types

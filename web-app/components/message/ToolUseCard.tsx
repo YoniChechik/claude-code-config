@@ -21,8 +21,15 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
   const colorClass = TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
 
   return (
-    <div className={`border-l-4 p-3 rounded ${colorClass}`}>
-      <div className="font-semibold mb-1">[{tool.name}]</div>
+    <div className={`border-l-4 p-3 pl-6 rounded ${colorClass}`}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="font-semibold">[{tool.name}]</span>
+        {tool.timestamp && (
+          <span className="text-xs opacity-70">
+            {tool.timestamp.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+        )}
+      </div>
       {renderToolDetails(tool)}
     </div>
   );
