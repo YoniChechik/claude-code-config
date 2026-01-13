@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import SessionHeader from "./SessionHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
-import DirectoryNav from "./DirectoryNav";
 import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 
 interface ChatPaneProps {
@@ -23,7 +22,6 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const [streamingText, setStreamingText] = useState("");
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [showNav, setShowNav] = useState(false);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
@@ -208,11 +206,6 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     return handleSubmitInternal(prompt, false);
   };
 
-  const handleNavigate = (path: string) => {
-    // TODO: Implement cd command
-    console.log("Navigate to:", path);
-  };
-
   if (!session) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-50 text-gray-600">
@@ -245,21 +238,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
           />
         </div>
-
-        {showNav && (
-          <div className="w-64 border-l border-gray-300 bg-gray-50 overflow-y-auto">
-            <DirectoryNav cwd={session.cwd} onNavigate={handleNavigate} />
-          </div>
-        )}
       </div>
-
-      <button
-        className="absolute top-12 right-0 px-2 py-4 bg-gray-200 hover:bg-gray-300 text-gray-700 border-l border-gray-300"
-        onClick={() => setShowNav(!showNav)}
-        title="Toggle file browser"
-      >
-        {showNav ? "◀" : "▶"}
-      </button>
     </div>
   );
 }
