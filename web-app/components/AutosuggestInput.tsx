@@ -43,7 +43,7 @@ export default function AutosuggestInput({
   // Auto-resize textarea based on content
   useEffect(() => {
     if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = '3rem'; // Reset to single line height (increased from 1.5rem)
       const newHeight = Math.min(inputRef.current.scrollHeight, 200);
       inputRef.current.style.height = newHeight + 'px';
     }
@@ -150,7 +150,7 @@ export default function AutosuggestInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm min-h-[48px]"
+          className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm"
         />
       </div>
 

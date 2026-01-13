@@ -36,19 +36,30 @@ export default function ChatMessages({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900">
+      {visibleMessages.length === 0 && !isStreaming && (
+        <div className="flex items-center justify-center h-full">
+          <p className="text-2xl text-gray-500">Write something special...</p>
+        </div>
+      )}
       {visibleMessages.map((message, index) => (
         <div
           key={index}
           className={`flex flex-col gap-2 p-4 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${
             message.role === "user"
-              ? "bg-gradient-to-br from-blue-800 to-blue-900 text-gray-100 ml-auto max-w-[75%]"
+              ? "bg-gradient-to-br from-blue-800 to-blue-900 text-gray-100 ml-auto max-w-[85%]"
               : "bg-gray-800 border border-gray-700 text-gray-100 mr-auto max-w-[85%]"
           }`}
         >
-          <div className={`text-xs font-semibold ${
+          <div className={`flex items-center gap-2 text-xs font-semibold ${
             message.role === "user" ? "text-blue-200" : "text-gray-400"
           }`}>
-            {message.role === "user" ? "You" : "Claude"}
+            <span>{message.role === "user" ? "You" : "Claude"}</span>
+            <span className="text-xs font-normal opacity-70">
+              {(typeof message.timestamp === "string"
+                ? new Date(message.timestamp)
+                : message.timestamp
+              ).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })}
+            </span>
           </div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
@@ -70,14 +81,6 @@ export default function ChatMessages({
                 }
               })}
             </div>
-          </div>
-          <div className={`text-xs ${
-            message.role === "user" ? "text-blue-300" : "text-gray-500"
-          }`}>
-            {(typeof message.timestamp === "string"
-              ? new Date(message.timestamp)
-              : message.timestamp
-            ).toLocaleTimeString()}
           </div>
         </div>
       ))}
