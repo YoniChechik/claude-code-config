@@ -3,11 +3,18 @@ import path from "path";
 
 /**
  * Convert directory path to Claude's encoding format
- * Example: /home/ubuntu/.claude -> -home-ubuntu--claude
- * Rule: Replace all / and . with -
+ * Examples:
+ *   /home/ubuntu/.claude -> -home-ubuntu--claude
+ *   /tmp -> -tmp
+ *   /tmp/test_underscore -> -tmp-test-underscore
+ *   /tmp/test with spaces -> -tmp-test-with-spaces
+ *   /tmp/test.dots -> -tmp-test-dots
+ * Rule: Replace all non-alphanumeric, non-hyphen characters with hyphen
+ * Preserves: a-z, A-Z, 0-9, - (hyphen)
+ * Converts to hyphen: /, ., _, space, and all special characters
  */
 export function dirToClaudePath(dirPath: string): string {
-  return dirPath.replace(/[/.]/g, "-");
+  return dirPath.replace(/[^a-zA-Z0-9-]/g, "-");
 }
 
 /**
