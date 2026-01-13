@@ -94,8 +94,9 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
   console.log("[AGENT-GROUPING] groupBlocksByAgent called with", blocks.length, "blocks");
   console.log("[AGENT-GROUPING] Input blocks:", blocks.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
 
-  // First, sort blocks to ensure tool_use appears before tool_result
-  const sortedBlocks = sortToolBlocks(blocks);
+  // Blocks are already in causal order from Claude after parent_tool_use_id filtering
+  const sortedBlocks = blocks;
+  console.log("[AGENT-GROUPING] Using blocks in original causal order (no sorting)");
   const groups: BlockGroup[] = [];
   const processedIndices = new Set<number>();
 
