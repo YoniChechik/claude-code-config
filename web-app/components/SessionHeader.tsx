@@ -55,9 +55,9 @@ export default function SessionHeader({
   const percentUsed = tokenUsage ? (tokenUsage.used / tokenUsage.total) * 100 : 0;
 
   // Determine color based on usage
-  let tokenColor = "text-green-200";
-  if (percentUsed > 80) tokenColor = "text-red-300";
-  else if (percentUsed > 60) tokenColor = "text-yellow-300";
+  let tokenColor = "text-green-400";
+  if (percentUsed > 80) tokenColor = "text-red-400";
+  else if (percentUsed > 60) tokenColor = "text-yellow-400";
 
   // Show high usage warning when account-wide > 70% used
   const showHighUsageWarning = accountUsage && accountUsage.percentUsed > 70;
@@ -78,33 +78,33 @@ export default function SessionHeader({
   const timeUntilReset = getTimeUntilReset();
 
   return (
-    <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white border-b border-amber-700 shadow-sm">
+    <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
       <div className="truncate font-mono text-sm font-medium" title={cwd}>
         {cwd}
       </div>
       <div className="flex items-center gap-3">
         {tokenUsage && (
-          <div className={`flex items-center gap-2 text-xs font-medium bg-amber-600/30 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>
+          <div className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>
             <span>🪙 {tokenUsage.used.toLocaleString()}/{tokenUsage.total.toLocaleString()}</span>
-            <span className="text-amber-200">({percentUsed.toFixed(0)}%)</span>
+            <span className="text-gray-400">({percentUsed.toFixed(0)}%)</span>
           </div>
         )}
         {showHighUsageWarning && timeUntilReset && (
-          <div className="flex items-center gap-2 text-xs font-medium bg-red-600/40 px-3 py-1 rounded-md text-red-100" title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}>
+          <div className="flex items-center gap-2 text-xs font-medium bg-red-900/40 px-3 py-1 rounded-md text-red-300" title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}>
             <span>⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m</span>
           </div>
         )}
         {lastDurationMs > 0 && (
-          <div className="flex items-center gap-3 text-sm font-medium bg-amber-600/30 px-3 py-1 rounded-md">
+          <div className="flex items-center gap-3 text-sm font-medium bg-gray-700/50 px-3 py-1 rounded-md">
             <span>{formatDuration(lastDurationMs)}</span>
-            <span className="text-amber-200">│</span>
+            <span className="text-gray-500">│</span>
             <span>{model}</span>
           </div>
         )}
         {onClose && (
           <button
             onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-amber-700 transition-all duration-200 text-xl leading-none font-light"
+            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
             title="Close session"
           >
             ×

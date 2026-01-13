@@ -30,7 +30,7 @@ export default function ChatInput({
   };
 
   return (
-    <div className="flex gap-3 p-5 border-t border-gray-200 bg-gradient-to-b from-white to-gray-50">
+    <div className="flex gap-3 p-5 border-t border-gray-700 bg-gradient-to-b from-gray-800 to-gray-900">
       <AutosuggestInput
         value={input}
         onChange={setInput}
@@ -42,7 +42,7 @@ export default function ChatInput({
       <button
         onClick={handleSubmit}
         disabled={disabled || !input.trim()}
-        className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-none"
+        className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-none"
       >
         Send
       </button>

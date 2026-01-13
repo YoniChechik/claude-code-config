@@ -2,15 +2,15 @@ import type { ContentBlock } from "@/lib/types";
 
 // Tool color mapping (from cc_filter.jq)
 const TOOL_COLORS = {
-  Task: "bg-purple-100 text-purple-700 border-purple-300",
-  Bash: "bg-yellow-100 text-yellow-800 border-yellow-300",
-  Read: "bg-green-100 text-green-700 border-green-300",
-  Write: "bg-blue-100 text-blue-700 border-blue-300",
-  Edit: "bg-blue-100 text-blue-700 border-blue-300",
-  Grep: "bg-cyan-100 text-cyan-700 border-cyan-300",
-  Glob: "bg-cyan-100 text-cyan-700 border-cyan-300",
-  TodoWrite: "bg-purple-100 text-purple-700 border-purple-300",
-  default: "bg-gray-100 text-gray-700 border-gray-300",
+  Task: "bg-purple-900/40 text-purple-300 border-purple-700",
+  Bash: "bg-yellow-900/40 text-yellow-300 border-yellow-700",
+  Read: "bg-green-900/40 text-green-300 border-green-700",
+  Write: "bg-blue-900/40 text-blue-300 border-blue-700",
+  Edit: "bg-blue-900/40 text-blue-300 border-blue-700",
+  Grep: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
+  Glob: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
+  TodoWrite: "bg-purple-900/40 text-purple-300 border-purple-700",
+  default: "bg-gray-800 text-gray-300 border-gray-700",
 };
 
 interface ToolUseCardProps {
@@ -33,7 +33,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Bash":
       return (
         <div className="font-mono text-sm">
-          <div className="text-gray-600">{tool.input.description}</div>
+          <div className="text-gray-400">{tool.input.description}</div>
           <div className="mt-1">$ {tool.input.command}</div>
         </div>
       );
@@ -44,7 +44,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
           {(tool.input.todos || []).map((todo: any, idx: number) => (
             <div key={idx} className="flex items-center gap-2">
               <span>{getStatusEmoji(todo.status)}</span>
-              <span className={todo.status === "completed" ? "line-through text-gray-500" : ""}>
+              <span className={todo.status === "completed" ? "line-through text-gray-500" : "text-gray-300"}>
                 {todo.content}
               </span>
             </div>
@@ -63,7 +63,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Write":
     case "Edit":
       return (
-        <div className="text-sm font-mono text-gray-600">
+        <div className="text-sm font-mono text-gray-400">
           {tool.input.file_path}
         </div>
       );
@@ -71,14 +71,14 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Grep":
     case "Glob":
       return (
-        <div className="text-sm font-mono text-gray-600">
+        <div className="text-sm font-mono text-gray-400">
           {tool.input.pattern}
         </div>
       );
 
     default:
       return (
-        <pre className="text-xs text-gray-600 overflow-x-auto">
+        <pre className="text-xs text-gray-400 overflow-x-auto">
           {JSON.stringify(tool.input, null, 2)}
         </pre>
       );

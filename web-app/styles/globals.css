@@ -22,14 +22,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   font-size: 16px;
   line-height: 1.6;
-  color: theme(colors.gray.900);
-  background-color: theme(colors.gray.50);
+  color: theme(colors.gray.100);
+  background-color: theme(colors.gray.900);
 }
 
 code {
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Courier New', Courier, monospace;
   font-size: 0.9em;
-  background-color: theme(colors.gray.100);
+  background-color: theme(colors.gray.800);
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
 }
@@ -48,14 +48,14 @@ code {
 }
 
 ::-webkit-scrollbar-track {
-  background: theme(colors.gray.100);
+  background: theme(colors.gray.800);
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, theme(colors.gray.400), theme(colors.gray.500));
+  background: linear-gradient(to bottom, theme(colors.gray.600), theme(colors.gray.700));
   border-radius: 5px;
-  border: 2px solid theme(colors.gray.100);
+  border: 2px solid theme(colors.gray.800);
 }
 
 ::-webkit-scrollbar-thumb:hover {

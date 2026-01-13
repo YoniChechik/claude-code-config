@@ -32,13 +32,13 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
     : contentStr;
 
   return (
-    <div className="text-gray-600 bg-gray-100 px-3 py-2 rounded font-mono text-sm my-2 whitespace-pre-wrap">
+    <div className="text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono text-sm my-2 whitespace-pre-wrap">
       {displayContent}
       {shouldCollapse && (
-        <div className="mt-2 pt-2 border-t border-gray-300">
+        <div className="mt-2 pt-2 border-t border-gray-700">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="text-blue-600 hover:text-blue-800 text-xs font-semibold"
+            className="text-blue-400 hover:text-blue-300 text-xs font-semibold"
           >
             {isExpanded ? '▲ Show less' : `▼ Show ${lines.length - 3} more lines`}
           </button>
@@ -61,7 +61,7 @@ export default function ContentBlockRenderer({ block, isNested = false }: Conten
 
     case "thinking":
       return (
-        <div className="text-gray-500 italic bg-gray-50 px-3 py-2 rounded-lg my-2">
+        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg my-2">
           💭 {block.thinking}
         </div>
       );

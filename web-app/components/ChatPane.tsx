@@ -222,14 +222,14 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
 
   if (!session) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50 text-gray-600">
+      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
         Loading session...
       </div>
     );
   }
 
   return (
-    <div className={`relative flex flex-col h-full bg-white ${isFocused ? 'ring-2 ring-blue-500' : ''}`}>
+    <div className={`relative flex flex-col h-full bg-gray-900 ${isFocused ? 'ring-2 ring-blue-500' : ''}`}>
       <SessionHeader
         cwd={session.cwd}
         model={session.model}
