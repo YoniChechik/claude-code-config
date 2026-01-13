@@ -160,6 +160,9 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
                 };
                 assistantBlocks.push(toolResultBlock);
                 setStreamingBlocks([...assistantBlocks]);
+              } else if (event.type === "cwd_changed") {
+                // Update session cwd immediately
+                setSession((prev) => prev ? { ...prev, cwd: event.cwd } : null);
               } else if (event.type === "error") {
                 console.error("Stream error:", event.error);
               }
@@ -180,27 +183,17 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         setMessages((prev) => [...prev, assistantMessage]);
       }
 
-      // Update session metadata (cwd, model, duration) from server without overwriting messages
+      // Update session metadata (model, duration) from server
+      // Note: cwd is already updated via cwd_changed event during stream
       const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
       const data = await sessionResponse.json();
       if (data.session) {
-        const previousCwd = session.cwd; // Store before update
-
-        setSession({
-          ...session,
-          cwd: data.session.cwd,
+        setSession((prev) => prev ? {
+          ...prev,
+          cwd: data.session.cwd, // Ensure sync with backend
           model: data.session.model,
           lastDurationMs: data.session.lastDurationMs,
-        });
-
-        // Check if directory changed and trigger auto-continue
-        if (data.session.previousCwd && data.session.previousCwd !== data.session.cwd && !isAutoContinue) {
-          // Directory changed - trigger auto-continue
-          const continuePrompt = `Now we are in ${data.session.cwd}. CONTINUE`;
-
-          // Recursively call with auto-continue flag
-          await handleSubmitInternal(continuePrompt, true);
-        }
+        } : null);
       }
     } catch (error) {
       console.error("Failed to send command:", error);

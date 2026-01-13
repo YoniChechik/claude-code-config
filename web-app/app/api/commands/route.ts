@@ -104,6 +104,17 @@ export async function POST(request: NextRequest) {
         const updatedSession = sessionManager.getSession(sessionId);
         const didChangeCwd = updatedSession && updatedSession.cwd !== previousCwd;
 
+        // Send cwd_changed event to client so navbar updates immediately
+        if (didChangeCwd) {
+          const cwdChangedEvent = {
+            type: "cwd_changed",
+            cwd: updatedSession.cwd,
+          };
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(cwdChangedEvent)}\n\n`)
+          );
+        }
+
         // Auto-continue if directory changed BEFORE closing stream
         if (didChangeCwd) {
           try {
