@@ -38,18 +38,29 @@ export default function AgentTaskFrame({
       {/* Agent Content - nested tool invocations and nested agents */}
       <div className="px-4 py-3 space-y-2">
         {childBlocks.map((item, index) => {
-          // Handle nested agent task groups recursively
-          if (typeof item === "object" && "type" in item && item.type === "agent_task") {
-            return (
-              <div key={index} className="ml-2">
-                <AgentTaskFrame
-                  agentType={item.agentType}
-                  description={item.description}
-                  taskId={item.taskId}
-                  childBlocks={item.blocks}
-                />
-              </div>
-            );
+          // Check if this is a BlockGroup
+          if (typeof item === "object" && "type" in item) {
+            // Handle nested agent task groups recursively
+            if (item.type === "agent_task") {
+              return (
+                <div key={index} className="ml-2">
+                  <AgentTaskFrame
+                    agentType={item.agentType}
+                    description={item.description}
+                    taskId={item.taskId}
+                    childBlocks={item.blocks}
+                  />
+                </div>
+              );
+            }
+            // Handle standalone block groups
+            if (item.type === "standalone") {
+              return (
+                <div key={index} className="ml-2">
+                  <ContentBlockRenderer block={item.block} isNested />
+                </div>
+              );
+            }
           }
           // Handle regular content blocks
           return (
