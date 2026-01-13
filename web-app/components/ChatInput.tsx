@@ -8,6 +8,7 @@ interface ChatInputProps {
   onSubmit: (prompt: string) => void;
   commands: SlashCommand[];
   disabled?: boolean;
+  onFocusRef?: (focusFn: () => void) => void;
 }
 
 /**
@@ -17,6 +18,7 @@ export default function ChatInput({
   onSubmit,
   commands,
   disabled = false,
+  onFocusRef,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
 
@@ -28,18 +30,19 @@ export default function ChatInput({
   };
 
   return (
-    <div className="flex gap-2 p-4 border-t border-gray-300 bg-white">
+    <div className="flex gap-3 p-5 border-t border-gray-200 bg-gradient-to-b from-white to-gray-50">
       <AutosuggestInput
         value={input}
         onChange={setInput}
         onSubmit={handleSubmit}
         commands={commands}
         disabled={disabled}
+        onFocusRef={onFocusRef}
       />
       <button
         onClick={handleSubmit}
         disabled={disabled || !input.trim()}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+        className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-none"
       >
         Send
       </button>

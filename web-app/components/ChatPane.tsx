@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import SessionHeader from "./SessionHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
@@ -10,22 +10,32 @@ import type { Session, Message, SlashCommand } from "@/lib/types";
 interface ChatPaneProps {
   sessionId: string;
   commands: SlashCommand[];
+  onClose?: () => void;
+  isFocused?: boolean;
 }
 
 /**
  * Individual chat pane with session management
  */
-export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
+export default function ChatPane({ sessionId, commands, onClose, isFocused = false }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showNav, setShowNav] = useState(false);
+  const inputFocusRef = useRef<() => void>();
 
   // Load session on mount
   useEffect(() => {
     loadSession();
   }, [sessionId]);
+
+  // Focus input when pane becomes focused
+  useEffect(() => {
+    if (isFocused && inputFocusRef.current) {
+      inputFocusRef.current();
+    }
+  }, [isFocused]);
 
   const loadSession = async () => {
     try {
@@ -155,11 +165,12 @@ export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
   }
 
   return (
-    <div className="relative flex flex-col h-full bg-white">
+    <div className={`relative flex flex-col h-full bg-white ${isFocused ? 'ring-2 ring-blue-500' : ''}`}>
       <SessionHeader
         cwd={session.cwd}
         model={session.model}
         lastDurationMs={session.lastDurationMs}
+        onClose={onClose}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -173,6 +184,7 @@ export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
             onSubmit={handleSubmit}
             commands={commands}
             disabled={isStreaming}
+            onFocusRef={(ref) => (inputFocusRef.current = ref)}
           />
         </div>
 

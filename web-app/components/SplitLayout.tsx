@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ChatPane from "./ChatPane";
 import type { SlashCommand } from "@/lib/types";
 
@@ -8,6 +8,7 @@ interface SplitLayoutProps {
   sessionIds: string[];
   commands: SlashCommand[];
   onAddSession: () => void;
+  onCloseSession: (sessionId: string) => void;
 }
 
 /**
@@ -17,12 +18,14 @@ export default function SplitLayout({
   sessionIds,
   commands,
   onAddSession,
+  onCloseSession,
 }: SplitLayoutProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [paneWidths, setPaneWidths] = useState<number[]>(
     sessionIds.map(() => 100 / sessionIds.length)
   );
+  const [focusedPaneIndex, setFocusedPaneIndex] = useState(0);
 
   const handleMouseDown = (index: number) => {
     setIsDragging(true);
@@ -71,6 +74,31 @@ export default function SplitLayout({
     setPaneWidths(sessionIds.map(() => 100 / sessionIds.length));
   }
 
+  // Keep focused index in bounds
+  useEffect(() => {
+    if (focusedPaneIndex >= sessionIds.length) {
+      setFocusedPaneIndex(Math.max(0, sessionIds.length - 1));
+    }
+  }, [sessionIds.length, focusedPaneIndex]);
+
+  // Keyboard shortcuts for pane navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey) {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          setFocusedPaneIndex((prev) => Math.max(0, prev - 1));
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          setFocusedPaneIndex((prev) => Math.min(sessionIds.length - 1, prev + 1));
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sessionIds.length]);
+
   return (
     <div
       className="flex h-full w-full select-none relative"
@@ -81,7 +109,7 @@ export default function SplitLayout({
       {/* Floating + button */}
       <button
         onClick={onAddSession}
-        className="absolute top-4 right-4 z-50 w-12 h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl font-light transition-colors"
+        className="absolute top-5 right-5 z-50 w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-3xl font-light transition-all duration-200 hover:scale-110"
         title="Add new chat"
       >
         +
@@ -93,15 +121,20 @@ export default function SplitLayout({
             className="h-full overflow-hidden"
             style={{ width: `${paneWidths[index]}vw` }}
           >
-            <ChatPane sessionId={sessionId} commands={commands} />
+            <ChatPane
+              sessionId={sessionId}
+              commands={commands}
+              onClose={() => onCloseSession(sessionId)}
+              isFocused={index === focusedPaneIndex}
+            />
           </div>
 
           {index < sessionIds.length - 1 && (
             <div
-              className="flex items-center justify-center w-1 bg-gray-300 cursor-col-resize hover:bg-blue-500 active:bg-blue-600"
+              className="flex items-center justify-center w-1.5 bg-gradient-to-b from-gray-200 via-gray-300 to-gray-200 cursor-col-resize hover:from-blue-400 hover:via-blue-500 hover:to-blue-400 active:from-blue-600 active:via-blue-700 active:to-blue-600 transition-all duration-200"
               onMouseDown={() => handleMouseDown(index)}
             >
-              <div className="text-gray-600 text-xs">⋮</div>
+              <div className="text-gray-500 text-xs">⋮</div>
             </div>
           )}
         </div>

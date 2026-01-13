@@ -11,6 +11,7 @@ interface AutosuggestInputProps {
   commands: SlashCommand[];
   placeholder?: string;
   disabled?: boolean;
+  onFocusRef?: (focusFn: () => void) => void;
 }
 
 /**
@@ -23,11 +24,19 @@ export default function AutosuggestInput({
   commands,
   placeholder = "Type your message or /command...",
   disabled = false,
+  onFocusRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Expose focus function to parent
+  useEffect(() => {
+    if (onFocusRef && inputRef.current) {
+      onFocusRef(() => inputRef.current?.focus());
+    }
+  }, [onFocusRef]);
 
   // Handle input change
   const handleChange = (newValue: string) => {
@@ -121,16 +130,16 @@ export default function AutosuggestInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="w-full px-3 py-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+          className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 transition-all duration-200 shadow-sm"
         />
       </div>
 
       {/* Suggestion dropdown */}
       {suggestMode && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
+        <div className="absolute bottom-full left-0 right-0 mb-3 bg-white border-2 border-gray-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10">
           {/* Keyboard hint */}
-          <div className="px-3 py-2 text-xs text-gray-500 border-b border-gray-200 bg-gray-50">
-            <span className="font-semibold">Tab</span> to accept • <span className="font-semibold">↑↓</span> to navigate
+          <div className="px-4 py-2.5 text-xs text-gray-600 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-gray-100 font-medium">
+            <span className="font-bold text-blue-600">Tab</span> to accept • <span className="font-bold text-blue-600">↑↓</span> to navigate
           </div>
 
           {matches.slice(0, 10).map((cmd, index) => {
@@ -151,9 +160,9 @@ export default function AutosuggestInput({
             return (
               <div
                 key={cmd.name}
-                className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
+                className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-all duration-150 ${
                   index === selectedIndex
-                    ? "bg-blue-100 border-l-4 border-blue-500"
+                    ? "bg-gradient-to-r from-blue-50 to-blue-100 border-l-4 border-blue-500 shadow-sm"
                     : "hover:bg-gray-50 border-l-4 border-transparent"
                 }`}
                 onClick={() => {
@@ -161,8 +170,8 @@ export default function AutosuggestInput({
                   acceptSuggestion();
                 }}
               >
-                <span className="font-mono text-sm font-medium">/{cmd.name}</span>
-                <span className={`text-xs px-2 py-0.5 rounded ${getBadgeStyle()}`}>
+                <span className="font-mono text-sm font-semibold text-gray-800">/{cmd.name}</span>
+                <span className={`text-xs px-2.5 py-1 rounded-lg font-medium ${getBadgeStyle()}`}>
                   {cmd.source}
                 </span>
               </div>

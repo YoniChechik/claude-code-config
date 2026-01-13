@@ -73,6 +73,27 @@ export default function Home() {
     }
   };
 
+  const closeSession = async (sessionId: string) => {
+    try {
+      // Call DELETE endpoint
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+
+      // Remove from local state
+      const newSessionIds = sessionIds.filter((id) => id !== sessionId);
+
+      // If all sessions closed, create a new one
+      if (newSessionIds.length === 0) {
+        await addSession();
+      } else {
+        setSessionIds(newSessionIds);
+      }
+    } catch (err) {
+      console.error("Failed to close session:", err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
@@ -112,6 +133,7 @@ export default function Home() {
         sessionIds={sessionIds}
         commands={commands}
         onAddSession={addSession}
+        onCloseSession={closeSession}
       />
     </main>
   );

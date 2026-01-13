@@ -6,6 +6,7 @@ interface SessionHeaderProps {
   cwd: string;
   model: string;
   lastDurationMs: number;
+  onClose?: () => void;
 }
 
 /**
@@ -16,19 +17,31 @@ export default function SessionHeader({
   cwd,
   model,
   lastDurationMs,
+  onClose,
 }: SessionHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-yellow-500 text-black border-b border-gray-300">
-      <div className="truncate font-mono text-sm" title={cwd}>
+    <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white border-b border-amber-700 shadow-sm">
+      <div className="truncate font-mono text-sm font-medium" title={cwd}>
         {cwd}
       </div>
-      {lastDurationMs > 0 && (
-        <div className="flex items-center gap-2 text-sm">
-          <span>{formatDuration(lastDurationMs)}</span>
-          <span>│</span>
-          <span>{model}</span>
-        </div>
-      )}
+      <div className="flex items-center gap-3">
+        {lastDurationMs > 0 && (
+          <div className="flex items-center gap-3 text-sm font-medium bg-amber-600/30 px-3 py-1 rounded-md">
+            <span>{formatDuration(lastDurationMs)}</span>
+            <span className="text-amber-200">│</span>
+            <span>{model}</span>
+          </div>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-amber-700 transition-all duration-200 text-xl leading-none font-light"
+            title="Close session"
+          >
+            ×
+          </button>
+        )}
+      </div>
     </div>
   );
 }
