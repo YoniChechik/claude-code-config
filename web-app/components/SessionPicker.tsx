@@ -2,9 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 
-/**
- * Format relative time (e.g., "2h ago", "1d ago")
- */
 function formatRelativeTime(timestamp: string): string {
   const diff = Date.now() - new Date(timestamp).getTime();
   const hours = Math.floor(diff / 3600000);
@@ -32,9 +29,6 @@ interface SessionPickerProps {
   onCancel: () => void;
 }
 
-/**
- * Modal picker for selecting a session to resume
- */
 export default function SessionPicker({
   isOpen,
   onSelect,
@@ -79,7 +73,7 @@ export default function SessionPicker({
 
   useEffect(() => {
     if (selectedItemRefs.current[selectedIndex]) {
-      selectedItemRefs.current[selectedIndex]?.scrollIntoView({
+      selectedItemRefs.current[selectedIndex]!.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
       });
@@ -93,13 +87,8 @@ export default function SessionPicker({
     const response = await fetch("/api/sessions/recent?limit=20");
     const data = await response.json();
 
-    if (data.sessions) {
-      setSessions(data.sessions);
-      setSelectedIndex(0);
-    } else {
-      setError("Failed to load sessions");
-    }
-
+    setSessions(data.sessions);
+    setSelectedIndex(0);
     setLoading(false);
   };
 

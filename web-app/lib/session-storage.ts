@@ -2,9 +2,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import { homedir } from "os";
 
-/**
- * Session metadata extracted from JSONL files
- */
 export interface SessionMetadata {
   id: string;
   cwd: string;
@@ -15,9 +12,6 @@ export interface SessionMetadata {
   filePath: string;
 }
 
-/**
- * JSONL line format for session storage
- */
 interface SessionLine {
   type: "user" | "assistant";
   message?: {
@@ -29,9 +23,6 @@ interface SessionLine {
   timestamp?: string;
 }
 
-/**
- * Format relative time (e.g., "2h ago", "1d ago")
- */
 export function formatRelativeTime(timestamp: string): string {
   const diff = Date.now() - new Date(timestamp).getTime();
   const hours = Math.floor(diff / 3600000);
@@ -43,22 +34,12 @@ export function formatRelativeTime(timestamp: string): string {
   return `${Math.floor(days / 7)}w ago`;
 }
 
-/**
- * Scan projects directory and discover all session JSONL files
- */
 async function discoverSessionFiles(): Promise<string[]> {
   const projectsDir = path.join(homedir(), ".claude", "projects");
-
-  const stats = await fs.stat(projectsDir);
-  if (!stats.isDirectory()) {
-    return [];
-  }
-
   const sessionFiles: string[] = [];
   const entries = await fs.readdir(projectsDir);
 
   for (const entry of entries) {
-    // Skip hidden files/directories (like .jsonl symlink)
     if (entry.startsWith(".")) continue;
 
     const entryPath = path.join(projectsDir, entry);
@@ -76,9 +57,6 @@ async function discoverSessionFiles(): Promise<string[]> {
   return sessionFiles;
 }
 
-/**
- * Extract metadata from a session JSONL file
- */
 async function loadSessionMetadata(filePath: string): Promise<SessionMetadata | null> {
   const content = await fs.readFile(filePath, "utf-8");
   const lines = content.trim().split("\n").filter(line => line.trim());
@@ -87,20 +65,16 @@ async function loadSessionMetadata(filePath: string): Promise<SessionMetadata | 
     return null;
   }
 
-  // Parse first line for session ID and creation time
   const firstLine: SessionLine = JSON.parse(lines[0]);
-  const sessionId = firstLine.sessionId || path.basename(filePath, ".jsonl");
-  const createdAt = firstLine.timestamp || new Date().toISOString();
-  const cwd = firstLine.cwd || "/unknown";
+  const sessionId = firstLine.sessionId!;
+  const createdAt = firstLine.timestamp!;
+  const cwd = firstLine.cwd!;
 
-  // Parse last line for last activity
   const lastLine: SessionLine = JSON.parse(lines[lines.length - 1]);
-  const lastActivityAt = lastLine.timestamp || createdAt;
+  const lastActivityAt = lastLine.timestamp!;
 
-  // Count messages (user + assistant pairs)
   const messageCount = lines.length;
 
-  // Extract last message preview
   let lastMessagePreview = "";
   for (let i = lines.length - 1; i >= 0; i--) {
     const line: SessionLine = JSON.parse(lines[i]);
@@ -110,13 +84,12 @@ async function loadSessionMetadata(filePath: string): Promise<SessionMetadata | 
         lastMessagePreview = content;
       } else if (Array.isArray(content)) {
         const textBlock = content.find(block => block.type === "text");
-        lastMessagePreview = textBlock?.text || "";
+        lastMessagePreview = textBlock!.text!;
       }
       break;
     }
   }
 
-  // Truncate preview to 50 characters
   if (lastMessagePreview.length > 50) {
     lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
   }
@@ -132,13 +105,9 @@ async function loadSessionMetadata(filePath: string): Promise<SessionMetadata | 
   };
 }
 
-/**
- * Get recent sessions sorted by last activity
- */
 export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> {
   const sessionFiles = await discoverSessionFiles();
 
-  // Get file modification times and sort
   const filesWithStats = await Promise.all(
     sessionFiles.map(async (filePath) => {
       const stats = await fs.stat(filePath);
@@ -148,15 +117,12 @@ export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> 
 
   filesWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
-  // Load metadata for top N files
   const recentFiles = filesWithStats.slice(0, limit).map(f => f.filePath);
   const metadataPromises = recentFiles.map(filePath => loadSessionMetadata(filePath));
   const metadata = await Promise.all(metadataPromises);
 
-  // Filter out null results
   const validMetadata = metadata.filter((m): m is SessionMetadata => m !== null);
 
-  // Deduplicate by session ID (keep most recent)
   const seenIds = new Set<string>();
   const uniqueMetadata = validMetadata.filter(session => {
     if (seenIds.has(session.id)) {
@@ -166,7 +132,6 @@ export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> 
     return true;
   });
 
-  // Sort by last activity
   uniqueMetadata.sort((a, b) =>
     new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
   );
@@ -174,18 +139,12 @@ export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> 
   return uniqueMetadata;
 }
 
-/**
- * Message format for loaded sessions
- */
 interface LoadedMessage {
   role: "user" | "assistant";
   content: Array<Record<string, unknown>>;
   timestamp: Date;
 }
 
-/**
- * Load full session messages from JSONL file
- */
 export async function loadSessionMessages(filePath: string): Promise<LoadedMessage[]> {
   const content = await fs.readFile(filePath, "utf-8");
   const lines = content.trim().split("\n").filter(line => line.trim());

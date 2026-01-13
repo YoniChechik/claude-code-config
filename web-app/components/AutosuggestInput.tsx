@@ -17,9 +17,6 @@ interface AutosuggestInputProps {
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
-/**
- * Input with slash command autosuggest (ported from autosuggest.sh)
- */
 export default function AutosuggestInput({
   value,
   onChange,
@@ -40,37 +37,32 @@ export default function AutosuggestInput({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selectedItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Expose focus function to parent
   useEffect(() => {
     if (onFocusRef && inputRef.current) {
-      onFocusRef(() => inputRef.current?.focus());
+      onFocusRef(() => inputRef.current!.focus());
     }
   }, [onFocusRef]);
 
-  // Auto-resize textarea based on content
   useEffect(() => {
     if (inputRef.current) {
-      inputRef.current.style.height = '3rem'; // Reset to single line height (increased from 1.5rem)
+      inputRef.current.style.height = '3rem';
       const newHeight = Math.min(inputRef.current.scrollHeight, 200);
       inputRef.current.style.height = newHeight + 'px';
     }
   }, [value]);
 
-  // Scroll selected item into view
   useEffect(() => {
     if (suggestMode && selectedItemRefs.current[selectedIndex]) {
-      selectedItemRefs.current[selectedIndex]?.scrollIntoView({
+      selectedItemRefs.current[selectedIndex]!.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
       });
     }
   }, [selectedIndex, suggestMode]);
 
-  // Handle input change
   const handleChange = (newValue: string) => {
     onChange(newValue);
 
-    // Check if user typed "/resume" exactly - show picker instead of autocomplete
     const trimmed = newValue.trim();
     if (trimmed === "/resume") {
       if (onResumeSession) {
@@ -81,13 +73,11 @@ export default function AutosuggestInput({
       return;
     }
 
-    // Check if we should enter suggest mode (after typing /)
     const lastSlashIndex = newValue.lastIndexOf("/");
     if (lastSlashIndex >= 0) {
       const beforeSlash = newValue.substring(0, lastSlashIndex);
       if (beforeSlash === "" || beforeSlash.endsWith(" ")) {
         const pattern = newValue.substring(lastSlashIndex + 1);
-        // Use shared fuzzyMatchCommands function for consistent matching
         const newMatches = pattern ? fuzzyMatchCommands(pattern, commands) : commands;
         setMatches(newMatches);
         setSelectedIndex(0);
@@ -100,7 +90,6 @@ export default function AutosuggestInput({
     setMatches([]);
   };
 
-  // Handle key down
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (suggestMode && matches.length > 0) {
       if (e.key === "Tab") {
@@ -121,7 +110,6 @@ export default function AutosuggestInput({
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // If streaming, trigger flash animation instead of submitting
       if (isStreaming) {
         setIsFlashing(true);
         setTimeout(() => setIsFlashing(false), 300);
@@ -131,7 +119,6 @@ export default function AutosuggestInput({
     }
   };
 
-  // Accept suggestion
   const acceptSuggestion = () => {
     if (matches.length > 0) {
       const lastSlashIndex = value.lastIndexOf("/");
@@ -142,7 +129,6 @@ export default function AutosuggestInput({
     }
   };
 
-  // Get current suggestion text
   const getSuggestion = (): string => {
     if (!suggestMode || matches.length === 0) return "";
 
@@ -153,7 +139,6 @@ export default function AutosuggestInput({
 
   const suggestion = getSuggestion();
 
-  // Handle resume session selection
   const handleResumeSelect = (sessionId: string, filePath: string, cwd: string) => {
     setShowResumePicker(false);
     onChange("");
@@ -170,7 +155,6 @@ export default function AutosuggestInput({
   return (
     <div className="relative flex-1">
       <div className="relative">
-        {/* Ghost text showing suggestion */}
         {suggestion && (
           <div
             className="absolute inset-0 px-4 py-3 text-gray-600 pointer-events-none whitespace-pre-wrap overflow-hidden"
@@ -180,7 +164,6 @@ export default function AutosuggestInput({
           </div>
         )}
 
-        {/* Actual input */}
         <textarea
           ref={inputRef}
           value={value}
@@ -196,16 +179,13 @@ export default function AutosuggestInput({
         />
       </div>
 
-      {/* Suggestion dropdown */}
       {suggestMode && matches.length > 0 && (
         <div ref={dropdownRef} className="absolute bottom-full left-0 right-0 mb-3 bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10">
-          {/* Keyboard hint */}
           <div className="px-4 py-2.5 text-xs text-gray-300 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900 font-medium">
             <span className="font-bold text-blue-400">Tab</span> to accept • <span className="font-bold text-blue-400">↑↓</span> to navigate
           </div>
 
           {matches.slice(0, 10).map((cmd, index) => {
-            // Color-coded badges based on source
             const getBadgeStyle = () => {
               switch (cmd.source) {
                 case "builtin":
@@ -245,7 +225,6 @@ export default function AutosuggestInput({
         </div>
       )}
 
-      {/* Session picker modal */}
       <SessionPicker
         isOpen={showResumePicker}
         onSelect={handleResumeSelect}

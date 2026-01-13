@@ -3,20 +3,12 @@ import { generateSessionId, normalizePath } from "./utils";
 import { CDTracker } from "./cd-tracker";
 import { execSync } from "child_process";
 
-/**
- * In-memory session manager
- * Stores active sessions with their message history and CD tracking state
- */
 class SessionManager {
   private sessions = new Map<string, Session>();
   private cdTrackers = new Map<string, CDTracker>();
 
-  /**
-   * Create a new session
-   */
   createSession(cwd: string, clientHostname?: string): Session {
-    // Detect session type from environment variables
-    const { sessionType, hostname, distroName } = this.detectSessionType(clientHostname);
+    const { sessionType, hostname, distroName, clientIp } = this.detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
@@ -28,6 +20,7 @@ class SessionManager {
       sessionType,
       hostname,
       distroName,
+      clientIp,
     };
 
     this.sessions.set(session.id, session);
@@ -36,27 +29,19 @@ class SessionManager {
     return session;
   }
 
-  /**
-   * Detect session type from environment variables
-   */
   private detectSessionType(clientHostname?: string): {
     sessionType: 'ssh' | 'wsl' | 'local';
     hostname?: string;
     distroName?: string;
+    clientIp?: string;
   } {
-    // Check for SSH connection
     if (process.env.SSH_CONNECTION) {
-      let hostname = 'unknown';
-      try {
-        // Prefer client-provided hostname, fallback to env var or hostname command
-        hostname = clientHostname || process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
-      } catch {
-        // Fallback to 'unknown' if hostname command fails
-      }
-      return { sessionType: 'ssh', hostname };
+      const parts = process.env.SSH_CONNECTION.split(' ');
+      const clientIp = parts[0];
+      const hostname = clientHostname || process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
+      return { sessionType: 'ssh', hostname, clientIp };
     }
 
-    // Check for WSL
     if (process.env.WSL_DISTRO_NAME) {
       return {
         sessionType: 'wsl',
@@ -64,16 +49,11 @@ class SessionManager {
       };
     }
 
-    // Default to local
     return { sessionType: 'local' };
   }
 
-  /**
-   * Resume an existing session with pre-loaded messages
-   */
   resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
-    // Detect session type from environment variables
-    const { sessionType, hostname, distroName } = this.detectSessionType();
+    const { sessionType, hostname, distroName, clientIp } = this.detectSessionType();
 
     const session: Session = {
       id: sessionId,
@@ -86,6 +66,7 @@ class SessionManager {
       sessionType,
       hostname,
       distroName,
+      clientIp,
     };
 
     this.sessions.set(session.id, session);
@@ -94,88 +75,52 @@ class SessionManager {
     return session;
   }
 
-  /**
-   * Get session by ID
-   */
-  getSession(id: string): Session | undefined {
-    return this.sessions.get(id);
+  getSession(id: string): Session {
+    return this.sessions.get(id)!;
   }
 
-  /**
-   * Get all sessions
-   */
   getAllSessions(): Session[] {
     return Array.from(this.sessions.values());
   }
 
-  /**
-   * Delete session
-   */
   deleteSession(id: string): boolean {
     this.cdTrackers.delete(id);
     return this.sessions.delete(id);
   }
 
-  /**
-   * Clear messages in a session
-   */
-  clearMessages(id: string): boolean {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.messages = [];
-      return true;
-    }
-    return false;
+  clearMessages(id: string): void {
+    const session = this.sessions.get(id)!;
+    session.messages = [];
   }
 
-  /**
-   * Add message to session
-   */
   addMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.messages.push(message);
-    }
+    const session = this.sessions.get(sessionId)!;
+    session.messages.push(message);
   }
 
-  /**
-   * Get CD tracker for session
-   */
-  getCDTracker(sessionId: string): CDTracker | undefined {
-    return this.cdTrackers.get(sessionId);
+  getCDTracker(sessionId: string): CDTracker {
+    return this.cdTrackers.get(sessionId)!;
   }
 
-  /**
-   * Update session metadata from CD tracker
-   * Tracks previousCwd for symlink creation
-   */
   updateSessionFromTracker(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    const tracker = this.cdTrackers.get(sessionId);
+    const session = this.sessions.get(sessionId)!;
+    const tracker = this.cdTrackers.get(sessionId)!;
 
-    if (session && tracker) {
-      const wantedCwd = tracker.getWantedCwd();
-      if (wantedCwd) {
-        session.previousCwd = session.cwd; // Save previous before updating
-        session.cwd = wantedCwd;
-      }
-      session.model = tracker.getModel();
-      session.lastDurationMs = tracker.getLastDurationMs();
+    const wantedCwd = tracker.getWantedCwd();
+    if (wantedCwd) {
+      session.previousCwd = session.cwd;
+      session.cwd = wantedCwd;
     }
+    session.model = tracker.getModel();
+    session.lastDurationMs = tracker.getLastDurationMs();
   }
 
-  /**
-   * Set Claude session ID for resuming conversations
-   */
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.claudeSessionId = claudeSessionId;
-    }
+    const session = this.sessions.get(sessionId)!;
+    session.claudeSessionId = claudeSessionId;
   }
 }
 
-// Singleton instance - preserved across hot reloads in development
 const globalForSessionManager = globalThis as unknown as {
   sessionManager: SessionManager | undefined;
 };
