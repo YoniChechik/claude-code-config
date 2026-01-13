@@ -1,6 +1,9 @@
 #!/bin/bash
 # Start Claude Code Web UI in background
 
+# Capture original working directory
+export CCWEB_ORIGINAL_CWD="$(pwd)"
+
 cd /home/ubuntu/.claude/web-app
 
 # Kill existing process if running

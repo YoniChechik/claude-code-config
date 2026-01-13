@@ -101,7 +101,7 @@ export default function SplitLayout({
 
   return (
     <div
-      className="flex h-full w-full select-none relative"
+      className="flex h-full w-full relative"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}

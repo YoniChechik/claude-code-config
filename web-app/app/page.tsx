@@ -19,8 +19,10 @@ export default function Home() {
 
   const initializeSessions = async () => {
     try {
-      // Get current working directory (default to /home/ubuntu)
-      const cwd = process.env.NEXT_PUBLIC_DEFAULT_CWD || "/home/ubuntu";
+      // Get current working directory from backend
+      const cwdResponse = await fetch("/api/cwd");
+      const cwdData = await cwdResponse.json();
+      const cwd = cwdData.cwd || "/home/ubuntu";
 
       // Create one session to start
       const response = await fetch("/api/sessions", {
@@ -72,7 +74,10 @@ export default function Home() {
 
   const addSession = async () => {
     try {
-      const cwd = process.env.NEXT_PUBLIC_DEFAULT_CWD || "/home/ubuntu";
+      // Get current working directory from backend
+      const cwdResponse = await fetch("/api/cwd");
+      const cwdData = await cwdResponse.json();
+      const cwd = cwdData.cwd || "/home/ubuntu";
 
       const response = await fetch("/api/sessions", {
         method: "POST",
