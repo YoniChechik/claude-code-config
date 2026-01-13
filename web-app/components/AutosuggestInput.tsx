@@ -94,7 +94,7 @@ export default function AutosuggestInput({
     if (suggestMode && matches.length > 0) {
       if (e.key === "Tab") {
         e.preventDefault();
-        acceptSuggestion();
+        _acceptSuggestion();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) => (prev + 1) % matches.length);
@@ -103,7 +103,7 @@ export default function AutosuggestInput({
         setSelectedIndex((prev) => (prev - 1 + matches.length) % matches.length);
       } else if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        acceptSuggestion();
+        _acceptSuggestion();
         return;
       }
     }
@@ -119,26 +119,6 @@ export default function AutosuggestInput({
     }
   };
 
-  const acceptSuggestion = () => {
-    if (matches.length > 0) {
-      const lastSlashIndex = value.lastIndexOf("/");
-      const base = value.substring(0, lastSlashIndex + 1);
-      onChange(base + matches[selectedIndex].name + " ");
-      setSuggestMode(false);
-      setMatches([]);
-    }
-  };
-
-  const getSuggestion = (): string => {
-    if (!suggestMode || matches.length === 0) return "";
-
-    const lastSlashIndex = value.lastIndexOf("/");
-    const base = value.substring(0, lastSlashIndex + 1);
-    return base + matches[selectedIndex].name;
-  };
-
-  const suggestion = getSuggestion();
-
   const handleResumeSelect = (sessionId: string, filePath: string, cwd: string) => {
     setShowResumePicker(false);
     onChange("");
@@ -151,6 +131,26 @@ export default function AutosuggestInput({
     setShowResumePicker(false);
     onChange("");
   };
+
+  const _acceptSuggestion = () => {
+    if (matches.length > 0) {
+      const lastSlashIndex = value.lastIndexOf("/");
+      const base = value.substring(0, lastSlashIndex + 1);
+      onChange(base + matches[selectedIndex].name + " ");
+      setSuggestMode(false);
+      setMatches([]);
+    }
+  };
+
+  const _getSuggestion = (): string => {
+    if (!suggestMode || matches.length === 0) return "";
+
+    const lastSlashIndex = value.lastIndexOf("/");
+    const base = value.substring(0, lastSlashIndex + 1);
+    return base + matches[selectedIndex].name;
+  };
+
+  const suggestion = _getSuggestion();
 
   return (
     <div className="relative flex-1">
@@ -185,21 +185,7 @@ export default function AutosuggestInput({
             <span className="font-bold text-blue-400">Tab</span> to accept • <span className="font-bold text-blue-400">↑↓</span> to navigate
           </div>
 
-          {matches.slice(0, 10).map((cmd, index) => {
-            const getBadgeStyle = () => {
-              switch (cmd.source) {
-                case "builtin":
-                  return "bg-gray-700 text-gray-300 border border-gray-600";
-                case "user":
-                  return "bg-blue-900 text-blue-300 border border-blue-700";
-                case "project":
-                  return "bg-green-900 text-green-300 border border-green-700";
-                default:
-                  return "bg-gray-700 text-gray-300 border border-gray-600";
-              }
-            };
-
-            return (
+          {matches.slice(0, 10).map((cmd, index) => (
               <div
                 key={cmd.name}
                 ref={(el) => {
@@ -212,16 +198,15 @@ export default function AutosuggestInput({
                 }`}
                 onClick={() => {
                   setSelectedIndex(index);
-                  acceptSuggestion();
+                  _acceptSuggestion();
                 }}
               >
                 <span className="font-mono text-sm font-semibold text-gray-100">/{cmd.name}</span>
-                <span className={`text-xs px-2.5 py-1 rounded-lg font-medium ${getBadgeStyle()}`}>
+                <span className={`text-xs px-2.5 py-1 rounded-lg font-medium ${_getBadgeStyle(cmd.source)}`}>
                   {cmd.source}
                 </span>
               </div>
-            );
-          })}
+            ))}
         </div>
       )}
 
@@ -232,4 +217,17 @@ export default function AutosuggestInput({
       />
     </div>
   );
+}
+
+function _getBadgeStyle(source: string): string {
+  switch (source) {
+    case "builtin":
+      return "bg-gray-700 text-gray-300 border border-gray-600";
+    case "user":
+      return "bg-blue-900 text-blue-300 border border-blue-700";
+    case "project":
+      return "bg-green-900 text-green-300 border border-green-700";
+    default:
+      return "bg-gray-700 text-gray-300 border border-gray-600";
+  }
 }

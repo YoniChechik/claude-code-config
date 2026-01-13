@@ -8,7 +8,7 @@ class SessionManager {
   private cdTrackers = new Map<string, CDTracker>();
 
   createSession(cwd: string, clientHostname?: string): Session {
-    const { sessionType, hostname, distroName, clientIp } = this.detectSessionType(clientHostname);
+    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
@@ -29,7 +29,7 @@ class SessionManager {
     return session;
   }
 
-  private detectSessionType(clientHostname?: string): {
+  private _detectSessionType(clientHostname?: string): {
     sessionType: 'ssh' | 'wsl' | 'local';
     hostname?: string;
     distroName?: string;
@@ -53,7 +53,7 @@ class SessionManager {
   }
 
   resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
-    const { sessionType, hostname, distroName, clientIp } = this.detectSessionType();
+    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType();
 
     const session: Session = {
       id: sessionId,

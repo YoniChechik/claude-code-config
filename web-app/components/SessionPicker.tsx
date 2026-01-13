@@ -2,17 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 
-function formatRelativeTime(timestamp: string): string {
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(hours / 24);
-
-  if (hours < 1) return "< 1h ago";
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return `${Math.floor(days / 7)}w ago`;
-}
-
 interface SessionMetadata {
   id: string;
   cwd: string;
@@ -43,7 +32,7 @@ export default function SessionPicker({
 
   useEffect(() => {
     if (isOpen) {
-      loadSessions();
+      _loadSessions();
     }
   }, [isOpen]);
 
@@ -80,7 +69,7 @@ export default function SessionPicker({
     }
   }, [selectedIndex]);
 
-  const loadSessions = async () => {
+  const _loadSessions = async () => {
     setLoading(true);
     setError(null);
 
@@ -164,7 +153,7 @@ export default function SessionPicker({
                           {session.cwd}
                         </span>
                         <span className="text-xs text-gray-400 flex-shrink-0">
-                          {formatRelativeTime(session.lastActivityAt)}
+                          {_formatRelativeTime(session.lastActivityAt)}
                         </span>
                       </div>
                       <div className="text-sm text-gray-300 mb-1">
@@ -196,4 +185,15 @@ export default function SessionPicker({
       </div>
     </div>
   );
+}
+
+function _formatRelativeTime(timestamp: string): string {
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(hours / 24);
+
+  if (hours < 1) return "< 1h ago";
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return `${Math.floor(days / 7)}w ago`;
 }
