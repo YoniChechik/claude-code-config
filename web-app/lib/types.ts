@@ -12,6 +12,7 @@ export interface Session {
   sessionType: 'ssh' | 'wsl' | 'local';
   hostname?: string; // For SSH sessions
   distroName?: string; // For WSL sessions
+  clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
 }
 
 // Content block types (matches Claude API output)

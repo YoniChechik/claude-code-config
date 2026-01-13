@@ -259,6 +259,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         sessionType={session.sessionType}
         hostname={session.hostname}
         distroName={session.distroName}
+        clientIp={session.clientIp}
       />
 
       <div className="flex flex-1 overflow-hidden">

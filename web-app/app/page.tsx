@@ -24,35 +24,39 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Resolve SSH hostname if needed
-      let hostname = window.location.hostname;
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        const savedHost = localStorage.getItem('ssh-host');
-        if (savedHost) {
-          hostname = savedHost;
-        } else {
-          // Prompt user for SSH host
-          const userHost = window.prompt(
-            'Enter your SSH host alias (from ~/.ssh/config):\nExample: mixtiles'
-          );
-          if (userHost && userHost.trim() !== '') {
-            hostname = userHost.trim();
-            localStorage.setItem('ssh-host', hostname);
-          }
-        }
-      }
-
-      // Create one session to start
+      // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, clientHostname: hostname }),
+        body: JSON.stringify({ cwd }),
       });
 
       const data = await response.json();
 
       if (data.session) {
         setSessionIds([data.session.id]);
+
+        // Auto-load hostname mapping if SSH with localhost hostname
+        if (
+          data.session.sessionType === 'ssh' &&
+          data.session.clientIp &&
+          (data.session.hostname === 'localhost' || data.session.hostname === '127.0.0.1')
+        ) {
+          try {
+            const mappingResponse = await fetch(
+              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`
+            );
+            const mappingData = await mappingResponse.json();
+
+            // If mapping exists, update session with resolved hostname
+            if (mappingData.hostname) {
+              // No action needed - SessionHeader will handle this automatically
+              console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
+            }
+          } catch (err) {
+            console.error("Failed to auto-load SSH hostname mapping:", err);
+          }
+        }
       } else {
         throw new Error("Failed to create session");
       }
@@ -97,17 +101,11 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Resolve SSH hostname if needed
-      let hostname = window.location.hostname;
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        const savedHost = localStorage.getItem('ssh-host');
-        hostname = savedHost || hostname; // Use saved or fallback to localhost
-      }
-
+      // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, clientHostname: hostname }),
+        body: JSON.stringify({ cwd }),
       });
 
       const data = await response.json();

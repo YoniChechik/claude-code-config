@@ -26,13 +26,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const cleared = sessionManager.clearMessages(id);
 
-  if (!cleared) {
+  const session = sessionManager.getSession(id);
+  if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  const session = sessionManager.getSession(id);
+  sessionManager.clearMessages(id);
   return NextResponse.json({ session });
 }
 

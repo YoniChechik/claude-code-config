@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { formatDuration } from "@/lib/utils";
+import SSHHostPromptModal from "./SSHHostPromptModal";
 
 interface SessionHeaderProps {
   cwd: string;
@@ -16,6 +17,7 @@ interface SessionHeaderProps {
   sessionType?: 'ssh' | 'wsl' | 'local';
   hostname?: string;
   distroName?: string;
+  clientIp?: string;
 }
 
 /**
@@ -31,13 +33,18 @@ export default function SessionHeader({
   sessionType = 'local',
   hostname,
   distroName,
+  clientIp,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{ percentUsed: number; resetTime: string } | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [isLoadingMapping, setIsLoadingMapping] = useState(false);
+  const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(hostname);
 
   // Generate VSCode URL based on session type
-  const getVSCodeUrl = (): string => {
-    if (sessionType === 'ssh' && hostname) {
-      return `vscode://vscode-remote/ssh-remote+${hostname}${cwd}?windowId=_blank`;
+  const getVSCodeUrl = (hostnameOverride?: string): string => {
+    const effectiveHostname = hostnameOverride || resolvedHostname;
+    if (sessionType === 'ssh' && effectiveHostname) {
+      return `vscode://vscode-remote/ssh-remote+${effectiveHostname}${cwd}?windowId=_blank`;
     }
     if (sessionType === 'wsl' && distroName) {
       return `vscode://vscode-remote/wsl+${distroName}${cwd}?windowId=_blank`;
@@ -94,15 +101,96 @@ export default function SessionHeader({
 
   const timeUntilReset = getTimeUntilReset();
 
+  // Check if hostname is localhost
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  // Handle CWD click
+  const handleCwdClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+
+    // If not SSH or not localhost, open directly
+    if (sessionType !== 'ssh' || !isLocalhost) {
+      window.open(getVSCodeUrl(), '_blank');
+      return;
+    }
+
+    // If localhost but no clientIp, show error
+    if (!clientIp) {
+      alert('Cannot resolve SSH hostname: client IP not available');
+      return;
+    }
+
+    // If already resolved, open directly
+    if (resolvedHostname && resolvedHostname !== 'localhost' && resolvedHostname !== '127.0.0.1') {
+      window.open(getVSCodeUrl(), '_blank');
+      return;
+    }
+
+    // Try to fetch mapping
+    setIsLoadingMapping(true);
+    try {
+      const response = await fetch(`/api/ssh-host-mapping?clientIp=${encodeURIComponent(clientIp)}`);
+      const data = await response.json();
+
+      if (data.hostname) {
+        setResolvedHostname(data.hostname);
+        window.open(getVSCodeUrl(data.hostname), '_blank');
+      } else {
+        // No mapping found, show modal
+        setShowModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch hostname mapping:', error);
+      alert('Failed to fetch hostname mapping. Please try again.');
+    } finally {
+      setIsLoadingMapping(false);
+    }
+  };
+
+  // Handle modal save
+  const handleSaveHostname = async (newHostname: string) => {
+    if (!clientIp) {
+      alert('Cannot save mapping: client IP not available');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/ssh-host-mapping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientIp, hostname: newHostname }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save hostname mapping');
+      }
+
+      setResolvedHostname(newHostname);
+      setShowModal(false);
+      window.open(getVSCodeUrl(newHostname), '_blank');
+    } catch (error) {
+      console.error('Failed to save hostname mapping:', error);
+      alert('Failed to save hostname mapping. Please try again.');
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
-      <a
-        href={getVSCodeUrl()}
-        className="truncate font-mono text-sm font-medium hover:text-blue-400 hover:underline cursor-pointer transition-colors"
-        title={`Open ${cwd} in VSCode`}
-      >
-        {cwd}
-      </a>
+    <>
+      <SSHHostPromptModal
+        isOpen={showModal}
+        clientIp={clientIp || ''}
+        onSave={handleSaveHostname}
+        onCancel={() => setShowModal(false)}
+      />
+      <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
+        <button
+          onClick={handleCwdClick}
+          disabled={isLoadingMapping}
+          className="truncate font-mono text-sm font-medium hover:text-blue-400 hover:underline cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait text-left"
+          title={`Open ${cwd} in VSCode`}
+        >
+          {isLoadingMapping ? `${cwd} (loading...)` : cwd}
+        </button>
       <div className="flex items-center gap-3">
         {tokenUsage && (
           <div className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>
@@ -132,6 +220,7 @@ export default function SessionHeader({
           </button>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
