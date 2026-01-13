@@ -124,7 +124,9 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
         }
       }
 
-      // Extract child blocks from tool_result.content
+      // Extract child blocks from TWO sources:
+      // 1. Blocks streamed BETWEEN tool_use and tool_result (e.g., Bash tool_use/result)
+      // 2. Blocks inside tool_result.content (e.g., summary text blocks)
       let childBlocks: ContentBlock[] = [];
       if (toolResultIndex !== -1) {
         const toolResult = sortedBlocks[toolResultIndex] as Extract<
@@ -133,16 +135,32 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
         >;
 
         console.log("[AGENT-GROUPING] Found matching tool_result for task", taskTool.id);
+
+        // Collect all blocks between tool_use and tool_result (streaming agent work)
+        const streamingBlocks = sortedBlocks.slice(i + 1, toolResultIndex);
+        console.log("[AGENT-GROUPING] Found", streamingBlocks.length, "streaming blocks between tool_use and tool_result");
+        console.log("[AGENT-GROUPING] Streaming blocks:", streamingBlocks.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
+
+        // Add streaming blocks first
+        childBlocks.push(...streamingBlocks);
+
+        // Mark all streaming blocks as processed
+        for (let k = i + 1; k < toolResultIndex; k++) {
+          processedIndices.add(k);
+        }
+
+        // Now extract blocks from tool_result.content (if any)
         console.log("[AGENT-GROUPING] tool_result.content type:", Array.isArray(toolResult.content) ? "array" : typeof toolResult.content);
 
-        // tool_result.content can be a string or an array of blocks
         if (Array.isArray(toolResult.content)) {
-          childBlocks = toolResult.content;
-          console.log("[AGENT-GROUPING] Extracted", childBlocks.length, "child blocks from tool_result.content");
-          console.log("[AGENT-GROUPING] Child blocks:", childBlocks.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
+          console.log("[AGENT-GROUPING] Extracted", toolResult.content.length, "blocks from tool_result.content");
+          console.log("[AGENT-GROUPING] Content blocks:", toolResult.content.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
+          childBlocks.push(...toolResult.content);
         } else {
-          console.log("[AGENT-GROUPING] tool_result.content is not an array, no child blocks extracted");
+          console.log("[AGENT-GROUPING] tool_result.content is not an array");
         }
+
+        console.log("[AGENT-GROUPING] Total child blocks:", childBlocks.length);
 
         // Mark tool_result as processed so we skip it
         processedIndices.add(toolResultIndex);
