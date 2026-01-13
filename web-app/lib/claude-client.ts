@@ -26,6 +26,7 @@ export interface ClaudeStreamEvent {
     id: string;
     name: string;
     input: Record<string, unknown>;
+    timestamp?: Date;
   };
   tool_result?: {
     tool_use_id: string;
@@ -77,6 +78,8 @@ export class ClaudeClient {
       let outputBuffer = "";
       let hasReceivedData = false;
       let stderrOutput = "";
+      const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
+      const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
@@ -155,13 +158,15 @@ export class ClaudeClient {
             // Handle content_block_start for tool_use blocks (streaming)
             if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
               const block = event.content_block;
-              if (block.name !== "StructuredOutput") {
+              if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
+                emittedToolUseIds.add(block.id);
                 eventQueue.push({
                   type: "tool_use",
                   tool: {
                     id: block.id,
                     name: block.name,
                     input: block.input || {},
+                    timestamp: new Date(),
                   },
                 });
                 resolveNext?.();
@@ -186,14 +191,16 @@ export class ClaudeClient {
                     });
                   }
 
-                  // Send tool_use event for all tools (skip StructuredOutput for display)
-                  if (block.name !== "StructuredOutput") {
+                  // Send tool_use event for all tools (skip StructuredOutput and already-emitted)
+                  if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
+                    emittedToolUseIds.add(block.id);
                     eventQueue.push({
                       type: "tool_use",
                       tool: {
                         id: block.id,
                         name: block.name,
                         input: block.input || {},
+                        timestamp: new Date(),
                       },
                     });
                   }
@@ -207,7 +214,8 @@ export class ClaudeClient {
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
-                if (block.type === "tool_result") {
+                if (block.type === "tool_result" && !emittedToolResultIds.has(block.tool_use_id)) {
+                  emittedToolResultIds.add(block.tool_use_id);
                   _debugLog("TOOL_RESULT_BLOCK", block);
                   eventQueue.push({
                     type: "tool_result",
