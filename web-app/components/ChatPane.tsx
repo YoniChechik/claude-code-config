@@ -127,12 +127,20 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
               if (event.type === "text") {
                 assistantText += event.content || "";
                 setStreamingText(assistantText);
-                // Add text block
-                const textBlock = {
-                  type: "text" as const,
-                  text: event.content || "",
-                };
-                assistantBlocks.push(textBlock);
+
+                // Update or create the last text block instead of creating multiple blocks
+                const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+                if (lastBlock && lastBlock.type === "text") {
+                  // Update existing text block
+                  lastBlock.text += event.content || "";
+                } else {
+                  // Create new text block
+                  const textBlock = {
+                    type: "text" as const,
+                    text: event.content || "",
+                  };
+                  assistantBlocks.push(textBlock);
+                }
                 setStreamingBlocks([...assistantBlocks]);
               } else if (event.type === "thinking") {
                 // Add thinking block
