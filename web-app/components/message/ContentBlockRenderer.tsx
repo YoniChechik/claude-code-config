@@ -32,7 +32,7 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
     : contentStr;
 
   return (
-    <div className="text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono text-sm my-2 whitespace-pre-wrap">
+    <div className="text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono text-sm whitespace-pre-wrap">
       {displayContent}
       {shouldCollapse && (
         <div className="mt-2 pt-2 border-t border-gray-700">
@@ -61,7 +61,7 @@ export default function ContentBlockRenderer({ block, isNested = false }: Conten
 
     case "thinking":
       return (
-        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg my-2">
+        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg">
           💭 {block.thinking}
         </div>
       );

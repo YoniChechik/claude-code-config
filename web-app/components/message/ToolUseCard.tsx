@@ -21,7 +21,7 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
   const colorClass = TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
 
   return (
-    <div className={`border-l-4 p-3 rounded my-2 ${colorClass}`}>
+    <div className={`border-l-4 p-3 rounded ${colorClass}`}>
       <div className="font-semibold mb-1">[{tool.name}]</div>
       {renderToolDetails(tool)}
     </div>
