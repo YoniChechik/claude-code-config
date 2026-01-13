@@ -217,8 +217,12 @@ export class ClaudeClient {
                     resolveNext = null;
                   }
                 }
+              }
+            }
 
-                // Tool result blocks
+            // Handle tool results from user messages
+            if (event.type === "user" && event.message?.content) {
+              for (const block of event.message.content) {
                 if (block.type === "tool_result") {
                   eventQueue.push({
                     type: "tool_result",
