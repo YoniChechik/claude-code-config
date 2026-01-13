@@ -47,3 +47,10 @@ export PATH="$HOME/.claude/bin:$PATH"
   - Passes all arguments through to claude (e.g., `cc -p "hello"` runs `claude -p "hello"`)
 
 - **`ccui.sh`** - Runs `cc.sh` with custom UI wrapper (customize this file for your own UI enhancements)
+
+- **`ccweb`** - Starts the Claude Code Web UI (Next.js multi-session interface):
+  - Runs dev server in background with nohup
+  - Saves PID to `web-app/dev.pid`
+  - Logs to `web-app/dev.log`
+  - Access at http://localhost:3000
+  - Add to PATH: `ln -sf ~/.claude/_clones/ccweb/start-dev.sh ~/.local/bin/ccweb`
