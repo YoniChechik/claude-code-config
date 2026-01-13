@@ -204,12 +204,10 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
-              // CRITICAL: Skip messages that are INSIDE an agent (parent_tool_use_id exists)
-              // These blocks will come from the Task tool_result.content array instead
+              // Log parent_tool_use_id if present for debugging
               if (event.parent_tool_use_id) {
-                console.log("[CLAUDE-CLIENT] SKIPPING assistant message (inside agent, parent_tool_use_id:", event.parent_tool_use_id + ")");
-                debugLog("SKIPPED_ASSISTANT_MESSAGE", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
-                continue;
+                console.log("[CLAUDE-CLIENT] Assistant message has parent_tool_use_id:", event.parent_tool_use_id);
+                debugLog("ASSISTANT_MESSAGE_WITH_PARENT", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
               }
 
               console.log("[CLAUDE-CLIENT] Processing assistant message content:", event.message.content.length, "blocks");
@@ -253,12 +251,10 @@ export class ClaudeClient {
 
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
-              // CRITICAL: Skip messages that are INSIDE an agent (parent_tool_use_id exists)
-              // These blocks will come from the Task tool_result.content array instead
+              // Log parent_tool_use_id if present for debugging
               if (event.parent_tool_use_id) {
-                console.log("[CLAUDE-CLIENT] SKIPPING user message (inside agent, parent_tool_use_id:", event.parent_tool_use_id + ")");
-                debugLog("SKIPPED_USER_MESSAGE", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
-                continue;
+                console.log("[CLAUDE-CLIENT] User message has parent_tool_use_id:", event.parent_tool_use_id);
+                debugLog("USER_MESSAGE_WITH_PARENT", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
               }
 
               console.log("[CLAUDE-CLIENT] Processing user message content:", event.message.content.length, "blocks");
