@@ -180,13 +180,18 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   ): Promise<{ text: string; blocks: ContentBlock[] }> => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       const chunk = decoder.decode(value);
-      const lines = chunk.split("\n");
+      buffer += chunk;
+      const lines = buffer.split("\n");
+
+      // Keep the last incomplete line in the buffer
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
@@ -194,20 +199,24 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         const data = line.slice(6);
         if (data === "[DONE]") break;
 
-        const event = JSON.parse(data);
+        try {
+          const event = JSON.parse(data);
 
-        if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
-          const result = _processStreamEvent(event, assistantText, assistantBlocks);
-          assistantText = result.text;
-          assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
-          setStreamingText(assistantText);
-          setStreamingBlocks([...assistantBlocks]);
-        } else if (event.type === "cwd_changed") {
-          setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
-        } else if (event.type === "token_usage") {
-          setTokenUsage(event.token_usage);
-        } else if (event.type === "error") {
-          console.error("Stream error:", event.error);
+          if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
+            const result = _processStreamEvent(event, assistantText, assistantBlocks);
+            assistantText = result.text;
+            assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
+            setStreamingText(assistantText);
+            setStreamingBlocks([...assistantBlocks]);
+          } else if (event.type === "cwd_changed") {
+            setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
+          } else if (event.type === "token_usage") {
+            setTokenUsage(event.token_usage);
+          } else if (event.type === "error") {
+            console.error("Stream error:", event.error);
+          }
+        } catch (e) {
+          console.error("Failed to parse SSE event:", data, e);
         }
       }
     }

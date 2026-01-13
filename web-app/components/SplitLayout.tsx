@@ -108,7 +108,7 @@ export default function SplitLayout({
       {/* Floating + button */}
       <button
         onClick={onAddSession}
-        className="absolute top-5 right-5 z-50 w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-3xl font-light transition-all duration-200 hover:scale-110"
+        className="absolute top-5 right-5 z-50 w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-xl leading-none transition-all duration-200 hover:scale-110"
         title="Add new chat"
       >
         +
