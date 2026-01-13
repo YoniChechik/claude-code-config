@@ -29,7 +29,7 @@ export type BlockGroup =
  * Those child blocks are recursively processed to find nested agents.
  */
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
-  const sortedBlocks = blocks;
+  const sortedBlocks = _sortToolBlocks(blocks);
   const groups: BlockGroup[] = [];
   const processedIndices = new Set<number>();
 
@@ -68,9 +68,7 @@ function _isTaskTool(block: ContentBlock): boolean {
 /**
  * Sorts content blocks to ensure tool_use blocks appear before their matching tool_result blocks.
  * This fixes the issue where tool inputs and outputs appear in scrambled order.
- * (Currently unused but kept for future optimization)
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const toolUseMap = new Map<string, ContentBlock>();
   const toolResultMap = new Map<string, ContentBlock>();
