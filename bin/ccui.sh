@@ -58,7 +58,7 @@ run_claude() {
     trap - INT
 
     if [ -z "$SESSION_ID" ]; then
-        SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
+        SESSION_ID=$(grep '"subtype":"init"' "$raw" | head -1 | jq -r '.session_id // empty' 2>/dev/null)
     fi
 
     local model
