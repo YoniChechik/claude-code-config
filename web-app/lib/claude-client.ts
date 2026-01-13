@@ -243,18 +243,10 @@ export class ClaudeClient {
           const event = eventQueue.shift()!;
           yield event;
         } else if (!processEnded) {
-          // Wait for next event with a timeout
-          await Promise.race([
-            new Promise<void>((resolve) => {
-              resolveNext = resolve;
-            }),
-            new Promise<void>((resolve) => {
-              setTimeout(() => {
-                claude.kill();
-                resolve();
-              }, 5000);
-            }),
-          ]);
+          // Wait for next event
+          await new Promise<void>((resolve) => {
+            resolveNext = resolve;
+          });
         }
       }
 
