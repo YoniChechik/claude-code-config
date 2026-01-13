@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { SlashCommand } from "@/lib/types";
+import { fuzzyMatchCommands } from "@/lib/autosuggest";
 
 interface AutosuggestInputProps {
   value: string;
@@ -28,17 +29,6 @@ export default function AutosuggestInput({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fuzzy match commands
-  const fuzzyMatch = (pattern: string): SlashCommand[] => {
-    if (!pattern) return commands;
-
-    const patternLower = pattern.toLowerCase();
-    return commands.filter((cmd) => {
-      const cmdLower = cmd.name.toLowerCase();
-      return cmdLower === patternLower || cmdLower.startsWith(patternLower);
-    });
-  };
-
   // Handle input change
   const handleChange = (newValue: string) => {
     onChange(newValue);
@@ -49,7 +39,8 @@ export default function AutosuggestInput({
       const beforeSlash = newValue.substring(0, lastSlashIndex);
       if (beforeSlash === "" || beforeSlash.endsWith(" ")) {
         const pattern = newValue.substring(lastSlashIndex + 1);
-        const newMatches = fuzzyMatch(pattern);
+        // Use shared fuzzyMatchCommands function for consistent matching
+        const newMatches = pattern ? fuzzyMatchCommands(pattern, commands) : commands;
         setMatches(newMatches);
         setSelectedIndex(0);
         setSuggestMode(true);
@@ -136,22 +127,47 @@ export default function AutosuggestInput({
 
       {/* Suggestion dropdown */}
       {suggestMode && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-y-auto z-10">
-          {matches.slice(0, 10).map((cmd, index) => (
-            <div
-              key={cmd.name}
-              className={`flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-blue-50 ${
-                index === selectedIndex ? "bg-blue-100" : ""
-              }`}
-              onClick={() => {
-                setSelectedIndex(index);
-                acceptSuggestion();
-              }}
-            >
-              <span className="font-mono text-sm">/{cmd.name}</span>
-              <span className="text-xs text-gray-500">{cmd.source}</span>
-            </div>
-          ))}
+        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
+          {/* Keyboard hint */}
+          <div className="px-3 py-2 text-xs text-gray-500 border-b border-gray-200 bg-gray-50">
+            <span className="font-semibold">Tab</span> to accept • <span className="font-semibold">↑↓</span> to navigate
+          </div>
+
+          {matches.slice(0, 10).map((cmd, index) => {
+            // Color-coded badges based on source
+            const getBadgeStyle = () => {
+              switch (cmd.source) {
+                case "builtin":
+                  return "bg-gray-100 text-gray-700 border border-gray-300";
+                case "user":
+                  return "bg-blue-100 text-blue-700 border border-blue-300";
+                case "project":
+                  return "bg-green-100 text-green-700 border border-green-300";
+                default:
+                  return "bg-gray-100 text-gray-700 border border-gray-300";
+              }
+            };
+
+            return (
+              <div
+                key={cmd.name}
+                className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
+                  index === selectedIndex
+                    ? "bg-blue-100 border-l-4 border-blue-500"
+                    : "hover:bg-gray-50 border-l-4 border-transparent"
+                }`}
+                onClick={() => {
+                  setSelectedIndex(index);
+                  acceptSuggestion();
+                }}
+              >
+                <span className="font-mono text-sm font-medium">/{cmd.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded ${getBadgeStyle()}`}>
+                  {cmd.source}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
