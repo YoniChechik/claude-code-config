@@ -42,8 +42,7 @@ cd _clones/FEATURE_NAME
 ```
 
 ### Step 3: Sync with Main
-Run the sync skill to commit and push:
-/sync
+Run the sync skill to commit and push.
 
 ### Step 4: Analyze Current Progress
 1. Read current git state compared to origin/main to understand context

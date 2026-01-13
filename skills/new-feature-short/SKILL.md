@@ -14,8 +14,7 @@ Creates a new feature branch using git clone with lightweight planning. Uses pla
 ## Process
 
 ### Step 1: Create Clone
-Run the create-clone skill:
-/create-clone
+Run the create-clone skill.
 
 ### Step 2: Fast Plan
 Use Task tool with subagent_type="planner-agent" and model="haiku" to create a quick MVP plan:
