@@ -16,6 +16,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   type?: "text" | "thinking" | "tool" | "error";
+  isAutoContinueMessage?: boolean; // Mark internal system messages
 }
 
 // Streaming event types (matches cc_filter.jq output)

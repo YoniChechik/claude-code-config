@@ -24,9 +24,14 @@ export default function ChatMessages({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
 
+  // Filter out internal auto-continue messages
+  const visibleMessages = messages.filter(
+    msg => !msg.isAutoContinueMessage
+  );
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-gray-50 to-white">
-      {messages.map((message, index) => (
+      {visibleMessages.map((message, index) => (
         <div
           key={index}
           className={`flex flex-col gap-2 p-4 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${

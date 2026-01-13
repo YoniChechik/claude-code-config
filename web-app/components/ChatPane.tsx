@@ -23,7 +23,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showNav, setShowNav] = useState(false);
-  const inputFocusRef = useRef<() => void>();
+  const inputFocusRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
   useEffect(() => {
@@ -57,16 +57,27 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     }
   };
 
-  const handleSubmit = async (prompt: string) => {
+  const handleSubmitInternal = async (prompt: string, isAutoContinue: boolean = false) => {
     if (!session) return;
 
-    // Add user message
-    const userMessage: Message = {
-      role: "user",
-      content: prompt,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
+    // Add user message (only if not auto-continue)
+    if (!isAutoContinue) {
+      const userMessage: Message = {
+        role: "user",
+        content: prompt,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+    } else {
+      // Add auto-continue message marked as internal
+      const autoContinueMsg: Message = {
+        role: "user",
+        content: prompt,
+        timestamp: new Date(),
+        isAutoContinueMessage: true,
+      };
+      setMessages((prev) => [...prev, autoContinueMsg]);
+    }
 
     // Start streaming
     setIsStreaming(true);
@@ -136,12 +147,23 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
       const data = await sessionResponse.json();
       if (data.session) {
+        const previousCwd = session.cwd; // Store before update
+
         setSession({
           ...session,
           cwd: data.session.cwd,
           model: data.session.model,
           lastDurationMs: data.session.lastDurationMs,
         });
+
+        // Check if directory changed and trigger auto-continue
+        if (data.session.previousCwd && data.session.previousCwd !== data.session.cwd && !isAutoContinue) {
+          // Directory changed - trigger auto-continue
+          const continuePrompt = `Now we are in ${data.session.cwd}. CONTINUE`;
+
+          // Recursively call with auto-continue flag
+          await handleSubmitInternal(continuePrompt, true);
+        }
       }
     } catch (error) {
       console.error("Failed to send command:", error);
@@ -149,6 +171,10 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       setIsStreaming(false);
       setStreamingText("");
     }
+  };
+
+  const handleSubmit = async (prompt: string) => {
+    return handleSubmitInternal(prompt, false);
   };
 
   const handleNavigate = (path: string) => {
