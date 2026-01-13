@@ -1,11 +1,29 @@
 import { spawn } from "child_process";
 import * as fs from "fs";
+import * as path from "path";
 
 /**
  * Claude client wrapper for streaming commands
  * Calls the claude CLI directly (same as ccui.sh) without needing CLAUDE_API_KEY
  * Uses the same schema as ccui.sh (StructuredOutput with cwd + response)
  */
+
+// Debug logging helper
+const DEBUG_ENABLED = process.env.DEBUG_CCWEB === "true" || process.env.CCWEB_DEBUG === "true";
+const DEBUG_LOG_PATH = "/home/ubuntu/.claude/web-app/debug.log";
+
+function debugLog(eventType: string, payload: any) {
+  if (!DEBUG_ENABLED) return;
+
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${eventType}: ${JSON.stringify(payload)}\n`;
+
+  try {
+    fs.appendFileSync(DEBUG_LOG_PATH, logEntry);
+  } catch (err) {
+    console.error("Failed to write debug log:", err);
+  }
+}
 
 const STRUCTURED_OUTPUT_SCHEMA = {
   type: "object" as const,
@@ -143,6 +161,7 @@ export class ClaudeClient {
 
           try {
             const event = JSON.parse(line);
+            debugLog("RAW_JSON_LINE", event);
 
             // Handle init event to get model and session_id
             if (event.subtype === "init") {
@@ -185,11 +204,13 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
+              debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
               // When using StructuredOutput schema, ONLY send text from StructuredOutput tool
               // Skip ALL raw text blocks to avoid duplicates from partial streaming events
               for (const block of event.message.content) {
                 // Tool use blocks (ALL tools, not just StructuredOutput)
                 if (block.type === "tool_use") {
+                  debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
                   if (block.name === "StructuredOutput" && block.input?.response) {
                     eventQueue.push({
@@ -222,6 +243,7 @@ export class ClaudeClient {
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
+                  debugLog("TOOL_RESULT_BLOCK", block);
                   eventQueue.push({
                     type: "tool_result",
                     tool_result: {
@@ -350,6 +372,7 @@ export class ClaudeClient {
       while (!processEnded || eventQueue.length > 0) {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
+          debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
           // Wait for next event
