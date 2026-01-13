@@ -103,21 +103,25 @@ export default function SessionPicker({
     setLoading(false);
   };
 
+  console.log('[SessionPicker] isOpen:', isOpen, 'sessions count:', sessions.length);
+
   if (!isOpen) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
       onClick={onCancel}
+      data-testid="session-picker-backdrop"
     >
       <div
         ref={modalRef}
         className="bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        data-testid="session-picker-modal"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900">
-          <h2 className="text-xl font-bold text-gray-100">Resume Session</h2>
+          <h2 className="text-xl font-bold text-gray-100" data-testid="session-picker-header">Resume Session</h2>
           <p className="text-sm text-gray-400 mt-1">
             <span className="font-bold text-blue-400">↑↓</span> to navigate •{" "}
             <span className="font-bold text-blue-400">Enter</span> to select •{" "}
@@ -162,6 +166,9 @@ export default function SessionPicker({
                       : "hover:bg-gray-700 border-l-4 border-transparent"
                   }`}
                   onClick={() => onSelect(session.id, session.filePath, session.cwd)}
+                  data-testid="session-item"
+                  data-session-id={session.id}
+                  data-selected={index === selectedIndex}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -194,6 +201,7 @@ export default function SessionPicker({
           <button
             onClick={onCancel}
             className="px-4 py-2 text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-700 rounded-lg transition-colors"
+            data-testid="cancel-button"
           >
             Cancel
           </button>
