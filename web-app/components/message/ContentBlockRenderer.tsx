@@ -47,9 +47,9 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
   );
 }
 
-export default function ContentBlockRenderer({ block, isNested = false }: ContentBlockRendererProps) {
+export default function ContentBlockRenderer({ block, isNested: _isNested = false }: ContentBlockRendererProps) {
   switch (block.type) {
-    case "text":
+    case "text": {
       // Filter out internal system messages
       const trimmedText = block.text.trim();
       if (trimmedText === "Structured output provided successfully" ||
@@ -57,6 +57,7 @@ export default function ContentBlockRenderer({ block, isNested = false }: Conten
         return null;
       }
       return <span>{block.text}</span>;
+    }
 
     case "thinking":
       return (

@@ -9,8 +9,8 @@ interface AgentTaskFrameProps {
   agentType: string;
   description: string;
   taskId: string;
-  taskToolUse: ContentBlock;
-  childBlocks: BlockGroup[];
+  taskToolUse: Extract<ContentBlock, { type: "tool_use" }>;
+  childBlocks: (ContentBlock | BlockGroup)[];
 }
 
 /**
@@ -20,7 +20,7 @@ interface AgentTaskFrameProps {
 export default function AgentTaskFrame({
   agentType,
   description,
-  taskId,
+  taskId: _taskId,
   taskToolUse,
   childBlocks,
 }: AgentTaskFrameProps) {
@@ -45,27 +45,35 @@ export default function AgentTaskFrame({
 
         {childBlocks.map((item, index) => {
           // Handle nested agent task groups recursively
-          if (item.type === "agent_task") {
+          if ("type" in item && item.type === "agent_task") {
+            const agentItem = item as Extract<typeof item, { type: "agent_task" }>;
             return (
               <div key={index} className="ml-2">
                 <AgentTaskFrame
-                  agentType={item.agentType}
-                  description={item.description}
-                  taskId={item.taskId}
-                  taskToolUse={item.taskToolUse}
-                  childBlocks={item.blocks}
+                  agentType={agentItem.agentType}
+                  description={agentItem.description}
+                  taskId={agentItem.taskId}
+                  taskToolUse={agentItem.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
+                  childBlocks={agentItem.blocks}
                 />
               </div>
             );
           }
           // Handle standalone block groups
-          if (item.type === "standalone") {
+          if ("type" in item && item.type === "standalone") {
+            const standaloneItem = item as Extract<typeof item, { type: "standalone" }>;
             return (
               <div key={index} className="ml-2">
-                <ContentBlockRenderer block={item.block} isNested />
+                <ContentBlockRenderer block={standaloneItem.block} isNested />
               </div>
             );
           }
+          // Handle raw content blocks
+          return (
+            <div key={index} className="ml-2">
+              <ContentBlockRenderer block={item as ContentBlock} isNested />
+            </div>
+          );
         })}
       </div>
     </div>

@@ -68,7 +68,9 @@ function _isTaskTool(block: ContentBlock): boolean {
 /**
  * Sorts content blocks to ensure tool_use blocks appear before their matching tool_result blocks.
  * This fixes the issue where tool inputs and outputs appear in scrambled order.
+ * (Currently unused but kept for future optimization)
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const toolUseMap = new Map<string, ContentBlock>();
   const toolResultMap = new Map<string, ContentBlock>();
@@ -197,13 +199,14 @@ function _processAgentTask(
   const childGroups = groupBlocksByAgent(childBlocks);
 
   // Add agent task group
+  const input = taskTool.input as Record<string, unknown>;
   groups.push({
     type: "agent_task",
-    agentType: taskTool.input.subagent_type,
-    description: taskTool.input.description || "",
+    agentType: String(input.subagent_type),
+    description: String(input.description || ""),
     taskId: taskTool.id,
     taskToolUse: taskTool,
-    blocks: childGroups,
+    blocks: childGroups as BlockGroup[],
   });
 
   processedIndices.add(blockIndex);

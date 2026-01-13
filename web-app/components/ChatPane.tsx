@@ -5,6 +5,7 @@ import SessionHeader from "./SessionHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
+import type { ClaudeStreamEvent } from "@/lib/claude-client";
 
 interface ChatPaneProps {
   sessionId: string;
@@ -124,7 +125,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   };
 
   const _processStreamEvent = (
-    event: any,
+    event: ClaudeStreamEvent,
     assistantText: string,
     assistantBlocks: ContentBlock[]
   ): { text: string; blocks: ContentBlock[] } => {
@@ -150,7 +151,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       return { text: assistantText, blocks: assistantBlocks };
     }
 
-    if (event.type === "tool_use") {
+    if (event.type === "tool_use" && event.tool) {
       assistantBlocks.push({
         type: "tool_use" as const,
         id: event.tool.id,
@@ -160,7 +161,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       return { text: assistantText, blocks: assistantBlocks };
     }
 
-    if (event.type === "tool_result") {
+    if (event.type === "tool_result" && event.tool_result) {
       assistantBlocks.push({
         type: "tool_result" as const,
         tool_use_id: event.tool_result.tool_use_id,

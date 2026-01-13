@@ -55,7 +55,6 @@ export default function SplitLayout({
     // Calculate new widths for the two panes being resized
     const leftPaneStart = dragIndex === 0 ? 0 : cumulativeWidths[dragIndex - 1];
     const rightPaneEnd = cumulativeWidths[dragIndex + 1];
-    const totalPairWidth = rightPaneEnd - leftPaneStart;
 
     const newLeftWidth = ((mouseX - leftPaneStart) / totalWidth) * 100;
     const newRightWidth = ((rightPaneEnd - mouseX) / totalWidth) * 100;

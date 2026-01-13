@@ -1,6 +1,5 @@
 import { spawn } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 
 /**
  * Claude client wrapper for streaming commands
@@ -26,7 +25,7 @@ export interface ClaudeStreamEvent {
   tool?: {
     id: string;
     name: string;
-    input: Record<string, any>;
+    input: Record<string, unknown>;
   };
   tool_result?: {
     tool_use_id: string;
@@ -51,7 +50,7 @@ export interface ClaudeStreamEvent {
 // PUBLIC CLASS
 
 export class ClaudeClient {
-  constructor(apiKey?: string) {
+  constructor(_apiKey?: string) {
     // Note: We don't need apiKey anymore since we use the claude CLI directly
     // The claude CLI handles authentication automatically
   }
@@ -269,7 +268,7 @@ export class ClaudeClient {
               resolveNext?.();
               resolveNext = null;
             }
-          } catch (e) {
+          } catch {
             // JSON parse error - skip and continue with next line
           }
         }
@@ -309,7 +308,7 @@ export class ClaudeClient {
           });
           try {
             claude.kill();
-          } catch (e) {
+          } catch {
             // Already dead
           }
           processEnded = true;
@@ -395,7 +394,7 @@ const _STRUCTURED_OUTPUT_SCHEMA = {
 /**
  * Log debug messages to file when DEBUG_CCWEB is enabled
  */
-function _debugLog(eventType: string, payload: any): void {
+function _debugLog(eventType: string, payload: unknown): void {
   if (!_DEBUG_ENABLED) return;
 
   const timestamp = new Date().toISOString();

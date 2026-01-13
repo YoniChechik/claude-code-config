@@ -14,7 +14,7 @@ export interface Session {
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, any> }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string | ContentBlock[] };
 
 // Message types
@@ -53,9 +53,8 @@ export interface SendCommandRequest {
   prompt: string;
 }
 
-export interface SendCommandResponse {
-  // Streaming response via Server-Sent Events
-}
+export type SendCommandResponse = Record<string, never>;
+// Streaming response via Server-Sent Events (no direct response body)
 
 export interface GetModelsResponse {
   models: string[];

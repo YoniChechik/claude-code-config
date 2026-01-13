@@ -29,19 +29,26 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
 }
 
 function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
+  const input = tool.input as Record<string, unknown>;
+
   switch (tool.name) {
     case "Bash":
       return (
         <div className="font-mono text-sm">
-          <div className="text-gray-400">{tool.input.description}</div>
-          <div className="mt-1">$ {tool.input.command}</div>
+          <div className="text-gray-400">{String(input.description)}</div>
+          <div className="mt-1">$ {String(input.command)}</div>
         </div>
       );
 
-    case "TodoWrite":
+    case "TodoWrite": {
+      interface TodoItem {
+        status: string;
+        content: string;
+      }
+      const todos = input.todos as TodoItem[] || [];
       return (
         <div className="space-y-1">
-          {(tool.input.todos || []).map((todo: any, idx: number) => (
+          {todos.map((todo: TodoItem, idx: number) => (
             <div key={idx} className="flex items-center gap-2">
               <span>{getStatusEmoji(todo.status)}</span>
               <span className={todo.status === "completed" ? "line-through text-gray-500" : "text-gray-300"}>
@@ -51,11 +58,12 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
           ))}
         </div>
       );
+    }
 
     case "Task":
       return (
         <div className="text-sm">
-          <span className="font-medium">{tool.input.subagent_type}</span>: {tool.input.description}
+          <span className="font-medium">{String(input.subagent_type)}</span>: {String(input.description)}
         </div>
       );
 
@@ -64,7 +72,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Edit":
       return (
         <div className="text-sm font-mono text-gray-400">
-          {tool.input.file_path}
+          {String(input.file_path)}
         </div>
       );
 
@@ -72,14 +80,14 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Glob":
       return (
         <div className="text-sm font-mono text-gray-400">
-          {tool.input.pattern}
+          {String(input.pattern)}
         </div>
       );
 
     default:
       return (
         <pre className="text-xs text-gray-400 overflow-x-auto">
-          {JSON.stringify(tool.input, null, 2)}
+          {JSON.stringify(input, null, 2)}
         </pre>
       );
   }

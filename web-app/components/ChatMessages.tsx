@@ -60,12 +60,14 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
-                      taskToolUse={group.taskToolUse}
+                      taskToolUse={group.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
                       childBlocks={group.blocks}
                     />
                   );
                 }
-                return <ContentBlockRenderer key={groupIdx} block={group.block} />;
+                if (group.type === "standalone") {
+                  return <ContentBlockRenderer key={groupIdx} block={group.block} />;
+                }
               })}
             </div>
           </div>
@@ -94,7 +96,7 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
-                      taskToolUse={group.taskToolUse}
+                      taskToolUse={group.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
                       childBlocks={group.blocks}
                     />
                   );
