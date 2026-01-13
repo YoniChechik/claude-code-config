@@ -103,8 +103,6 @@ export default function SessionPicker({
     setLoading(false);
   };
 
-  console.log('[SessionPicker] isOpen:', isOpen, 'sessions count:', sessions.length);
-
   if (!isOpen) return null;
 
   return (

@@ -46,6 +46,7 @@ export interface StructuredOutput {
 // API request/response types
 export interface CreateSessionRequest {
   cwd: string;
+  clientHostname?: string;
 }
 
 export interface CreateSessionResponse {
