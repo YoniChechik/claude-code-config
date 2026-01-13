@@ -87,7 +87,7 @@ create_session_symlink() {
 run_claude() {
     local raw
     raw=$(mktemp)
-    local schema='{"type":"object","properties":{"cwd":{"type":"string","description":"Current working directory path"},"response":{"type":"string","description":"Response to user"}},"required":["cwd","response"]}'
+    local schema='{"type":"object","properties":{"wanted_cwd":{"type":"string","description":"Target directory path for permanent cd"},"response":{"type":"string","description":"Response to user"}},"required":["response"]}'
     local args=(-p "$1" --output-format stream-json --verbose --json-schema "$schema")
 
     [ -n "$SESSION_ID" ] && args+=(--resume "$SESSION_ID")
@@ -121,10 +121,10 @@ run_claude() {
     result=$(grep '"type":"result"' "$raw" | tail -1)
     [ -n "$result" ] && LAST_MS=$(echo "$result" | jq -r '.duration_ms // 0')
 
-    # Extract cwd from structured_output (cannot be done in while loop due to subshell)
-    local cwd
-    cwd=$(echo "$result" | jq -r '.structured_output.cwd // empty' 2>/dev/null)
-    [ -n "$cwd" ] && SESSION_CWD="$cwd"
+    # Extract wanted_cwd from structured_output (cannot be done in while loop due to subshell)
+    local wanted_cwd
+    wanted_cwd=$(echo "$result" | jq -r '.structured_output.wanted_cwd // empty' 2>/dev/null)
+    [ -n "$wanted_cwd" ] && SESSION_CWD="$wanted_cwd"
 
     rm -f "$raw"
 }
@@ -162,5 +162,8 @@ while true; do
 
         cd "$SESSION_CWD" 2>/dev/null || true
         PREV_CWD="$SESSION_CWD"
+
+        # Auto-continue after directory change
+        run_claude "Now we are in $SESSION_CWD. CONTINUE"
     fi
 done
