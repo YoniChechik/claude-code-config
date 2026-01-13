@@ -1,13 +1,14 @@
 "use client";
 
 import { ContentBlock } from "@/lib/types";
+import { BlockGroup } from "@/lib/agent-grouping";
 import ContentBlockRenderer from "./ContentBlockRenderer";
 
 interface AgentTaskFrameProps {
   agentType: string;
   description: string;
   taskId: string;
-  childBlocks: ContentBlock[];
+  childBlocks: (ContentBlock | BlockGroup)[];
 }
 
 /**
@@ -34,13 +35,29 @@ export default function AgentTaskFrame({
         <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Running" />
       </div>
 
-      {/* Agent Content - nested tool invocations */}
+      {/* Agent Content - nested tool invocations and nested agents */}
       <div className="px-4 py-3 space-y-2">
-        {childBlocks.map((block, index) => (
-          <div key={index} className="ml-2">
-            <ContentBlockRenderer block={block} isNested />
-          </div>
-        ))}
+        {childBlocks.map((item, index) => {
+          // Handle nested agent task groups recursively
+          if (typeof item === "object" && "type" in item && item.type === "agent_task") {
+            return (
+              <div key={index} className="ml-2">
+                <AgentTaskFrame
+                  agentType={item.agentType}
+                  description={item.description}
+                  taskId={item.taskId}
+                  childBlocks={item.blocks}
+                />
+              </div>
+            );
+          }
+          // Handle regular content blocks
+          return (
+            <div key={index} className="ml-2">
+              <ContentBlockRenderer block={item as ContentBlock} isNested />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
