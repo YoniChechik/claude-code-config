@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 import { ClaudeClient } from "@/lib/claude-client";
 import { createSessionSymlink } from "@/lib/symlink-manager";
+import { loadSystemPrompt } from "@/lib/system-prompt-loader";
 import type { SendCommandRequest } from "@/lib/types";
 
 /**
@@ -52,10 +53,13 @@ export async function POST(request: NextRequest) {
         // Pass claude session ID if exists
         const claudeSessionId = session.claudeSessionId;
 
+        // Load custom system prompt if exists
+        const systemPrompt = await loadSystemPrompt();
+
         // Stream events from Claude (uses claude CLI directly, no API key needed)
         for await (const event of client.streamCommand(prompt, {
           sessionId: claudeSessionId,
-          appendSystemPrompt: undefined,
+          appendSystemPrompt: systemPrompt,
         })) {
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
