@@ -186,11 +186,15 @@ export class ClaudeClient {
         }
       });
 
-      claude.on("close", (code: number) => {
+      claude.on("close", (code: number | null, signal: string | null) => {
         processEnded = true;
-        if (code !== 0) {
+        if (code !== 0 && code !== null) {
           const errorDetails = stderrOutput ? `\nStderr: ${stderrOutput}` : "";
           processError = new Error(`claude CLI exited with code ${code}${errorDetails}`);
+        }
+        if (signal) {
+          const errorDetails = stderrOutput ? `\nStderr: ${stderrOutput}` : "";
+          processError = new Error(`claude CLI killed by signal ${signal}${errorDetails}`);
         }
         if (resolveNext) {
           resolveNext();
