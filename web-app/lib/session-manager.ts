@@ -48,7 +48,8 @@ class SessionManager {
     if (process.env.SSH_CONNECTION) {
       let hostname = 'unknown';
       try {
-        hostname = execSync('hostname').toString().trim();
+        // First check if user set CCWEB_SSH_HOST env var (SSH alias from their config)
+        hostname = process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
       } catch {
         // Fallback to 'unknown' if hostname command fails
       }
