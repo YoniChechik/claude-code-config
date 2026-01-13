@@ -34,7 +34,11 @@ export default function DirectoryNav({ cwd, onNavigate }: DirectoryNavProps) {
       // For now, we'll just show placeholder data
       // TODO: Implement actual directory listing API
       setEntries([
-        { name: "..", type: "directory", path: path.split("/").slice(0, -1).join("/") || "/" },
+        {
+          name: "..",
+          type: "directory",
+          path: path.split("/").slice(0, -1).join("/") || "/",
+        },
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load directory");
@@ -61,9 +65,7 @@ export default function DirectoryNav({ cwd, onNavigate }: DirectoryNavProps) {
       {loading && (
         <div className="px-4 py-2 text-sm text-gray-600">Loading...</div>
       )}
-      {error && (
-        <div className="px-4 py-2 text-sm text-red-600">{error}</div>
-      )}
+      {error && <div className="px-4 py-2 text-sm text-red-600">{error}</div>}
 
       <div className="flex-1 overflow-y-auto">
         {entries.map((entry, index) => (

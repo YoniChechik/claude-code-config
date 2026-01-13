@@ -8,7 +8,8 @@ class SessionManager {
   private cdTrackers = new Map<string, CDTracker>();
 
   createSession(cwd: string, clientHostname?: string): Session {
-    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType(clientHostname);
+    const { sessionType, hostname, distroName, clientIp } =
+      this._detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
@@ -30,30 +31,34 @@ class SessionManager {
   }
 
   private _detectSessionType(clientHostname?: string): {
-    sessionType: 'ssh' | 'wsl' | 'local';
+    sessionType: "ssh" | "wsl" | "local";
     hostname?: string;
     distroName?: string;
     clientIp?: string;
   } {
     if (process.env.SSH_CONNECTION) {
-      const parts = process.env.SSH_CONNECTION.split(' ');
+      const parts = process.env.SSH_CONNECTION.split(" ");
       const clientIp = parts[0];
-      const hostname = clientHostname || process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
-      return { sessionType: 'ssh', hostname, clientIp };
+      const hostname =
+        clientHostname ||
+        process.env.CCWEB_SSH_HOST ||
+        execSync("hostname").toString().trim();
+      return { sessionType: "ssh", hostname, clientIp };
     }
 
     if (process.env.WSL_DISTRO_NAME) {
       return {
-        sessionType: 'wsl',
-        distroName: process.env.WSL_DISTRO_NAME
+        sessionType: "wsl",
+        distroName: process.env.WSL_DISTRO_NAME,
       };
     }
 
-    return { sessionType: 'local' };
+    return { sessionType: "local" };
   }
 
   resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
-    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType();
+    const { sessionType, hostname, distroName, clientIp } =
+      this._detectSessionType();
 
     const session: Session = {
       id: sessionId,
@@ -128,6 +133,6 @@ const globalForSessionManager = globalThis as unknown as {
 export const sessionManager =
   globalForSessionManager.sessionManager ?? new SessionManager();
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   globalForSessionManager.sessionManager = sessionManager;
 }

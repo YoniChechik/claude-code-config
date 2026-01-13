@@ -62,7 +62,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string }
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string },
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -184,9 +184,15 @@ export class ClaudeClient {
             }
 
             // Handle content_block_start for tool_use blocks (streaming)
-            if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            if (
+              event.type === "content_block_start" &&
+              event.content_block?.type === "tool_use"
+            ) {
               const block = event.content_block;
-              if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
+              if (
+                block.name !== "StructuredOutput" &&
+                !emittedToolUseIds.has(block.id)
+              ) {
                 emittedToolUseIds.add(block.id);
                 // Buffer tool_use event instead of emitting directly
                 const toolUseEvent: ClaudeStreamEvent = {
@@ -215,7 +221,10 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  if (block.name === "StructuredOutput" && block.input?.response) {
+                  if (
+                    block.name === "StructuredOutput" &&
+                    block.input?.response
+                  ) {
                     eventQueue.push({
                       type: "text",
                       content: block.input.response,
@@ -223,7 +232,10 @@ export class ClaudeClient {
                   }
 
                   // Buffer tool_use event for all tools (skip StructuredOutput and already-emitted)
-                  if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
+                  if (
+                    block.name !== "StructuredOutput" &&
+                    !emittedToolUseIds.has(block.id)
+                  ) {
                     emittedToolUseIds.add(block.id);
                     const toolUseEvent: ClaudeStreamEvent = {
                       type: "tool_use",
@@ -249,7 +261,10 @@ export class ClaudeClient {
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
-                if (block.type === "tool_result" && !emittedToolResultIds.has(block.tool_use_id)) {
+                if (
+                  block.type === "tool_result" &&
+                  !emittedToolResultIds.has(block.tool_use_id)
+                ) {
                   emittedToolResultIds.add(block.tool_use_id);
                   _debugLog("TOOL_RESULT_BLOCK", block);
                   // Buffer tool_result event instead of emitting directly
@@ -267,7 +282,9 @@ export class ClaudeClient {
 
                 // Parse token usage from system_reminder blocks
                 if (block.type === "text" && block.text) {
-                  const tokenMatch = block.text.match(/Token usage: (\d+)\/(\d+); (\d+) remaining/);
+                  const tokenMatch = block.text.match(
+                    /Token usage: (\d+)\/(\d+); (\d+) remaining/,
+                  );
                   if (tokenMatch) {
                     eventQueue.push({
                       type: "token_usage",
@@ -285,7 +302,10 @@ export class ClaudeClient {
             }
 
             // Handle thinking content
-            if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta?.type === "thinking_delta"
+            ) {
               eventQueue.push({
                 type: "thinking",
                 content: event.delta.thinking,
@@ -339,10 +359,14 @@ export class ClaudeClient {
         toolResultBuffer.clear();
 
         if (code !== 0 && code !== null) {
-          processError = new Error(`claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
+          processError = new Error(
+            `claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`,
+          );
         }
         if (signal) {
-          processError = new Error(`claude CLI killed by signal ${signal}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
+          processError = new Error(
+            `claude CLI killed by signal ${signal}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`,
+          );
         }
         resolveNext?.();
         resolveNext = null;
@@ -362,7 +386,8 @@ export class ClaudeClient {
           fallbackUsed = true;
           eventQueue.push({
             type: "text",
-            content: "Hello! I'm Claude, your AI assistant. I can help you with coding, analysis, creative writing, and much more. What would you like to work on?",
+            content:
+              "Hello! I'm Claude, your AI assistant. I can help you with coding, analysis, creative writing, and much more. What would you like to work on?",
           });
           eventQueue.push({
             type: "result",

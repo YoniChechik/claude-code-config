@@ -169,7 +169,9 @@ test.describe("Chat Functionality", () => {
 
     // Send a prompt that will trigger multiple parallel tool calls
     // This simulates the scenario where multiple Glob calls happen
-    await chatInput.fill("use glob to search for these patterns: **/*nonexistent1*.xyz, **/*nonexistent2*.xyz, **/*nonexistent3*.xyz");
+    await chatInput.fill(
+      "use glob to search for these patterns: **/*nonexistent1*.xyz, **/*nonexistent2*.xyz, **/*nonexistent3*.xyz",
+    );
     await chatInput.press("Enter");
 
     // Wait for the input to be cleared
@@ -188,7 +190,9 @@ test.describe("Chat Functionality", () => {
     // Get all tool-related elements within the Claude message
     // Tool use blocks have border-l-4 and contain [ToolName]
     // Tool result blocks have bg-gray-800 and contain output
-    const messageContent = claudeMessage.locator("div.whitespace-pre-wrap").first();
+    const messageContent = claudeMessage
+      .locator("div.whitespace-pre-wrap")
+      .first();
 
     // Wait a bit more for all tool calls to complete
     await page.waitForTimeout(10000);
@@ -207,7 +211,7 @@ test.describe("Chat Functionality", () => {
 
     for (let i = 0; i < allBlocks.length; i++) {
       const block = allBlocks[i];
-      const classes = await block.getAttribute("class") || "";
+      const classes = (await block.getAttribute("class")) || "";
       const text = (await block.textContent()) || "";
 
       // Identify tool_use blocks (have border-l-4 and contain [])
@@ -215,7 +219,11 @@ test.describe("Chat Functionality", () => {
         blockSequence.push({ type: "tool_use", text, index: i });
       }
       // Identify tool_result blocks (have bg-gray-800 but not border-l-4, contain actual output)
-      else if (classes.includes("bg-gray-800") && !classes.includes("border-l-4") && text.trim().length > 0) {
+      else if (
+        classes.includes("bg-gray-800") &&
+        !classes.includes("border-l-4") &&
+        text.trim().length > 0
+      ) {
         blockSequence.push({ type: "tool_result", text, index: i });
       }
     }
@@ -230,7 +238,10 @@ test.describe("Chat Functionality", () => {
     for (const block of blockSequence) {
       if (block.type === "tool_use") {
         consecutiveToolUses++;
-        maxConsecutiveToolUses = Math.max(maxConsecutiveToolUses, consecutiveToolUses);
+        maxConsecutiveToolUses = Math.max(
+          maxConsecutiveToolUses,
+          consecutiveToolUses,
+        );
       } else if (block.type === "tool_result") {
         consecutiveToolUses = 0;
       }
@@ -241,7 +252,9 @@ test.describe("Chat Functionality", () => {
     expect(maxConsecutiveToolUses).toBeLessThanOrEqual(1);
 
     // Also verify we actually found some tool calls
-    const toolUseCount = blockSequence.filter(b => b.type === "tool_use").length;
+    const toolUseCount = blockSequence.filter(
+      (b) => b.type === "tool_use",
+    ).length;
     expect(toolUseCount).toBeGreaterThan(0);
   });
 });

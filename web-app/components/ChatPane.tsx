@@ -18,13 +18,21 @@ interface ChatPaneProps {
 /**
  * Individual chat pane with session management
  */
-export default function ChatPane({ sessionId, commands, onClose, isFocused = false, onResumeSession }: ChatPaneProps) {
+export default function ChatPane({
+  sessionId,
+  commands,
+  onClose,
+  isFocused = false,
+  onResumeSession,
+}: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [tokenUsage, setTokenUsage] = useState<{ used: number; total: number; remaining: number } | undefined>(undefined);
+  const [tokenUsage, setTokenUsage] = useState<
+    { used: number; total: number; remaining: number } | undefined
+  >(undefined);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
@@ -44,22 +52,21 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     const data = await response.json();
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
-    const messagesWithDates = data.session.messages.map(
-      (msg: Message) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-        // Convert old string content to ContentBlock format
-        content: typeof msg.content === "string"
+    const messagesWithDates = data.session.messages.map((msg: Message) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp),
+      // Convert old string content to ContentBlock format
+      content:
+        typeof msg.content === "string"
           ? [{ type: "text" as const, text: msg.content }]
           : msg.content,
-      })
-    );
+    }));
     setMessages(messagesWithDates);
   };
 
   const handleSubmitInternal = async (
     prompt: string,
-    isAutoContinue: boolean = false
+    isAutoContinue: boolean = false,
   ) => {
     if (!session) return;
 
@@ -81,7 +88,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     const streamResult = await _handleStreamEvents(
       response,
       assistantText,
-      assistantBlocks
+      assistantBlocks,
     );
     assistantText = streamResult.text;
     assistantBlocks = streamResult.blocks;
@@ -128,7 +135,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const _processStreamEvent = (
     event: ClaudeStreamEvent,
     assistantText: string,
-    assistantBlocks: ContentBlock[]
+    assistantBlocks: ContentBlock[],
   ): { text: string; blocks: ContentBlock[] } => {
     if (event.type === "text") {
       assistantText += event.content || "";
@@ -177,7 +184,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const _handleStreamEvents = async (
     response: Response,
     assistantText: string,
-    assistantBlocks: ContentBlock[]
+    assistantBlocks: ContentBlock[],
   ): Promise<{ text: string; blocks: ContentBlock[] }> => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
@@ -203,8 +210,17 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         try {
           const event = JSON.parse(data);
 
-          if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
-            const result = _processStreamEvent(event, assistantText, assistantBlocks);
+          if (
+            event.type === "text" ||
+            event.type === "thinking" ||
+            event.type === "tool_use" ||
+            event.type === "tool_result"
+          ) {
+            const result = _processStreamEvent(
+              event,
+              assistantText,
+              assistantBlocks,
+            );
             assistantText = result.text;
             assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
             setStreamingText(assistantText);
@@ -236,7 +252,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
             model: data.session.model,
             lastDurationMs: data.session.lastDurationMs,
           }
-        : null
+        : null,
     );
   };
 
@@ -249,7 +265,9 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   }
 
   return (
-    <div className={`relative flex flex-col h-full bg-gray-900 ${isFocused ? 'ring-2 ring-blue-500' : ''}`}>
+    <div
+      className={`relative flex flex-col h-full bg-gray-900 ${isFocused ? "ring-2 ring-blue-500" : ""}`}
+    >
       <SessionHeader
         cwd={session.cwd}
         model={session.model}

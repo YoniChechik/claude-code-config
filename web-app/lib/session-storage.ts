@@ -16,7 +16,9 @@ interface SessionLine {
   type: "user" | "assistant";
   message?: {
     role: string;
-    content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+    content:
+      | string
+      | Array<{ type: string; text?: string; [key: string]: unknown }>;
   };
   cwd?: string;
   sessionId?: string;
@@ -29,26 +31,32 @@ interface LoadedMessage {
   timestamp: Date;
 }
 
-export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> {
+export async function getRecentSessions(
+  limit = 20,
+): Promise<SessionMetadata[]> {
   const sessionFiles = await _discoverSessionFiles();
 
   const filesWithStats = await Promise.all(
     sessionFiles.map(async (filePath) => {
       const stats = await fs.stat(filePath);
       return { filePath, mtime: stats.mtime };
-    })
+    }),
   );
 
   filesWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
-  const recentFiles = filesWithStats.slice(0, limit).map(f => f.filePath);
-  const metadataPromises = recentFiles.map(filePath => _loadSessionMetadata(filePath));
+  const recentFiles = filesWithStats.slice(0, limit).map((f) => f.filePath);
+  const metadataPromises = recentFiles.map((filePath) =>
+    _loadSessionMetadata(filePath),
+  );
   const metadata = await Promise.all(metadataPromises);
 
-  const validMetadata = metadata.filter((m): m is SessionMetadata => m !== null);
+  const validMetadata = metadata.filter(
+    (m): m is SessionMetadata => m !== null,
+  );
 
   const seenIds = new Set<string>();
-  const uniqueMetadata = validMetadata.filter(session => {
+  const uniqueMetadata = validMetadata.filter((session) => {
     if (seenIds.has(session.id)) {
       return false;
     }
@@ -56,23 +64,34 @@ export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> 
     return true;
   });
 
-  uniqueMetadata.sort((a, b) =>
-    new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
+  uniqueMetadata.sort(
+    (a, b) =>
+      new Date(b.lastActivityAt).getTime() -
+      new Date(a.lastActivityAt).getTime(),
   );
 
   return uniqueMetadata;
 }
 
-export async function loadSessionMessages(filePath: string): Promise<LoadedMessage[]> {
+export async function loadSessionMessages(
+  filePath: string,
+): Promise<LoadedMessage[]> {
   const content = await fs.readFile(filePath, "utf-8");
-  const lines = content.trim().split("\n").filter(line => line.trim());
+  const lines = content
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim());
 
   const messages = lines
-    .map(line => {
+    .map((line) => {
       const parsed: SessionLine = JSON.parse(line);
       if (!parsed.message) return null;
 
-      let contentBlocks: Array<{ type: string; text?: string; [key: string]: unknown }>;
+      let contentBlocks: Array<{
+        type: string;
+        text?: string;
+        [key: string]: unknown;
+      }>;
 
       if (typeof parsed.message.content === "string") {
         contentBlocks = [{ type: "text", text: parsed.message.content }];
@@ -116,9 +135,14 @@ async function _discoverSessionFiles(): Promise<string[]> {
   return sessionFiles;
 }
 
-async function _loadSessionMetadata(filePath: string): Promise<SessionMetadata | null> {
+async function _loadSessionMetadata(
+  filePath: string,
+): Promise<SessionMetadata | null> {
   const content = await fs.readFile(filePath, "utf-8");
-  const lines = content.trim().split("\n").filter(line => line.trim());
+  const lines = content
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim());
 
   if (lines.length === 0) {
     return null;
@@ -142,7 +166,7 @@ async function _loadSessionMetadata(filePath: string): Promise<SessionMetadata |
       if (typeof content === "string") {
         lastMessagePreview = content;
       } else if (Array.isArray(content)) {
-        const textBlock = content.find(block => block.type === "text");
+        const textBlock = content.find((block) => block.type === "text");
         lastMessagePreview = textBlock!.text!;
       }
       break;

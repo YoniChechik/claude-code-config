@@ -121,7 +121,7 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
 function _findToolResultIndex(
   taskTool: Extract<ContentBlock, { type: "tool_use" }>,
   startIdx: number,
-  blocks: ContentBlock[]
+  blocks: ContentBlock[],
 ): number {
   for (let j = startIdx + 1; j < blocks.length; j++) {
     const block = blocks[j];
@@ -139,7 +139,7 @@ function _extractChildBlocks(
   taskToolIndex: number,
   toolResultIndex: number,
   blocks: ContentBlock[],
-  processedIndices: Set<number>
+  processedIndices: Set<number>,
 ): ContentBlock[] {
   const childBlocks: ContentBlock[] = [];
 
@@ -175,7 +175,7 @@ function _processAgentTask(
   blockIndex: number,
   blocks: ContentBlock[],
   groups: BlockGroup[],
-  processedIndices: Set<number>
+  processedIndices: Set<number>,
 ): void {
   const taskTool = block as Extract<ContentBlock, { type: "tool_use" }>;
 
@@ -189,7 +189,7 @@ function _processAgentTask(
       blockIndex,
       toolResultIndex,
       blocks,
-      processedIndices
+      processedIndices,
     );
   }
 

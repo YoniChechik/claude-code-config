@@ -56,12 +56,13 @@ export default function ChatMessages({
   }, [messages, streamingText, streamingBlocks, shouldAutoScroll]);
 
   // Filter out internal auto-continue messages
-  const visibleMessages = messages.filter(
-    msg => !msg.isAutoContinueMessage
-  );
+  const visibleMessages = messages.filter((msg) => !msg.isAutoContinueMessage);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto p-6 pl-12 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900">
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-y-auto p-6 pl-12 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900"
+    >
       {visibleMessages.length === 0 && !isStreaming && (
         <div className="flex items-center justify-center h-full">
           <p className="text-2xl text-gray-500">Write something special...</p>
@@ -76,15 +77,22 @@ export default function ChatMessages({
               : "bg-gray-800 border border-gray-700 text-gray-100 mr-auto max-w-[85%]"
           }`}
         >
-          <div className={`flex items-center gap-2 text-xs font-semibold ${
-            message.role === "user" ? "text-blue-200" : "text-gray-400"
-          }`}>
+          <div
+            className={`flex items-center gap-2 text-xs font-semibold ${
+              message.role === "user" ? "text-blue-200" : "text-gray-400"
+            }`}
+          >
             <span>{message.role === "user" ? "You" : "Claude"}</span>
             <span className="text-xs font-normal opacity-70">
               {(typeof message.timestamp === "string"
                 ? new Date(message.timestamp)
                 : message.timestamp
-              ).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              ).toLocaleTimeString("en-US", {
+                hour12: false,
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
             </span>
           </div>
           <div className="text-sm leading-relaxed">
@@ -97,13 +105,20 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
-                      taskToolUse={group.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
+                      taskToolUse={
+                        group.taskToolUse as Extract<
+                          ContentBlock,
+                          { type: "tool_use" }
+                        >
+                      }
                       childBlocks={group.blocks}
                     />
                   );
                 }
                 if (group.type === "standalone") {
-                  return <ContentBlockRenderer key={groupIdx} block={group.block} />;
+                  return (
+                    <ContentBlockRenderer key={groupIdx} block={group.block} />
+                  );
                 }
               })}
             </div>
@@ -125,20 +140,28 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
-                      taskToolUse={group.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
+                      taskToolUse={
+                        group.taskToolUse as Extract<
+                          ContentBlock,
+                          { type: "tool_use" }
+                        >
+                      }
                       childBlocks={group.blocks}
                     />
                   );
                 }
 
                 // Add cursor after last text block during streaming
-                const isLastGroup = groupIdx === groupBlocksByAgent(streamingBlocks).length - 1;
+                const isLastGroup =
+                  groupIdx === groupBlocksByAgent(streamingBlocks).length - 1;
                 const isTextBlock = group.block.type === "text";
                 return (
                   <span key={groupIdx}>
                     <ContentBlockRenderer block={group.block} />
                     {isStreaming && isLastGroup && isTextBlock && (
-                      <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
+                      <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">
+                        ▋
+                      </span>
                     )}
                   </span>
                 );

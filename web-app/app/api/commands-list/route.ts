@@ -18,7 +18,7 @@ export async function GET() {
     console.error("Failed to load slash commands:", error);
     return NextResponse.json(
       { error: "Failed to load commands" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

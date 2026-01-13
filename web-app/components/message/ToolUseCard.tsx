@@ -18,7 +18,8 @@ interface ToolUseCardProps {
 }
 
 export default function ToolUseCard({ tool }: ToolUseCardProps) {
-  const colorClass = TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
+  const colorClass =
+    TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
 
   return (
     <div className={`border-l-4 p-3 pl-6 rounded ${colorClass}`}>
@@ -26,7 +27,12 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
         <span className="font-semibold">[{tool.name}]</span>
         {tool.timestamp && (
           <span className="text-xs opacity-70">
-            {tool.timestamp.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            {tool.timestamp.toLocaleTimeString("en-US", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
           </span>
         )}
       </div>
@@ -52,13 +58,19 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
         status: string;
         content: string;
       }
-      const todos = input.todos as TodoItem[] || [];
+      const todos = (input.todos as TodoItem[]) || [];
       return (
         <div className="space-y-1">
           {todos.map((todo: TodoItem, idx: number) => (
             <div key={idx} className="flex items-center gap-2">
               <span>{getStatusEmoji(todo.status)}</span>
-              <span className={todo.status === "completed" ? "line-through text-gray-500" : "text-gray-300"}>
+              <span
+                className={
+                  todo.status === "completed"
+                    ? "line-through text-gray-500"
+                    : "text-gray-300"
+                }
+              >
                 {todo.content}
               </span>
             </div>
@@ -70,7 +82,8 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Task":
       return (
         <div className="text-sm">
-          <span className="font-medium">{String(input.subagent_type)}</span>: {String(input.description)}
+          <span className="font-medium">{String(input.subagent_type)}</span>:{" "}
+          {String(input.description)}
         </div>
       );
 
@@ -102,9 +115,13 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
 
 function getStatusEmoji(status: string): string {
   switch (status) {
-    case "pending": return "⏳";
-    case "in_progress": return "🔄";
-    case "completed": return "✅";
-    default: return "📝";
+    case "pending":
+      return "⏳";
+    case "in_progress":
+      return "🔄";
+    case "completed":
+      return "✅";
+    default:
+      return "📝";
   }
 }

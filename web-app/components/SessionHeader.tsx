@@ -14,7 +14,7 @@ interface SessionHeaderProps {
     remaining: number;
   };
   onClose?: () => void;
-  sessionType?: 'ssh' | 'wsl' | 'local';
+  sessionType?: "ssh" | "wsl" | "local";
   hostname?: string;
   distroName?: string;
   clientIp?: string;
@@ -30,23 +30,28 @@ export default function SessionHeader({
   lastDurationMs,
   tokenUsage,
   onClose,
-  sessionType = 'local',
+  sessionType = "local",
   hostname,
   distroName,
   clientIp,
 }: SessionHeaderProps) {
-  const [accountUsage, setAccountUsage] = useState<{ percentUsed: number; resetTime: string } | null>(null);
+  const [accountUsage, setAccountUsage] = useState<{
+    percentUsed: number;
+    resetTime: string;
+  } | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [isLoadingMapping, setIsLoadingMapping] = useState(false);
-  const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(hostname);
+  const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(
+    hostname,
+  );
 
   // Generate VSCode URL based on session type
   const getVSCodeUrl = (hostnameOverride?: string): string => {
     const effectiveHostname = hostnameOverride || resolvedHostname;
-    if (sessionType === 'ssh' && effectiveHostname) {
+    if (sessionType === "ssh" && effectiveHostname) {
       return `vscode://vscode-remote/ssh-remote+${effectiveHostname}${cwd}?windowId=_blank`;
     }
-    if (sessionType === 'wsl' && distroName) {
+    if (sessionType === "wsl" && distroName) {
       return `vscode://vscode-remote/wsl+${distroName}${cwd}?windowId=_blank`;
     }
     return `vscode://file${cwd}?windowId=_blank`;
@@ -56,7 +61,7 @@ export default function SessionHeader({
   useEffect(() => {
     const fetchAccountUsage = async () => {
       try {
-        const response = await fetch('/api/usage');
+        const response = await fetch("/api/usage");
         const data = await response.json();
         if (data.usage) {
           setAccountUsage({
@@ -65,7 +70,7 @@ export default function SessionHeader({
           });
         }
       } catch (error) {
-        console.error('Failed to fetch account usage:', error);
+        console.error("Failed to fetch account usage:", error);
       }
     };
 
@@ -76,7 +81,9 @@ export default function SessionHeader({
   }, []);
 
   // Calculate percentage used for session
-  const percentUsed = tokenUsage ? (tokenUsage.used / tokenUsage.total) * 100 : 0;
+  const percentUsed = tokenUsage
+    ? (tokenUsage.used / tokenUsage.total) * 100
+    : 0;
 
   // Determine color based on usage
   let tokenColor = "text-green-400";
@@ -102,46 +109,52 @@ export default function SessionHeader({
   const timeUntilReset = getTimeUntilReset();
 
   // Check if hostname is localhost
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
 
   // Handle CWD click
   const handleCwdClick = async (e: React.MouseEvent) => {
     e.preventDefault();
 
     // If not SSH or not localhost, open directly
-    if (sessionType !== 'ssh' || !isLocalhost) {
-      window.open(getVSCodeUrl(), '_blank');
+    if (sessionType !== "ssh" || !isLocalhost) {
+      window.open(getVSCodeUrl(), "_blank");
       return;
     }
 
     // If localhost but no clientIp, show error
     if (!clientIp) {
-      alert('Cannot resolve SSH hostname: client IP not available');
+      alert("Cannot resolve SSH hostname: client IP not available");
       return;
     }
 
     // If already resolved, open directly
-    if (resolvedHostname && resolvedHostname !== 'localhost' && resolvedHostname !== '127.0.0.1') {
-      window.open(getVSCodeUrl(), '_blank');
+    if (
+      resolvedHostname &&
+      resolvedHostname !== "localhost" &&
+      resolvedHostname !== "127.0.0.1"
+    ) {
+      window.open(getVSCodeUrl(), "_blank");
       return;
     }
 
     // Try to fetch mapping
     setIsLoadingMapping(true);
     try {
-      const response = await fetch(`/api/ssh-host-mapping?clientIp=${encodeURIComponent(clientIp)}`);
+      const response = await fetch(
+        `/api/ssh-host-mapping?clientIp=${encodeURIComponent(clientIp)}`,
+      );
       const data = await response.json();
 
       if (data.hostname) {
         setResolvedHostname(data.hostname);
-        window.open(getVSCodeUrl(data.hostname), '_blank');
+        window.open(getVSCodeUrl(data.hostname), "_blank");
       } else {
         // No mapping found, show modal
         setShowModal(true);
       }
     } catch (error) {
-      console.error('Failed to fetch hostname mapping:', error);
-      alert('Failed to fetch hostname mapping. Please try again.');
+      console.error("Failed to fetch hostname mapping:", error);
+      alert("Failed to fetch hostname mapping. Please try again.");
     } finally {
       setIsLoadingMapping(false);
     }
@@ -150,27 +163,27 @@ export default function SessionHeader({
   // Handle modal save
   const handleSaveHostname = async (newHostname: string) => {
     if (!clientIp) {
-      alert('Cannot save mapping: client IP not available');
+      alert("Cannot save mapping: client IP not available");
       return;
     }
 
     try {
-      const response = await fetch('/api/ssh-host-mapping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/ssh-host-mapping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientIp, hostname: newHostname }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save hostname mapping');
+        throw new Error("Failed to save hostname mapping");
       }
 
       setResolvedHostname(newHostname);
       setShowModal(false);
-      window.open(getVSCodeUrl(newHostname), '_blank');
+      window.open(getVSCodeUrl(newHostname), "_blank");
     } catch (error) {
-      console.error('Failed to save hostname mapping:', error);
-      alert('Failed to save hostname mapping. Please try again.');
+      console.error("Failed to save hostname mapping:", error);
+      alert("Failed to save hostname mapping. Please try again.");
     }
   };
 
@@ -178,7 +191,7 @@ export default function SessionHeader({
     <>
       <SSHHostPromptModal
         isOpen={showModal}
-        clientIp={clientIp || ''}
+        clientIp={clientIp || ""}
         onSave={handleSaveHostname}
         onCancel={() => setShowModal(false)}
       />
@@ -191,35 +204,46 @@ export default function SessionHeader({
         >
           {isLoadingMapping ? `${cwd} (loading...)` : cwd}
         </button>
-      <div className="flex items-center gap-3">
-        {tokenUsage && (
-          <div className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>
-            <span>🪙 {tokenUsage.used.toLocaleString()}/{tokenUsage.total.toLocaleString()}</span>
-            <span className="text-gray-400">({percentUsed.toFixed(0)}%)</span>
-          </div>
-        )}
-        {showHighUsageWarning && timeUntilReset && (
-          <div className="flex items-center gap-2 text-xs font-medium bg-red-900/40 px-3 py-1 rounded-md text-red-300" title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}>
-            <span>⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m</span>
-          </div>
-        )}
-        {lastDurationMs > 0 && (
-          <div className="flex items-center gap-3 text-sm font-medium bg-gray-700/50 px-3 py-1 rounded-md">
-            <span>{formatDuration(lastDurationMs)}</span>
-            <span className="text-gray-500">│</span>
-            <span>{model}</span>
-          </div>
-        )}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
-            title="Close session"
-          >
-            ×
-          </button>
-        )}
-      </div>
+        <div className="flex items-center gap-3">
+          {tokenUsage && (
+            <div
+              className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`}
+              title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}
+            >
+              <span>
+                🪙 {tokenUsage.used.toLocaleString()}/
+                {tokenUsage.total.toLocaleString()}
+              </span>
+              <span className="text-gray-400">({percentUsed.toFixed(0)}%)</span>
+            </div>
+          )}
+          {showHighUsageWarning && timeUntilReset && (
+            <div
+              className="flex items-center gap-2 text-xs font-medium bg-red-900/40 px-3 py-1 rounded-md text-red-300"
+              title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}
+            >
+              <span>
+                ⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m
+              </span>
+            </div>
+          )}
+          {lastDurationMs > 0 && (
+            <div className="flex items-center gap-3 text-sm font-medium bg-gray-700/50 px-3 py-1 rounded-md">
+              <span>{formatDuration(lastDurationMs)}</span>
+              <span className="text-gray-500">│</span>
+              <span>{model}</span>
+            </div>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
+              title="Close session"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
     </>
   );

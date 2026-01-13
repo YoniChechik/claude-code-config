@@ -9,7 +9,11 @@ import path from "path";
 export async function loadSystemPrompt(): Promise<string | undefined> {
   try {
     // Path relative to web-app directory: ../main_appended_system_prompt.md
-    const promptPath = path.join(process.cwd(), "..", "main_appended_system_prompt.md");
+    const promptPath = path.join(
+      process.cwd(),
+      "..",
+      "main_appended_system_prompt.md",
+    );
     const content = await fs.readFile(promptPath, "utf-8");
     return content.trim();
   } catch {

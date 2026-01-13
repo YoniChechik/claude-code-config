@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   if (!sessionId || !filePath || !cwd) {
     return NextResponse.json(
       { error: "sessionId, filePath, and cwd are required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 

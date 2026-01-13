@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   if (!sessionId || !prompt) {
     return new Response(
       JSON.stringify({ error: "sessionId and prompt are required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
+      { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
 
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   if (!tracker) {
     return new Response(
       JSON.stringify({ error: "Session tracker not found" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 
@@ -78,7 +78,10 @@ export async function POST(request: NextRequest) {
             if (event.session_id) {
               sessionManager.setClaudeSessionId(sessionId, event.session_id);
             }
-          } else if (event.type === "result" && event.duration_ms !== undefined) {
+          } else if (
+            event.type === "result" &&
+            event.duration_ms !== undefined
+          ) {
             tracker.processResultEvent({ duration_ms: event.duration_ms });
           } else if (
             event.type === "structured_output" &&
@@ -92,7 +95,11 @@ export async function POST(request: NextRequest) {
               // Create symlink BEFORE updating session
               const claudeSessionId = session.claudeSessionId;
               if (claudeSessionId) {
-                await createSessionSymlink(claudeSessionId, session.cwd, wantedCwd);
+                await createSessionSymlink(
+                  claudeSessionId,
+                  session.cwd,
+                  wantedCwd,
+                );
               }
             }
           }
@@ -102,7 +109,8 @@ export async function POST(request: NextRequest) {
         const previousCwd = session.cwd;
         sessionManager.updateSessionFromTracker(sessionId);
         const updatedSession = sessionManager.getSession(sessionId);
-        const didChangeCwd = updatedSession && updatedSession.cwd !== previousCwd;
+        const didChangeCwd =
+          updatedSession && updatedSession.cwd !== previousCwd;
 
         // Send cwd_changed event to client so navbar updates immediately
         if (didChangeCwd) {
@@ -111,7 +119,7 @@ export async function POST(request: NextRequest) {
             cwd: updatedSession.cwd,
           };
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(cwdChangedEvent)}\n\n`)
+            encoder.encode(`data: ${JSON.stringify(cwdChangedEvent)}\n\n`),
           );
         }
 
@@ -144,10 +152,20 @@ export async function POST(request: NextRequest) {
               if (continueTracker) {
                 if (event.type === "init" && event.model) {
                   continueTracker.processInitEvent({ model: event.model });
-                } else if (event.type === "result" && event.duration_ms !== undefined) {
-                  continueTracker.processResultEvent({ duration_ms: event.duration_ms });
-                } else if (event.type === "structured_output" && event.structured_output) {
-                  continueTracker.processStructuredOutput(event.structured_output);
+                } else if (
+                  event.type === "result" &&
+                  event.duration_ms !== undefined
+                ) {
+                  continueTracker.processResultEvent({
+                    duration_ms: event.duration_ms,
+                  });
+                } else if (
+                  event.type === "structured_output" &&
+                  event.structured_output
+                ) {
+                  continueTracker.processStructuredOutput(
+                    event.structured_output,
+                  );
                 }
               }
             }
@@ -161,7 +179,7 @@ export async function POST(request: NextRequest) {
               error: err instanceof Error ? err.message : String(err),
             };
             controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
+              encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`),
             );
           }
         }
@@ -174,7 +192,7 @@ export async function POST(request: NextRequest) {
           error: error instanceof Error ? error.message : String(error),
         };
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
+          encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`),
         );
       } finally {
         controller.close();

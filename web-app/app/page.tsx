@@ -38,20 +38,23 @@ export default function Home() {
 
         // Auto-load hostname mapping if SSH with localhost hostname
         if (
-          data.session.sessionType === 'ssh' &&
+          data.session.sessionType === "ssh" &&
           data.session.clientIp &&
-          (data.session.hostname === 'localhost' || data.session.hostname === '127.0.0.1')
+          (data.session.hostname === "localhost" ||
+            data.session.hostname === "127.0.0.1")
         ) {
           try {
             const mappingResponse = await fetch(
-              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`
+              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`,
             );
             const mappingData = await mappingResponse.json();
 
             // If mapping exists, update session with resolved hostname
             if (mappingData.hostname) {
               // No action needed - SessionHeader will handle this automatically
-              console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
+              console.log(
+                `Auto-loaded SSH hostname mapping: ${mappingData.hostname}`,
+              );
             }
           } catch (err) {
             console.error("Failed to auto-load SSH hostname mapping:", err);
@@ -143,7 +146,7 @@ export default function Home() {
   const resumeSession = async (
     sessionId: string,
     filePath: string,
-    cwd: string
+    cwd: string,
   ) => {
     const response = await fetch("/api/sessions/resume", {
       method: "POST",

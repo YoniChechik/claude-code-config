@@ -97,7 +97,12 @@ export default function SessionPicker({
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900">
-          <h2 className="text-xl font-bold text-gray-100" data-testid="session-picker-header">Resume Session</h2>
+          <h2
+            className="text-xl font-bold text-gray-100"
+            data-testid="session-picker-header"
+          >
+            Resume Session
+          </h2>
           <p className="text-sm text-gray-400 mt-1">
             <span className="font-bold text-blue-400">↑↓</span> to navigate •{" "}
             <span className="font-bold text-blue-400">Enter</span> to select •{" "}
@@ -121,7 +126,9 @@ export default function SessionPicker({
 
           {!loading && !error && sessions.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-              <div className="text-gray-400 text-lg mb-2">No previous sessions found</div>
+              <div className="text-gray-400 text-lg mb-2">
+                No previous sessions found
+              </div>
               <div className="text-gray-500 text-sm">
                 Start a new conversation to create your first session
               </div>
@@ -141,7 +148,9 @@ export default function SessionPicker({
                       ? "bg-gradient-to-r from-blue-900 to-blue-800 border-l-4 border-blue-500"
                       : "hover:bg-gray-700 border-l-4 border-transparent"
                   }`}
-                  onClick={() => onSelect(session.id, session.filePath, session.cwd)}
+                  onClick={() =>
+                    onSelect(session.id, session.filePath, session.cwd)
+                  }
                   data-testid="session-item"
                   data-session-id={session.id}
                   data-selected={index === selectedIndex}

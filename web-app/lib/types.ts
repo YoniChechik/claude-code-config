@@ -9,7 +9,7 @@ export interface Session {
   createdAt: Date;
   claudeSessionId?: string;
   isResumed?: boolean; // Flag for resumed sessions
-  sessionType: 'ssh' | 'wsl' | 'local';
+  sessionType: "ssh" | "wsl" | "local";
   hostname?: string; // For SSH sessions
   distroName?: string; // For WSL sessions
   clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
@@ -19,8 +19,18 @@ export interface Session {
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown>; timestamp?: Date }
-  | { type: "tool_result"; tool_use_id: string; content: string | ContentBlock[] };
+  | {
+      type: "tool_use";
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      timestamp?: Date;
+    }
+  | {
+      type: "tool_result";
+      tool_use_id: string;
+      content: string | ContentBlock[];
+    };
 
 // Message types
 export interface Message {

@@ -14,7 +14,7 @@ interface UsageData {
 /**
  * GET /api/usage - Calculate account-wide token usage from local session files
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const projectsDir = path.join(process.env.HOME!, ".claude", "projects");
 
@@ -45,7 +45,9 @@ export async function GET(request: NextRequest) {
 
             // Check if this is from today
             if (event.timestamp) {
-              const eventDate = new Date(event.timestamp).toISOString().split("T")[0];
+              const eventDate = new Date(event.timestamp)
+                .toISOString()
+                .split("T")[0];
               if (eventDate !== today) continue;
             }
 
@@ -53,7 +55,9 @@ export async function GET(request: NextRequest) {
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
                 if (block.type === "text" && block.text) {
-                  const match = block.text.match(/Token usage: (\d+)\/(\d+); (\d+) remaining/);
+                  const match = block.text.match(
+                    /Token usage: (\d+)\/(\d+); (\d+) remaining/,
+                  );
                   if (match) {
                     const used = parseInt(match[1]);
                     // Take the maximum usage seen (represents cumulative usage for that session)
@@ -64,7 +68,7 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
-          } catch (e) {
+          } catch {
             // Skip malformed lines
           }
         }
@@ -73,7 +77,9 @@ export async function GET(request: NextRequest) {
 
     // Calculate reset time (6 PM EST today or tomorrow)
     const now = new Date();
-    const est = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const est = new Date(
+      now.toLocaleString("en-US", { timeZone: "America/New_York" }),
+    );
     const resetTime = new Date(est);
     resetTime.setHours(18, 0, 0, 0); // 6 PM EST
 
@@ -100,8 +106,7 @@ export async function GET(request: NextRequest) {
     console.error("Failed to calculate usage:", error);
     return Response.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-
