@@ -100,4 +100,56 @@ test.describe("Chat Functionality", () => {
     // (or at least immediately after sending)
     await expect(chatInput).toHaveValue("");
   });
+
+  test("messages should persist after sending and not disappear", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // Wait for the chat interface to load
+    await page.waitForSelector("textarea, input[type='text']", {
+      timeout: 10000,
+    });
+
+    // Use the first chat pane
+    const leftPane = page.locator("main > div > div").first();
+    const chatInput = leftPane.locator("textarea, input[type='text']").first();
+    const sendButton = leftPane.locator("button:has-text('Send')").first();
+
+    // Type "hi" in the chat input
+    await chatInput.fill("hi");
+
+    // Send the message
+    await sendButton.click();
+
+    // Wait for the input to be cleared (indicates message was sent)
+    await expect(chatInput).toHaveValue("", { timeout: 3000 });
+
+    // Wait for the user message "hi" to appear
+    await expect(leftPane.locator("text=hi")).toBeVisible({ timeout: 5000 });
+
+    // Wait for a response to appear
+    const claudeMessage = leftPane
+      .locator("div.bg-gray-100")
+      .filter({ has: page.locator("text=Claude") })
+      .last();
+    await expect(claudeMessage).toBeVisible({ timeout: 20000 });
+
+    // CRITICAL: Verify both messages are STILL visible after 3 seconds
+    // This reproduces the bug where messages disappear shortly after appearing
+    await page.waitForTimeout(3000);
+
+    // User message "hi" should still be visible
+    await expect(leftPane.locator("text=hi")).toBeVisible({
+      timeout: 1000,
+    });
+
+    // Assistant response should still be visible
+    const responseContent = claudeMessage.locator("div.whitespace-pre-wrap");
+    await expect(responseContent).toBeVisible({ timeout: 1000 });
+
+    // Verify the response text is non-empty
+    const responseText = await responseContent.textContent();
+    expect(responseText).toBeTruthy();
+  });
 });
