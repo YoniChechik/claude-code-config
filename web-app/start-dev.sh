@@ -6,7 +6,15 @@ export CCWEB_ORIGINAL_CWD="$(pwd)"
 
 cd /home/ubuntu/.claude/web-app
 
-# Kill existing process if running
+# Kill any process using port 3000
+PORT_PID=$(sudo lsof -ti:3000 2>/dev/null)
+if [ ! -z "$PORT_PID" ]; then
+    echo "Port 3000 is occupied by PID: $PORT_PID. Killing it..."
+    sudo kill "$PORT_PID" 2>/dev/null || sudo kill -9 "$PORT_PID" 2>/dev/null
+    sleep 1
+fi
+
+# Kill existing process if running (via dev.pid)
 if [ -f dev.pid ]; then
     OLD_PID=$(cat dev.pid)
     if ps -p "$OLD_PID" > /dev/null 2>&1; then
