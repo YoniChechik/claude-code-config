@@ -5,11 +5,10 @@ import SplitLayout from "@/components/SplitLayout";
 import type { SlashCommand } from "@/lib/types";
 
 /**
- * Main page - initializes two sessions and renders split layout
+ * Main page - initializes session(s) and renders dynamic split layout
  */
 export default function Home() {
-  const [leftSessionId, setLeftSessionId] = useState<string | null>(null);
-  const [rightSessionId, setRightSessionId] = useState<string | null>(null);
+  const [sessionIds, setSessionIds] = useState<string[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,28 +22,19 @@ export default function Home() {
       // Get current working directory (default to /home/ubuntu)
       const cwd = process.env.NEXT_PUBLIC_DEFAULT_CWD || "/home/ubuntu";
 
-      // Create two sessions
-      const [leftResponse, rightResponse] = await Promise.all([
-        fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cwd }),
-        }),
-        fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cwd }),
-        }),
-      ]);
+      // Create one session to start
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
 
-      const leftData = await leftResponse.json();
-      const rightData = await rightResponse.json();
+      const data = await response.json();
 
-      if (leftData.session && rightData.session) {
-        setLeftSessionId(leftData.session.id);
-        setRightSessionId(rightData.session.id);
+      if (data.session) {
+        setSessionIds([data.session.id]);
       } else {
-        throw new Error("Failed to create sessions");
+        throw new Error("Failed to create session");
       }
 
       // Load slash commands (client-side we'll use a simplified version)
@@ -60,6 +50,26 @@ export default function Home() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize");
       setLoading(false);
+    }
+  };
+
+  const addSession = async () => {
+    try {
+      const cwd = process.env.NEXT_PUBLIC_DEFAULT_CWD || "/home/ubuntu";
+
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
+
+      const data = await response.json();
+
+      if (data.session) {
+        setSessionIds([...sessionIds, data.session.id]);
+      }
+    } catch (err) {
+      console.error("Failed to add session:", err);
     }
   };
 
@@ -87,7 +97,7 @@ export default function Home() {
     );
   }
 
-  if (!leftSessionId || !rightSessionId) {
+  if (sessionIds.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
         <h1 className="text-4xl font-bold">ccweb</h1>
@@ -99,9 +109,9 @@ export default function Home() {
   return (
     <main className="h-screen w-screen">
       <SplitLayout
-        leftSessionId={leftSessionId}
-        rightSessionId={rightSessionId}
+        sessionIds={sessionIds}
         commands={commands}
+        onAddSession={addSession}
       />
     </main>
   );
