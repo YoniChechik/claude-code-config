@@ -81,11 +81,39 @@ export class ClaudeClient {
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
 
+      // Buffer for maintaining causal ordering of tool_use/tool_result pairs
+      const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
+      const toolResultBuffer = new Map<string, ClaudeStreamEvent>(); // tool_use_id -> tool_result event
+      const toolUseOrder: string[] = []; // Track the order tool_use events arrive
+
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
       let resolveNext: (() => void) | null = null;
       let processEnded = false;
       let processError: Error | null = null;
+
+      // Helper to emit tool_use/tool_result pairs in causal order
+      const tryEmitPairedEvents = () => {
+        // Emit all tool_use events that have matching tool_results
+        for (const toolId of toolUseOrder) {
+          const toolUseEvent = toolUseBuffer.get(toolId);
+          const toolResultEvent = toolResultBuffer.get(toolId);
+
+          if (toolUseEvent && toolResultEvent) {
+            // We have both - emit them in order
+            eventQueue.push(toolUseEvent);
+            eventQueue.push(toolResultEvent);
+
+            // Remove from buffers
+            toolUseBuffer.delete(toolId);
+            toolResultBuffer.delete(toolId);
+            toolUseOrder.splice(toolUseOrder.indexOf(toolId), 1);
+
+            resolveNext?.();
+            resolveNext = null;
+          }
+        }
+      };
 
       // Build args like ccui.sh does
       const args = [
@@ -160,7 +188,8 @@ export class ClaudeClient {
               const block = event.content_block;
               if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
                 emittedToolUseIds.add(block.id);
-                eventQueue.push({
+                // Buffer tool_use event instead of emitting directly
+                const toolUseEvent: ClaudeStreamEvent = {
                   type: "tool_use",
                   tool: {
                     id: block.id,
@@ -168,9 +197,11 @@ export class ClaudeClient {
                     input: block.input || {},
                     timestamp: new Date(),
                   },
-                });
-                resolveNext?.();
-                resolveNext = null;
+                };
+                toolUseBuffer.set(block.id, toolUseEvent);
+                toolUseOrder.push(block.id);
+                // Try to emit paired events
+                tryEmitPairedEvents();
               }
             }
 
@@ -191,10 +222,10 @@ export class ClaudeClient {
                     });
                   }
 
-                  // Send tool_use event for all tools (skip StructuredOutput and already-emitted)
+                  // Buffer tool_use event for all tools (skip StructuredOutput and already-emitted)
                   if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
                     emittedToolUseIds.add(block.id);
-                    eventQueue.push({
+                    const toolUseEvent: ClaudeStreamEvent = {
                       type: "tool_use",
                       tool: {
                         id: block.id,
@@ -202,7 +233,11 @@ export class ClaudeClient {
                         input: block.input || {},
                         timestamp: new Date(),
                       },
-                    });
+                    };
+                    toolUseBuffer.set(block.id, toolUseEvent);
+                    toolUseOrder.push(block.id);
+                    // Try to emit paired events
+                    tryEmitPairedEvents();
                   }
 
                   resolveNext?.();
@@ -217,15 +252,17 @@ export class ClaudeClient {
                 if (block.type === "tool_result" && !emittedToolResultIds.has(block.tool_use_id)) {
                   emittedToolResultIds.add(block.tool_use_id);
                   _debugLog("TOOL_RESULT_BLOCK", block);
-                  eventQueue.push({
+                  // Buffer tool_result event instead of emitting directly
+                  const toolResultEvent: ClaudeStreamEvent = {
                     type: "tool_result",
                     tool_result: {
                       tool_use_id: block.tool_use_id,
                       content: block.content,
                     },
-                  });
-                  resolveNext?.();
-                  resolveNext = null;
+                  };
+                  toolResultBuffer.set(block.tool_use_id, toolResultEvent);
+                  // Try to emit paired events
+                  tryEmitPairedEvents();
                 }
 
                 // Parse token usage from system_reminder blocks
@@ -284,6 +321,23 @@ export class ClaudeClient {
 
       claude.on("close", (code: number | null, signal: string | null) => {
         processEnded = true;
+
+        // Flush any remaining buffered events when process ends
+        // Emit unpaired tool_use events first (in order)
+        for (const toolId of toolUseOrder) {
+          const toolUseEvent = toolUseBuffer.get(toolId);
+          if (toolUseEvent) {
+            eventQueue.push(toolUseEvent);
+            toolUseBuffer.delete(toolId);
+          }
+        }
+
+        // Then emit any remaining tool_result events
+        for (const toolResultEvent of toolResultBuffer.values()) {
+          eventQueue.push(toolResultEvent);
+        }
+        toolResultBuffer.clear();
+
         if (code !== 0 && code !== null) {
           processError = new Error(`claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
         }
