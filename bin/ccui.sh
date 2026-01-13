@@ -165,5 +165,8 @@ while true; do
 
         # Auto-continue after directory change
         run_claude "Now we are in $SESSION_CWD. CONTINUE"
+
+        # Clear SESSION_CWD to prevent infinite loop
+        SESSION_CWD=""
     fi
 done
