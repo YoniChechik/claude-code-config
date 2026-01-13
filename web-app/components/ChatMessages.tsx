@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import type { Message, ContentBlock } from "@/lib/types";
 import ContentBlockRenderer from "./message/ContentBlockRenderer";
+import AgentTaskFrame from "./message/AgentTaskFrame";
+import { groupBlocksByAgent } from "@/lib/agent-grouping";
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -50,9 +52,20 @@ export default function ChatMessages({
           </div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
-              {message.content.map((block, blockIdx) => (
-                <ContentBlockRenderer key={blockIdx} block={block} />
-              ))}
+              {groupBlocksByAgent(message.content).map((group, groupIdx) => {
+                if (group.type === "agent_task") {
+                  return (
+                    <AgentTaskFrame
+                      key={groupIdx}
+                      agentType={group.agentType}
+                      description={group.description}
+                      taskId={group.taskId}
+                      childBlocks={group.blocks}
+                    />
+                  );
+                }
+                return <ContentBlockRenderer key={groupIdx} block={group.block} />;
+              })}
             </div>
           </div>
           <div className={`text-xs ${
@@ -72,14 +85,26 @@ export default function ChatMessages({
           <div className="text-xs font-semibold text-gray-500">Claude</div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
-              {streamingBlocks.map((block, blockIdx) => {
+              {groupBlocksByAgent(streamingBlocks).map((group, groupIdx) => {
+                if (group.type === "agent_task") {
+                  return (
+                    <AgentTaskFrame
+                      key={groupIdx}
+                      agentType={group.agentType}
+                      description={group.description}
+                      taskId={group.taskId}
+                      childBlocks={group.blocks}
+                    />
+                  );
+                }
+
                 // Add cursor after last text block during streaming
-                const isLastBlock = blockIdx === streamingBlocks.length - 1;
-                const isTextBlock = block.type === "text";
+                const isLastGroup = groupIdx === groupBlocksByAgent(streamingBlocks).length - 1;
+                const isTextBlock = group.block.type === "text";
                 return (
-                  <span key={blockIdx}>
-                    <ContentBlockRenderer block={block} />
-                    {isStreaming && isLastBlock && isTextBlock && (
+                  <span key={groupIdx}>
+                    <ContentBlockRenderer block={group.block} />
+                    {isStreaming && isLastGroup && isTextBlock && (
                       <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
                     )}
                   </span>

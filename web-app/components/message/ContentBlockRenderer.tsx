@@ -3,9 +3,10 @@ import ToolUseCard from "./ToolUseCard";
 
 interface ContentBlockRendererProps {
   block: ContentBlock;
+  isNested?: boolean;
 }
 
-export default function ContentBlockRenderer({ block }: ContentBlockRendererProps) {
+export default function ContentBlockRenderer({ block, isNested = false }: ContentBlockRendererProps) {
   switch (block.type) {
     case "text":
       return <span>{block.text}</span>;
