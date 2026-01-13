@@ -142,6 +142,25 @@ export class ClaudeClient {
               }
             }
 
+            // Handle content_block_start for tool_use blocks (streaming)
+            if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+              const block = event.content_block;
+              if (block.name !== "StructuredOutput") {
+                eventQueue.push({
+                  type: "tool_use",
+                  tool: {
+                    id: block.id,
+                    name: block.name,
+                    input: block.input || {},
+                  },
+                });
+                if (resolveNext) {
+                  resolveNext();
+                  resolveNext = null;
+                }
+              }
+            }
+
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
               for (const block of event.message.content) {
