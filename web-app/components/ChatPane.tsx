@@ -122,8 +122,17 @@ export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
         setMessages((prev) => [...prev, assistantMessage]);
       }
 
-      // Reload session to get updated metadata
-      await loadSession();
+      // Update session metadata (cwd, model, duration) from server without overwriting messages
+      const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+      const data = await sessionResponse.json();
+      if (data.session) {
+        setSession({
+          ...session,
+          cwd: data.session.cwd,
+          model: data.session.model,
+          lastDurationMs: data.session.lastDurationMs,
+        });
+      }
     } catch (error) {
       console.error("Failed to send command:", error);
     } finally {
