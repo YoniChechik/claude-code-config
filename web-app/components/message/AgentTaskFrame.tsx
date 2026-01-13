@@ -8,7 +8,8 @@ interface AgentTaskFrameProps {
   agentType: string;
   description: string;
   taskId: string;
-  childBlocks: (ContentBlock | BlockGroup)[];
+  taskToolUse: ContentBlock;
+  childBlocks: BlockGroup[];
 }
 
 /**
@@ -19,6 +20,7 @@ export default function AgentTaskFrame({
   agentType,
   description,
   taskId,
+  taskToolUse,
   childBlocks,
 }: AgentTaskFrameProps) {
   return (
@@ -38,36 +40,28 @@ export default function AgentTaskFrame({
       {/* Agent Content - nested tool invocations and nested agents */}
       <div className="px-4 py-3 space-y-2">
         {childBlocks.map((item, index) => {
-          // Check if this is a BlockGroup
-          if (typeof item === "object" && "type" in item) {
-            // Handle nested agent task groups recursively
-            if (item.type === "agent_task") {
-              return (
-                <div key={index} className="ml-2">
-                  <AgentTaskFrame
-                    agentType={item.agentType}
-                    description={item.description}
-                    taskId={item.taskId}
-                    childBlocks={item.blocks}
-                  />
-                </div>
-              );
-            }
-            // Handle standalone block groups
-            if (item.type === "standalone") {
-              return (
-                <div key={index} className="ml-2">
-                  <ContentBlockRenderer block={item.block} isNested />
-                </div>
-              );
-            }
+          // Handle nested agent task groups recursively
+          if (item.type === "agent_task") {
+            return (
+              <div key={index} className="ml-2">
+                <AgentTaskFrame
+                  agentType={item.agentType}
+                  description={item.description}
+                  taskId={item.taskId}
+                  taskToolUse={item.taskToolUse}
+                  childBlocks={item.blocks}
+                />
+              </div>
+            );
           }
-          // Handle regular content blocks
-          return (
-            <div key={index} className="ml-2">
-              <ContentBlockRenderer block={item as ContentBlock} isNested />
-            </div>
-          );
+          // Handle standalone block groups
+          if (item.type === "standalone") {
+            return (
+              <div key={index} className="ml-2">
+                <ContentBlockRenderer block={item.block} isNested />
+              </div>
+            );
+          }
         })}
       </div>
     </div>

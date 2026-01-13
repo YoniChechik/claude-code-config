@@ -60,6 +60,7 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
+                      taskToolUse={group.taskToolUse}
                       childBlocks={group.blocks}
                     />
                   );
@@ -93,6 +94,7 @@ export default function ChatMessages({
                       agentType={group.agentType}
                       description={group.description}
                       taskId={group.taskId}
+                      taskToolUse={group.taskToolUse}
                       childBlocks={group.blocks}
                     />
                   );
