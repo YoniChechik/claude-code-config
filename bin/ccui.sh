@@ -50,8 +50,13 @@ dir_to_claude_path() {
     # Examples:
     #   /home/ubuntu/.claude -> -home-ubuntu--claude
     #   /tmp -> -tmp
-    # Rule: Replace all / and . with -
-    echo "$1" | tr '/.' '-'
+    #   /tmp/test_underscore -> -tmp-test-underscore
+    #   /tmp/test with spaces -> -tmp-test-with-spaces
+    #   /tmp/test.dots -> -tmp-test-dots
+    # Rule: Replace all non-alphanumeric, non-hyphen characters with hyphen
+    # Preserves: a-z, A-Z, 0-9, - (hyphen)
+    # Converts to hyphen: /, ., _, space, and all special characters
+    echo "$1" | sed 's/[^a-zA-Z0-9-]/-/g'
 }
 
 create_session_symlink() {
