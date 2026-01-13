@@ -63,13 +63,7 @@ if [ -f "package-lock.json" ]; then
 fi
 ```
 
-### Step 6: Notify User
-Tell user:
-- The clone has been created at `_clones/$FEATURE_NAME`
-- The branch `$FEATURE_NAME` has been published to remote
-
-### Step 7: Change to Feature Directory
+### Step 6: Change to Feature Directory
 Call the permanent-cd skill to change to the feature clone directory:
 /permanent-cd _clones/$FEATURE_NAME
 
-**FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
