@@ -204,15 +204,18 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
+              console.log("[CLAUDE-CLIENT] Processing assistant message content:", event.message.content.length, "blocks");
               debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
               // When using StructuredOutput schema, ONLY send text from StructuredOutput tool
               // Skip ALL raw text blocks to avoid duplicates from partial streaming events
               for (const block of event.message.content) {
                 // Tool use blocks (ALL tools, not just StructuredOutput)
                 if (block.type === "tool_use") {
+                  console.log("[CLAUDE-CLIENT] Tool use block:", block.name, "id:", block.id);
                   debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
                   if (block.name === "StructuredOutput" && block.input?.response) {
+                    console.log("[CLAUDE-CLIENT] Extracting response from StructuredOutput");
                     eventQueue.push({
                       type: "text",
                       content: block.input.response,
@@ -221,6 +224,7 @@ export class ClaudeClient {
 
                   // Send tool_use event for all tools (skip StructuredOutput for display)
                   if (block.name !== "StructuredOutput") {
+                    console.log("[CLAUDE-CLIENT] Queueing tool_use event for:", block.name);
                     eventQueue.push({
                       type: "tool_use",
                       tool: {
@@ -241,8 +245,14 @@ export class ClaudeClient {
 
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
+              console.log("[CLAUDE-CLIENT] Processing user message content:", event.message.content.length, "blocks");
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
+                  console.log("[CLAUDE-CLIENT] Tool result block for tool_use_id:", block.tool_use_id);
+                  console.log("[CLAUDE-CLIENT] Tool result content type:", Array.isArray(block.content) ? "array" : typeof block.content);
+                  if (Array.isArray(block.content)) {
+                    console.log("[CLAUDE-CLIENT] Tool result content array length:", block.content.length);
+                  }
                   debugLog("TOOL_RESULT_BLOCK", block);
                   eventQueue.push({
                     type: "tool_result",
@@ -372,6 +382,7 @@ export class ClaudeClient {
       while (!processEnded || eventQueue.length > 0) {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
+          console.log("[CLAUDE-CLIENT] Yielding event:", event.type);
           debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
