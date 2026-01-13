@@ -28,10 +28,12 @@ export interface ClaudeStreamEvent {
     | "thinking"
     | "tool_use"
     | "tool_result"
+    | "token_usage"
     | "init"
     | "result"
     | "structured_output"
-    | "error";
+    | "error"
+    | "cwd_changed";
   content?: string;
   tool?: {
     id: string;
@@ -42,6 +44,12 @@ export interface ClaudeStreamEvent {
     tool_use_id: string;
     content: string;
   };
+  token_usage?: {
+    used: number;
+    total: number;
+    remaining: number;
+  };
+  cwd?: string;
   model?: string;
   session_id?: string;
   duration_ms?: number;
@@ -220,7 +228,7 @@ export class ClaudeClient {
               }
             }
 
-            // Handle tool results from user messages
+            // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
@@ -234,6 +242,25 @@ export class ClaudeClient {
                   if (resolveNext) {
                     resolveNext();
                     resolveNext = null;
+                  }
+                }
+
+                // Parse token usage from system_reminder blocks
+                if (block.type === "text" && block.text) {
+                  const tokenMatch = block.text.match(/Token usage: (\d+)\/(\d+); (\d+) remaining/);
+                  if (tokenMatch) {
+                    eventQueue.push({
+                      type: "token_usage",
+                      token_usage: {
+                        used: parseInt(tokenMatch[1]),
+                        total: parseInt(tokenMatch[2]),
+                        remaining: parseInt(tokenMatch[3]),
+                      },
+                    });
+                    if (resolveNext) {
+                      resolveNext();
+                      resolveNext = null;
+                    }
                   }
                 }
               }

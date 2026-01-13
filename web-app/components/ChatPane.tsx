@@ -22,6 +22,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const [streamingText, setStreamingText] = useState("");
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<{ used: number; total: number; remaining: number } | undefined>(undefined);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
@@ -163,6 +164,9 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
               } else if (event.type === "cwd_changed") {
                 // Update session cwd immediately
                 setSession((prev) => prev ? { ...prev, cwd: event.cwd } : null);
+              } else if (event.type === "token_usage") {
+                // Update token usage
+                setTokenUsage(event.token_usage);
               } else if (event.type === "error") {
                 console.error("Stream error:", event.error);
               }
@@ -222,6 +226,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         cwd={session.cwd}
         model={session.model}
         lastDurationMs={session.lastDurationMs}
+        tokenUsage={tokenUsage}
         onClose={onClose}
       />
 

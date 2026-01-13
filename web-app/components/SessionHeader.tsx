@@ -6,6 +6,11 @@ interface SessionHeaderProps {
   cwd: string;
   model: string;
   lastDurationMs: number;
+  tokenUsage?: {
+    used: number;
+    total: number;
+    remaining: number;
+  };
   onClose?: () => void;
 }
 
@@ -17,14 +22,29 @@ export default function SessionHeader({
   cwd,
   model,
   lastDurationMs,
+  tokenUsage,
   onClose,
 }: SessionHeaderProps) {
+  // Calculate percentage used
+  const percentUsed = tokenUsage ? (tokenUsage.used / tokenUsage.total) * 100 : 0;
+
+  // Determine color based on usage
+  let tokenColor = "text-green-200";
+  if (percentUsed > 80) tokenColor = "text-red-300";
+  else if (percentUsed > 60) tokenColor = "text-yellow-300";
+
   return (
     <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white border-b border-amber-700 shadow-sm">
       <div className="truncate font-mono text-sm font-medium" title={cwd}>
         {cwd}
       </div>
       <div className="flex items-center gap-3">
+        {tokenUsage && (
+          <div className={`flex items-center gap-2 text-xs font-medium bg-amber-600/30 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total}`}>
+            <span>🪙 {tokenUsage.used.toLocaleString()}/{tokenUsage.total.toLocaleString()}</span>
+            <span className="text-amber-200">({percentUsed.toFixed(0)}%)</span>
+          </div>
+        )}
         {lastDurationMs > 0 && (
           <div className="flex items-center gap-3 text-sm font-medium bg-amber-600/30 px-3 py-1 rounded-md">
             <span>{formatDuration(lastDurationMs)}</span>
