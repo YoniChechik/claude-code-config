@@ -10,18 +10,21 @@ interface ContentBlockRendererProps {
 function ToolResultBlock({ content }: { content: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Convert content to string if it's not already
+  const contentStr = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+
   // Filter out internal system messages
-  const trimmedContent = content.trim();
+  const trimmedContent = contentStr.trim();
   if (trimmedContent === "Structured output provided successfully" ||
       trimmedContent === "No response requested") {
     return null;
   }
 
-  const lines = content.split('\n');
+  const lines = contentStr.split('\n');
   const shouldCollapse = lines.length > 3;
   const displayContent = shouldCollapse && !isExpanded
     ? lines.slice(0, 3).join('\n')
-    : content;
+    : contentStr;
 
   return (
     <div className="text-gray-600 bg-gray-100 px-3 py-2 rounded font-mono text-sm my-2 whitespace-pre-wrap">
