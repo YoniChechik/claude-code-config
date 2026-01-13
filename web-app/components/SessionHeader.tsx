@@ -33,27 +33,8 @@ export default function SessionHeader({
   if (percentUsed > 80) tokenColor = "text-red-300";
   else if (percentUsed > 60) tokenColor = "text-yellow-300";
 
-  // Calculate time until 6 PM EST reset
-  const getTimeUntilReset = () => {
-    const now = new Date();
-    const est = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const resetTime = new Date(est);
-    resetTime.setHours(18, 0, 0, 0); // 6 PM EST
-
-    if (est.getHours() >= 18) {
-      // Already past 6 PM, next reset is tomorrow
-      resetTime.setDate(resetTime.getDate() + 1);
-    }
-
-    const diff = resetTime.getTime() - est.getTime();
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    return { hours, minutes, totalMinutes: hours * 60 + minutes };
-  };
-
-  const { hours, minutes, totalMinutes } = getTimeUntilReset();
-  const showResetWarning = percentUsed > 70 || totalMinutes < 120; // Show if >70% used OR <2h until reset
+  // Show high usage warning when > 70% used
+  const showHighUsageWarning = percentUsed > 70;
 
   return (
     <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white border-b border-amber-700 shadow-sm">
@@ -62,14 +43,14 @@ export default function SessionHeader({
       </div>
       <div className="flex items-center gap-3">
         {tokenUsage && (
-          <div className={`flex items-center gap-2 text-xs font-medium bg-amber-600/30 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total}`}>
+          <div className={`flex items-center gap-2 text-xs font-medium bg-amber-600/30 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>
             <span>🪙 {tokenUsage.used.toLocaleString()}/{tokenUsage.total.toLocaleString()}</span>
             <span className="text-amber-200">({percentUsed.toFixed(0)}%)</span>
           </div>
         )}
-        {showResetWarning && (
-          <div className="flex items-center gap-2 text-xs font-medium bg-amber-600/30 px-3 py-1 rounded-md text-amber-100" title="Tokens reset daily at 6 PM EST">
-            <span>⏰ Reset in {hours}h {minutes}m</span>
+        {showHighUsageWarning && (
+          <div className="flex items-center gap-2 text-xs font-medium bg-red-600/40 px-3 py-1 rounded-md text-red-100" title="High token usage - consider starting a new session. Tokens reset every 5 hours.">
+            <span>⚠️ High usage</span>
           </div>
         )}
         {lastDurationMs > 0 && (
