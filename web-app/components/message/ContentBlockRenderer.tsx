@@ -36,8 +36,10 @@ function ToolResultBlock({ content }: { content: string }) {
 export default function ContentBlockRenderer({ block, isNested = false }: ContentBlockRendererProps) {
   switch (block.type) {
     case "text":
-      // Filter out "Structured output provided successfully" messages
-      if (block.text.trim() === "Structured output provided successfully") {
+      // Filter out internal system messages
+      const trimmedText = block.text.trim();
+      if (trimmedText === "Structured output provided successfully" ||
+          trimmedText === "No response requested") {
         return null;
       }
       return <span>{block.text}</span>;
