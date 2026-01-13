@@ -1,6 +1,7 @@
 import type { Session, Message } from "./types";
 import { generateSessionId, normalizePath } from "./utils";
 import { CDTracker } from "./cd-tracker";
+import { execSync } from "child_process";
 
 /**
  * In-memory session manager
@@ -45,7 +46,12 @@ class SessionManager {
   } {
     // Check for SSH connection
     if (process.env.SSH_CONNECTION) {
-      const hostname = process.env.HOSTNAME || process.env.HOST || 'unknown';
+      let hostname = 'unknown';
+      try {
+        hostname = execSync('hostname').toString().trim();
+      } catch {
+        // Fallback to 'unknown' if hostname command fails
+      }
       return { sessionType: 'ssh', hostname };
     }
 
