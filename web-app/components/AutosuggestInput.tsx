@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { SlashCommand } from "@/lib/types";
 import { fuzzyMatchCommands } from "@/lib/autosuggest-client";
+import SessionPicker from "./SessionPicker";
 
 interface AutosuggestInputProps {
   value: string;
@@ -13,6 +14,7 @@ interface AutosuggestInputProps {
   disabled?: boolean;
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
+  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
@@ -27,11 +29,13 @@ export default function AutosuggestInput({
   disabled = false,
   isStreaming = false,
   onFocusRef,
+  onResumeSession,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isFlashing, setIsFlashing] = useState(false);
+  const [showResumePicker, setShowResumePicker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selectedItemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -65,6 +69,17 @@ export default function AutosuggestInput({
   // Handle input change
   const handleChange = (newValue: string) => {
     onChange(newValue);
+
+    // Check if user typed "/resume" exactly - show picker instead of autocomplete
+    const trimmed = newValue.trim();
+    if (trimmed === "/resume") {
+      if (onResumeSession) {
+        setShowResumePicker(true);
+        setSuggestMode(false);
+        setMatches([]);
+      }
+      return;
+    }
 
     // Check if we should enter suggest mode (after typing /)
     const lastSlashIndex = newValue.lastIndexOf("/");
@@ -137,6 +152,20 @@ export default function AutosuggestInput({
   };
 
   const suggestion = getSuggestion();
+
+  // Handle resume session selection
+  const handleResumeSelect = (sessionId: string, filePath: string, cwd: string) => {
+    setShowResumePicker(false);
+    onChange("");
+    if (onResumeSession) {
+      onResumeSession(sessionId, filePath, cwd);
+    }
+  };
+
+  const handleResumeCancel = () => {
+    setShowResumePicker(false);
+    onChange("");
+  };
 
   return (
     <div className="relative flex-1">
@@ -215,6 +244,13 @@ export default function AutosuggestInput({
           })}
         </div>
       )}
+
+      {/* Session picker modal */}
+      <SessionPicker
+        isOpen={showResumePicker}
+        onSelect={handleResumeSelect}
+        onCancel={handleResumeCancel}
+      />
     </div>
   );
 }

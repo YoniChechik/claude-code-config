@@ -8,6 +8,7 @@ export interface Session {
   messages: Message[];
   createdAt: Date;
   claudeSessionId?: string;
+  isResumed?: boolean; // Flag for resumed sessions
 }
 
 // Content block types (matches Claude API output)

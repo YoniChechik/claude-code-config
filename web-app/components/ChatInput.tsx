@@ -10,6 +10,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
+  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
@@ -21,6 +22,7 @@ export default function ChatInput({
   disabled = false,
   isStreaming = false,
   onFocusRef,
+  onResumeSession,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
 
@@ -41,6 +43,7 @@ export default function ChatInput({
         disabled={disabled}
         isStreaming={isStreaming}
         onFocusRef={onFocusRef}
+        onResumeSession={onResumeSession}
       />
     </div>
   );

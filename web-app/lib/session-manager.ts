@@ -30,6 +30,26 @@ class SessionManager {
   }
 
   /**
+   * Resume an existing session with pre-loaded messages
+   */
+  resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
+    const session: Session = {
+      id: sessionId,
+      cwd: normalizePath(cwd),
+      model: "claude-sonnet-4-5-20250929",
+      lastDurationMs: 0,
+      messages,
+      createdAt: new Date(),
+      isResumed: true,
+    };
+
+    this.sessions.set(session.id, session);
+    this.cdTrackers.set(session.id, new CDTracker());
+
+    return session;
+  }
+
+  /**
    * Get session by ID
    */
   getSession(id: string): Session | undefined {
