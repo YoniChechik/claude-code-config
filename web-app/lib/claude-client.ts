@@ -185,9 +185,14 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
+              // Check if this message has a StructuredOutput tool
+              const hasStructuredOutput = event.message.content.some(
+                (b: any) => b.type === "tool_use" && b.name === "StructuredOutput"
+              );
+
               for (const block of event.message.content) {
-                // Text blocks
-                if (block.type === "text" && block.text) {
+                // Text blocks - skip if StructuredOutput exists (to avoid duplicate)
+                if (block.type === "text" && block.text && !hasStructuredOutput) {
                   eventQueue.push({
                     type: "text",
                     content: block.text,
