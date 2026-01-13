@@ -15,7 +15,6 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
     return null;
   }
 
-  // Convert content to string if it's not already
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
 
   // Filter out internal system messages

@@ -91,12 +91,8 @@ function isTaskTool(block: ContentBlock): boolean {
  * Those child blocks are recursively processed to find nested agents.
  */
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
-  console.log("[AGENT-GROUPING] groupBlocksByAgent called with", blocks.length, "blocks");
-  console.log("[AGENT-GROUPING] Input blocks:", blocks.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
-
   // Blocks are already in causal order from Claude after parent_tool_use_id filtering
   const sortedBlocks = blocks;
-  console.log("[AGENT-GROUPING] Using blocks in original causal order (no sorting)");
   const groups: BlockGroup[] = [];
   const processedIndices = new Set<number>();
 
@@ -110,7 +106,6 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
     // Check if this is a Task tool
     if (isTaskTool(block)) {
       const taskTool = block as Extract<ContentBlock, { type: "tool_use" }>;
-      console.log("[AGENT-GROUPING] Found Task tool:", taskTool.input.subagent_type, "id:", taskTool.id);
 
       // Find the matching tool_result
       let toolResultIndex = -1;
@@ -135,12 +130,8 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
           { type: "tool_result" }
         >;
 
-        console.log("[AGENT-GROUPING] Found matching tool_result for task", taskTool.id);
-
         // Collect all blocks between tool_use and tool_result (streaming agent work)
         const streamingBlocks = sortedBlocks.slice(i + 1, toolResultIndex);
-        console.log("[AGENT-GROUPING] Found", streamingBlocks.length, "streaming blocks between tool_use and tool_result");
-        console.log("[AGENT-GROUPING] Streaming blocks:", streamingBlocks.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
 
         // Add streaming blocks first
         childBlocks.push(...streamingBlocks);
@@ -151,27 +142,16 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
         }
 
         // Now extract blocks from tool_result.content (if any)
-        console.log("[AGENT-GROUPING] tool_result.content type:", Array.isArray(toolResult.content) ? "array" : typeof toolResult.content);
-
         if (Array.isArray(toolResult.content)) {
-          console.log("[AGENT-GROUPING] Extracted", toolResult.content.length, "blocks from tool_result.content");
-          console.log("[AGENT-GROUPING] Content blocks:", toolResult.content.map(b => b.type + (b.type === "tool_use" ? ":" + (b as any).name : "")));
           childBlocks.push(...toolResult.content);
-        } else {
-          console.log("[AGENT-GROUPING] tool_result.content is not an array");
         }
-
-        console.log("[AGENT-GROUPING] Total child blocks:", childBlocks.length);
 
         // Mark tool_result as processed so we skip it
         processedIndices.add(toolResultIndex);
-      } else {
-        console.log("[AGENT-GROUPING] No matching tool_result found for task", taskTool.id);
       }
 
       // Recursively group the child blocks
       const childGroups = groupBlocksByAgent(childBlocks);
-      console.log("[AGENT-GROUPING] Recursively grouped", childBlocks.length, "child blocks into", childGroups.length, "groups");
 
       // Add agent task group
       groups.push({
@@ -186,7 +166,6 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
       processedIndices.add(i);
     } else {
       // Standalone block
-      console.log("[AGENT-GROUPING] Adding standalone block:", block.type);
       groups.push({
         type: "standalone",
         block,
@@ -195,6 +174,5 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
     }
   }
 
-  console.log("[AGENT-GROUPING] Returning", groups.length, "groups");
   return groups;
 }

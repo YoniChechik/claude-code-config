@@ -38,27 +38,21 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   }, [isFocused]);
 
   const loadSession = async () => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}`);
-      const data = await response.json();
-      if (data.session) {
-        setSession(data.session);
-        // Convert timestamp strings back to Date objects and handle old string content
-        const messagesWithDates = (data.session.messages || []).map(
-          (msg: Message) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-            // Convert old string content to ContentBlock format
-            content: typeof msg.content === "string"
-              ? [{ type: "text" as const, text: msg.content }]
-              : msg.content,
-          })
-        );
-        setMessages(messagesWithDates);
-      }
-    } catch (error) {
-      console.error("Failed to load session:", error);
-    }
+    const response = await fetch(`/api/sessions/${sessionId}`);
+    const data = await response.json();
+    setSession(data.session);
+    // Convert timestamp strings back to Date objects and handle old string content
+    const messagesWithDates = data.session.messages.map(
+      (msg: Message) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+        // Convert old string content to ContentBlock format
+        content: typeof msg.content === "string"
+          ? [{ type: "text" as const, text: msg.content }]
+          : msg.content,
+      })
+    );
+    setMessages(messagesWithDates);
   };
 
   const handleSubmitInternal = async (prompt: string, isAutoContinue: boolean = false) => {
@@ -88,132 +82,116 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     setStreamingText("");
     setStreamingBlocks([]);
 
-    try {
-      const response = await fetch("/api/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, prompt }),
-      });
+    const response = await fetch("/api/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, prompt }),
+    });
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
 
-      if (!reader) {
-        throw new Error("No response stream");
-      }
+    let assistantText = "";
+    const assistantBlocks: ContentBlock[] = [];
 
-      let assistantText = "";
-      const assistantBlocks: ContentBlock[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split("\n");
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
+          if (data === "[DONE]") {
+            // Stream complete
+            break;
+          }
 
-            if (data === "[DONE]") {
-              // Stream complete
-              break;
+          const event = JSON.parse(data);
+
+          if (event.type === "text") {
+            assistantText += event.content || "";
+            setStreamingText(assistantText);
+
+            // Update or create the last text block instead of creating multiple blocks
+            const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+            if (lastBlock && lastBlock.type === "text") {
+              // Update existing text block
+              lastBlock.text += event.content || "";
+            } else {
+              // Create new text block
+              const textBlock = {
+                type: "text" as const,
+                text: event.content || "",
+              };
+              assistantBlocks.push(textBlock);
             }
-
-            try {
-              const event = JSON.parse(data);
-
-              if (event.type === "text") {
-                assistantText += event.content || "";
-                setStreamingText(assistantText);
-
-                // Update or create the last text block instead of creating multiple blocks
-                const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-                if (lastBlock && lastBlock.type === "text") {
-                  // Update existing text block
-                  lastBlock.text += event.content || "";
-                } else {
-                  // Create new text block
-                  const textBlock = {
-                    type: "text" as const,
-                    text: event.content || "",
-                  };
-                  assistantBlocks.push(textBlock);
-                }
-                setStreamingBlocks([...assistantBlocks]);
-              } else if (event.type === "thinking") {
-                // Add thinking block
-                const thinkingBlock = {
-                  type: "thinking" as const,
-                  thinking: event.content || "",
-                };
-                assistantBlocks.push(thinkingBlock);
-                setStreamingBlocks([...assistantBlocks]);
-              } else if (event.type === "tool_use") {
-                // Add tool use block
-                const toolBlock = {
-                  type: "tool_use" as const,
-                  id: event.tool.id,
-                  name: event.tool.name,
-                  input: event.tool.input,
-                };
-                assistantBlocks.push(toolBlock);
-                setStreamingBlocks([...assistantBlocks]);
-              } else if (event.type === "tool_result") {
-                // Add tool result block
-                const toolResultBlock = {
-                  type: "tool_result" as const,
-                  tool_use_id: event.tool_result.tool_use_id,
-                  content: event.tool_result.content,
-                };
-                assistantBlocks.push(toolResultBlock);
-                setStreamingBlocks([...assistantBlocks]);
-              } else if (event.type === "cwd_changed") {
-                // Update session cwd immediately
-                setSession((prev) => prev ? { ...prev, cwd: event.cwd } : null);
-              } else if (event.type === "token_usage") {
-                // Update token usage
-                setTokenUsage(event.token_usage);
-              } else if (event.type === "error") {
-                console.error("Stream error:", event.error);
-              }
-            } catch (e) {
-              // Ignore parse errors
-            }
+            setStreamingBlocks([...assistantBlocks]);
+          } else if (event.type === "thinking") {
+            // Add thinking block
+            const thinkingBlock = {
+              type: "thinking" as const,
+              thinking: event.content || "",
+            };
+            assistantBlocks.push(thinkingBlock);
+            setStreamingBlocks([...assistantBlocks]);
+          } else if (event.type === "tool_use") {
+            // Add tool use block
+            const toolBlock = {
+              type: "tool_use" as const,
+              id: event.tool.id,
+              name: event.tool.name,
+              input: event.tool.input,
+            };
+            assistantBlocks.push(toolBlock);
+            setStreamingBlocks([...assistantBlocks]);
+          } else if (event.type === "tool_result") {
+            // Add tool result block
+            const toolResultBlock = {
+              type: "tool_result" as const,
+              tool_use_id: event.tool_result.tool_use_id,
+              content: event.tool_result.content,
+            };
+            assistantBlocks.push(toolResultBlock);
+            setStreamingBlocks([...assistantBlocks]);
+          } else if (event.type === "cwd_changed") {
+            // Update session cwd immediately
+            setSession((prev) => prev ? { ...prev, cwd: event.cwd } : null);
+          } else if (event.type === "token_usage") {
+            // Update token usage
+            setTokenUsage(event.token_usage);
+          } else if (event.type === "error") {
+            console.error("Stream error:", event.error);
+          }
           }
         }
       }
 
-      // Add assistant message
-      if (assistantBlocks.length > 0) {
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: assistantBlocks,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-      }
+    // Add assistant message
+    const assistantMessage: Message = {
+      role: "assistant",
+      content: assistantBlocks,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
 
-      // Update session metadata (model, duration) from server
-      // Note: cwd is already updated via cwd_changed event during stream
-      const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
-      const data = await sessionResponse.json();
-      if (data.session) {
-        setSession((prev) => prev ? {
-          ...prev,
-          cwd: data.session.cwd, // Ensure sync with backend
-          model: data.session.model,
-          lastDurationMs: data.session.lastDurationMs,
-        } : null);
-      }
-    } catch (error) {
-      console.error("Failed to send command:", error);
-    } finally {
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
-    }
+    // Update session metadata (model, duration) from server
+    // Note: cwd is already updated via cwd_changed event during stream
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const data = await sessionResponse.json();
+    setSession((prev) => prev ? {
+      ...prev,
+      cwd: data.session.cwd, // Ensure sync with backend
+      model: data.session.model,
+      lastDurationMs: data.session.lastDurationMs,
+    } : null);
+
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamingBlocks([]);
   };
 
   const handleSubmit = async (prompt: string) => {

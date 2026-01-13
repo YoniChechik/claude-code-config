@@ -176,10 +176,8 @@ export class ClaudeClient {
                   model: model,
                   session_id: sessionId,
                 });
-                if (resolveNext) {
-                  resolveNext();
-                  resolveNext = null;
-                }
+                resolveNext?.();
+                resolveNext = null;
               }
             }
 
@@ -195,33 +193,22 @@ export class ClaudeClient {
                     input: block.input || {},
                   },
                 });
-                if (resolveNext) {
-                  resolveNext();
-                  resolveNext = null;
-                }
+                resolveNext?.();
+                resolveNext = null;
               }
             }
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
-              // Log parent_tool_use_id if present for debugging
-              if (event.parent_tool_use_id) {
-                console.log("[CLAUDE-CLIENT] Assistant message has parent_tool_use_id:", event.parent_tool_use_id);
-                debugLog("ASSISTANT_MESSAGE_WITH_PARENT", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
-              }
-
-              console.log("[CLAUDE-CLIENT] Processing assistant message content:", event.message.content.length, "blocks");
               debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
               // When using StructuredOutput schema, ONLY send text from StructuredOutput tool
               // Skip ALL raw text blocks to avoid duplicates from partial streaming events
               for (const block of event.message.content) {
                 // Tool use blocks (ALL tools, not just StructuredOutput)
                 if (block.type === "tool_use") {
-                  console.log("[CLAUDE-CLIENT] Tool use block:", block.name, "id:", block.id);
                   debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
                   if (block.name === "StructuredOutput" && block.input?.response) {
-                    console.log("[CLAUDE-CLIENT] Extracting response from StructuredOutput");
                     eventQueue.push({
                       type: "text",
                       content: block.input.response,
@@ -230,7 +217,6 @@ export class ClaudeClient {
 
                   // Send tool_use event for all tools (skip StructuredOutput for display)
                   if (block.name !== "StructuredOutput") {
-                    console.log("[CLAUDE-CLIENT] Queueing tool_use event for:", block.name);
                     eventQueue.push({
                       type: "tool_use",
                       tool: {
@@ -241,30 +227,16 @@ export class ClaudeClient {
                     });
                   }
 
-                  if (resolveNext) {
-                    resolveNext();
-                    resolveNext = null;
-                  }
+                  resolveNext?.();
+                  resolveNext = null;
                 }
               }
             }
 
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
-              // Log parent_tool_use_id if present for debugging
-              if (event.parent_tool_use_id) {
-                console.log("[CLAUDE-CLIENT] User message has parent_tool_use_id:", event.parent_tool_use_id);
-                debugLog("USER_MESSAGE_WITH_PARENT", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
-              }
-
-              console.log("[CLAUDE-CLIENT] Processing user message content:", event.message.content.length, "blocks");
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
-                  console.log("[CLAUDE-CLIENT] Tool result block for tool_use_id:", block.tool_use_id);
-                  console.log("[CLAUDE-CLIENT] Tool result content type:", Array.isArray(block.content) ? "array" : typeof block.content);
-                  if (Array.isArray(block.content)) {
-                    console.log("[CLAUDE-CLIENT] Tool result content array length:", block.content.length);
-                  }
                   debugLog("TOOL_RESULT_BLOCK", block);
                   eventQueue.push({
                     type: "tool_result",
@@ -273,10 +245,8 @@ export class ClaudeClient {
                       content: block.content,
                     },
                   });
-                  if (resolveNext) {
-                    resolveNext();
-                    resolveNext = null;
-                  }
+                  resolveNext?.();
+                  resolveNext = null;
                 }
 
                 // Parse token usage from system_reminder blocks
@@ -291,10 +261,8 @@ export class ClaudeClient {
                         remaining: parseInt(tokenMatch[3]),
                       },
                     });
-                    if (resolveNext) {
-                      resolveNext();
-                      resolveNext = null;
-                    }
+                    resolveNext?.();
+                    resolveNext = null;
                   }
                 }
               }
@@ -306,10 +274,8 @@ export class ClaudeClient {
                 type: "thinking",
                 content: event.delta.thinking,
               });
-              if (resolveNext) {
-                resolveNext();
-                resolveNext = null;
-              }
+              resolveNext?.();
+              resolveNext = null;
             }
 
             // Handle result event
@@ -328,13 +294,11 @@ export class ClaudeClient {
                 });
               }
 
-              if (resolveNext) {
-                resolveNext();
-                resolveNext = null;
-              }
+              resolveNext?.();
+              resolveNext = null;
             }
           } catch (e) {
-            // Ignore JSON parse errors for non-JSON output
+            // JSON parse error - skip and continue with next line
           }
         }
       });
@@ -342,26 +306,20 @@ export class ClaudeClient {
       claude.on("close", (code: number | null, signal: string | null) => {
         processEnded = true;
         if (code !== 0 && code !== null) {
-          const errorDetails = stderrOutput ? `\nStderr: ${stderrOutput}` : "";
-          processError = new Error(`claude CLI exited with code ${code}${errorDetails}`);
+          processError = new Error(`claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
         }
         if (signal) {
-          const errorDetails = stderrOutput ? `\nStderr: ${stderrOutput}` : "";
-          processError = new Error(`claude CLI killed by signal ${signal}${errorDetails}`);
+          processError = new Error(`claude CLI killed by signal ${signal}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
         }
-        if (resolveNext) {
-          resolveNext();
-          resolveNext = null;
-        }
+        resolveNext?.();
+        resolveNext = null;
       });
 
       claude.on("error", (err: Error) => {
         processEnded = true;
         processError = err;
-        if (resolveNext) {
-          resolveNext();
-          resolveNext = null;
-        }
+        resolveNext?.();
+        resolveNext = null;
       });
 
       // Set a timeout to fall back to mock if the process doesn't start
