@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "next": "15.1.5",
+    "next": "^16.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -20,7 +20,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.1.5",
+    "eslint-config-next": "^16.1.1",
     "tailwindcss": "^4.0.0-alpha.25",
     "typescript": "^5"
   }
