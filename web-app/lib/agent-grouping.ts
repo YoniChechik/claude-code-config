@@ -11,7 +11,8 @@ export type BlockGroup =
       agentType: string;
       description: string;
       taskId: string;
-      blocks: (ContentBlock | BlockGroup)[];
+      taskToolUse: ContentBlock; // The Task tool_use block itself
+      blocks: (ContentBlock | BlockGroup)[]; // Child blocks from tool_result.content
     }
   | {
       type: "standalone";
@@ -85,75 +86,78 @@ function isTaskTool(block: ContentBlock): boolean {
 /**
  * Groups content blocks by agent tasks (recursive)
  *
- * When a Task tool_use is found, all subsequent blocks until the next sibling Task
- * or end of array are grouped as children of that agent task. Nested Task tools
- * are recursively grouped as child agents.
+ * When a Task tool_use is found, we look for its matching tool_result.
+ * The tool_result.content array contains the agent's child blocks.
+ * Those child blocks are recursively processed to find nested agents.
  */
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
   // First, sort blocks to ensure tool_use appears before tool_result
   const sortedBlocks = sortToolBlocks(blocks);
   const groups: BlockGroup[] = [];
-  let i = 0;
+  const processedIndices = new Set<number>();
 
-  while (i < sortedBlocks.length) {
+  for (let i = 0; i < sortedBlocks.length; i++) {
+    if (processedIndices.has(i)) {
+      continue;
+    }
+
     const block = sortedBlocks[i];
 
     // Check if this is a Task tool
     if (isTaskTool(block)) {
-      // Start agent task group
-      const agentBlocks: (ContentBlock | BlockGroup)[] = [];
-      i++; // Move past the Task tool itself
+      const taskTool = block as Extract<ContentBlock, { type: "tool_use" }>;
 
-      // Collect blocks until next sibling Task or end
-      while (i < sortedBlocks.length) {
-        const nextBlock = sortedBlocks[i];
-
-        // If we hit another Task tool, recursively group it as a nested agent
-        if (isTaskTool(nextBlock)) {
-          // Recursively process the nested agent by collecting its blocks
-          const nestedBlocks: ContentBlock[] = [nextBlock];
-          i++; // Move past the nested Task tool
-
-          // Collect blocks for the nested agent
-          let depth = 1;
-          while (i < sortedBlocks.length && depth > 0) {
-            const candidateBlock = sortedBlocks[i];
-
-            if (isTaskTool(candidateBlock)) {
-              // Another nested Task - we'll handle it in the recursive call
-              break;
-            }
-
-            nestedBlocks.push(candidateBlock);
-            i++;
-          }
-
-          // Recursively group the nested agent's blocks
-          const nestedGroups = groupBlocksByAgent(nestedBlocks);
-          agentBlocks.push(...nestedGroups);
-        } else {
-          agentBlocks.push(nextBlock);
-          i++;
+      // Find the matching tool_result
+      let toolResultIndex = -1;
+      for (let j = i + 1; j < sortedBlocks.length; j++) {
+        const candidateBlock = sortedBlocks[j];
+        if (
+          candidateBlock.type === "tool_result" &&
+          candidateBlock.tool_use_id === taskTool.id
+        ) {
+          toolResultIndex = j;
+          break;
         }
       }
 
+      // Extract child blocks from tool_result.content
+      let childBlocks: ContentBlock[] = [];
+      if (toolResultIndex !== -1) {
+        const toolResult = sortedBlocks[toolResultIndex] as Extract<
+          ContentBlock,
+          { type: "tool_result" }
+        >;
+
+        // tool_result.content can be a string or an array of blocks
+        if (Array.isArray(toolResult.content)) {
+          childBlocks = toolResult.content;
+        }
+
+        // Mark tool_result as processed so we skip it
+        processedIndices.add(toolResultIndex);
+      }
+
+      // Recursively group the child blocks
+      const childGroups = groupBlocksByAgent(childBlocks);
+
       // Add agent task group
-      // Safe to cast since isTaskTool confirmed this is a tool_use with subagent_type
-      const taskTool = block as Extract<ContentBlock, { type: "tool_use" }>;
       groups.push({
         type: "agent_task",
         agentType: taskTool.input.subagent_type,
         description: taskTool.input.description || "",
         taskId: taskTool.id,
-        blocks: agentBlocks,
+        taskToolUse: taskTool,
+        blocks: childGroups,
       });
+
+      processedIndices.add(i);
     } else {
       // Standalone block
       groups.push({
         type: "standalone",
         block,
       });
-      i++;
+      processedIndices.add(i);
     }
   }
 

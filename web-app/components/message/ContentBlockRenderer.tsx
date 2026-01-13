@@ -7,8 +7,13 @@ interface ContentBlockRendererProps {
   isNested?: boolean;
 }
 
-function ToolResultBlock({ content }: { content: string }) {
+function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // If content is an array, it's handled by agent grouping - don't display it here
+  if (Array.isArray(content)) {
+    return null;
+  }
 
   // Convert content to string if it's not already
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
