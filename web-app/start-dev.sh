@@ -6,11 +6,11 @@ export CCWEB_ORIGINAL_CWD="$(pwd)"
 
 cd /home/ubuntu/.claude/web-app
 
-# Kill any process LISTENING on port 3000 (not client connections)
-PORT_PID=$(sudo lsof -i:3000 -sTCP:LISTEN -t 2>/dev/null)
+# Kill any process LISTENING on port 3000 (works for both IPv4 and IPv6)
+PORT_PID=$(sudo fuser 3000/tcp 2>/dev/null)
 if [ ! -z "$PORT_PID" ]; then
     echo "Port 3000 is occupied by PID: $PORT_PID. Killing it..."
-    sudo kill "$PORT_PID" 2>/dev/null || sudo kill -9 "$PORT_PID" 2>/dev/null
+    sudo kill $PORT_PID 2>/dev/null || sudo kill -9 $PORT_PID 2>/dev/null
     sleep 1
 fi
 
