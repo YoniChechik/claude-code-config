@@ -42,7 +42,8 @@ cd _clones/FEATURE_NAME
 ```
 
 ### Step 3: Sync with Main
-Run /sync command to merge from origin/main and commit any local changes
+Run the sync skill to merge from origin/main and commit any local changes:
+/sync
 
 ### Step 4: Analyze Current Progress
 1. Read current git state compared to origin/main to understand context
