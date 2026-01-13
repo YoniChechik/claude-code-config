@@ -8,37 +8,7 @@ import * as path from "path";
  * Uses the same schema as ccui.sh (StructuredOutput with cwd + response)
  */
 
-// Debug logging helper
-const DEBUG_ENABLED = process.env.DEBUG_CCWEB === "true" || process.env.CCWEB_DEBUG === "true";
-const DEBUG_LOG_PATH = "/home/ubuntu/.claude/web-app/debug.log";
-
-function debugLog(eventType: string, payload: any) {
-  if (!DEBUG_ENABLED) return;
-
-  const timestamp = new Date().toISOString();
-  const logEntry = `[${timestamp}] ${eventType}: ${JSON.stringify(payload)}\n`;
-
-  try {
-    fs.appendFileSync(DEBUG_LOG_PATH, logEntry);
-  } catch (err) {
-    console.error("Failed to write debug log:", err);
-  }
-}
-
-const STRUCTURED_OUTPUT_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    wanted_cwd: {
-      type: "string" as const,
-      description: "Target directory path for permanent cd",
-    },
-    response: {
-      type: "string" as const,
-      description: "Response to user",
-    },
-  },
-  required: ["response"],
-};
+// EXPORTS: Public interfaces and types
 
 export interface ClaudeStreamEvent {
   type:
@@ -77,6 +47,8 @@ export interface ClaudeStreamEvent {
   };
   error?: string;
 }
+
+// PUBLIC CLASS
 
 export class ClaudeClient {
   constructor(apiKey?: string) {
@@ -121,7 +93,7 @@ export class ClaudeClient {
         "stream-json",
         "--verbose",
         "--json-schema",
-        JSON.stringify(STRUCTURED_OUTPUT_SCHEMA),
+        JSON.stringify(_STRUCTURED_OUTPUT_SCHEMA),
       ];
 
       // Add --resume flag if sessionId exists
@@ -161,7 +133,7 @@ export class ClaudeClient {
 
           try {
             const event = JSON.parse(line);
-            debugLog("RAW_JSON_LINE", event);
+            _debugLog("RAW_JSON_LINE", event);
 
             // Handle init event to get model and session_id
             if (event.subtype === "init") {
@@ -200,13 +172,13 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
-              debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
+              _debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
               // When using StructuredOutput schema, ONLY send text from StructuredOutput tool
               // Skip ALL raw text blocks to avoid duplicates from partial streaming events
               for (const block of event.message.content) {
                 // Tool use blocks (ALL tools, not just StructuredOutput)
                 if (block.type === "tool_use") {
-                  debugLog("TOOL_USE_BLOCK", block);
+                  _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
                   if (block.name === "StructuredOutput" && block.input?.response) {
                     eventQueue.push({
@@ -237,7 +209,7 @@ export class ClaudeClient {
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
-                  debugLog("TOOL_RESULT_BLOCK", block);
+                  _debugLog("TOOL_RESULT_BLOCK", block);
                   eventQueue.push({
                     type: "tool_result",
                     tool_result: {
@@ -353,7 +325,7 @@ export class ClaudeClient {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
           console.log("[CLAUDE-CLIENT] Yielding event:", event.type);
-          debugLog("YIELDING_EVENT", event);
+          _debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
           // Wait for next event
@@ -394,5 +366,44 @@ export class ClaudeClient {
    */
   getDefaultModel(): string {
     return "claude-sonnet-4-5-20250929";
+  }
+}
+
+// PRIVATE CONSTANTS
+
+const _DEBUG_ENABLED =
+  process.env.DEBUG_CCWEB === "true" || process.env.CCWEB_DEBUG === "true";
+const _DEBUG_LOG_PATH = "/home/ubuntu/.claude/web-app/debug.log";
+
+const _STRUCTURED_OUTPUT_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    wanted_cwd: {
+      type: "string" as const,
+      description: "Target directory path for permanent cd",
+    },
+    response: {
+      type: "string" as const,
+      description: "Response to user",
+    },
+  },
+  required: ["response"],
+};
+
+// PRIVATE HELPERS
+
+/**
+ * Log debug messages to file when DEBUG_CCWEB is enabled
+ */
+function _debugLog(eventType: string, payload: any): void {
+  if (!_DEBUG_ENABLED) return;
+
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${eventType}: ${JSON.stringify(payload)}\n`;
+
+  try {
+    fs.appendFileSync(_DEBUG_LOG_PATH, logEntry);
+  } catch (err) {
+    console.error("Failed to write debug log:", err);
   }
 }

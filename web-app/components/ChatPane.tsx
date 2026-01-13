@@ -55,29 +55,14 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     setMessages(messagesWithDates);
   };
 
-  const handleSubmitInternal = async (prompt: string, isAutoContinue: boolean = false) => {
+  const handleSubmitInternal = async (
+    prompt: string,
+    isAutoContinue: boolean = false
+  ) => {
     if (!session) return;
 
-    // Add user message (only if not auto-continue)
-    if (!isAutoContinue) {
-      const userMessage: Message = {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-    } else {
-      // Add auto-continue message marked as internal
-      const autoContinueMsg: Message = {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-        timestamp: new Date(),
-        isAutoContinueMessage: true,
-      };
-      setMessages((prev) => [...prev, autoContinueMsg]);
-    }
+    _addUserMessage(prompt, isAutoContinue);
 
-    // Start streaming
     setIsStreaming(true);
     setStreamingText("");
     setStreamingBlocks([]);
@@ -88,11 +73,112 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       body: JSON.stringify({ sessionId, prompt }),
     });
 
+    let assistantText = "";
+    let assistantBlocks: ContentBlock[] = [];
+
+    const streamResult = await _handleStreamEvents(
+      response,
+      assistantText,
+      assistantBlocks
+    );
+    assistantText = streamResult.text;
+    assistantBlocks = streamResult.blocks;
+
+    const assistantMessage: Message = {
+      role: "assistant",
+      content: assistantBlocks,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    await _updateSessionMetadata();
+
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamingBlocks([]);
+  };
+
+  const handleSubmit = async (prompt: string) => {
+    return handleSubmitInternal(prompt, false);
+  };
+
+  // PRIVATE HELPERS
+
+  const _addUserMessage = (prompt: string, isAutoContinue: boolean): void => {
+    if (isAutoContinue) {
+      const autoContinueMsg: Message = {
+        role: "user",
+        content: [{ type: "text", text: prompt }],
+        timestamp: new Date(),
+        isAutoContinueMessage: true,
+      };
+      setMessages((prev) => [...prev, autoContinueMsg]);
+    } else {
+      const userMessage: Message = {
+        role: "user",
+        content: [{ type: "text", text: prompt }],
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+    }
+  };
+
+  const _processStreamEvent = (
+    event: any,
+    assistantText: string,
+    assistantBlocks: ContentBlock[]
+  ): { text: string; blocks: ContentBlock[] } => {
+    if (event.type === "text") {
+      assistantText += event.content || "";
+      const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+      if (lastBlock && lastBlock.type === "text") {
+        lastBlock.text += event.content || "";
+      } else {
+        assistantBlocks.push({
+          type: "text" as const,
+          text: event.content || "",
+        });
+      }
+      return { text: assistantText, blocks: assistantBlocks };
+    }
+
+    if (event.type === "thinking") {
+      assistantBlocks.push({
+        type: "thinking" as const,
+        thinking: event.content || "",
+      });
+      return { text: assistantText, blocks: assistantBlocks };
+    }
+
+    if (event.type === "tool_use") {
+      assistantBlocks.push({
+        type: "tool_use" as const,
+        id: event.tool.id,
+        name: event.tool.name,
+        input: event.tool.input,
+      });
+      return { text: assistantText, blocks: assistantBlocks };
+    }
+
+    if (event.type === "tool_result") {
+      assistantBlocks.push({
+        type: "tool_result" as const,
+        tool_use_id: event.tool_result.tool_use_id,
+        content: event.tool_result.content,
+      });
+      return { text: assistantText, blocks: assistantBlocks };
+    }
+
+    return { text: assistantText, blocks: assistantBlocks };
+  };
+
+  const _handleStreamEvents = async (
+    response: Response,
+    assistantText: string,
+    assistantBlocks: ContentBlock[]
+  ): Promise<{ text: string; blocks: ContentBlock[] }> => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
-
-    let assistantText = "";
-    const assistantBlocks: ContentBlock[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -102,100 +188,45 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       const lines = chunk.split("\n");
 
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
+        if (!line.startsWith("data: ")) continue;
 
-          if (data === "[DONE]") {
-            // Stream complete
-            break;
-          }
+        const data = line.slice(6);
+        if (data === "[DONE]") break;
 
-          const event = JSON.parse(data);
+        const event = JSON.parse(data);
 
-          if (event.type === "text") {
-            assistantText += event.content || "";
-            setStreamingText(assistantText);
-
-            // Update or create the last text block instead of creating multiple blocks
-            const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-            if (lastBlock && lastBlock.type === "text") {
-              // Update existing text block
-              lastBlock.text += event.content || "";
-            } else {
-              // Create new text block
-              const textBlock = {
-                type: "text" as const,
-                text: event.content || "",
-              };
-              assistantBlocks.push(textBlock);
-            }
-            setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "thinking") {
-            // Add thinking block
-            const thinkingBlock = {
-              type: "thinking" as const,
-              thinking: event.content || "",
-            };
-            assistantBlocks.push(thinkingBlock);
-            setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "tool_use") {
-            // Add tool use block
-            const toolBlock = {
-              type: "tool_use" as const,
-              id: event.tool.id,
-              name: event.tool.name,
-              input: event.tool.input,
-            };
-            assistantBlocks.push(toolBlock);
-            setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "tool_result") {
-            // Add tool result block
-            const toolResultBlock = {
-              type: "tool_result" as const,
-              tool_use_id: event.tool_result.tool_use_id,
-              content: event.tool_result.content,
-            };
-            assistantBlocks.push(toolResultBlock);
-            setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed") {
-            // Update session cwd immediately
-            setSession((prev) => prev ? { ...prev, cwd: event.cwd } : null);
-          } else if (event.type === "token_usage") {
-            // Update token usage
-            setTokenUsage(event.token_usage);
-          } else if (event.type === "error") {
-            console.error("Stream error:", event.error);
-          }
-          }
+        if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
+          const result = _processStreamEvent(event, assistantText, assistantBlocks);
+          assistantText = result.text;
+          assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
+          setStreamingText(assistantText);
+          setStreamingBlocks([...assistantBlocks]);
+        } else if (event.type === "cwd_changed") {
+          setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
+        } else if (event.type === "token_usage") {
+          setTokenUsage(event.token_usage);
+        } else if (event.type === "error") {
+          console.error("Stream error:", event.error);
         }
       }
+    }
 
-    // Add assistant message
-    const assistantMessage: Message = {
-      role: "assistant",
-      content: assistantBlocks,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, assistantMessage]);
-
-    // Update session metadata (model, duration) from server
-    // Note: cwd is already updated via cwd_changed event during stream
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
-    const data = await sessionResponse.json();
-    setSession((prev) => prev ? {
-      ...prev,
-      cwd: data.session.cwd, // Ensure sync with backend
-      model: data.session.model,
-      lastDurationMs: data.session.lastDurationMs,
-    } : null);
-
-    setIsStreaming(false);
-    setStreamingText("");
-    setStreamingBlocks([]);
+    return { text: assistantText, blocks: assistantBlocks };
   };
 
-  const handleSubmit = async (prompt: string) => {
-    return handleSubmitInternal(prompt, false);
+  const _updateSessionMetadata = async (): Promise<void> => {
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const data = await sessionResponse.json();
+    setSession((prev) =>
+      prev
+        ? {
+            ...prev,
+            cwd: data.session.cwd,
+            model: data.session.model,
+            lastDurationMs: data.session.lastDurationMs,
+          }
+        : null
+    );
   };
 
   if (!session) {
