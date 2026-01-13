@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { formatDuration } from "@/lib/utils";
 
 interface SessionHeaderProps {
@@ -25,7 +26,32 @@ export default function SessionHeader({
   tokenUsage,
   onClose,
 }: SessionHeaderProps) {
-  // Calculate percentage used
+  const [accountUsage, setAccountUsage] = useState<{ percentUsed: number; resetTime: string } | null>(null);
+
+  // Poll account-wide usage every 30 seconds
+  useEffect(() => {
+    const fetchAccountUsage = async () => {
+      try {
+        const response = await fetch('/api/usage');
+        const data = await response.json();
+        if (data.usage) {
+          setAccountUsage({
+            percentUsed: data.usage.percentUsed,
+            resetTime: data.usage.resetTime,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch account usage:', error);
+      }
+    };
+
+    fetchAccountUsage();
+    const interval = setInterval(fetchAccountUsage, 30000); // Poll every 30s
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate percentage used for session
   const percentUsed = tokenUsage ? (tokenUsage.used / tokenUsage.total) * 100 : 0;
 
   // Determine color based on usage
@@ -33,8 +59,23 @@ export default function SessionHeader({
   if (percentUsed > 80) tokenColor = "text-red-300";
   else if (percentUsed > 60) tokenColor = "text-yellow-300";
 
-  // Show high usage warning when > 70% used
-  const showHighUsageWarning = percentUsed > 70;
+  // Show high usage warning when account-wide > 70% used
+  const showHighUsageWarning = accountUsage && accountUsage.percentUsed > 70;
+
+  // Calculate time until reset
+  const getTimeUntilReset = () => {
+    if (!accountUsage) return null;
+    const now = new Date();
+    const reset = new Date(accountUsage.resetTime);
+    const diff = reset.getTime() - now.getTime();
+    if (diff < 0) return null;
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return { hours, minutes };
+  };
+
+  const timeUntilReset = getTimeUntilReset();
 
   return (
     <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white border-b border-amber-700 shadow-sm">
@@ -48,9 +89,9 @@ export default function SessionHeader({
             <span className="text-amber-200">({percentUsed.toFixed(0)}%)</span>
           </div>
         )}
-        {showHighUsageWarning && (
-          <div className="flex items-center gap-2 text-xs font-medium bg-red-600/40 px-3 py-1 rounded-md text-red-100" title="High token usage - consider starting a new session. Tokens reset every 5 hours.">
-            <span>⚠️ High usage</span>
+        {showHighUsageWarning && timeUntilReset && (
+          <div className="flex items-center gap-2 text-xs font-medium bg-red-600/40 px-3 py-1 rounded-md text-red-100" title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}>
+            <span>⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m</span>
           </div>
         )}
         {lastDurationMs > 0 && (
