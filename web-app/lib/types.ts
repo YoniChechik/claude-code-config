@@ -9,6 +9,9 @@ export interface Session {
   createdAt: Date;
   claudeSessionId?: string;
   isResumed?: boolean; // Flag for resumed sessions
+  sessionType: 'ssh' | 'wsl' | 'local';
+  hostname?: string; // For SSH sessions
+  distroName?: string; // For WSL sessions
 }
 
 // Content block types (matches Claude API output)

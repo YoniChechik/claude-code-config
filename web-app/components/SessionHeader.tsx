@@ -13,6 +13,9 @@ interface SessionHeaderProps {
     remaining: number;
   };
   onClose?: () => void;
+  sessionType?: 'ssh' | 'wsl' | 'local';
+  hostname?: string;
+  distroName?: string;
 }
 
 /**
@@ -25,8 +28,22 @@ export default function SessionHeader({
   lastDurationMs,
   tokenUsage,
   onClose,
+  sessionType = 'local',
+  hostname,
+  distroName,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{ percentUsed: number; resetTime: string } | null>(null);
+
+  // Generate VSCode URL based on session type
+  const getVSCodeUrl = (): string => {
+    if (sessionType === 'ssh' && hostname) {
+      return `vscode://vscode-remote/ssh-remote+${hostname}${cwd}?windowId=_blank`;
+    }
+    if (sessionType === 'wsl' && distroName) {
+      return `vscode://vscode-remote/wsl+${distroName}${cwd}?windowId=_blank`;
+    }
+    return `vscode://file${cwd}?windowId=_blank`;
+  };
 
   // Poll account-wide usage every 30 seconds
   useEffect(() => {
@@ -79,9 +96,13 @@ export default function SessionHeader({
 
   return (
     <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
-      <div className="truncate font-mono text-sm font-medium" title={cwd}>
+      <a
+        href={getVSCodeUrl()}
+        className="truncate font-mono text-sm font-medium hover:text-blue-400 hover:underline cursor-pointer transition-colors"
+        title={`Open ${cwd} in VSCode`}
+      >
         {cwd}
-      </div>
+      </a>
       <div className="flex items-center gap-3">
         {tokenUsage && (
           <div className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`} title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}>

@@ -14,6 +14,9 @@ class SessionManager {
    * Create a new session
    */
   createSession(cwd: string): Session {
+    // Detect session type from environment variables
+    const { sessionType, hostname, distroName } = this.detectSessionType();
+
     const session: Session = {
       id: generateSessionId(),
       cwd: normalizePath(cwd),
@@ -21,6 +24,9 @@ class SessionManager {
       lastDurationMs: 0,
       messages: [],
       createdAt: new Date(),
+      sessionType,
+      hostname,
+      distroName,
     };
 
     this.sessions.set(session.id, session);
@@ -30,9 +36,38 @@ class SessionManager {
   }
 
   /**
+   * Detect session type from environment variables
+   */
+  private detectSessionType(): {
+    sessionType: 'ssh' | 'wsl' | 'local';
+    hostname?: string;
+    distroName?: string;
+  } {
+    // Check for SSH connection
+    if (process.env.SSH_CONNECTION) {
+      const hostname = process.env.HOSTNAME || process.env.HOST || 'unknown';
+      return { sessionType: 'ssh', hostname };
+    }
+
+    // Check for WSL
+    if (process.env.WSL_DISTRO_NAME) {
+      return {
+        sessionType: 'wsl',
+        distroName: process.env.WSL_DISTRO_NAME
+      };
+    }
+
+    // Default to local
+    return { sessionType: 'local' };
+  }
+
+  /**
    * Resume an existing session with pre-loaded messages
    */
   resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
+    // Detect session type from environment variables
+    const { sessionType, hostname, distroName } = this.detectSessionType();
+
     const session: Session = {
       id: sessionId,
       cwd: normalizePath(cwd),
@@ -41,6 +76,9 @@ class SessionManager {
       messages,
       createdAt: new Date(),
       isResumed: true,
+      sessionType,
+      hostname,
+      distroName,
     };
 
     this.sessions.set(session.id, session);

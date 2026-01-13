@@ -256,6 +256,9 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         lastDurationMs={session.lastDurationMs}
         tokenUsage={tokenUsage}
         onClose={onClose}
+        sessionType={session.sessionType}
+        hostname={session.hostname}
+        distroName={session.distroName}
       />
 
       <div className="flex flex-1 overflow-hidden">
