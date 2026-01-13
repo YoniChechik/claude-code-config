@@ -33,7 +33,14 @@ export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
       const data = await response.json();
       if (data.session) {
         setSession(data.session);
-        setMessages(data.session.messages || []);
+        // Convert timestamp strings back to Date objects
+        const messagesWithDates = (data.session.messages || []).map(
+          (msg: Message) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp),
+          })
+        );
+        setMessages(messagesWithDates);
       }
     } catch (error) {
       console.error("Failed to load session:", error);

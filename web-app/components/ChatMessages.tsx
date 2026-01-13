@@ -57,7 +57,10 @@ export default function ChatMessages({
             <div className="whitespace-pre-wrap break-words">{message.content}</div>
           </div>
           <div className="text-xs text-gray-500">
-            {message.timestamp.toLocaleTimeString()}
+            {(typeof message.timestamp === "string"
+              ? new Date(message.timestamp)
+              : message.timestamp
+            ).toLocaleTimeString()}
           </div>
         </div>
       ))}
