@@ -3,6 +3,7 @@
 import { ContentBlock } from "@/lib/types";
 import { BlockGroup } from "@/lib/agent-grouping";
 import ContentBlockRenderer from "./ContentBlockRenderer";
+import ToolUseCard from "./ToolUseCard";
 
 interface AgentTaskFrameProps {
   agentType: string;
@@ -39,6 +40,11 @@ export default function AgentTaskFrame({
 
       {/* Agent Content - nested tool invocations and nested agents */}
       <div className="px-4 py-3 space-y-2">
+        {/* Display the Task tool invocation that spawned this agent */}
+        <div className="ml-2">
+          <ToolUseCard tool={taskToolUse} />
+        </div>
+
         {childBlocks.map((item, index) => {
           // Handle nested agent task groups recursively
           if (item.type === "agent_task") {
