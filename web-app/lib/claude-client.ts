@@ -88,7 +88,15 @@ export class ClaudeClient {
       let processError: Error | null = null;
 
       // Build args like ccui.sh does
-      const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
+      const args = [
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        JSON.stringify(STRUCTURED_OUTPUT_SCHEMA),
+      ];
 
       // Add --resume flag if sessionId exists
       if (options?.sessionId) {
