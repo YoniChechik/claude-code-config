@@ -1,318 +1,502 @@
-# Code Review Report
+# Code Review Report: ccweb UI Component Updates
 
-**Date**: 2026-01-11
+**Date**: 2026-01-13
 **Branch**: main
 **Reviewer**: Code Review Agent
+**Changed Files**: 17 components/lib files across 10 commits
 
 ## Summary
 
-This review covers the cd bug fix changes implemented across three commits:
-- **552cf4d**: Fix ccui.sh cd bug and restore structured output
-- **e8247c8**: Fix shellcheck linting issues in bash scripts
-- **ad8b21f**: Reorganize autosuggest.sh with main function first
+Recent changes focus on implementing dark mode support, improving agent task display logic, and enhancing component organization. The overall quality is good with proper TypeScript usage and clean component structure. However, there are several critical issues related to FAIL-FAST principles and some security concerns that need addressing.
 
-The changes successfully address a critical bug where user input in ccui.sh was being consumed by `read` commands in autosuggest.sh, preventing proper directory synchronization. The fix redirects all `read` operations to `/dev/tty` to avoid stdin conflicts, and restores structured output functionality with JSON schema for cwd tracking.
-
-**Overall Status**: ✅ APPROVED
-
-## Code Review Findings
-
-### ✅ APPROVED - No Blocking Issues Found
-
-All changes are clean, well-implemented, and properly address the root cause of the bug.
-
-### 📝 Analysis of Key Changes
-
-#### 1. Root Cause Fix (autosuggest.sh)
-
-**Problem Identified**: The original autosuggest.sh code was reading from stdin using bare `read` commands. When invoked via command substitution in ccui.sh (`input=$(read_with_autosuggest)`), stdin was piped from the Claude agent's output stream. This caused `read` commands to consume JSON data meant for ccui.sh, breaking directory synchronization.
-
-**Solution Applied**: All 15 `read` commands in autosuggest.sh now redirect from `/dev/tty`:
-- Line 392: `IFS= read -rsn1 char < /dev/tty` (main key reader)
-- Line 403-404: `IFS= read -rsn1 -t 0.5 char2 < /dev/tty` (escape sequences)
-- Lines 412-414: `IFS= read -rsn1 -t 0.5 char4/char5/char6 < /dev/tty` (Ctrl+Arrow)
-- Lines 423-425: `IFS= read -rsn1 -t 0.5 char4/char5/char6 < /dev/tty` (bracketed paste)
-- Lines 232, 240, 244-247: All paste mode reads redirected to `/dev/tty`
-
-**Correctness**: ✅ This is the correct solution. Using `/dev/tty` ensures input is read directly from the terminal, regardless of stdin redirection.
-
-#### 2. Structured Output Restoration (ccui.sh)
-
-**Changes**:
-- Line 35: Added JSON schema requiring `cwd` and `response` fields
-- Line 36: Added `--json-schema "$schema"` to Claude CLI args
-- Lines 50-53: Added JSON case handler to extract `cwd` from structured output
-- Lines 74-76: Added directory change logic to cd into SESSION_CWD
-
-**Integration**: The JSON schema is processed by cc_filter.jq (lines 303-310) which outputs structured data as `JSON:` prefixed lines. The bash script captures this and extracts the cwd field.
-
-**Correctness**: ✅ Properly implemented. The structured output is now fully restored and functional.
-
-#### 3. Code Quality Improvements (shellcheck fixes)
-
-**Changes in e8247c8**:
-- Separated variable declarations from assignments to avoid masking return values (SC2155)
-- Removed unused `cursor_line` variable (SC2034)
-- Added shellcheck directives for sourced files (SC1091)
-
-**Examples**:
-```bash
-# Before (SC2155 violation):
-local name="$(basename "$f" .md)"
-
-# After (correct):
-local name
-name="$(basename "$f" .md)"
-```
-
-**Correctness**: ✅ All shellcheck warnings properly addressed without changing functionality.
-
-#### 4. Code Organization (ad8b21f)
-
-**Change**: Moved `read_with_autosuggest()` to top of autosuggest.sh file, following top-down organization principle where the main public function appears first, followed by helper functions.
-
-**Correctness**: ✅ Improves code readability without functional changes.
-
-## Test Results
-
-**Tests Run**: 49 autosuggest unit tests
-**Tests Passed**: 36/49 (73%)
-**Tests Failed**: 13/49 (27%)
-
-**Analysis of Failures**: All 13 failures are expected in non-TTY environments:
-- Key detection tests (Tab, Arrow keys, Backspace, etc.) fail because `/dev/tty` doesn't exist in CI/non-interactive contexts
-- These tests would pass in actual terminal usage
-
-**Passing Tests Confirm**:
-- All fuzzy matching logic works correctly (exact, prefix, case-insensitive)
-- Score calculations are accurate (0 for exact, 1 for prefix, 999 for no match)
-- Command discovery from multiple sources (user, project, built-ins) works
-- Cursor movement and word jumping logic is correct
-- Multiline rendering calculations are accurate
-- Bracketed paste content processing works (escape chars preserved, empty strings filtered)
-- All required functions exist
-
-**Shellcheck**: ✅ Both files pass with no warnings or errors
-
-## Security Review
-
-**Findings**: ✅ No security concerns identified
-
-- No credential exposure
-- No SQL injection vectors (no database queries)
-- Input validation: Terminal input is properly sanitized through bash string manipulation
-- `/dev/tty` usage is safe and standard practice for TUI applications
-- Command substitution with `mktemp` is secure (random temp file names)
-- JSON parsing uses `jq` with proper error handling (`2>/dev/null`)
-
-## Integration & Compatibility
-
-**Backwards Compatibility**: ✅ No breaking changes
-- API of `read_with_autosuggest()` unchanged (still returns input via stdout)
-- ccui.sh interface unchanged for end users
-- Structured output is additive (backward compatible with old agent responses)
-
-**Integration Points**:
-1. `/dev/tty` redirection works in all standard terminals (bash, zsh, etc.)
-2. JSON schema integration with Claude CLI is clean
-3. cc_filter.jq correctly processes structured_output (lines 303-310)
-4. Directory change logic is defensive (`|| true` prevents errors)
-
-## Performance & Edge Cases
-
-**Performance**: ✅ No performance regressions
-- Reading from `/dev/tty` has same performance as stdin
-- JSON parsing is minimal (single jq call per response)
-- No blocking operations added
-
-**Edge Cases Handled**:
-- Missing SESSION_CWD: Check for non-empty and directory existence before cd (line 74)
-- Non-existent directory: `|| true` prevents script failure (line 75)
-- Bracketed paste timeouts: Empty strings from timeouts are filtered (line 234)
-- Escape sequences in paste: Preserved correctly (lines 238-261)
-- Terminal resize: Multiline rendering recalculates based on `tput cols`
-- No TTY available: UI output to `/dev/tty` fails gracefully with errors but doesn't crash
-
-## Code Style & Best Practices
-
-**Adherence to Guidelines**: ✅ Follows fail-fast principles
-
-**Good Practices Observed**:
-1. **Defensive cd**: `cd "$SESSION_CWD" 2>/dev/null || true` - fails silently if directory doesn't exist
-2. **Proper quoting**: All variables properly quoted (e.g., `"$json"`, `"$raw"`)
-3. **Error handling**: jq errors redirected to /dev/null to prevent noise
-4. **Modular design**: Each function has single responsibility
-5. **Top-down organization**: Main function first, helpers after (commit ad8b21f)
-6. **Shellcheck compliance**: All SC warnings addressed
-
-**Potential Improvements (Low Priority)**:
-- Could add debug logging for directory changes (not critical)
-- Could validate JSON schema matches expected format (defensive, not necessary)
-
-## Files Reviewed
-
-### /home/ubuntu/.claude/bin/autosuggest.sh (516 lines)
-- ✅ All 15 read commands properly redirected to `/dev/tty`
-- ✅ No stdin reads remaining that could cause conflicts
-- ✅ Terminal output already redirected to `/dev/tty` (from earlier commit 35b1dda)
-- ✅ Code reorganized with main function first
-- ✅ All shellcheck warnings fixed
-- ✅ Paste mode handling robust (escape chars preserved, timeouts handled)
-
-### /home/ubuntu/.claude/bin/ccui.sh (106 lines)
-- ✅ JSON schema properly defined with required cwd field
-- ✅ Schema passed to Claude CLI via `--json-schema` flag
-- ✅ JSON parsing extracts cwd correctly using jq
-- ✅ Directory change logic defensive (checks existence, fails safely)
-- ✅ All shellcheck warnings fixed
-- ✅ Integration with cc_filter.jq clean and correct
-
-### Related Files Reviewed
-- ✅ /home/ubuntu/.claude/bin/cc_filter.jq: Structured output handling (lines 303-310) correct
-- ✅ /home/ubuntu/.claude/bin/test_autosuggest.sh: Comprehensive test coverage (49 tests)
-
-## Regression Analysis
-
-**Risk Assessment**: LOW
-
-**Potential Regressions Checked**:
-1. ✅ User input capture: Still works via command substitution stdout
-2. ✅ Autosuggest display: Still renders correctly to `/dev/tty`
-3. ✅ Slash command completion: All fuzzy matching logic unchanged
-4. ✅ Session management: SESSION_ID and MODEL tracking unchanged
-5. ✅ Streaming output: TEXT/SUB/LINE/JSON prefix handling intact
-6. ✅ Error handling: INT trap and cleanup logic preserved
-
-**Changes Do Not Affect**:
-- Main response streaming (TEXT/SUB/LINE handling)
-- Session persistence (SESSION_ID capture)
-- Model and timing display (LAST_MS calculation)
-- User command and skill discovery
-- Terminal state management (save/restore)
-
-## Verification of Bug Fix
-
-**Original Bug**: Directory changes made by Claude agent were not reflected in ccui.sh prompt because structured output was removed in commit 9256875.
-
-**Verification**:
-1. ✅ Structured output restored with JSON schema (commit 552cf4d, line 35)
-2. ✅ JSON parsing captures SESSION_CWD (commit 552cf4d, line 52)
-3. ✅ Directory change executes after each command (commit 552cf4d, lines 74-76)
-4. ✅ `/dev/tty` redirection prevents stdin conflicts (commit 552cf4d, all read commands)
-5. ✅ Tests confirm core functionality intact (36/36 non-TTY tests passing)
-
-**Why The Fix Works**:
-- Before: `read` consumed stdin → JSON data → cwd never reached ccui.sh
-- After: `read < /dev/tty` reads terminal → stdin intact → JSON data processed → cwd extracted → cd executes
-
-## Recommendations
-
-### Must Do (Before Merge)
-None - all changes are production-ready.
-
-### Should Do (Future Enhancements)
-1. Add integration test that verifies directory synchronization in actual terminal
-2. Consider adding debug mode flag to log directory changes for troubleshooting
-3. Document the `/dev/tty` pattern in code comments for future maintainers
-
-### Nice to Have
-1. Add visual indicator when directory changes (e.g., "→ /new/path")
-2. Consider caching last successful cwd to handle transient directory deletion
-3. Add telemetry for how often directory sync fails (if monitoring exists)
-
-## Conclusion
-
-This is an exemplary bug fix that addresses the root cause correctly, adds comprehensive improvements, and maintains high code quality standards. The changes demonstrate:
-
-- **Correct diagnosis**: Identified stdin conflict as root cause
-- **Proper solution**: `/dev/tty` is the standard pattern for TUI input
-- **Quality improvements**: Fixed shellcheck warnings, improved organization
-- **No regressions**: All core functionality preserved and tested
-- **Good practices**: Defensive programming, proper error handling, clean integration
-
-The code is ready for production use.
-
-**Final Recommendation**: ✅ **APPROVED FOR MERGE**
+**Overall Status**: ⚠️ CHANGES REQUESTED
 
 ---
 
-# CD Session Bug Fix - Additional Review (2026-01-13)
+## Code Review Findings
 
-## New Bug Report
-User reported: "when it returns and we cd to new dir i write some prompt but nothing happens."
+### 🚨 BLOCKING Issues
 
-## Root Cause Identified
-**File:** `/home/ubuntu/.claude/bin/ccui.sh` line 61
+#### 1. **FAIL-FAST Violation: Silent `.catch()` in Test File**
+**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
+**Line**: 46
+**Severity**: BLOCKING
 
-**Problem:** Session ID extraction was using `head -1` to get the session_id from the first line of claude CLI output.
-
-**Why it failed:**
-1. Claude CLI outputs a `hook_response` message BEFORE the `init` message when a SessionStart hook is configured
-2. Both messages contain a `session_id` field, but they are DIFFERENT:
-   - `hook_response` session_id: temporary/hook-specific ID
-   - `init` session_id: the actual session ID to use for `--resume`
-3. Using `head -1` would extract the wrong session_id from the hook_response
-4. On subsequent commands with `--resume`, claude would receive an invalid session_id
-5. This caused the session to fail silently or become unresponsive
-
-**Example of the problem:**
-```bash
-# Output from claude CLI:
-{"type":"system","subtype":"hook_response","session_id":"hook-123",...}
-{"type":"system","subtype":"init","session_id":"real-456",...}
-
-# Old code (WRONG):
-SESSION_ID=$(head -1 "$raw" | jq -r '.session_id')  # Gets "hook-123"
-
-# Fixed code (CORRECT):
-SESSION_ID=$(grep '"subtype":"init"' "$raw" | head -1 | jq -r '.session_id')  # Gets "real-456"
+```javascript
+try {
+  const event = JSON.parse(data);
+  if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'text') {
+    blocks.push(event);
+  }
+} catch (e) {}  // <-- SILENT CATCH: Hides JSON parse errors
 ```
 
-## Fix Applied
-Changed line 61 in `/home/ubuntu/.claude/bin/ccui.sh`:
+**Issue**: Empty catch block silently swallows JSON parsing errors. This violates FAIL-FAST principles and will hide malformed event data. During development, we need to know when parsing fails.
 
-**Before:**
-```bash
-SESSION_ID=$(head -1 "$raw" | jq -r '.session_id // empty' 2>/dev/null)
+**Why it matters**: Invalid streaming data will be silently ignored, making it difficult to debug streaming protocol issues. Errors should propagate and crash immediately so they're discovered during development.
+
+**Fix**: Let exceptions propagate or log and re-throw:
+```javascript
+} catch (e) {
+  console.error('Failed to parse event:', e, 'raw:', data);
+  throw e; // or: continue; with logging
+}
 ```
 
-**After:**
-```bash
-SESSION_ID=$(grep '"subtype":"init"' "$raw" | head -1 | jq -r '.session_id // empty' 2>/dev/null)
+---
+
+#### 2. **FAIL-FAST Violation: Defensive String Type Checking in ToolUseCard**
+**File**: `/home/ubuntu/.claude/web-app/components/message/ToolUseCard.tsx`
+**Lines**: 38-39, 48, 66, 75, 83
+**Severity**: BLOCKING
+
+```typescript
+<div className="font-mono text-sm">
+  <div className="text-gray-400">{String(input.description)}</div>  // Defensive conversion
+  <div className="mt-1">$ {String(input.command)}</div>  // Defensive conversion
+</div>
 ```
 
-## New Tests Created
+**Issue**: Repeatedly using `String(input.property)` adds defensive type conversions. If the input doesn't have the expected type, it should fail loudly. This is masking type safety issues.
 
-### 1. test_ccui_loop.sh - Integration Test
-Tests the complete ccui.sh workflow:
-- cd /tmp → verify session_id and cwd
-- ls (after cd) → verify resume works
-- cd /home/ubuntu → verify multiple cds
-- pwd (after second cd) → verify continued responsiveness
+**Why it matters**: We have TypeScript - trust it. If `input` doesn't have the right properties, it's a contract violation that should crash during development, not silently convert undefined to "undefined".
 
-**Result:** All tests PASS
+**Fix**: Trust the type system:
+```typescript
+// If types are correct, no String() wrapper needed:
+<div className="text-gray-400">{input.description}</div>
+<div className="mt-1">$ {input.command}</div>
 
-### 2. test_cd_session_bug.sh - Unit Tests
-Mock-based tests for session persistence (incomplete but framework ready)
+// If the type isn't trustworthy, create a better type:
+// interface BashInput { description: string; command: string; }
+```
 
-### 3. test_cd_real_session.sh - Real CLI Tests
-Tests with actual claude CLI and StructuredOutput
+---
+
+#### 3. **Potential XSS Risk: Direct Text Rendering Without Sanitization**
+**File**: `/home/ubuntu/.claude/web-app/components/message/ContentBlockRenderer.tsx`
+**Line**: 59
+**Severity**: BLOCKING (if untrusted content)
+
+```typescript
+case "text": {
+  const trimmedText = block.text.trim();
+  if (trimmedText === "Structured output provided successfully" ||
+      trimmedText === "No response requested") {
+    return null;
+  }
+  return <span>{block.text}</span>;  // <-- Direct rendering
+}
+```
+
+**Issue**: Text blocks are rendered directly without sanitization. While Claude API output is trusted, rendering user-controlled content or external data this way could enable XSS attacks.
+
+**Why it matters**: If the content source changes (e.g., accepting user-provided markdown, external data), this becomes a critical XSS vector.
+
+**Mitigation**: For trusted Claude API content this is acceptable, but:
+- Document assumption that `block.text` is trusted
+- Consider using `dangerouslySetInnerHTML` with a sanitizer if content becomes untrusted
+- Use React's automatic HTML escaping as defense-in-depth
+
+**Note**: This is acceptable for Claude API responses but should be documented.
+
+---
+
+### ⚠️ High Priority Issues
+
+#### 1. **Logic Error: Agent Task Tool Result Property Casting**
+**File**: `/home/ubuntu/.claude/web-app/components/message/AgentTaskFrame.tsx`
+**Line**: 56
+**Severity**: HIGH
+
+```typescript
+taskToolUse={agentItem.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
+```
+
+**Issue**: Unnecessary type assertion. If `agentItem` is already typed as `agent_task`, then `taskToolUse` should already be the correct type. This assertion suggests type uncertainty.
+
+**Why it matters**: Type assertions override TypeScript's safety checks. If the type is uncertain, the root cause is a broader type design issue.
+
+**Fix**: Verify the `BlockGroup` type definition - the type should already guarantee this, making the assertion unnecessary:
+```typescript
+taskToolUse={agentItem.taskToolUse}  // Should work without assertion
+```
+
+---
+
+#### 2. **Inefficient Re-computation in Streaming Messages**
+**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
+**Line**: 106
+**Severity**: HIGH
+
+```typescript
+const isLastGroup = groupIdx === groupBlocksByAgent(streamingBlocks).length - 1;
+```
+
+**Issue**: `groupBlocksByAgent(streamingBlocks)` is called twice per render:
+1. Once in the `.map()` on line 91
+2. Again on line 106 to get the length
+
+This means the entire blocking algorithm runs twice for every streaming message render. For large block arrays, this creates O(n) duplicate work per render.
+
+**Why it matters**: Every keystroke during streaming triggers a re-render. This doubles the computation cost unnecessarily.
+
+**Fix**: Compute once and reuse:
+```typescript
+{groupBlocksByAgent(streamingBlocks).map((group, groupIdx, groups) => {
+  const isLastGroup = groupIdx === groups.length - 1;
+  // ...
+})}
+```
+
+---
+
+#### 3. **Race Condition: Dark Mode Toggle and State Sync**
+**File**: `/home/ubuntu/.claude/web-app/components/DarkModeToggle.tsx`
+**Lines**: 22-31
+**Severity**: HIGH
+
+```typescript
+const toggleDark = () => {
+  const newDark = !isDark;
+  setIsDark(newDark);  // Async state update
+  localStorage.setItem("darkMode", String(newDark));  // Synchronous
+
+  if (newDark) {
+    document.documentElement.classList.add("dark");  // Synchronous DOM
+  } else {
+    document.documentElement.classList.remove("dark");  // Synchronous DOM
+  }
+};
+```
+
+**Issue**: The function mixes synchronous DOM operations with async React state updates. If the component re-renders before `setIsDark` completes, the local state and DOM could be out of sync temporarily.
+
+**Why it matters**: Rapid toggling could cause flickering or inconsistent UI state. The DOM class and React state should stay synchronized.
+
+**Fix**: Use a single state setter and rely on useEffect:
+```typescript
+const toggleDark = () => {
+  setIsDark(prev => {
+    const newDark = !prev;
+    localStorage.setItem("darkMode", String(newDark));
+    if (newDark) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+    return newDark;
+  });
+};
+```
+
+Or better: extract DOM updates to a useEffect dependency:
+```typescript
+useEffect(() => {
+  localStorage.setItem("darkMode", String(isDark));
+  if (isDark) {
+    document.documentElement.classList.add("dark");
+  } else {
+    document.documentElement.classList.remove("dark");
+  }
+}, [isDark]);
+```
+
+---
+
+#### 4. **Unsafe Optional Chain / FAIL-FAST: Property Access Without Validation**
+**File**: `/home/ubuntu/.claude/web-app/components/AutosuggestInput.tsx`
+**Line**: 36
+**Severity**: HIGH (Process Safety)
+
+```typescript
+if (onFocusRef && inputRef.current) {
+  onFocusRef(() => inputRef.current?.focus());
+}
+```
+
+**Issue**: This is defensive programming. The condition checks `onFocusRef` and `inputRef.current` exist, but if they don't, nothing happens. This masks bugs where `onFocusRef` is required but missing.
+
+**Why it matters**: If the parent component is supposed to provide `onFocusRef` but doesn't, this silently ignores the failure. The code should either:
+1. Require it (no guard)
+2. Work fine without it (but then don't try to use it)
+
+Current approach violates FAIL-FAST: it silently skips functionality.
+
+**Fix**: If optional:
+```typescript
+useEffect(() => {
+  if (onFocusRef && inputRef.current) {
+    onFocusRef(() => inputRef.current.focus());
+  }
+}, [onFocusRef]);
+```
+
+Or make it required and let it fail if missing.
+
+---
+
+### 📝 Medium Priority Issues
+
+#### 1. **Type Safety: Implicit `any` in Agent Grouping**
+**File**: `/home/ubuntu/.claude/web-app/lib/agent-grouping.ts`
+**Line**: 202
+**Severity**: MEDIUM
+
+```typescript
+const input = taskTool.input as Record<string, unknown>;
+groups.push({
+  type: "agent_task",
+  agentType: String(input.subagent_type),
+  description: String(input.description || ""),
+  // ...
+});
+```
+
+**Issue**: `input` is cast to `Record<string, unknown>`. While this is better than `any`, the properties are still `unknown`. The `String()` conversions suggest the type isn't being properly validated.
+
+**Why it matters**: `input.subagent_type` could be anything. Using `String()` conversion is defensive. Either validate the input structure with a type guard or use a stricter type.
+
+**Fix**: Create a proper input validator:
+```typescript
+interface TaskInput {
+  subagent_type: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
+function isTaskInput(obj: unknown): obj is TaskInput {
+  return typeof obj === 'object' && obj !== null &&
+         typeof (obj as any).subagent_type === 'string';
+}
+```
+
+---
+
+#### 2. **Code Duplication: Streaming Message Rendering**
+**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
+**Lines**: 39-82 (regular messages) vs 86-119 (streaming messages)
+**Severity**: MEDIUM
+
+The message rendering code is nearly identical between regular and streaming messages. Only the styling for streaming content (cursor animation) differs.
+
+**Why it matters**: When the UI needs updates, both versions must be maintained. This increases bug surface.
+
+**Fix**: Extract shared rendering logic:
+```typescript
+const renderMessageContent = (blocks, isStreaming) => (
+  <div className="whitespace-pre-wrap break-words">
+    {groupBlocksByAgent(blocks).map((group, groupIdx) => (
+      // ... render logic
+      {isStreaming && isLastGroup && <Cursor />}
+    ))}
+  </div>
+);
+```
+
+---
+
+#### 3. **Missing Error Handling: Stream Reader Could Fail**
+**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
+**Line**: 26-49
+**Severity**: MEDIUM
+
+```javascript
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const {done, value} = await reader.read();  // Could throw
+  if (done) break;
+
+  const chunk = decoder.decode(value);
+  // ...
+}
+```
+
+**Issue**: No error handling around `reader.read()`. If the network fails mid-stream, the test crashes without a clear error message.
+
+**Why it matters**: E2E tests need robust error handling to report clear failures.
+
+**Fix**: Add try-catch around stream reading:
+```javascript
+try {
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    // ...
+  }
+} catch (error) {
+  throw new Error(`Stream reading failed: ${error.message}`);
+}
+```
+
+---
+
+#### 4. **Hard-coded Test URL**
+**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
+**Line**: 6
+**Severity**: MEDIUM
+
+```javascript
+const API_URL = 'http://localhost:3000';
+```
+
+**Why it matters**: Hard-coded localhost assumes the dev server is running on port 3000. If it runs on a different port (e.g., during CI/CD), the test fails confusingly.
+
+**Fix**: Use environment variable:
+```javascript
+const API_URL = process.env.API_URL || 'http://localhost:3000';
+```
+
+---
+
+### 💡 Low Priority / Suggestions
+
+#### 1. **Performance: groupBlocksByAgent Called Multiple Times**
+**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
+**Lines**: 55, 91
+**Severity**: LOW
+
+The same block array is grouped twice (once for regular messages, once potentially for streaming). Consider memoizing with `useMemo`.
+
+---
+
+#### 2. **Accessibility: Missing ARIA Labels**
+**File**: `/home/ubuntu/.claude/web-app/components/DarkModeToggle.tsx`
+**Lines**: 35-50
+**Severity**: LOW
+
+The button has `aria-label` (good), but could benefit from `aria-pressed` attribute:
+```typescript
+<button
+  aria-pressed={isDark}  // Indicates toggle state
+  // ...
+>
+```
+
+---
+
+#### 3. **Code Style: Unused Function**
+**File**: `/home/ubuntu/.claude/web-app/lib/agent-grouping.ts`
+**Line**: 73-118
+**Severity**: LOW
+
+The `_sortToolBlocks` function is marked with `@typescript-eslint/no-unused-vars` but never used. Consider:
+- Document why it's kept (for future optimization)
+- Or remove if truly not needed
+
+The comment says "(Currently unused but kept for future optimization)" which is fine, but confirm if this is actually needed.
+
+---
+
+#### 4. **Styling: Inconsistent Spacing**
+**Files**: Multiple component files
+**Severity**: LOW
+
+Some components use different margin patterns. Consider standardizing gap/spacing using Tailwind spacing conventions (consistent `gap`, `space-y`, etc.).
+
+---
 
 ## Test Results
-- **test_ccui_loop.sh:** PASS (4/4 tests)
-- **test_cd_output.sh:** PASS (10/10 tests)
 
-## Impact Assessment
-- **Severity:** CRITICAL - Session becomes completely unresponsive after first cd
-- **Affected Users:** All ccui.sh users (SessionStart hook is enabled by default)
-- **Fix Complexity:** Minimal - single line change
-- **Risk:** Low - grep for specific subtype is more robust than head -1
-- **Backwards Compatibility:** Fully compatible
+**Status**: E2E test suite identified
 
-## Files Modified
-- `/home/ubuntu/.claude/bin/ccui.sh` - Fixed session_id extraction (line 61)
+**Test Coverage**:
+- E2E test for agent display exists: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
+- Test validates correct block ordering and agent task grouping
+- Test includes comprehensive logging for debugging
 
-## New Files Added
-- `/home/ubuntu/.claude/bin/test_ccui_loop.sh` - Integration test
-- `/home/ubuntu/.claude/bin/test_cd_session_bug.sh` - Unit test framework
-- `/home/ubuntu/.claude/bin/test_cd_real_session.sh` - Real CLI tests
+**Recommendations**:
+1. Run full test suite before deployment
+2. Add unit tests for `groupBlocksByAgent` function (critical logic)
+3. Add component tests for `DarkModeToggle` state management
+4. Add tests for `AutosuggestInput` keyboard navigation
+
+---
+
+## Files Reviewed
+
+### Components
+- ✅ `components/DarkModeToggle.tsx` - Dark mode implementation with race condition
+- ✅ `components/ChatMessages.tsx` - Message rendering with performance issue
+- ✅ `components/ChatInput.tsx` - Well structured, no critical issues
+- ✅ `components/AutosuggestInput.tsx` - Good keyboard handling, defensive pattern noted
+- ✅ `components/message/AgentTaskFrame.tsx` - Good structure, minor type assertion issue
+- ✅ `components/message/ContentBlockRenderer.tsx` - XSS consideration noted
+- ✅ `components/message/ToolUseCard.tsx` - FAIL-FAST violations with String() conversions
+
+### Library Files
+- ✅ `lib/agent-grouping.ts` - Core grouping logic, good structure, type safety improvements needed
+- ✅ `lib/types.ts` - Well-defined types for streaming and content blocks
+
+### Config/Layout
+- ✅ `app/layout.tsx` - Proper dark mode setup with `className="dark"`
+- ✅ `tailwind.config.js` - Correctly configured for dark mode with `darkMode: 'class'`
+- ✅ `eslint.config.js` - Good linting setup
+
+### Tests
+- ⚠️ `test/agent-display.test.js` - FAIL-FAST violation with silent catch
+
+---
+
+## Summary of Required Fixes
+
+### BLOCKING (Must Fix Before Merge)
+1. Remove silent catch block in test file (line 46)
+2. Remove defensive `String()` type conversions in ToolUseCard
+3. Address FAIL-FAST violation in AutosuggestInput optional handling
+
+### HIGH Priority (Before Merge)
+1. Fix race condition in DarkModeToggle (state/DOM sync)
+2. Remove double computation in ChatMessages streaming cursor check
+3. Review type assertion in AgentTaskFrame line 56
+
+### MEDIUM Priority (Next Sprint)
+1. Add input validation for agent task types
+2. Add error handling for stream reading in tests
+3. Parametrize test API URL with environment variable
+4. Extract duplicate message rendering code
+
+### LOW Priority (Nice-to-Have)
+1. Add ARIA attributes for accessibility
+2. Memoize groupBlocksByAgent calls
+3. Review _sortToolBlocks necessity
+4. Standardize spacing/margins across components
+
+---
+
+## Compliance with Coding Guidelines
+
+**FAIL-FAST Adherence**: Partial
+
+The codebase has several violations of FAIL-FAST principles:
+- Silent catch blocks hiding parse errors
+- Defensive type conversions masking type issues
+- Optional parameter guards that silently skip functionality
+
+These should be addressed to match the team's coding standards defined in `/home/ubuntu/.claude/rules/general_coding_style.md`.
+
+---
+
+## Security Assessment
+
+**Overall Risk**: MEDIUM
+
+- No SQL injection vectors (no database layer)
+- XSS risk is minimal due to trusted Claude API content, but should be documented
+- No credential exposure identified
+- Input validation could be strengthened for agent task inputs
+- Recommend documenting trust boundaries for content rendering
+
+---
+
+## Recommendations
+
+1. **Fix BLOCKING issues** before merging - these violate stated coding standards
+2. **Add unit tests** for `groupBlocksByAgent` - this is critical business logic
+3. **Document content trust model** - clarify what content is trusted vs untrusted
+4. **Add input validators** for dynamic content from agent responses
+5. **Performance testing** - verify streaming performance with large block arrays
+6. **Run full test suite** - ensure E2E tests pass before deployment
+

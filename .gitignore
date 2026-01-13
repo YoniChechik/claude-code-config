@@ -41,3 +41,4 @@ _clones/
 plan.md
 web-app/.env.local
 web-app/debug.log
+web-app/test-output.log
