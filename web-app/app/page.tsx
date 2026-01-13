@@ -37,14 +37,31 @@ export default function Home() {
         throw new Error("Failed to create session");
       }
 
-      // Load slash commands (client-side we'll use a simplified version)
-      // In a real implementation, this would call an API endpoint
-      setCommands([
-        { name: "help", source: "builtin" },
-        { name: "clear", source: "builtin" },
-        { name: "model", source: "builtin" },
-        { name: "status", source: "builtin" },
-      ]);
+      // Load slash commands from API
+      try {
+        const commandsResponse = await fetch("/api/commands-list");
+        const commandsData = await commandsResponse.json();
+        if (commandsData.commands) {
+          setCommands(commandsData.commands);
+        } else {
+          // Fallback to builtins if API fails
+          setCommands([
+            { name: "help", source: "builtin" },
+            { name: "clear", source: "builtin" },
+            { name: "model", source: "builtin" },
+            { name: "status", source: "builtin" },
+          ]);
+        }
+      } catch (cmdErr) {
+        console.error("Failed to load commands:", cmdErr);
+        // Fallback to builtins
+        setCommands([
+          { name: "help", source: "builtin" },
+          { name: "clear", source: "builtin" },
+          { name: "model", source: "builtin" },
+          { name: "status", source: "builtin" },
+        ]);
+      }
 
       setLoading(false);
     } catch (err) {
