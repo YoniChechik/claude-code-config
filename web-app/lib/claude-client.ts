@@ -59,7 +59,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string }
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string }
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -99,6 +99,7 @@ export class ClaudeClient {
 
       const claude = spawn("/home/ubuntu/.local/bin/claude", args, {
         stdio: ["pipe", "pipe", "pipe"],
+        cwd: options?.cwd || process.cwd(),
       });
 
       // Close stdin since we're not sending any input

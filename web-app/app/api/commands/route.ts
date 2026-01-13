@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
         for await (const event of client.streamCommand(prompt, {
           sessionId: claudeSessionId,
           appendSystemPrompt: systemPrompt,
+          cwd: session.cwd,
         })) {
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
               for await (const event of client.streamCommand(continuePrompt, {
                 sessionId: updatedSession.claudeSessionId,
                 appendSystemPrompt: systemPrompt,
+                cwd: updatedSession.cwd,
               })) {
                 // Process events to update tracker state
                 const continueTracker = sessionManager.getCDTracker(sessionId);
