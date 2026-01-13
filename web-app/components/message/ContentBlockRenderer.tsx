@@ -9,6 +9,10 @@ interface ContentBlockRendererProps {
 export default function ContentBlockRenderer({ block, isNested = false }: ContentBlockRendererProps) {
   switch (block.type) {
     case "text":
+      // Filter out "Structured output provided successfully" messages
+      if (block.text.trim() === "Structured output provided successfully") {
+        return null;
+      }
       return <span>{block.text}</span>;
 
     case "thinking":
