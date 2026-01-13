@@ -104,50 +104,59 @@ export async function POST(request: NextRequest) {
         const updatedSession = sessionManager.getSession(sessionId);
         const didChangeCwd = updatedSession && updatedSession.cwd !== previousCwd;
 
-        // Send completion marker
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-
-        // Start auto-continue if directory changed (mimics ccui.sh lines 172-175)
+        // Auto-continue if directory changed BEFORE closing stream
         if (didChangeCwd) {
-          setImmediate(async () => {
-            try {
-              const client = new ClaudeClient();
-              const systemPrompt = await loadSystemPrompt();
-              const continuePrompt = `Now we are in ${updatedSession.cwd}. CONTINUE`;
+          try {
+            const client = new ClaudeClient();
+            const systemPrompt = await loadSystemPrompt();
+            const continuePrompt = `Now we are in ${updatedSession.cwd}. CONTINUE`;
 
-              // Add user message for continue
-              sessionManager.addMessage(sessionId, {
-                role: "user",
-                content: [{ type: "text", text: continuePrompt }],
-                timestamp: new Date(),
-              });
+            // Add user message for continue
+            sessionManager.addMessage(sessionId, {
+              role: "user",
+              content: [{ type: "text", text: continuePrompt }],
+              timestamp: new Date(),
+            });
 
-              // Stream the auto-continue response
-              for await (const event of client.streamCommand(continuePrompt, {
-                sessionId: updatedSession.claudeSessionId,
-                appendSystemPrompt: systemPrompt,
-                cwd: updatedSession.cwd,
-              })) {
-                // Process events to update tracker state
-                const continueTracker = sessionManager.getCDTracker(sessionId);
-                if (continueTracker) {
-                  if (event.type === "init" && event.model) {
-                    continueTracker.processInitEvent({ model: event.model });
-                  } else if (event.type === "result" && event.duration_ms !== undefined) {
-                    continueTracker.processResultEvent({ duration_ms: event.duration_ms });
-                  } else if (event.type === "structured_output" && event.structured_output) {
-                    continueTracker.processStructuredOutput(event.structured_output);
-                  }
+            // Stream the auto-continue response to client
+            for await (const event of client.streamCommand(continuePrompt, {
+              sessionId: updatedSession.claudeSessionId,
+              appendSystemPrompt: systemPrompt,
+              cwd: updatedSession.cwd,
+            })) {
+              // Send event to client
+              const data = `data: ${JSON.stringify(event)}\n\n`;
+              controller.enqueue(encoder.encode(data));
+
+              // Process events to update tracker state
+              const continueTracker = sessionManager.getCDTracker(sessionId);
+              if (continueTracker) {
+                if (event.type === "init" && event.model) {
+                  continueTracker.processInitEvent({ model: event.model });
+                } else if (event.type === "result" && event.duration_ms !== undefined) {
+                  continueTracker.processResultEvent({ duration_ms: event.duration_ms });
+                } else if (event.type === "structured_output" && event.structured_output) {
+                  continueTracker.processStructuredOutput(event.structured_output);
                 }
               }
-
-              // Update session after continue
-              sessionManager.updateSessionFromTracker(sessionId);
-            } catch (err) {
-              console.error("Auto-continue after cd failed:", err);
             }
-          });
+
+            // Update session after continue
+            sessionManager.updateSessionFromTracker(sessionId);
+          } catch (err) {
+            console.error("Auto-continue after cd failed:", err);
+            const errorEvent = {
+              type: "error",
+              error: err instanceof Error ? err.message : String(err),
+            };
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
+            );
+          }
         }
+
+        // Send completion marker AFTER auto-continue
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (error) {
         const errorEvent = {
           type: "error",

@@ -27,6 +27,7 @@ export interface ClaudeStreamEvent {
     | "text"
     | "thinking"
     | "tool_use"
+    | "tool_result"
     | "init"
     | "result"
     | "structured_output"
@@ -36,6 +37,10 @@ export interface ClaudeStreamEvent {
     id: string;
     name: string;
     input: Record<string, any>;
+  };
+  tool_result?: {
+    tool_use_id: string;
+    content: string;
   };
   model?: string;
   session_id?: string;
@@ -199,6 +204,21 @@ export class ClaudeClient {
                     });
                   }
 
+                  if (resolveNext) {
+                    resolveNext();
+                    resolveNext = null;
+                  }
+                }
+
+                // Tool result blocks
+                if (block.type === "tool_result") {
+                  eventQueue.push({
+                    type: "tool_result",
+                    tool_result: {
+                      tool_use_id: block.tool_use_id,
+                      content: block.content,
+                    },
+                  });
                   if (resolveNext) {
                     resolveNext();
                     resolveNext = null;

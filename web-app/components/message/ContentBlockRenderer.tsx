@@ -22,7 +22,7 @@ export default function ContentBlockRenderer({ block }: ContentBlockRendererProp
 
     case "tool_result":
       return (
-        <div className="text-gray-600 bg-gray-100 px-3 py-2 rounded font-mono text-sm my-2">
+        <div className="text-gray-600 bg-gray-100 px-3 py-2 rounded font-mono text-sm my-2 whitespace-pre-wrap">
           {block.content}
         </div>
       );

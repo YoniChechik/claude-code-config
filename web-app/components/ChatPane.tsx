@@ -151,6 +151,15 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
                 };
                 assistantBlocks.push(toolBlock);
                 setStreamingBlocks([...assistantBlocks]);
+              } else if (event.type === "tool_result") {
+                // Add tool result block
+                const toolResultBlock = {
+                  type: "tool_result" as const,
+                  tool_use_id: event.tool_result.tool_use_id,
+                  content: event.tool_result.content,
+                };
+                assistantBlocks.push(toolResultBlock);
+                setStreamingBlocks([...assistantBlocks]);
               } else if (event.type === "error") {
                 console.error("Stream error:", event.error);
               }
