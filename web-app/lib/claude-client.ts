@@ -204,6 +204,14 @@ export class ClaudeClient {
 
             // Handle text content from assistant messages
             if (event.type === "assistant" && event.message?.content) {
+              // CRITICAL: Skip messages that are INSIDE an agent (parent_tool_use_id exists)
+              // These blocks will come from the Task tool_result.content array instead
+              if (event.parent_tool_use_id) {
+                console.log("[CLAUDE-CLIENT] SKIPPING assistant message (inside agent, parent_tool_use_id:", event.parent_tool_use_id + ")");
+                debugLog("SKIPPED_ASSISTANT_MESSAGE", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
+                continue;
+              }
+
               console.log("[CLAUDE-CLIENT] Processing assistant message content:", event.message.content.length, "blocks");
               debugLog("ASSISTANT_MESSAGE_CONTENT", event.message.content);
               // When using StructuredOutput schema, ONLY send text from StructuredOutput tool
@@ -245,6 +253,14 @@ export class ClaudeClient {
 
             // Handle tool results and system warnings from user messages
             if (event.type === "user" && event.message?.content) {
+              // CRITICAL: Skip messages that are INSIDE an agent (parent_tool_use_id exists)
+              // These blocks will come from the Task tool_result.content array instead
+              if (event.parent_tool_use_id) {
+                console.log("[CLAUDE-CLIENT] SKIPPING user message (inside agent, parent_tool_use_id:", event.parent_tool_use_id + ")");
+                debugLog("SKIPPED_USER_MESSAGE", { parent_tool_use_id: event.parent_tool_use_id, content_blocks: event.message.content.length });
+                continue;
+              }
+
               console.log("[CLAUDE-CLIENT] Processing user message content:", event.message.content.length, "blocks");
               for (const block of event.message.content) {
                 if (block.type === "tool_result") {
