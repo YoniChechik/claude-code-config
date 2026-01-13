@@ -97,11 +97,55 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Update session from tracker
+        // Update session from tracker and check if directory changed
+        const previousCwd = session.cwd;
         sessionManager.updateSessionFromTracker(sessionId);
+        const updatedSession = sessionManager.getSession(sessionId);
+        const didChangeCwd = updatedSession && updatedSession.cwd !== previousCwd;
 
         // Send completion marker
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+
+        // Start auto-continue if directory changed (mimics ccui.sh lines 172-175)
+        if (didChangeCwd) {
+          setImmediate(async () => {
+            try {
+              const client = new ClaudeClient();
+              const systemPrompt = await loadSystemPrompt();
+              const continuePrompt = `Now we are in ${updatedSession.cwd}. CONTINUE`;
+
+              // Add user message for continue
+              sessionManager.addMessage(sessionId, {
+                role: "user",
+                content: [{ type: "text", text: continuePrompt }],
+                timestamp: new Date(),
+              });
+
+              // Stream the auto-continue response
+              for await (const event of client.streamCommand(continuePrompt, {
+                sessionId: updatedSession.claudeSessionId,
+                appendSystemPrompt: systemPrompt,
+              })) {
+                // Process events to update tracker state
+                const continueTracker = sessionManager.getCDTracker(sessionId);
+                if (continueTracker) {
+                  if (event.type === "init" && event.model) {
+                    continueTracker.processInitEvent({ model: event.model });
+                  } else if (event.type === "result" && event.duration_ms !== undefined) {
+                    continueTracker.processResultEvent({ duration_ms: event.duration_ms });
+                  } else if (event.type === "structured_output" && event.structured_output) {
+                    continueTracker.processStructuredOutput(event.structured_output);
+                  }
+                }
+              }
+
+              // Update session after continue
+              sessionManager.updateSessionFromTracker(sessionId);
+            } catch (err) {
+              console.error("Auto-continue after cd failed:", err);
+            }
+          });
+        }
       } catch (error) {
         const errorEvent = {
           type: "error",
