@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message, ContentBlock } from "@/lib/types";
 import ContentBlockRenderer from "./message/ContentBlockRenderer";
 import AgentTaskFrame from "./message/AgentTaskFrame";
@@ -24,20 +24,36 @@ export default function ChatMessages({
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
-  // Auto-scroll to bottom only if user is already at bottom
+  // Track scroll position to detect when user scrolls back to bottom
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-    // Only auto-scroll if within 100px of bottom
-    if (distanceFromBottom <= 100) {
+      // If user scrolls back to bottom (within 100px), resume auto-scroll
+      if (distanceFromBottom <= 100) {
+        setShouldAutoScroll(true);
+      } else {
+        // User scrolled up, stop auto-scroll
+        setShouldAutoScroll(false);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Auto-scroll to bottom only if shouldAutoScroll is true
+  useEffect(() => {
+    if (shouldAutoScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, streamingText, streamingBlocks]);
+  }, [messages, streamingText, streamingBlocks, shouldAutoScroll]);
 
   // Filter out internal auto-continue messages
   const visibleMessages = messages.filter(
