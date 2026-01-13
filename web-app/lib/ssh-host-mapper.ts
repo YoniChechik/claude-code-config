@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-const MAPPINGS_FILE = join(homedir(), ".claude", "ssh-host-mappings.json");
+const MAPPINGS_FILE = join(homedir(), ".ccweb-ssh-hosts.json");
 
 /**
  * Read SSH host mappings from file
