@@ -24,11 +24,29 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
+      // Resolve SSH hostname if needed
+      let hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        const savedHost = localStorage.getItem('ssh-host');
+        if (savedHost) {
+          hostname = savedHost;
+        } else {
+          // Prompt user for SSH host
+          const userHost = window.prompt(
+            'Enter your SSH host alias (from ~/.ssh/config):\nExample: mixtiles'
+          );
+          if (userHost && userHost.trim() !== '') {
+            hostname = userHost.trim();
+            localStorage.setItem('ssh-host', hostname);
+          }
+        }
+      }
+
       // Create one session to start
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, clientHostname: window.location.hostname }),
+        body: JSON.stringify({ cwd, clientHostname: hostname }),
       });
 
       const data = await response.json();
@@ -79,10 +97,17 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
+      // Resolve SSH hostname if needed
+      let hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        const savedHost = localStorage.getItem('ssh-host');
+        hostname = savedHost || hostname; // Use saved or fallback to localhost
+      }
+
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, clientHostname: window.location.hostname }),
+        body: JSON.stringify({ cwd, clientHostname: hostname }),
       });
 
       const data = await response.json();
