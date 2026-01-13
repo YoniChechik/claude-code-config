@@ -14,7 +14,7 @@ Creates a new feature branch using git clone for isolated development with full 
 ## Process
 
 ### Step 1: Create Clone
-/create-clone
+Run the create-clone skill.
 
 ### Step 2: Plan
 Use the planner subagent to create the feature plan

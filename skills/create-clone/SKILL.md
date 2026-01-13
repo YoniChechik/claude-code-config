@@ -45,7 +45,7 @@ git push -u origin $FEATURE_NAME
 ```
 
 ### Step 4: Sync with Main
-/sync
+Run the sync skill to commit and push.
 
 ### Step 5: Setup Environment
 Setup development environment based on project type:
@@ -67,5 +67,8 @@ fi
 Tell user:
 - The clone has been created at `_clones/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` has been published to remote
+
+### Step 7: Change to Feature Directory
+Run the permanent-cd skill to change to the feature clone directory.
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
