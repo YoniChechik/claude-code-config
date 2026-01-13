@@ -46,9 +46,9 @@ export async function POST(request: NextRequest) {
       const encoder = new TextEncoder();
 
       try {
-        const client = new ClaudeClient(process.env.CLAUDE_API_KEY);
+        const client = new ClaudeClient();
 
-        // Stream events from Claude
+        // Stream events from Claude (uses claude CLI directly, no API key needed)
         for await (const event of client.streamCommand(prompt, sessionId)) {
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
