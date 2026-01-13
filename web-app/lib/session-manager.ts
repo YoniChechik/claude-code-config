@@ -52,6 +52,18 @@ class SessionManager {
   }
 
   /**
+   * Clear messages in a session
+   */
+  clearMessages(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.messages = [];
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Add message to session
    */
   addMessage(sessionId: string, message: Message): void {

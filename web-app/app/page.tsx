@@ -92,18 +92,19 @@ export default function Home() {
 
   const closeSession = async (sessionId: string) => {
     try {
-      // Call DELETE endpoint
-      await fetch(`/api/sessions/${sessionId}`, {
-        method: "DELETE",
-      });
-
-      // Remove from local state
-      const newSessionIds = sessionIds.filter((id) => id !== sessionId);
-
-      // If all sessions closed, create a new one
-      if (newSessionIds.length === 0) {
-        await addSession();
+      // If only 1 session, clear messages instead of deleting
+      if (sessionIds.length === 1) {
+        await fetch(`/api/sessions/${sessionId}`, {
+          method: "PATCH",
+        });
       } else {
+        // Multiple sessions: delete the session
+        await fetch(`/api/sessions/${sessionId}`, {
+          method: "DELETE",
+        });
+
+        // Remove from local state
+        const newSessionIds = sessionIds.filter((id) => id !== sessionId);
         setSessionIds(newSessionIds);
       }
     } catch (err) {
