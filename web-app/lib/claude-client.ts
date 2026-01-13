@@ -60,17 +60,14 @@ export class ClaudeClient {
     sessionId?: string,
     appendSystemPrompt?: string
   ): AsyncGenerator<ClaudeStreamEvent> {
-    console.error(`[ClaudeClient] streamCommand called with prompt: "${prompt}"`);
     const startTime = Date.now();
 
     try {
       // Yield init event first
-      console.error(`[ClaudeClient] Yielding init event`);
       yield {
         type: "init",
         model: "claude-sonnet-4-5-20250929",
       };
-      console.error(`[ClaudeClient] Init event yielded, about to set up process`);
 
       let model = "claude-sonnet-4-5-20250929";
       let outputBuffer = "";
@@ -232,7 +229,7 @@ export class ClaudeClient {
             resolveNext = null;
           }
         }
-      }, 100);
+      }, 3000);
 
       // Yield events as they arrive
       while (!processEnded || eventQueue.length > 0) {

@@ -50,10 +50,8 @@ export async function POST(request: NextRequest) {
 
         // Stream events from Claude (uses claude CLI directly, no API key needed)
         for await (const event of client.streamCommand(prompt, sessionId)) {
-          console.error(`[API] Event type: ${event.type}`);
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
-          console.error(`[API] Enqueueing: ${data.substring(0, 100)}`);
           controller.enqueue(encoder.encode(data));
 
           // Track CD changes, model, and duration
