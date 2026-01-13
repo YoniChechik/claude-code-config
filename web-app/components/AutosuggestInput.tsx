@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { SlashCommand } from "@/lib/types";
-import { fuzzyMatchCommands } from "@/lib/autosuggest";
+import { fuzzyMatchCommands } from "@/lib/autosuggest-client";
 
 interface AutosuggestInputProps {
   value: string;
