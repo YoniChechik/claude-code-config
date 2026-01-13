@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { Message } from "@/lib/types";
+import type { Message, ContentBlock } from "@/lib/types";
 import ContentBlockRenderer from "./message/ContentBlockRenderer";
 
 interface ChatMessagesProps {
   messages: Message[];
   streamingText?: string;
+  streamingBlocks?: ContentBlock[];
   isStreaming?: boolean;
 }
 
@@ -16,6 +17,7 @@ interface ChatMessagesProps {
 export default function ChatMessages({
   messages,
   streamingText = "",
+  streamingBlocks = [],
   isStreaming = false,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -23,7 +25,7 @@ export default function ChatMessages({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, streamingBlocks]);
 
   // Filter out internal auto-continue messages
   const visibleMessages = messages.filter(
@@ -68,9 +70,18 @@ export default function ChatMessages({
       {isStreaming && (
         <div className="flex flex-col gap-2 p-4 rounded-2xl shadow-sm bg-white border border-gray-200 text-gray-800 mr-auto max-w-[85%]">
           <div className="text-xs font-semibold text-gray-500">Claude</div>
-          <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-            {streamingText}
-            <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
+          <div className="text-sm leading-relaxed">
+            <div className="whitespace-pre-wrap break-words">
+              {streamingBlocks.map((block, blockIdx) => (
+                <ContentBlockRenderer key={blockIdx} block={block} />
+              ))}
+              {streamingText && (
+                <span className="whitespace-pre-wrap break-words">
+                  {streamingText}
+                  <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -21,6 +21,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
+  const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [showNav, setShowNav] = useState(false);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
@@ -86,6 +87,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     // Start streaming
     setIsStreaming(true);
     setStreamingText("");
+    setStreamingBlocks([]);
 
     try {
       const response = await fetch("/api/commands", {
@@ -127,24 +129,29 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
                 assistantText += event.content || "";
                 setStreamingText(assistantText);
                 // Add text block
-                assistantBlocks.push({
-                  type: "text",
+                const textBlock = {
+                  type: "text" as const,
                   text: event.content || "",
-                });
+                };
+                assistantBlocks.push(textBlock);
               } else if (event.type === "thinking") {
                 // Add thinking block
-                assistantBlocks.push({
-                  type: "thinking",
+                const thinkingBlock = {
+                  type: "thinking" as const,
                   thinking: event.content || "",
-                });
+                };
+                assistantBlocks.push(thinkingBlock);
+                setStreamingBlocks([...assistantBlocks]);
               } else if (event.type === "tool_use") {
                 // Add tool use block
-                assistantBlocks.push({
-                  type: "tool_use",
+                const toolBlock = {
+                  type: "tool_use" as const,
                   id: event.tool.id,
                   name: event.tool.name,
                   input: event.tool.input,
-                });
+                };
+                assistantBlocks.push(toolBlock);
+                setStreamingBlocks([...assistantBlocks]);
               } else if (event.type === "error") {
                 console.error("Stream error:", event.error);
               }
@@ -192,6 +199,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     } finally {
       setIsStreaming(false);
       setStreamingText("");
+      setStreamingBlocks([]);
     }
   };
 
@@ -226,6 +234,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
           <ChatMessages
             messages={messages}
             streamingText={streamingText}
+            streamingBlocks={streamingBlocks}
             isStreaming={isStreaming}
           />
           <ChatInput
