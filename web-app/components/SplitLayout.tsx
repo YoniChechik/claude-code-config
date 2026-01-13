@@ -98,6 +98,10 @@ export default function SplitLayout({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sessionIds.length]);
 
+  // Calculate total divider width in pixels (6px per divider, 1.5rem = 6px at 16px base)
+  const dividerCount = sessionIds.length - 1;
+  const dividerWidthPx = dividerCount * 6;
+
   return (
     <div
       className="flex h-full w-full relative"
@@ -118,7 +122,7 @@ export default function SplitLayout({
         <div key={sessionId} className="flex">
           <div
             className="h-full overflow-hidden"
-            style={{ width: `${paneWidths[index]}vw` }}
+            style={{ width: `calc(${paneWidths[index]}vw - ${paneWidths[index] / 100 * dividerWidthPx}px)` }}
           >
             <ChatPane
               sessionId={sessionId}
