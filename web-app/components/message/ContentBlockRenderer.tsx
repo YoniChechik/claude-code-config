@@ -10,6 +10,13 @@ interface ContentBlockRendererProps {
 function ToolResultBlock({ content }: { content: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Filter out internal system messages
+  const trimmedContent = content.trim();
+  if (trimmedContent === "Structured output provided successfully" ||
+      trimmedContent === "No response requested") {
+    return null;
+  }
+
   const lines = content.split('\n');
   const shouldCollapse = lines.length > 3;
   const displayContent = shouldCollapse && !isExpanded
