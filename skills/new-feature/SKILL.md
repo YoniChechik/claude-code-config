@@ -14,7 +14,7 @@ Creates a new feature branch using git clone for isolated development with full 
 ## Process
 
 ### Step 1: Create Clone
-Run the create-clone skill to set up an isolated feature branch:
+Run the create-clone skill:
 /create-clone
 
 ### Step 2: Plan

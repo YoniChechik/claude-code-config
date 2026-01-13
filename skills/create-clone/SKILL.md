@@ -45,7 +45,7 @@ git push -u origin $FEATURE_NAME
 ```
 
 ### Step 4: Sync with Main
-Run the sync skill to merge from origin/main:
+Run the sync skill to commit and push:
 /sync
 
 ### Step 5: Setup Environment

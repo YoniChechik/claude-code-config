@@ -42,7 +42,7 @@ cd _clones/FEATURE_NAME
 ```
 
 ### Step 3: Sync with Main
-Run the sync skill to merge from origin/main and commit any local changes:
+Run the sync skill to commit and push:
 /sync
 
 ### Step 4: Analyze Current Progress

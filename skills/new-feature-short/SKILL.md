@@ -14,7 +14,7 @@ Creates a new feature branch using git clone with lightweight planning. Uses pla
 ## Process
 
 ### Step 1: Create Clone
-Run the create-clone skill to set up an isolated feature clone:
+Run the create-clone skill:
 /create-clone
 
 ### Step 2: Fast Plan
