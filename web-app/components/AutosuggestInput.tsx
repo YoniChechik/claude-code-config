@@ -11,6 +11,7 @@ interface AutosuggestInputProps {
   commands: SlashCommand[];
   placeholder?: string;
   disabled?: boolean;
+  isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
 }
 
@@ -24,11 +25,13 @@ export default function AutosuggestInput({
   commands,
   placeholder = "Type your message or /command...",
   disabled = false,
+  isStreaming = false,
   onFocusRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isFlashing, setIsFlashing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selectedItemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -103,7 +106,13 @@ export default function AutosuggestInput({
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      onSubmit();
+      // If streaming, trigger flash animation instead of submitting
+      if (isStreaming) {
+        setIsFlashing(true);
+        setTimeout(() => setIsFlashing(false), 300);
+      } else {
+        onSubmit();
+      }
     }
   };
 
@@ -150,7 +159,11 @@ export default function AutosuggestInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm"
+          className={`w-full px-4 py-3 border-2 rounded-xl resize-none overflow-y-auto focus:outline-none disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm ${
+            isStreaming
+              ? 'border-blue-500 animate-border-spin'
+              : 'border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+          } ${isFlashing ? 'animate-flash-gray' : ''}`}
         />
       </div>
 

@@ -268,7 +268,8 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
           <ChatInput
             onSubmit={handleSubmit}
             commands={commands}
-            disabled={isStreaming}
+            disabled={false}
+            isStreaming={isStreaming}
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
           />
         </div>

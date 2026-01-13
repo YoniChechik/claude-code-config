@@ -8,6 +8,7 @@ interface ChatInputProps {
   onSubmit: (prompt: string) => void;
   commands: SlashCommand[];
   disabled?: boolean;
+  isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
 }
 
@@ -18,6 +19,7 @@ export default function ChatInput({
   onSubmit,
   commands,
   disabled = false,
+  isStreaming = false,
   onFocusRef,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
@@ -37,6 +39,7 @@ export default function ChatInput({
         onSubmit={handleSubmit}
         commands={commands}
         disabled={disabled}
+        isStreaming={isStreaming}
         onFocusRef={onFocusRef}
       />
     </div>
