@@ -48,15 +48,27 @@ export async function POST(request: NextRequest) {
       try {
         const client = new ClaudeClient();
 
+        // Pass claude session ID if exists
+        const claudeSessionId = session.claudeSessionId;
+
         // Stream events from Claude (uses claude CLI directly, no API key needed)
-        for await (const event of client.streamCommand(prompt)) {
+        for await (const event of client.streamCommand(prompt, {
+          sessionId: claudeSessionId,
+          appendSystemPrompt: undefined,
+        })) {
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));
 
           // Track CD changes, model, and duration
-          if (event.type === "init" && event.model) {
-            tracker.processInitEvent({ model: event.model });
+          if (event.type === "init") {
+            if (event.model) {
+              tracker.processInitEvent({ model: event.model });
+            }
+            // Store claude session ID from init event
+            if (event.session_id) {
+              sessionManager.setClaudeSessionId(sessionId, event.session_id);
+            }
           } else if (event.type === "result" && event.duration_ms !== undefined) {
             tracker.processResultEvent({ duration_ms: event.duration_ms });
           } else if (

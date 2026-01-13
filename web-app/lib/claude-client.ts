@@ -37,6 +37,7 @@ export interface ClaudeStreamEvent {
     input: unknown;
   };
   model?: string;
+  session_id?: string;
   duration_ms?: number;
   structured_output?: {
     cwd: string;
@@ -57,7 +58,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    appendSystemPrompt?: string
+    options?: { sessionId?: string; appendSystemPrompt?: string }
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -69,6 +70,7 @@ export class ClaudeClient {
       };
 
       let model = "claude-sonnet-4-5-20250929";
+      let sessionId: string | undefined;
       let outputBuffer = "";
       let hasReceivedData = false;
       let stderrOutput = "";
@@ -82,10 +84,15 @@ export class ClaudeClient {
       // Build args like ccui.sh does
       const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
 
+      // Add --resume flag if sessionId exists
+      if (options?.sessionId) {
+        args.push("--resume", options.sessionId);
+      }
+
       // Add system prompt if provided
-      if (appendSystemPrompt) {
+      if (options?.appendSystemPrompt) {
         const tempFile = `/tmp/ccweb_system_prompt_${Date.now()}.txt`;
-        await fs.promises.writeFile(tempFile, appendSystemPrompt);
+        await fs.promises.writeFile(tempFile, options.appendSystemPrompt);
         args.push("--append-system-prompt", tempFile);
       }
 
@@ -115,9 +122,24 @@ export class ClaudeClient {
           try {
             const event = JSON.parse(line);
 
-            // Handle init event to get model
-            if (event.subtype === "init" && event.model) {
-              model = event.model;
+            // Handle init event to get model and session_id
+            if (event.subtype === "init") {
+              if (event.model) {
+                model = event.model;
+              }
+              if (event.session_id) {
+                sessionId = event.session_id;
+                // Send updated init event with session_id
+                eventQueue.push({
+                  type: "init",
+                  model: model,
+                  session_id: sessionId,
+                });
+                if (resolveNext) {
+                  resolveNext();
+                  resolveNext = null;
+                }
+              }
             }
 
             // Handle text content from assistant messages

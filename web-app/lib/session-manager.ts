@@ -84,6 +84,16 @@ class SessionManager {
       session.lastDurationMs = tracker.getLastDurationMs();
     }
   }
+
+  /**
+   * Set Claude session ID for resuming conversations
+   */
+  setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.claudeSessionId = claudeSessionId;
+    }
+  }
 }
 
 // Singleton instance

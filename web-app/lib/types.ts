@@ -6,6 +6,7 @@ export interface Session {
   lastDurationMs: number;
   messages: Message[];
   createdAt: Date;
+  claudeSessionId?: string;
 }
 
 // Message types
