@@ -39,3 +39,5 @@ _clones/
 
 # Temporary plan files
 plan.md
+web-app/.env.local
+web-app/debug.log

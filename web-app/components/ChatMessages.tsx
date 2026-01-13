@@ -52,6 +52,7 @@ export default function ChatMessages({
           </div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
+              {console.log("[CHAT-MESSAGES] Processing", message.role, "message with", message.content.length, "blocks:", message.content.map(b => b.type === "tool_use" ? `${b.type}(${b.name})` : b.type))}
               {groupBlocksByAgent(message.content).map((group, groupIdx) => {
                 if (group.type === "agent_task") {
                   return (
