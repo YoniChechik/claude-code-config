@@ -106,12 +106,14 @@ export default function ChatPane({ sessionId, commands }: ChatPaneProps) {
       }
 
       // Add assistant message
+      console.error(`[ChatPane] Final assistantText: "${assistantText.substring(0, 50)}...", length: ${assistantText.length}`);
       if (assistantText) {
         const assistantMessage: Message = {
           role: "assistant",
           content: assistantText,
           timestamp: new Date(),
         };
+        console.error(`[ChatPane] Adding assistant message to messages list`);
         setMessages((prev) => [...prev, assistantMessage]);
       }
 
