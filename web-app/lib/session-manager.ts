@@ -98,5 +98,14 @@ class SessionManager {
   }
 }
 
-// Singleton instance
-export const sessionManager = new SessionManager();
+// Singleton instance - preserved across hot reloads in development
+const globalForSessionManager = globalThis as unknown as {
+  sessionManager: SessionManager | undefined;
+};
+
+export const sessionManager =
+  globalForSessionManager.sessionManager ?? new SessionManager();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForSessionManager.sessionManager = sessionManager;
+}
