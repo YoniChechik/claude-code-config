@@ -57,7 +57,6 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    sessionId?: string,
     appendSystemPrompt?: string
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
@@ -72,6 +71,7 @@ export class ClaudeClient {
       let model = "claude-sonnet-4-5-20250929";
       let outputBuffer = "";
       let hasReceivedData = false;
+      let stderrOutput = "";
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
@@ -81,10 +81,6 @@ export class ClaudeClient {
 
       // Build args like ccui.sh does
       const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
-
-      if (sessionId) {
-        args.push("--resume", sessionId);
-      }
 
       // Add system prompt if provided
       if (appendSystemPrompt) {
@@ -100,6 +96,11 @@ export class ClaudeClient {
 
       // Close stdin since we're not sending any input
       claude.stdin.end();
+
+      // Capture stderr for debugging
+      claude.stderr.on("data", (chunk: Buffer) => {
+        stderrOutput += chunk.toString();
+      });
 
       claude.stdout.on("data", (chunk: Buffer) => {
         hasReceivedData = true;
@@ -188,7 +189,8 @@ export class ClaudeClient {
       claude.on("close", (code: number) => {
         processEnded = true;
         if (code !== 0) {
-          processError = new Error(`claude CLI exited with code ${code}`);
+          const errorDetails = stderrOutput ? `\nStderr: ${stderrOutput}` : "";
+          processError = new Error(`claude CLI exited with code ${code}${errorDetails}`);
         }
         if (resolveNext) {
           resolveNext();
