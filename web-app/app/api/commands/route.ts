@@ -5,6 +5,8 @@ import { createSessionSymlink } from "@/lib/symlink-manager";
 import { loadSystemPrompt } from "@/lib/system-prompt-loader";
 import type { SendCommandRequest } from "@/lib/types";
 
+export const maxDuration = 300; // 5 minutes
+
 /**
  * POST /api/commands - Send command to Claude (streaming response)
  */
