@@ -154,7 +154,7 @@ export default function SessionPicker({
             <div className="divide-y divide-gray-700">
               {sessions.map((session, index) => (
                 <div
-                  key={session.id}
+                  key={`${session.id}-${index}`}
                   ref={(el) => {
                     selectedItemRefs.current[index] = el;
                   }}

@@ -153,13 +153,25 @@ export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> 
   const metadataPromises = recentFiles.map(filePath => loadSessionMetadata(filePath));
   const metadata = await Promise.all(metadataPromises);
 
-  // Filter out null results and sort by last activity
+  // Filter out null results
   const validMetadata = metadata.filter((m): m is SessionMetadata => m !== null);
-  validMetadata.sort((a, b) =>
+
+  // Deduplicate by session ID (keep most recent)
+  const seenIds = new Set<string>();
+  const uniqueMetadata = validMetadata.filter(session => {
+    if (seenIds.has(session.id)) {
+      return false;
+    }
+    seenIds.add(session.id);
+    return true;
+  });
+
+  // Sort by last activity
+  uniqueMetadata.sort((a, b) =>
     new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
   );
 
-  return validMetadata;
+  return uniqueMetadata;
 }
 
 /**
