@@ -30,6 +30,8 @@ export default function AutosuggestInput({
   const [matches, setMatches] = useState<SlashCommand[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const selectedItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Expose focus function to parent
   useEffect(() => {
@@ -37,6 +39,25 @@ export default function AutosuggestInput({
       onFocusRef(() => inputRef.current?.focus());
     }
   }, [onFocusRef]);
+
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      const newHeight = Math.min(inputRef.current.scrollHeight, 200);
+      inputRef.current.style.height = newHeight + 'px';
+    }
+  }, [value]);
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (suggestMode && selectedItemRefs.current[selectedIndex]) {
+      selectedItemRefs.current[selectedIndex]?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex, suggestMode]);
 
   // Handle input change
   const handleChange = (newValue: string) => {
@@ -114,7 +135,7 @@ export default function AutosuggestInput({
         {/* Ghost text showing suggestion */}
         {suggestion && (
           <div
-            className="absolute inset-0 px-3 py-2 text-gray-600 pointer-events-none whitespace-pre-wrap"
+            className="absolute inset-0 px-4 py-3 text-gray-600 pointer-events-none whitespace-pre-wrap overflow-hidden"
             aria-hidden="true"
           >
             {suggestion}
@@ -129,14 +150,13 @@ export default function AutosuggestInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          rows={1}
-          className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm"
+          className="w-full px-4 py-3 border-2 border-gray-700 rounded-xl resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-800 bg-gray-800 text-gray-100 transition-all duration-200 shadow-sm min-h-[48px]"
         />
       </div>
 
       {/* Suggestion dropdown */}
       {suggestMode && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-3 bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10">
+        <div ref={dropdownRef} className="absolute bottom-full left-0 right-0 mb-3 bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10">
           {/* Keyboard hint */}
           <div className="px-4 py-2.5 text-xs text-gray-300 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900 font-medium">
             <span className="font-bold text-blue-400">Tab</span> to accept • <span className="font-bold text-blue-400">↑↓</span> to navigate
@@ -160,6 +180,9 @@ export default function AutosuggestInput({
             return (
               <div
                 key={cmd.name}
+                ref={(el) => {
+                  selectedItemRefs.current[index] = el;
+                }}
                 className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-all duration-150 ${
                   index === selectedIndex
                     ? "bg-gradient-to-r from-blue-900 to-blue-800 border-l-4 border-blue-500 shadow-sm"
