@@ -4,24 +4,24 @@ import type { CDTrackingState, StructuredOutput } from "./types";
  * CD Tracker - Ported from ccui.sh lines 32-73
  *
  * Tracks:
- * - Current working directory from StructuredOutput (cwd field)
+ * - Wanted working directory from StructuredOutput (wanted_cwd field)
  * - Model information from init events
  * - Duration from result events
  */
 export class CDTracker {
   private state: CDTrackingState = {
-    sessionCwd: null,
+    wantedCwd: null,
     lastDurationMs: 0,
     model: "claude-sonnet-4-5-20250929", // default
   };
 
   /**
    * Process JSON output from Claude streaming response
-   * Equivalent to: SESSION_CWD=$(echo "$json" | jq -r '.cwd // empty' 2>/dev/null)
+   * Equivalent to: SESSION_CWD=$(echo "$json" | jq -r '.wanted_cwd // empty' 2>/dev/null)
    */
   processStructuredOutput(output: StructuredOutput): void {
-    if (output.cwd) {
-      this.state.sessionCwd = output.cwd;
+    if (output.wanted_cwd) {
+      this.state.wantedCwd = output.wanted_cwd;
     }
   }
 
@@ -46,11 +46,11 @@ export class CDTracker {
   }
 
   /**
-   * Get current tracked working directory
+   * Get wanted working directory
    * Returns null if no cd has occurred
    */
-  getCurrentCwd(): string | null {
-    return this.state.sessionCwd;
+  getWantedCwd(): string | null {
+    return this.state.wantedCwd;
   }
 
   /**
@@ -79,7 +79,7 @@ export class CDTracker {
    */
   reset(): void {
     this.state = {
-      sessionCwd: null,
+      wantedCwd: null,
       lastDurationMs: 0,
       model: "claude-sonnet-4-5-20250929",
     };

@@ -2,6 +2,7 @@
 export interface Session {
   id: string;
   cwd: string;
+  previousCwd?: string; // Track previous directory for symlink creation
   model: string;
   lastDurationMs: number;
   messages: Message[];
@@ -27,7 +28,7 @@ export type StreamEvent =
 
 // Structured output from StructuredOutput tool
 export interface StructuredOutput {
-  cwd: string;
+  wanted_cwd?: string; // Changed from cwd - indicates desired directory
   response: string;
 }
 
@@ -75,7 +76,7 @@ export interface DirectoryEntry {
 
 // CD tracking state (ported from ccui.sh)
 export interface CDTrackingState {
-  sessionCwd: string | null;
+  wantedCwd: string | null; // Renamed from sessionCwd
   lastDurationMs: number;
   model: string;
 }

@@ -10,16 +10,16 @@ import * as fs from "fs";
 const STRUCTURED_OUTPUT_SCHEMA = {
   type: "object" as const,
   properties: {
-    cwd: {
+    wanted_cwd: {
       type: "string" as const,
-      description: "Current working directory path",
+      description: "Target directory path for permanent cd",
     },
     response: {
       type: "string" as const,
       description: "Response to user",
     },
   },
-  required: ["cwd", "response"],
+  required: ["response"],
 };
 
 export interface ClaudeStreamEvent {
@@ -40,7 +40,7 @@ export interface ClaudeStreamEvent {
   session_id?: string;
   duration_ms?: number;
   structured_output?: {
-    cwd: string;
+    wanted_cwd?: string;
     response: string;
   };
   error?: string;

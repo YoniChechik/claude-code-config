@@ -70,15 +70,17 @@ class SessionManager {
 
   /**
    * Update session metadata from CD tracker
+   * Tracks previousCwd for symlink creation
    */
   updateSessionFromTracker(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     const tracker = this.cdTrackers.get(sessionId);
 
     if (session && tracker) {
-      const newCwd = tracker.getCurrentCwd();
-      if (newCwd) {
-        session.cwd = newCwd;
+      const wantedCwd = tracker.getWantedCwd();
+      if (wantedCwd) {
+        session.previousCwd = session.cwd; // Save previous before updating
+        session.cwd = wantedCwd;
       }
       session.model = tracker.getModel();
       session.lastDurationMs = tracker.getLastDurationMs();

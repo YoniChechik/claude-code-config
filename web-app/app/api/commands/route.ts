@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 import { ClaudeClient } from "@/lib/claude-client";
+import { createSessionSymlink } from "@/lib/symlink-manager";
 import type { SendCommandRequest } from "@/lib/types";
 
 /**
@@ -76,6 +77,16 @@ export async function POST(request: NextRequest) {
             event.structured_output
           ) {
             tracker.processStructuredOutput(event.structured_output);
+
+            // Check if directory change is requested
+            const wantedCwd = event.structured_output.wanted_cwd;
+            if (wantedCwd && wantedCwd !== session.cwd) {
+              // Create symlink BEFORE updating session
+              const claudeSessionId = session.claudeSessionId;
+              if (claudeSessionId) {
+                await createSessionSymlink(claudeSessionId, session.cwd, wantedCwd);
+              }
+            }
           }
         }
 
