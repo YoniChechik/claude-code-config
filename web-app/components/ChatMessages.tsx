@@ -72,15 +72,19 @@ export default function ChatMessages({
           <div className="text-xs font-semibold text-gray-500">Claude</div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
-              {streamingBlocks.map((block, blockIdx) => (
-                <ContentBlockRenderer key={blockIdx} block={block} />
-              ))}
-              {streamingText && (
-                <span className="whitespace-pre-wrap break-words">
-                  {streamingText}
-                  <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
-                </span>
-              )}
+              {streamingBlocks.map((block, blockIdx) => {
+                // Add cursor after last text block during streaming
+                const isLastBlock = blockIdx === streamingBlocks.length - 1;
+                const isTextBlock = block.type === "text";
+                return (
+                  <span key={blockIdx}>
+                    <ContentBlockRenderer block={block} />
+                    {isStreaming && isLastBlock && isTextBlock && (
+                      <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
+                    )}
+                  </span>
+                );
+              })}
             </div>
           </div>
         </div>

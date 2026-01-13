@@ -134,6 +134,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
                   text: event.content || "",
                 };
                 assistantBlocks.push(textBlock);
+                setStreamingBlocks([...assistantBlocks]);
               } else if (event.type === "thinking") {
                 // Add thinking block
                 const thinkingBlock = {
