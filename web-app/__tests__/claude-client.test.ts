@@ -1,10 +1,21 @@
-import { ClaudeClient } from "../lib/claude-client";
+import { ClaudeClient, type ClaudeStreamEvent } from "../lib/claude-client";
+import { MockChildProcess } from "./test-utils";
+import * as child_process from "child_process";
+
+jest.mock("child_process");
 
 describe("ClaudeClient", () => {
   let client: ClaudeClient;
+  let mockProcess: MockChildProcess;
 
   beforeEach(() => {
     client = new ClaudeClient();
+    mockProcess = new MockChildProcess();
+    (child_process.spawn as jest.Mock).mockReturnValue(mockProcess);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   describe("constructor", () => {
@@ -51,7 +62,273 @@ describe("ClaudeClient", () => {
     });
   });
 
-  // Note: streamCommand tests are omitted here because they require
-  // complex process mocking. The streaming functionality is tested
-  // through E2E tests instead.
+  describe("streamCommand", () => {
+    it("should yield init event immediately", async () => {
+      const streamPromise = client.streamCommand("test prompt");
+      const iterator = streamPromise[Symbol.asyncIterator]();
+
+      const firstEvent = await iterator.next();
+
+      expect(firstEvent.done).toBe(false);
+      expect(firstEvent.value.type).toBe("init");
+      expect(firstEvent.value.model).toBe("claude-sonnet-4-5-20250929");
+
+      mockProcess.emitClose(0);
+    });
+
+    it("should parse init event with session_id", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const initEvent = {
+        type: "init",
+        subtype: "init",
+        model: "claude-sonnet-4-5-20250929",
+        session_id: "test-session-123",
+      };
+      mockProcess.emitData(JSON.stringify(initEvent) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const initEvents = events.filter(e => e.type === "init" && e.session_id);
+      expect(initEvents.length).toBeGreaterThan(0);
+      expect(initEvents[0].session_id).toBe("test-session-123");
+    });
+
+    it("should parse text content from assistant messages", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const assistantMsg = {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "StructuredOutput",
+              input: { response: "Hello from Claude!" },
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(assistantMsg) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const textEvents = events.filter(e => e.type === "text");
+      expect(textEvents.length).toBeGreaterThan(0);
+      expect(textEvents[0].content).toBe("Hello from Claude!");
+    });
+
+    it("should buffer tool_use events until matching tool_result arrives", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const toolUseMsg = {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_001",
+              name: "Read",
+              input: { file_path: "/test.txt" },
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(toolUseMsg) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const toolResultMsg = {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_001",
+              content: "file content",
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(toolResultMsg) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const toolUseEvents = events.filter(e => e.type === "tool_use");
+      const toolResultEvents = events.filter(e => e.type === "tool_result");
+
+      expect(toolUseEvents.length).toBeGreaterThan(0);
+      expect(toolResultEvents.length).toBeGreaterThan(0);
+
+      const toolUseIdx = events.findIndex(e => e.type === "tool_use");
+      const toolResultIdx = events.findIndex(e => e.type === "tool_result");
+      expect(toolUseIdx).toBeLessThan(toolResultIdx);
+    });
+
+    it("should parse token usage from system reminders", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const tokenMsg = {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Token usage: 1000/200000; 199000 remaining",
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(tokenMsg) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const tokenEvents = events.filter(e => e.type === "token_usage");
+      expect(tokenEvents.length).toBeGreaterThan(0);
+      expect(tokenEvents[0].token_usage?.used).toBe(1000);
+      expect(tokenEvents[0].token_usage?.total).toBe(200000);
+      expect(tokenEvents[0].token_usage?.remaining).toBe(199000);
+    });
+
+    it("should parse structured output from result event", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const resultEvent = {
+        type: "result",
+        structured_output: {
+          response: "Task complete",
+          wanted_cwd: "/new/path",
+        },
+      };
+      mockProcess.emitData(JSON.stringify(resultEvent) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const structuredEvents = events.filter(e => e.type === "structured_output");
+      expect(structuredEvents.length).toBeGreaterThan(0);
+      expect(structuredEvents[0].structured_output?.response).toBe("Task complete");
+      expect(structuredEvents[0].structured_output?.wanted_cwd).toBe("/new/path");
+    });
+
+    it("should handle process errors", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      mockProcess.emitError(new Error("Process spawn failed"));
+      mockProcess.emitClose(1);
+
+      await streamPromise;
+
+      const errorEvents = events.filter(e => e.type === "error");
+      expect(errorEvents.length).toBeGreaterThan(0);
+    });
+
+    it("should handle non-zero exit codes", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitStderr("Error occurred");
+      mockProcess.emitClose(1);
+
+      await streamPromise;
+
+      expect(events.some(e => e.type === "error")).toBe(true);
+    });
+
+    it("should skip StructuredOutput tool_use events", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test")) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const structuredToolMsg = {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_structured",
+              name: "StructuredOutput",
+              input: { response: "Test" },
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(structuredToolMsg) + "\n");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const toolUseEvents = events.filter(e => e.type === "tool_use");
+      const hasStructuredOutput = toolUseEvents.some(
+        e => e.tool?.name === "StructuredOutput"
+      );
+      expect(hasStructuredOutput).toBe(false);
+    });
+  });
 });

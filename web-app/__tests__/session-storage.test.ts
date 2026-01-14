@@ -353,4 +353,179 @@ describe("session-storage", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("getRecentSessions", () => {
+    it("should return empty array when no sessions exist", async () => {
+      const sessions = await import("../lib/session-storage");
+      const recent = await sessions.getRecentSessions();
+      expect(recent).toEqual([]);
+    });
+
+    it("should return sessions sorted by last activity", async () => {
+      const testDir1 = path.join(tempDir, "project1");
+      const testDir2 = path.join(tempDir, "project2");
+
+      const encoded1 = dirToClaudePath(testDir1);
+      const dirPath1 = path.join(tempDir, ".claude", "projects", encoded1);
+      await fs.mkdir(dirPath1, { recursive: true });
+
+      const encoded2 = dirToClaudePath(testDir2);
+      const dirPath2 = path.join(tempDir, ".claude", "projects", encoded2);
+      await fs.mkdir(dirPath2, { recursive: true });
+
+      const now = new Date();
+      const oldTime = new Date(now.getTime() - 3600000);
+
+      const session1Data = [
+        {
+          type: "user",
+          message: { role: "user", content: "Old session" },
+          cwd: testDir1,
+          sessionId: "session-old",
+          timestamp: oldTime.toISOString(),
+        },
+      ];
+
+      const session2Data = [
+        {
+          type: "user",
+          message: { role: "user", content: "Recent session" },
+          cwd: testDir2,
+          sessionId: "session-recent",
+          timestamp: now.toISOString(),
+        },
+      ];
+
+      await fs.writeFile(
+        path.join(dirPath1, "session-old.jsonl"),
+        session1Data.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      await fs.writeFile(
+        path.join(dirPath2, "session-recent.jsonl"),
+        session2Data.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const sessions = await import("../lib/session-storage");
+      const recent = await sessions.getRecentSessions();
+
+      expect(recent.length).toBeGreaterThan(0);
+      expect(recent[0].id).toBe("session-recent");
+      expect(recent[0].lastMessagePreview).toBe("Recent session");
+    });
+
+    it("should limit results to specified count", async () => {
+      const testDir = path.join(tempDir, "projectMany");
+      const encoded = dirToClaudePath(testDir);
+      const dirPath = path.join(tempDir, ".claude", "projects", encoded);
+      await fs.mkdir(dirPath, { recursive: true });
+
+      for (let i = 0; i < 5; i++) {
+        const sessionData = [
+          {
+            type: "user",
+            message: { role: "user", content: `Session ${i}` },
+            cwd: testDir,
+            sessionId: `session-${i}`,
+            timestamp: new Date().toISOString(),
+          },
+        ];
+        await fs.writeFile(
+          path.join(dirPath, `session-${i}.jsonl`),
+          sessionData.map((line) => JSON.stringify(line)).join("\n"),
+        );
+      }
+
+      const sessions = await import("../lib/session-storage");
+      const recent = await sessions.getRecentSessions(2);
+
+      expect(recent.length).toBeLessThanOrEqual(2);
+    });
+
+    it("should deduplicate sessions by ID", async () => {
+      const sourceDir = path.join(tempDir, "source");
+      const targetDir = path.join(tempDir, "target");
+
+      const sourceEncoded = dirToClaudePath(sourceDir);
+      const sourcePath = path.join(
+        tempDir,
+        ".claude",
+        "projects",
+        sourceEncoded,
+      );
+      await fs.mkdir(sourcePath, { recursive: true });
+
+      const targetEncoded = dirToClaudePath(targetDir);
+      const targetPath = path.join(
+        tempDir,
+        ".claude",
+        "projects",
+        targetEncoded,
+      );
+      await fs.mkdir(targetPath, { recursive: true });
+
+      const sessionData = [
+        {
+          type: "user",
+          message: { role: "user", content: "Shared session" },
+          cwd: sourceDir,
+          sessionId: "shared-session",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      const realFile = path.join(sourcePath, "shared-session.jsonl");
+      await fs.writeFile(
+        realFile,
+        sessionData.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const symlinkFile = path.join(targetPath, "shared-session.jsonl");
+      await fs.symlink(realFile, symlinkFile);
+
+      const sessions = await import("../lib/session-storage");
+      const recent = await sessions.getRecentSessions();
+
+      const sharedSessions = recent.filter((s) => s.id === "shared-session");
+      expect(sharedSessions.length).toBe(1);
+    });
+  });
+
+  describe("formatRelativeTime", () => {
+    it("should format time less than 1 hour", () => {
+      const sessions = require("../lib/session-storage");
+      const now = new Date();
+      const timestamp = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
+
+      const formatted = sessions.formatRelativeTime(timestamp);
+      expect(formatted).toBe("< 1h ago");
+    });
+
+    it("should format time in hours", () => {
+      const sessions = require("../lib/session-storage");
+      const now = new Date();
+      const timestamp = new Date(now.getTime() - 5 * 3600 * 1000).toISOString();
+
+      const formatted = sessions.formatRelativeTime(timestamp);
+      expect(formatted).toBe("5h ago");
+    });
+
+    it("should format time in days", () => {
+      const sessions = require("../lib/session-storage");
+      const now = new Date();
+      const timestamp = new Date(now.getTime() - 3 * 24 * 3600 * 1000).toISOString();
+
+      const formatted = sessions.formatRelativeTime(timestamp);
+      expect(formatted).toBe("3d ago");
+    });
+
+    it("should format time in weeks", () => {
+      const sessions = require("../lib/session-storage");
+      const now = new Date();
+      const timestamp = new Date(now.getTime() - 14 * 24 * 3600 * 1000).toISOString();
+
+      const formatted = sessions.formatRelativeTime(timestamp);
+      expect(formatted).toBe("2w ago");
+    });
+  });
 });
