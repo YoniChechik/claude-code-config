@@ -128,7 +128,7 @@ export default function ChatMessages({
 
       {/* Streaming message */}
       {isStreaming && (
-        <div className="flex flex-col gap-2 p-4 pl-12 rounded-2xl shadow-sm bg-gray-800 border border-gray-700 text-gray-100 mr-auto max-w-[85%]">
+        <div className="flex flex-col gap-2 p-4 pl-12 rounded-2xl shadow-sm bg-gray-800 border-2 text-gray-100 mr-auto max-w-[85%] animate-border-spin">
           <div className="text-xs font-semibold text-gray-400">Claude</div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">

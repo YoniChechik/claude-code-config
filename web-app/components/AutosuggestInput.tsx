@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { SlashCommand } from "@/lib/types";
+import type { MutableRefObject } from "react";
 import { fuzzyMatchCommands } from "@/lib/autosuggest-client";
 import SessionPicker from "./SessionPicker";
+import StopButton from "./StopButton";
 
 interface AutosuggestInputProps {
   value: string;
@@ -15,6 +17,7 @@ interface AutosuggestInputProps {
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
+  cancelStreamRef?: MutableRefObject<(() => void) | undefined>;
 }
 
 export default function AutosuggestInput({
@@ -27,6 +30,7 @@ export default function AutosuggestInput({
   isStreaming = false,
   onFocusRef,
   onResumeSession,
+  cancelStreamRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
@@ -160,9 +164,15 @@ export default function AutosuggestInput({
 
   const suggestion = _getSuggestion();
 
+  const handleStop = () => {
+    if (cancelStreamRef?.current) {
+      cancelStreamRef.current();
+    }
+  };
+
   return (
-    <div className="relative flex-1">
-      <div className="relative">
+    <div className="relative flex-1 flex gap-3 items-end">
+      <div className="relative flex-1">
         {suggestion && (
           <div
             className="absolute inset-0 px-4 py-3 text-gray-600 pointer-events-none whitespace-pre-wrap overflow-hidden"
@@ -185,52 +195,54 @@ export default function AutosuggestInput({
               : "border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           } ${isFlashing ? "animate-flash-gray" : ""}`}
         />
+
+        {suggestMode && matches.length > 0 && (
+          <div
+            ref={dropdownRef}
+            className="absolute bottom-full left-0 right-0 mb-3 bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
+          >
+            <div className="px-4 py-2.5 text-xs text-gray-300 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900 font-medium">
+              <span className="font-bold text-blue-400">Tab</span> to accept •{" "}
+              <span className="font-bold text-blue-400">↑↓</span> to navigate
+            </div>
+
+            {matches.slice(0, 10).map((cmd, index) => (
+              <div
+                key={cmd.name}
+                ref={(el) => {
+                  selectedItemRefs.current[index] = el;
+                }}
+                className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-all duration-150 ${
+                  index === selectedIndex
+                    ? "bg-gradient-to-r from-blue-900 to-blue-800 border-l-4 border-blue-500 shadow-sm"
+                    : "hover:bg-gray-700 border-l-4 border-transparent"
+                }`}
+                onClick={() => {
+                  setSelectedIndex(index);
+                  _acceptSuggestion();
+                }}
+              >
+                <span className="font-mono text-sm font-semibold text-gray-100">
+                  /{cmd.name}
+                </span>
+                <span
+                  className={`text-xs px-2.5 py-1 rounded-lg font-medium ${_getBadgeStyle(cmd.source)}`}
+                >
+                  {cmd.source}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <SessionPicker
+          isOpen={showResumePicker}
+          onSelect={handleResumeSelect}
+          onCancel={handleResumeCancel}
+        />
       </div>
 
-      {suggestMode && matches.length > 0 && (
-        <div
-          ref={dropdownRef}
-          className="absolute bottom-full left-0 right-0 mb-3 bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
-        >
-          <div className="px-4 py-2.5 text-xs text-gray-300 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900 font-medium">
-            <span className="font-bold text-blue-400">Tab</span> to accept •{" "}
-            <span className="font-bold text-blue-400">↑↓</span> to navigate
-          </div>
-
-          {matches.slice(0, 10).map((cmd, index) => (
-            <div
-              key={cmd.name}
-              ref={(el) => {
-                selectedItemRefs.current[index] = el;
-              }}
-              className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-all duration-150 ${
-                index === selectedIndex
-                  ? "bg-gradient-to-r from-blue-900 to-blue-800 border-l-4 border-blue-500 shadow-sm"
-                  : "hover:bg-gray-700 border-l-4 border-transparent"
-              }`}
-              onClick={() => {
-                setSelectedIndex(index);
-                _acceptSuggestion();
-              }}
-            >
-              <span className="font-mono text-sm font-semibold text-gray-100">
-                /{cmd.name}
-              </span>
-              <span
-                className={`text-xs px-2.5 py-1 rounded-lg font-medium ${_getBadgeStyle(cmd.source)}`}
-              >
-                {cmd.source}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <SessionPicker
-        isOpen={showResumePicker}
-        onSelect={handleResumeSelect}
-        onCancel={handleResumeCancel}
-      />
+      {isStreaming && <StopButton onClick={handleStop} />}
     </div>
   );
 }

@@ -34,6 +34,8 @@ export default function ChatPane({
     { used: number; total: number; remaining: number } | undefined
   >(undefined);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
   useEffect(() => {
@@ -76,35 +78,51 @@ export default function ChatPane({
     setStreamingText("");
     setStreamingBlocks([]);
 
-    const response = await fetch("/api/commands", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, prompt }),
-    });
-
-    let assistantText = "";
-    let assistantBlocks: ContentBlock[] = [];
-
-    const streamResult = await _handleStreamEvents(
-      response,
-      assistantText,
-      assistantBlocks,
-    );
-    assistantText = streamResult.text;
-    assistantBlocks = streamResult.blocks;
-
-    const assistantMessage: Message = {
-      role: "assistant",
-      content: assistantBlocks,
-      timestamp: new Date(),
+    abortControllerRef.current = new AbortController();
+    cancelStreamRef.current = () => {
+      abortControllerRef.current?.abort();
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamingBlocks([]);
     };
-    setMessages((prev) => [...prev, assistantMessage]);
 
-    await _updateSessionMetadata();
+    try {
+      const response = await fetch("/api/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, prompt }),
+        signal: abortControllerRef.current.signal,
+      });
 
-    setIsStreaming(false);
-    setStreamingText("");
-    setStreamingBlocks([]);
+      let assistantText = "";
+      let assistantBlocks: ContentBlock[] = [];
+
+      const streamResult = await _handleStreamEvents(
+        response,
+        assistantText,
+        assistantBlocks,
+      );
+      assistantText = streamResult.text;
+      assistantBlocks = streamResult.blocks;
+
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: assistantBlocks,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      await _updateSessionMetadata();
+
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamingBlocks([]);
+    } catch (error: unknown) {
+      if ((error as Error).name === "AbortError") {
+        return;
+      }
+      throw error;
+    }
   };
 
   const handleSubmit = async (prompt: string) => {
@@ -295,6 +313,7 @@ export default function ChatPane({
             isStreaming={isStreaming}
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
             onResumeSession={onResumeSession}
+            cancelStreamRef={cancelStreamRef}
           />
         </div>
       </div>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AutosuggestInput from "./AutosuggestInput";
 import type { SlashCommand } from "@/lib/types";
+import type { MutableRefObject } from "react";
 
 interface ChatInputProps {
   onSubmit: (prompt: string) => void;
@@ -11,6 +12,7 @@ interface ChatInputProps {
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
+  cancelStreamRef?: MutableRefObject<(() => void) | undefined>;
 }
 
 /**
@@ -23,6 +25,7 @@ export default function ChatInput({
   isStreaming = false,
   onFocusRef,
   onResumeSession,
+  cancelStreamRef,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
 
@@ -44,6 +47,7 @@ export default function ChatInput({
         isStreaming={isStreaming}
         onFocusRef={onFocusRef}
         onResumeSession={onResumeSession}
+        cancelStreamRef={cancelStreamRef}
       />
     </div>
   );

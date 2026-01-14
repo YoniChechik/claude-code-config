@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ContentBlock } from "@/lib/types";
 import ToolUseCard from "./ToolUseCard";
 import RainbowText from "../RainbowText";
+import UnknownContentBlock from "./UnknownContentBlock";
 
 interface ContentBlockRendererProps {
   block: ContentBlock;
@@ -12,6 +13,8 @@ export default function ContentBlockRenderer({
   block,
   isNested: _isNested = false,
 }: ContentBlockRendererProps) {
+  // All 4 known content block types are handled below
+  // Any unknown types will fall through to the UnknownContentBlock fallback
   switch (block.type) {
     case "text": {
       const trimmedText = block.text.trim();
@@ -37,8 +40,11 @@ export default function ContentBlockRenderer({
     case "tool_result":
       return <_ToolResultBlock content={block.content} />;
 
-    default:
-      return null;
+    default: {
+      const unknownBlock = block as ContentBlock & { type: string };
+      console.warn("Unknown content block type:", unknownBlock.type, unknownBlock);
+      return <UnknownContentBlock blockType={unknownBlock.type} blockData={unknownBlock} />;
+    }
   }
 }
 
