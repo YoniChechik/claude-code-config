@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ContentBlock } from "@/lib/types";
 import ToolUseCard from "./ToolUseCard";
+import RainbowText from "../RainbowText";
 
 interface ContentBlockRendererProps {
   block: ContentBlock;
@@ -66,7 +67,7 @@ export default function ContentBlockRenderer({
       ) {
         return null;
       }
-      return <span>{block.text}</span>;
+      return <RainbowText text={block.text} />;
     }
 
     case "thinking":
