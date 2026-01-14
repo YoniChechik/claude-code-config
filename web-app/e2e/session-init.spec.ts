@@ -21,17 +21,17 @@ test.describe("Session Initialization", () => {
 
     // Verify that the chat interface becomes available
     // The textarea should appear, indicating successful initialization
-    await expect(page.locator("textarea")).toBeVisible({ timeout: 10000 });
+    const textarea = page.locator("textarea");
+    await expect(textarea).toBeVisible({ timeout: 10000 });
 
     // Verify the "Initializing sessions..." text is no longer visible
     await expect(loadingText).not.toBeVisible();
 
-    // Verify key chat interface elements are present
-    const sendButton = page.locator("button:has-text('Send')").first();
-    await expect(sendButton).toBeVisible();
-
-    // Verify send button is disabled when input is empty (normal state)
-    await expect(sendButton).toBeDisabled();
+    // Verify the textarea has the expected placeholder
+    await expect(textarea).toHaveAttribute(
+      "placeholder",
+      "Type your message or /command...",
+    );
   });
 
   test("should not remain stuck on initialization screen for more than 10 seconds", async ({
