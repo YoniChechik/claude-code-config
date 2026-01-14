@@ -1,4 +1,6 @@
 import type { ClaudeStreamEvent } from "../lib/claude-client";
+import type { Session, Message } from "../lib/types";
+import { EventEmitter } from "events";
 
 /**
  * Mock Claude API stream events for testing
@@ -89,6 +91,35 @@ export function* mockClaudeStream(
       wanted_cwd: wantedCwd,
     },
   };
+}
+
+/**
+ * Mock child process for testing ClaudeClient spawn
+ */
+export class MockChildProcess extends EventEmitter {
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  stdin = {
+    end: jest.fn(),
+    write: jest.fn(),
+  };
+  kill = jest.fn();
+
+  emitData(data: string) {
+    this.stdout.emit("data", Buffer.from(data));
+  }
+
+  emitError(error: Error) {
+    this.emit("error", error);
+  }
+
+  emitClose(code: number | null = 0, signal: string | null = null) {
+    this.emit("close", code, signal);
+  }
+
+  emitStderr(data: string) {
+    this.stderr.emit("data", Buffer.from(data));
+  }
 }
 
 /**
