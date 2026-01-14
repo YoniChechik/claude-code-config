@@ -68,20 +68,28 @@ function _isTaskTool(block: ContentBlock): boolean {
 /**
  * Sorts content blocks to ensure tool_use blocks appear before their matching tool_result blocks.
  * This fixes the issue where tool inputs and outputs appear in scrambled order.
+ *
+ * IMPORTANT: Task (agent) tool_use blocks are NOT paired with their tool_results here.
+ * Task tools have nested child blocks between tool_use and tool_result that must stay
+ * in their original positions to maintain causality (child work appears before completion).
  */
 function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const toolUseMap = new Map<string, ContentBlock>();
   const toolResultMap = new Map<string, ContentBlock>();
-  const otherBlocks: ContentBlock[] = [];
+
+  // Identify Task tool IDs - these should not be paired during sorting
+  const taskToolIds = new Set<string>();
 
   // Separate blocks by type
   for (const block of blocks) {
     if (block.type === "tool_use") {
       toolUseMap.set(block.id, block);
+      // Check if this is a Task tool
+      if (_isTaskTool(block)) {
+        taskToolIds.add(block.id);
+      }
     } else if (block.type === "tool_result") {
       toolResultMap.set(block.tool_use_id, block);
-    } else {
-      otherBlocks.push(block);
     }
   }
 
@@ -97,15 +105,25 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
       processedToolUseIds.add(block.id);
 
       // Add matching tool_result immediately after if it exists
-      const toolResult = toolResultMap.get(block.id);
-      if (toolResult) {
-        sorted.push(toolResult);
+      // BUT NOT for Task tools - their results must stay in original position
+      // to preserve child blocks between tool_use and tool_result
+      if (!taskToolIds.has(block.id)) {
+        const toolResult = toolResultMap.get(block.id);
+        if (toolResult) {
+          sorted.push(toolResult);
+        }
       }
     } else if (block.type === "tool_result") {
-      // Skip if already added with its tool_use
-      if (processedToolUseIds.has(block.tool_use_id)) continue;
+      // Skip if already added with its tool_use (not applicable to Task tools)
+      if (
+        processedToolUseIds.has(block.tool_use_id) &&
+        !taskToolIds.has(block.tool_use_id)
+      ) {
+        continue;
+      }
 
-      // Orphaned tool_result (tool_use not found) - add it anyway
+      // Add tool_result in its original position for Task tools
+      // or as orphaned tool_result for non-Task tools
       sorted.push(block);
     } else {
       sorted.push(block);
