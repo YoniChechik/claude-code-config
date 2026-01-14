@@ -1,7 +1,3 @@
-interface RainbowTextProps {
-  text: string;
-}
-
 const RAINBOW_COLORS = [
   "#FF0000",
   "#FF7700",
@@ -11,6 +7,10 @@ const RAINBOW_COLORS = [
   "#4B0082",
   "#9400D3",
 ];
+
+interface RainbowTextProps {
+  text: string;
+}
 
 export default function RainbowText({ text }: RainbowTextProps) {
   const regex = /ultrathink/gi;

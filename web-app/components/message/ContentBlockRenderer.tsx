@@ -8,7 +8,41 @@ interface ContentBlockRendererProps {
   isNested?: boolean;
 }
 
-function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
+export default function ContentBlockRenderer({
+  block,
+  isNested: _isNested = false,
+}: ContentBlockRendererProps) {
+  switch (block.type) {
+    case "text": {
+      const trimmedText = block.text.trim();
+      if (
+        trimmedText === "Structured output provided successfully" ||
+        trimmedText === "No response requested"
+      ) {
+        return null;
+      }
+      return <RainbowText text={block.text} />;
+    }
+
+    case "thinking":
+      return (
+        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg">
+          💭 {block.thinking}
+        </div>
+      );
+
+    case "tool_use":
+      return <ToolUseCard tool={block} />;
+
+    case "tool_result":
+      return <_ToolResultBlock content={block.content} />;
+
+    default:
+      return null;
+  }
+}
+
+function _ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (Array.isArray(content)) {
@@ -49,38 +83,4 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
       </div>
     </div>
   );
-}
-
-export default function ContentBlockRenderer({
-  block,
-  isNested: _isNested = false,
-}: ContentBlockRendererProps) {
-  switch (block.type) {
-    case "text": {
-      const trimmedText = block.text.trim();
-      if (
-        trimmedText === "Structured output provided successfully" ||
-        trimmedText === "No response requested"
-      ) {
-        return null;
-      }
-      return <RainbowText text={block.text} />;
-    }
-
-    case "thinking":
-      return (
-        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg">
-          💭 {block.thinking}
-        </div>
-      );
-
-    case "tool_use":
-      return <ToolUseCard tool={block} />;
-
-    case "tool_result":
-      return <ToolResultBlock content={block.content} />;
-
-    default:
-      return null;
-  }
 }
