@@ -13,11 +13,10 @@ test.describe("Chat Scroll Behavior", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Send a message that will generate a long response
     await chatInput.fill("Write a long story about a robot");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for input to clear
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -58,11 +57,10 @@ test.describe("Chat Scroll Behavior", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Send a message that will generate a long response
     await chatInput.fill("Write a long detailed explanation about computers");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for input to clear
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -115,11 +113,10 @@ test.describe("Chat Scroll Behavior", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Send a message that will generate a long response
     await chatInput.fill("Write a very long explanation about programming");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for input to clear
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -173,11 +170,10 @@ test.describe("Chat Scroll Behavior", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Send first message to create some history
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for response to complete
@@ -185,7 +181,7 @@ test.describe("Chat Scroll Behavior", () => {
 
     // Send second message
     await chatInput.fill("tell me more");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait a bit for content
