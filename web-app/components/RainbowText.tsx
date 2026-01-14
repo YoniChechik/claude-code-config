@@ -14,22 +14,23 @@ interface RainbowTextProps {
 
 export default function RainbowText({ text }: RainbowTextProps) {
   const regex = /ultrathink/gi;
-  const parts: JSX.Element[] = [];
+  const parts: React.JSX.Element[] = [];
   let lastIndex = 0;
-  let match;
+  let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(<span key={`text-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
+    const matchIndex = match.index;
+    if (matchIndex > lastIndex) {
+      parts.push(<span key={`text-${lastIndex}`}>{text.slice(lastIndex, matchIndex)}</span>);
     }
 
     const word = match[0];
     const rainbowLetters = word.split("").map((letter, i) => (
-      <span key={`${match.index}-${i}`} style={{ color: RAINBOW_COLORS[i % RAINBOW_COLORS.length] }}>
+      <span key={`${matchIndex}-${i}`} style={{ color: RAINBOW_COLORS[i % RAINBOW_COLORS.length] }}>
         {letter}
       </span>
     ));
-    parts.push(<span key={`rainbow-${match.index}`}>{rainbowLetters}</span>);
+    parts.push(<span key={`rainbow-${matchIndex}`}>{rainbowLetters}</span>);
 
     lastIndex = regex.lastIndex;
   }
