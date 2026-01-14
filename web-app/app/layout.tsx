@@ -1,10 +1,9 @@
-import type { Metadata } from "next";
-import "../styles/globals.css";
+"use client";
 
-export const metadata: Metadata = {
-  title: "ccweb - Claude Code Web UI",
-  description: "Multi-session Claude Code interface",
-};
+import "../styles/globals.css";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import GlobalErrorHandler from "@/components/GlobalErrorHandler";
+import Head from "next/head";
 
 export default function RootLayout({
   children,
@@ -13,7 +12,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-gray-900 text-gray-100">{children}</body>
+      <Head>
+        <title>ccweb - Claude Code Web UI</title>
+        <meta name="description" content="Multi-session Claude Code interface" />
+      </Head>
+      <body className="bg-gray-900 text-gray-100">
+        <ErrorBoundary>
+          <GlobalErrorHandler />
+          {children}
+        </ErrorBoundary>
+      </body>
     </html>
   );
 }
