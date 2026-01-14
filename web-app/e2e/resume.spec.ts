@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("/resume command", () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the app
-    await page.goto("http://localhost:3000");
+    await page.goto("http://localhost:6379");
 
     // Wait for the chat input to be ready
     await page.waitForSelector("textarea", { timeout: 10000 });

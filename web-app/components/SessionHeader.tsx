@@ -18,6 +18,8 @@ interface SessionHeaderProps {
   hostname?: string;
   distroName?: string;
   clientIp?: string;
+  audioNotificationsEnabled?: boolean;
+  onToggleAudioNotifications?: () => void;
 }
 
 /**
@@ -34,6 +36,8 @@ export default function SessionHeader({
   hostname,
   distroName,
   clientIp,
+  audioNotificationsEnabled = false,
+  onToggleAudioNotifications,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{
     percentUsed: number;
@@ -233,6 +237,19 @@ export default function SessionHeader({
               <span className="text-gray-500">│</span>
               <span>{model}</span>
             </div>
+          )}
+          {onToggleAudioNotifications && (
+            <button
+              onClick={onToggleAudioNotifications}
+              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-sm"
+              title={
+                audioNotificationsEnabled
+                  ? "Disable audio notifications"
+                  : "Enable audio notifications"
+              }
+            >
+              {audioNotificationsEnabled ? "🔊" : "🔇"}
+            </button>
           )}
           {onClose && (
             <button

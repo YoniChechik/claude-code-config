@@ -6,6 +6,11 @@ import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
+import {
+  playAudioNotification,
+  updateTabTitle,
+  clearTabNotification,
+} from "@/lib/notifications";
 
 interface ChatPaneProps {
   sessionId: string;
@@ -36,6 +41,7 @@ export default function ChatPane({
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
 
   // Load session on mount
   useEffect(() => {
@@ -48,6 +54,25 @@ export default function ChatPane({
       inputFocusRef.current();
     }
   }, [isFocused]);
+
+  // Track window focus state
+  useEffect(() => {
+    const handleFocus = () => {
+      setIsWindowFocused(true);
+      clearTabNotification();
+    };
+    const handleBlur = () => {
+      setIsWindowFocused(false);
+    };
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
 
   const loadSession = async () => {
     const response = await fetch(`/api/sessions/${sessionId}`);
@@ -117,6 +142,14 @@ export default function ChatPane({
       setIsStreaming(false);
       setStreamingText("");
       setStreamingBlocks([]);
+
+      // Trigger notifications if window is not focused
+      if (!isWindowFocused && session?.audioNotificationsEnabled) {
+        playAudioNotification();
+      }
+      if (!isWindowFocused) {
+        updateTabTitle("Done");
+      }
     } catch (error: unknown) {
       if ((error as Error).name === "AbortError") {
         return;
@@ -127,6 +160,20 @@ export default function ChatPane({
 
   const handleSubmit = async (prompt: string) => {
     return handleSubmitInternal(prompt, false);
+  };
+
+  const toggleAudioNotifications = async () => {
+    if (!session) return;
+
+    const newValue = !session.audioNotificationsEnabled;
+    setSession({ ...session, audioNotificationsEnabled: newValue });
+
+    // Persist to backend
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audioNotificationsEnabled: newValue }),
+    });
   };
 
   // PRIVATE HELPERS
@@ -296,6 +343,8 @@ export default function ChatPane({
         hostname={session.hostname}
         distroName={session.distroName}
         clientIp={session.clientIp}
+        audioNotificationsEnabled={session.audioNotificationsEnabled}
+        onToggleAudioNotifications={toggleAudioNotifications}
       />
 
       <div className="flex flex-1 overflow-hidden">

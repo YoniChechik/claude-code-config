@@ -3,7 +3,7 @@
  * Tests that spawning a subagent shows all blocks in correct order
  */
 
-const API_URL = "http://localhost:3000";
+const API_URL = "http://localhost:6379";
 
 async function createSession() {
   const response = await fetch(`${API_URL}/api/sessions`, {

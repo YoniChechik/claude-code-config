@@ -57,7 +57,7 @@ describe("API /api/sessions", () => {
   describe("POST /api/sessions", () => {
     it("should create new session with valid cwd", async () => {
       const requestBody = { cwd: "/home/user" };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -75,7 +75,7 @@ describe("API /api/sessions", () => {
 
     it("should return 400 when cwd is missing", async () => {
       const requestBody = {};
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -89,7 +89,7 @@ describe("API /api/sessions", () => {
 
     it("should normalize cwd with trailing slash", async () => {
       const requestBody = { cwd: "/home/user/" };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -108,7 +108,7 @@ describe("API /api/sessions", () => {
         cwd: "/home/user",
         clientHostname: "my-laptop",
       };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -125,7 +125,7 @@ describe("API /api/sessions", () => {
 
     it("should store created session in manager", async () => {
       const requestBody = { cwd: "/home/user" };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -140,7 +140,7 @@ describe("API /api/sessions", () => {
 
     it("should create session with empty messages array", async () => {
       const requestBody = { cwd: "/home/user" };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
@@ -153,7 +153,7 @@ describe("API /api/sessions", () => {
 
     it("should create session with default model", async () => {
       const requestBody = { cwd: "/home/user" };
-      const request = new NextRequest("http://localhost:3000/api/sessions", {
+      const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
       });

@@ -4,7 +4,7 @@
  * tool_use_1, tool_result_1, tool_use_2, tool_result_2, tool_use_3, tool_result_3, tool_use_4, tool_result_4
  */
 
-const API_URL = "http://localhost:3000";
+const API_URL = "http://localhost:6379";
 
 async function createSession() {
   const response = await fetch(`${API_URL}/api/sessions`, {

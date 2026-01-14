@@ -6,10 +6,10 @@ export CCWEB_ORIGINAL_CWD="$(pwd)"
 
 cd /home/ubuntu/.claude/web-app
 
-# Kill any process LISTENING on port 3000 (works for both IPv4 and IPv6)
-PORT_PID=$(sudo fuser 3000/tcp 2>/dev/null)
+# Kill any process LISTENING on port 6379 (works for both IPv4 and IPv6)
+PORT_PID=$(sudo fuser 6379/tcp 2>/dev/null)
 if [ ! -z "$PORT_PID" ]; then
-    echo "Port 3000 is occupied by PID: $PORT_PID. Killing it..."
+    echo "Port 6379 is occupied by PID: $PORT_PID. Killing it..."
     sudo kill $PORT_PID 2>/dev/null || sudo kill -9 $PORT_PID 2>/dev/null
     sleep 1
 fi
@@ -32,4 +32,4 @@ echo $! > prod.pid
 
 echo "Production server started (PID: $(cat prod.pid))"
 echo "Logs: ~/.claude/web-app/prod.log"
-echo "URL: http://localhost:3000"
+echo "URL: http://localhost:6379"

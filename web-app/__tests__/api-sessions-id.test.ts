@@ -19,7 +19,7 @@ describe("API /api/sessions/[id]", () => {
       const session = sessionManager.createSession("/home/user");
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session.id}`,
+        `http://localhost:6379/api/sessions/${session.id}`,
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: session.id }),
@@ -33,7 +33,7 @@ describe("API /api/sessions/[id]", () => {
 
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
-        "http://localhost:3000/api/sessions/non-existent-id",
+        "http://localhost:6379/api/sessions/non-existent-id",
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: "non-existent-id" }),
@@ -52,7 +52,7 @@ describe("API /api/sessions/[id]", () => {
       });
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session.id}`,
+        `http://localhost:6379/api/sessions/${session.id}`,
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: session.id }),
@@ -82,7 +82,7 @@ describe("API /api/sessions/[id]", () => {
       expect(session.messages).toHaveLength(2);
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session.id}`,
+        `http://localhost:6379/api/sessions/${session.id}`,
         { method: "PATCH" },
       );
       const response = await PATCH(request, {
@@ -97,7 +97,7 @@ describe("API /api/sessions/[id]", () => {
 
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
-        "http://localhost:3000/api/sessions/non-existent-id",
+        "http://localhost:6379/api/sessions/non-existent-id",
         { method: "PATCH" },
       );
       const response = await PATCH(request, {
@@ -120,7 +120,7 @@ describe("API /api/sessions/[id]", () => {
       const originalModel = session.model;
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session.id}`,
+        `http://localhost:6379/api/sessions/${session.id}`,
         { method: "PATCH" },
       );
       await PATCH(request, {
@@ -137,7 +137,7 @@ describe("API /api/sessions/[id]", () => {
       const session = sessionManager.createSession("/home/user");
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session.id}`,
+        `http://localhost:6379/api/sessions/${session.id}`,
         { method: "DELETE" },
       );
       const response = await DELETE(request, {
@@ -154,7 +154,7 @@ describe("API /api/sessions/[id]", () => {
 
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
-        "http://localhost:3000/api/sessions/non-existent-id",
+        "http://localhost:6379/api/sessions/non-existent-id",
         { method: "DELETE" },
       );
       const response = await DELETE(request, {
@@ -171,7 +171,7 @@ describe("API /api/sessions/[id]", () => {
       const session2 = sessionManager.createSession("/home/user2");
 
       const request = new NextRequest(
-        `http://localhost:3000/api/sessions/${session1.id}`,
+        `http://localhost:6379/api/sessions/${session1.id}`,
         { method: "DELETE" },
       );
       await DELETE(request, {
