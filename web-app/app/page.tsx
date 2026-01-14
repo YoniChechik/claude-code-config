@@ -17,6 +17,39 @@ export default function Home() {
     initializeSessions();
   }, []);
 
+  // Tab close cleanup and heartbeat
+  useEffect(() => {
+    if (sessionIds.length === 0) return;
+
+    // Pagehide event for cleanup
+    const handlePagehide = () => {
+      // Use sendBeacon for non-blocking cleanup
+      const blob = new Blob(
+        [JSON.stringify({ sessionIds })],
+        { type: "application/json" },
+      );
+      navigator.sendBeacon("/api/sessions/cleanup", blob);
+    };
+
+    window.addEventListener("pagehide", handlePagehide);
+
+    // Heartbeat every 10s
+    const heartbeatInterval = setInterval(() => {
+      fetch("/api/sessions/heartbeat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionIds }),
+      }).catch((err) => {
+        console.error("Heartbeat failed:", err);
+      });
+    }, 10000);
+
+    return () => {
+      window.removeEventListener("pagehide", handlePagehide);
+      clearInterval(heartbeatInterval);
+    };
+  }, [sessionIds]);
+
   const initializeSessions = async () => {
     try {
       // Get current working directory from backend

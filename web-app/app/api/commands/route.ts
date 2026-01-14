@@ -3,6 +3,8 @@ import { sessionManager } from "@/lib/session-manager";
 import { ClaudeClient } from "@/lib/claude-client";
 import { createSessionSymlink } from "@/lib/symlink-manager";
 import { loadSystemPrompt } from "@/lib/system-prompt-loader";
+import { processRegistry } from "@/lib/process-registry";
+import { streamRegistry } from "@/lib/stream-registry";
 import type { SendCommandRequest } from "@/lib/types";
 
 // No timeout - allow responses to take as long as needed
@@ -45,6 +47,10 @@ export async function POST(request: NextRequest) {
     timestamp: new Date(),
   });
 
+  // Create AbortController for this stream
+  const abortController = new AbortController();
+  streamRegistry.register(sessionId, abortController);
+
   // Create streaming response
   const stream = new ReadableStream({
     async start(controller) {
@@ -64,7 +70,16 @@ export async function POST(request: NextRequest) {
           sessionId: claudeSessionId,
           appendSystemPrompt: systemPrompt,
           cwd: session.cwd,
+          onProcessSpawned: (process) => {
+            // Register process for cleanup
+            processRegistry.register(sessionId, process);
+          },
         })) {
+          // Check if stream was aborted
+          if (abortController.signal.aborted) {
+            console.log(`[Commands API] Stream aborted for session ${sessionId}`);
+            break;
+          }
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));
@@ -142,7 +157,16 @@ export async function POST(request: NextRequest) {
               sessionId: updatedSession.claudeSessionId,
               appendSystemPrompt: systemPrompt,
               cwd: updatedSession.cwd,
+              onProcessSpawned: (process) => {
+                // Register auto-continue process for cleanup
+                processRegistry.register(sessionId, process);
+              },
             })) {
+              // Check if stream was aborted
+              if (abortController.signal.aborted) {
+                console.log(`[Commands API] Auto-continue stream aborted for session ${sessionId}`);
+                break;
+              }
               // Send event to client
               const data = `data: ${JSON.stringify(event)}\n\n`;
               controller.enqueue(encoder.encode(data));
@@ -195,6 +219,9 @@ export async function POST(request: NextRequest) {
           encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`),
         );
       } finally {
+        // Cleanup: unregister process and stream
+        processRegistry.unregister(sessionId);
+        streamRegistry.unregister(sessionId);
         controller.close();
       }
     },

@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 
 /**
@@ -62,7 +62,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string },
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string; onProcessSpawned?: (process: ChildProcess) => void },
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -163,6 +163,11 @@ export class ClaudeClient {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: options?.cwd || process.cwd(),
       });
+
+      // Notify caller that process has been spawned
+      if (options?.onProcessSpawned) {
+        options.onProcessSpawned(claude);
+      }
 
       // Close stdin since we're not sending any input
       claude.stdin.end();
