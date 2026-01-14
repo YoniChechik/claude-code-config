@@ -85,6 +85,7 @@ export class ClaudeClient {
       const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
       const toolResultBuffer = new Map<string, ClaudeStreamEvent>(); // tool_use_id -> tool_result event
       const toolUseOrder: string[] = []; // Track the order tool_use events arrive
+      const taskToolIds = new Set<string>(); // Track Task tool IDs (agents)
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
@@ -95,22 +96,42 @@ export class ClaudeClient {
       // Helper to emit tool_use/tool_result pairs in causal order
       const tryEmitPairedEvents = () => {
         // Emit all tool_use events that have matching tool_results
+        // BUT skip non-Task tools that appear after a Task tool without its result
+        let activeTaskId: string | null = null;
+
         for (const toolId of toolUseOrder) {
           const toolUseEvent = toolUseBuffer.get(toolId);
           const toolResultEvent = toolResultBuffer.get(toolId);
+          const isTaskTool = taskToolIds.has(toolId);
 
+          // Track if we're currently inside an active agent (Task tool without result)
+          if (isTaskTool && toolUseEvent && !toolResultEvent) {
+            activeTaskId = toolId;
+          }
+
+          // If we have both tool_use and tool_result
           if (toolUseEvent && toolResultEvent) {
-            // We have both - emit them in order
-            eventQueue.push(toolUseEvent);
-            eventQueue.push(toolResultEvent);
+            // Only emit if:
+            // 1. This is a Task tool (agents always emit), OR
+            // 2. We're not inside an active agent (activeTaskId is null)
+            if (isTaskTool || activeTaskId === null) {
+              // We have both - emit them in order
+              eventQueue.push(toolUseEvent);
+              eventQueue.push(toolResultEvent);
 
-            // Remove from buffers
-            toolUseBuffer.delete(toolId);
-            toolResultBuffer.delete(toolId);
-            toolUseOrder.splice(toolUseOrder.indexOf(toolId), 1);
+              // Remove from buffers
+              toolUseBuffer.delete(toolId);
+              toolResultBuffer.delete(toolId);
+              toolUseOrder.splice(toolUseOrder.indexOf(toolId), 1);
 
-            resolveNext?.();
-            resolveNext = null;
+              // Clear activeTaskId if this was the active task
+              if (activeTaskId === toolId) {
+                activeTaskId = null;
+              }
+
+              resolveNext?.();
+              resolveNext = null;
+            }
           }
         }
       };
@@ -194,6 +215,10 @@ export class ClaudeClient {
                 !emittedToolUseIds.has(block.id)
               ) {
                 emittedToolUseIds.add(block.id);
+                // Track if this is a Task tool (agent)
+                if (block.name === "Task") {
+                  taskToolIds.add(block.id);
+                }
                 // Buffer tool_use event instead of emitting directly
                 const toolUseEvent: ClaudeStreamEvent = {
                   type: "tool_use",
@@ -237,6 +262,10 @@ export class ClaudeClient {
                     !emittedToolUseIds.has(block.id)
                   ) {
                     emittedToolUseIds.add(block.id);
+                    // Track if this is a Task tool (agent)
+                    if (block.name === "Task") {
+                      taskToolIds.add(block.id);
+                    }
                     const toolUseEvent: ClaudeStreamEvent = {
                       type: "tool_use",
                       tool: {
