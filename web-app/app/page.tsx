@@ -195,7 +195,7 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen w-screen">
+    <main className="w-screen" style={{ height: "calc(100vh - 1.75rem)" }}>
       <SplitLayout
         sessionIds={sessionIds}
         commands={commands}
