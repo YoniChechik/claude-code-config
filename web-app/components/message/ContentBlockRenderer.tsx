@@ -11,7 +11,6 @@ interface ContentBlockRendererProps {
 function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // If content is an array, it's handled by agent grouping - don't display it here
   if (Array.isArray(content)) {
     return null;
   }
@@ -19,7 +18,6 @@ function ToolResultBlock({ content }: { content: string | ContentBlock[] }) {
   const contentStr =
     typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
-  // Filter out internal system messages
   const trimmedContent = contentStr.trim();
   if (
     trimmedContent === "Structured output provided successfully" ||
@@ -59,7 +57,6 @@ export default function ContentBlockRenderer({
 }: ContentBlockRendererProps) {
   switch (block.type) {
     case "text": {
-      // Filter out internal system messages
       const trimmedText = block.text.trim();
       if (
         trimmedText === "Structured output provided successfully" ||
