@@ -1,7 +1,20 @@
 import type { NextConfig } from "next";
+import { execSync } from "child_process";
+
+const getBuildCommit = () => {
+  try {
+    return execSync("git rev-parse HEAD", {
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+};
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  env: {
+    BUILD_COMMIT: getBuildCommit(),
+  },
 };
 
 export default nextConfig;
