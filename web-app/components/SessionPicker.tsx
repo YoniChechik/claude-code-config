@@ -10,6 +10,8 @@ interface SessionMetadata {
   messageCount: number;
   lastMessagePreview: string;
   filePath: string;
+  isSymlinked?: boolean;
+  originalCwd?: string;
 }
 
 interface SessionPickerProps {
@@ -172,10 +174,20 @@ export default function SessionPicker({
                         <span className="font-mono text-sm font-semibold text-blue-400 truncate">
                           {session.cwd}
                         </span>
+                        {session.isSymlinked && session.originalCwd && (
+                          <span className="text-xs px-2 py-0.5 bg-purple-900 text-purple-200 rounded-full flex-shrink-0">
+                            from another directory
+                          </span>
+                        )}
                         <span className="text-xs text-gray-400 flex-shrink-0">
                           {_formatRelativeTime(session.lastActivityAt)}
                         </span>
                       </div>
+                      {session.isSymlinked && session.originalCwd && (
+                        <div className="text-xs text-purple-300 mb-1">
+                          Originally created in: {session.originalCwd}
+                        </div>
+                      )}
                       <div className="text-sm text-gray-300 mb-1">
                         {session.messageCount} messages
                       </div>

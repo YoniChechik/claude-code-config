@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { homedir } from "os";
+import { dirToClaudePath, resolveLinkPath } from "./symlink-manager";
 
 export interface SessionMetadata {
   id: string;
@@ -10,6 +11,8 @@ export interface SessionMetadata {
   messageCount: number;
   lastMessagePreview: string;
   filePath: string;
+  isSymlinked?: boolean;
+  originalCwd?: string;
 }
 
 interface SessionLine {
@@ -206,4 +209,72 @@ export function formatRelativeTime(timestamp: string): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return `${Math.floor(days / 7)}w ago`;
+}
+
+/**
+ * Find all sessions accessible from a specific directory
+ * This includes both sessions created in this directory and sessions
+ * symlinked from other directories via cd operations.
+ *
+ * @param cwd - The current working directory to search from
+ * @returns Array of session metadata for all accessible sessions
+ */
+export async function findSessionsByDirectory(
+  cwd: string,
+): Promise<SessionMetadata[]> {
+  const encoded = dirToClaudePath(cwd);
+  const dirPath = path.join(homedir(), ".claude", "projects", encoded);
+
+  try {
+    await fs.access(dirPath);
+  } catch {
+    return [];
+  }
+
+  const files = await fs.readdir(dirPath);
+  const sessionFiles = files.filter(
+    (file) => file.endsWith(".jsonl") && !file.includes("subagents"),
+  );
+
+  const metadataPromises = sessionFiles.map(async (file) => {
+    const filePath = path.join(dirPath, file);
+    const realPath = await resolveLinkPath(filePath);
+    const isSymlinked = realPath !== filePath;
+
+    const metadata = await _loadSessionMetadata(realPath);
+    if (!metadata) return null;
+
+    if (isSymlinked && metadata.cwd !== cwd) {
+      return {
+        ...metadata,
+        isSymlinked: true,
+        originalCwd: metadata.cwd,
+        filePath: realPath,
+      };
+    }
+
+    return metadata;
+  });
+
+  const results = await Promise.all(metadataPromises);
+  return results.filter((m): m is SessionMetadata => m !== null);
+}
+
+/**
+ * Check if a session file path is valid and accessible
+ * Handles both real files and symlinks, returning the resolved real path
+ *
+ * @param filePath - Path to check (may be a symlink)
+ * @returns The real file path if valid, null if broken or inaccessible
+ */
+export async function validateSessionPath(
+  filePath: string,
+): Promise<string | null> {
+  try {
+    const realPath = await resolveLinkPath(filePath);
+    await fs.access(realPath);
+    return realPath;
+  } catch {
+    return null;
+  }
 }
