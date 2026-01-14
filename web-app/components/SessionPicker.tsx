@@ -73,12 +73,23 @@ export default function SessionPicker({
     setLoading(true);
     setError(null);
 
-    const response = await fetch("/api/sessions/recent?limit=20");
-    const data = await response.json();
+    try {
+      const response = await fetch("/api/sessions/recent?limit=20");
 
-    setSessions(data.sessions);
-    setSelectedIndex(0);
-    setLoading(false);
+      if (!response.ok) {
+        throw new Error(`Failed to load sessions: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setSessions(data.sessions);
+      setSelectedIndex(0);
+    } catch (err) {
+      console.error("Error loading sessions:", err);
+      setError(err instanceof Error ? err.message : "Failed to load sessions");
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!isOpen) return null;

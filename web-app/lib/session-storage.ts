@@ -115,6 +115,15 @@ export async function loadSessionMessages(
 async function _discoverSessionFiles(): Promise<string[]> {
   const projectsDir = path.join(homedir(), ".claude", "projects");
   const sessionFiles: string[] = [];
+
+  try {
+    await fs.access(projectsDir);
+  } catch (error) {
+    throw new Error(
+      `Projects directory does not exist: ${projectsDir}. Error: ${error}`,
+    );
+  }
+
   const entries = await fs.readdir(projectsDir);
 
   for (const entry of entries) {
