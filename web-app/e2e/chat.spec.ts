@@ -257,4 +257,50 @@ test.describe("Chat Functionality", () => {
     ).length;
     expect(toolUseCount).toBeGreaterThan(0);
   });
+
+  test("should display timestamps next to tool names in ToolUseCard", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // Wait for the chat interface to load
+    await page.waitForSelector("textarea", {
+      timeout: 10000,
+    });
+
+    // Use the first chat pane
+    const leftPane = page.locator("main > div > div").first();
+    const chatInput = leftPane.locator("textarea").first();
+
+    // Send a message that triggers a tool call
+    await chatInput.fill("read the package.json file");
+    await chatInput.press("Enter");
+
+    // Wait for the input to be cleared
+    await expect(chatInput).toHaveValue("", { timeout: 3000 });
+
+    // Wait for Claude's response to start appearing
+    const claudeMessage = leftPane
+      .locator("div.bg-gray-800")
+      .filter({ has: page.locator("text=Claude") })
+      .last();
+    await expect(claudeMessage).toBeVisible({ timeout: 20000 });
+
+    // Wait for a tool use block to appear (like [Read])
+    const toolUseBlock = claudeMessage
+      .locator("div.border-l-4")
+      .filter({ hasText: "[Read]" })
+      .first();
+    await expect(toolUseBlock).toBeVisible({ timeout: 10000 });
+
+    // Verify that a timestamp in HH:MM:SS format appears next to the tool name
+    // The timestamp should match the pattern HH:MM:SS
+    const timestampRegex = /\d{2}:\d{2}:\d{2}/;
+    const toolBlockText = await toolUseBlock.textContent();
+    expect(toolBlockText).toMatch(timestampRegex);
+
+    // Verify the timestamp appears on the same line as the tool name
+    // The format should be like "[Read] HH:MM:SS"
+    expect(toolBlockText).toMatch(/\[Read\].*\d{2}:\d{2}:\d{2}/);
+  });
 });
