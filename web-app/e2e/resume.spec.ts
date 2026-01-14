@@ -263,4 +263,65 @@ test.describe("/resume command", () => {
       expect(isVisible).toBe(false);
     }
   });
+
+  test("should successfully resume a session when clicked and verify messages are loaded", async ({
+    page,
+  }) => {
+    // Type /resume command in the chat input
+    await page.fill("textarea", "/resume");
+
+    // Press Enter to open the session picker modal
+    await page.keyboard.press("Enter");
+
+    // Wait for the modal to appear
+    await page.waitForSelector('[data-testid="session-picker-modal"]', {
+      timeout: 5000,
+    });
+
+    // Wait for sessions to finish loading
+    await page
+      .waitForFunction(
+        () => {
+          const loadingText = document.querySelector("text=Loading sessions");
+          return (
+            !loadingText ||
+            !document.body.textContent?.includes("Loading sessions")
+          );
+        },
+        { timeout: 10000 },
+      )
+      .catch(() => {});
+
+    // Give a bit more time for session items to render
+    await page.waitForTimeout(500);
+
+    // Get all session items
+    const sessionItems = page.locator('[data-testid="session-item"]');
+    const count = await sessionItems.count();
+
+    // Only run the test if sessions exist
+    if (count > 0) {
+      // Click on the first session item to resume it
+      await sessionItems.first().click();
+
+      // Wait for modal to close after session selection
+      await page.waitForTimeout(500);
+      const modal = page.locator('[data-testid="session-picker-modal"]');
+      const isVisible = await modal.isVisible().catch(() => false);
+      expect(isVisible).toBe(false);
+
+      // Verify the session loaded by checking that chat messages appear
+      // Look for assistant messages with bg-gray-100 (light mode) or bg-gray-800 (dark mode)
+      const assistantMessages = page.locator(
+        "div.bg-gray-100, div.bg-gray-800",
+      );
+
+      // Wait for at least one message to be visible (indicates session loaded)
+      await expect(assistantMessages.first()).toBeVisible({ timeout: 10000 });
+
+      // Verify at least one message is present
+      const messageCount = await assistantMessages.count();
+      expect(messageCount).toBeGreaterThan(0);
+    }
+  });
 });
