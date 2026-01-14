@@ -144,8 +144,8 @@ export default function ChatPane({
       setStreamingText("");
       setStreamingBlocks([]);
 
-      // Trigger notifications if window is not focused
-      if (!isWindowFocused && session?.audioNotificationsEnabled) {
+      // Trigger notifications
+      if (session?.audioNotificationsEnabled) {
         playAudioNotification();
       }
       if (!isWindowFocused) {

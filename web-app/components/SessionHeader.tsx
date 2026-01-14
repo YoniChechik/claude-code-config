@@ -36,7 +36,7 @@ export default function SessionHeader({
   hostname,
   distroName,
   clientIp,
-  audioNotificationsEnabled = false,
+  audioNotificationsEnabled = true,
   onToggleAudioNotifications,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{

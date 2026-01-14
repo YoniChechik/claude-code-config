@@ -22,6 +22,7 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
+      audioNotificationsEnabled: true,
     };
 
     this.sessions.set(session.id, session);
@@ -72,6 +73,7 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
+      audioNotificationsEnabled: true,
     };
 
     this.sessions.set(session.id, session);
