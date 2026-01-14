@@ -75,9 +75,13 @@ test.describe("Notification Features", () => {
     await chatInput.fill("hi");
     await sendButton.click();
 
-    // Simulate window blur (losing focus)
+    // Simulate tab losing focus (hiding the page)
     await page.evaluate(() => {
-      window.dispatchEvent(new Event("blur"));
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
     });
 
     // Wait for response to complete
@@ -111,7 +115,11 @@ test.describe("Notification Features", () => {
 
     // Send a message while unfocused
     await page.evaluate(() => {
-      window.dispatchEvent(new Event("blur"));
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
     });
 
     await chatInput.fill("hi");
@@ -130,9 +138,13 @@ test.describe("Notification Features", () => {
     const modifiedTitle = await page.title();
     expect(modifiedTitle).toContain("Done");
 
-    // Simulate window focus
+    // Simulate tab regaining focus (showing the page)
     await page.evaluate(() => {
-      window.dispatchEvent(new Event("focus"));
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => false,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
     });
 
     // Wait for title to be restored
@@ -158,9 +170,13 @@ test.describe("Notification Features", () => {
     // Get original title
     const originalTitle = await page.title();
 
-    // Ensure window is focused
+    // Ensure page is visible
     await page.evaluate(() => {
-      window.dispatchEvent(new Event("focus"));
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => false,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
     });
 
     // Send a message while focused

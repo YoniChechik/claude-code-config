@@ -55,22 +55,23 @@ export default function ChatPane({
     }
   }, [isFocused]);
 
-  // Track window focus state
+  // Track window/tab focus state using Page Visibility API
   useEffect(() => {
-    const handleFocus = () => {
-      setIsWindowFocused(true);
-      clearTabNotification();
-    };
-    const handleBlur = () => {
-      setIsWindowFocused(false);
+    const handleVisibilityChange = () => {
+      const isVisible = !document.hidden;
+      setIsWindowFocused(isVisible);
+      if (isVisible) {
+        clearTabNotification();
+      }
     };
 
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("blur", handleBlur);
+    // Set initial state
+    setIsWindowFocused(!document.hidden);
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
