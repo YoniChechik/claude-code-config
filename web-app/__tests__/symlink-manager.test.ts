@@ -40,7 +40,7 @@ describe("symlink-manager", () => {
 
     it("should handle special characters", () => {
       expect(dirToClaudePath("/tmp/test@#$%^&*()")).toBe(
-        "-tmp-test----------",
+        "-tmp-test---------",
       );
     });
 

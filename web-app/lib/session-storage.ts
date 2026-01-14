@@ -1,7 +1,12 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { homedir } from "os";
+import { homedir as osHomedir } from "os";
 import { dirToClaudePath, resolveLinkPath } from "./symlink-manager";
+
+// Get home directory, respecting process.env.HOME for testing
+function homedir(): string {
+  return process.env.HOME || osHomedir();
+}
 
 export interface SessionMetadata {
   id: string;
@@ -150,54 +155,60 @@ async function _discoverSessionFiles(): Promise<string[]> {
 async function _loadSessionMetadata(
   filePath: string,
 ): Promise<SessionMetadata | null> {
-  const content = await fs.readFile(filePath, "utf-8");
-  const lines = content
-    .trim()
-    .split("\n")
-    .filter((line) => line.trim());
+  try {
+    const content = await fs.readFile(filePath, "utf-8");
+    const lines = content
+      .trim()
+      .split("\n")
+      .filter((line) => line.trim());
 
-  if (lines.length === 0) {
+    if (lines.length === 0) {
+      return null;
+    }
+
+    const firstLine: SessionLine = JSON.parse(lines[0]);
+    const sessionId = firstLine.sessionId!;
+    const createdAt = firstLine.timestamp!;
+    const cwd = firstLine.cwd!;
+
+    const lastLine: SessionLine = JSON.parse(lines[lines.length - 1]);
+    const lastActivityAt = lastLine.timestamp!;
+
+    const messageCount = lines.length;
+
+    let lastMessagePreview = "";
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line: SessionLine = JSON.parse(lines[i]);
+      if (line.type === "user" && line.message) {
+        const content = line.message.content;
+        if (typeof content === "string") {
+          lastMessagePreview = content;
+        } else if (Array.isArray(content)) {
+          const textBlock = content.find((block) => block.type === "text");
+          if (textBlock && "text" in textBlock) {
+            lastMessagePreview = textBlock.text as string;
+          }
+        }
+        break;
+      }
+    }
+
+    if (lastMessagePreview.length > 50) {
+      lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
+    }
+
+    return {
+      id: sessionId,
+      cwd,
+      createdAt,
+      lastActivityAt,
+      messageCount,
+      lastMessagePreview,
+      filePath,
+    };
+  } catch (error) {
     return null;
   }
-
-  const firstLine: SessionLine = JSON.parse(lines[0]);
-  const sessionId = firstLine.sessionId!;
-  const createdAt = firstLine.timestamp!;
-  const cwd = firstLine.cwd!;
-
-  const lastLine: SessionLine = JSON.parse(lines[lines.length - 1]);
-  const lastActivityAt = lastLine.timestamp!;
-
-  const messageCount = lines.length;
-
-  let lastMessagePreview = "";
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line: SessionLine = JSON.parse(lines[i]);
-    if (line.type === "user" && line.message) {
-      const content = line.message.content;
-      if (typeof content === "string") {
-        lastMessagePreview = content;
-      } else if (Array.isArray(content)) {
-        const textBlock = content.find((block) => block.type === "text");
-        lastMessagePreview = textBlock!.text!;
-      }
-      break;
-    }
-  }
-
-  if (lastMessagePreview.length > 50) {
-    lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
-  }
-
-  return {
-    id: sessionId,
-    cwd,
-    createdAt,
-    lastActivityAt,
-    messageCount,
-    lastMessagePreview,
-    filePath,
-  };
 }
 
 export function formatRelativeTime(timestamp: string): string {
