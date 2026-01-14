@@ -58,7 +58,18 @@ test.describe("Chat Scroll Behavior", () => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 
-    // Send a message that will generate a long response
+    // Build up message history first to ensure scrollable content
+    for (let i = 0; i < 3; i++) {
+      await chatInput.fill(`Message ${i + 1}: Tell me something interesting`);
+      await chatInput.press("Enter");
+      await expect(chatInput).toHaveValue("", { timeout: 10000 });
+      // Wait for streaming to complete (streaming message box disappears)
+      await page.waitForTimeout(1000);
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await page.waitForTimeout(1000);
+    }
+
+    // Now send the final message that we'll test with
     await chatInput.fill("Write a long detailed explanation about computers");
     await chatInput.press("Enter");
 
@@ -71,7 +82,7 @@ test.describe("Chat Scroll Behavior", () => {
     // Get the messages container
     const messagesContainer = leftPane.locator("div.overflow-y-auto").first();
 
-    // Wait for some content to accumulate
+    // Wait for content to accumulate
     await page.waitForTimeout(2000);
 
     // Scroll up by 300 pixels
@@ -113,6 +124,17 @@ test.describe("Chat Scroll Behavior", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
+
+    // Build up message history first to ensure scrollable content
+    for (let i = 0; i < 3; i++) {
+      await chatInput.fill(`Message ${i + 1}: Tell me something interesting`);
+      await chatInput.press("Enter");
+      await expect(chatInput).toHaveValue("", { timeout: 10000 });
+      // Wait for streaming to complete (streaming message box disappears)
+      await page.waitForTimeout(1000);
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await page.waitForTimeout(1000);
+    }
 
     // Send a message that will generate a long response
     await chatInput.fill("Write a very long explanation about programming");
@@ -171,18 +193,21 @@ test.describe("Chat Scroll Behavior", () => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 
-    // Send first message to create some history
-    await chatInput.fill("hello");
-    await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
+    // Build up message history to ensure scrollable content
+    for (let i = 0; i < 4; i++) {
+      await chatInput.fill(`Message ${i + 1}: Tell me something`);
+      await chatInput.press("Enter");
+      await expect(chatInput).toHaveValue("", { timeout: 10000 });
+      // Wait for streaming to complete (streaming message box disappears)
+      await page.waitForTimeout(1000);
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await page.waitForTimeout(1000);
+    }
 
-    // Wait for response to complete
-    await page.waitForTimeout(3000);
-
-    // Send second message
+    // Send message we'll test with
     await chatInput.fill("tell me more");
     await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
+    await expect(chatInput).toHaveValue("", { timeout: 5000 });
 
     // Wait a bit for content
     await page.waitForTimeout(1000);

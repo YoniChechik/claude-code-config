@@ -24,9 +24,9 @@ export default function ChatMessages({
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const shouldAutoScrollRef = useRef(true);
 
-  // Track scroll position to detect when user scrolls back to bottom
+  // Check if we're at the bottom before content updates
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -35,25 +35,34 @@ export default function ChatMessages({
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-      // If user scrolls back to bottom (within 100px), resume auto-scroll
-      if (distanceFromBottom <= 100) {
-        setShouldAutoScroll(true);
-      } else {
-        // User scrolled up, stop auto-scroll
-        setShouldAutoScroll(false);
-      }
+      // Update auto-scroll based on current position (synchronous via ref)
+      // If we're near bottom, enable auto-scroll. Otherwise disable it.
+      shouldAutoScrollRef.current = distanceFromBottom <= 100;
     };
 
-    container.addEventListener("scroll", handleScroll);
+    container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
   }, []);
 
   // Auto-scroll to bottom only if shouldAutoScroll is true
   useEffect(() => {
-    if (shouldAutoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, streamingText, streamingBlocks, shouldAutoScroll]);
+    // Use requestAnimationFrame to check flag after DOM updates and scroll events
+    let rafId: number;
+    const timeoutId = setTimeout(() => {
+      rafId = requestAnimationFrame(() => {
+        if (shouldAutoScrollRef.current) {
+          messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+        }
+      });
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (rafId !== undefined) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [messages, streamingText, streamingBlocks]);
 
   // Filter out internal auto-continue messages
   const visibleMessages = messages.filter((msg) => !msg.isAutoContinueMessage);
