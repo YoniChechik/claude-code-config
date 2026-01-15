@@ -129,8 +129,7 @@ test.describe("Tab Close Cleanup", () => {
 
     // Send a message to start streaming
     await textarea.fill("Tell me a very long story");
-    const sendButton = page.locator("button:has-text('Send')").first();
-    await sendButton.click();
+    await textarea.press("Enter");
 
     // Wait for streaming to start
     await page.waitForTimeout(2000);

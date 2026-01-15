@@ -9,11 +9,9 @@ test.describe("Content Rendering", () => {
   test("should render text blocks without truncation", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message asking for a response
     await chatInput.fill("say hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for Claude's response
@@ -40,11 +38,9 @@ test.describe("Content Rendering", () => {
   test("should render thinking blocks correctly", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message that might trigger thinking
     await chatInput.fill("solve a complex problem");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for response to start
@@ -70,11 +66,9 @@ test.describe("Content Rendering", () => {
   test("should display tool use blocks correctly", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message that will trigger tool use
     await chatInput.fill("read the package.json file");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for tool use block to appear
@@ -96,11 +90,9 @@ test.describe("Content Rendering", () => {
   test("should display tool result blocks correctly", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message that will trigger tool use and return results
     await chatInput.fill("read the package.json file");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for tool result to appear (bg-gray-800 with actual content)
@@ -122,11 +114,9 @@ test.describe("Content Rendering", () => {
   test("should handle tool result expand/collapse", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message that will return tool results
     await chatInput.fill("read package.json");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for response to complete
@@ -171,11 +161,9 @@ test.describe("Content Rendering", () => {
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for response
@@ -204,11 +192,9 @@ test.describe("Content Rendering", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send first message
     await chatInput.fill("first");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for first response
@@ -216,7 +202,7 @@ test.describe("Content Rendering", () => {
 
     // Send second message
     await chatInput.fill("second");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for second response
@@ -248,11 +234,9 @@ test.describe("Content Rendering", () => {
   test("should render content blocks in correct order", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send message that will trigger tool use
     await chatInput.fill("use glob to search for **/*.json files");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for response to complete
@@ -279,11 +263,9 @@ test.describe("Content Rendering", () => {
   test("should handle streaming text without data loss", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message
     await chatInput.fill("tell me a fact");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for streaming to start

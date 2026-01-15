@@ -69,11 +69,9 @@ test.describe("Notification Features", () => {
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Simulate tab losing focus (hiding the page)
     await page.evaluate(() => {
@@ -108,7 +106,6 @@ test.describe("Notification Features", () => {
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Get original title
     const originalTitle = await page.title();
@@ -123,7 +120,7 @@ test.describe("Notification Features", () => {
     });
 
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for response to complete
     const claudeMessage = leftPane
@@ -165,7 +162,6 @@ test.describe("Notification Features", () => {
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Get original title
     const originalTitle = await page.title();
@@ -181,7 +177,7 @@ test.describe("Notification Features", () => {
 
     // Send a message while focused
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for response to complete
     const claudeMessage = leftPane

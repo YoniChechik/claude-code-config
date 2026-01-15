@@ -11,11 +11,9 @@ test.describe("Progress Indicator", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for input to clear
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -41,11 +39,9 @@ test.describe("Progress Indicator", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a short message
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
@@ -78,11 +74,9 @@ test.describe("Progress Indicator", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send first message
     await chatInput.fill("first message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Verify first streaming message has animation
@@ -100,7 +94,7 @@ test.describe("Progress Indicator", () => {
 
     // Send second message
     await chatInput.fill("second message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Verify second streaming message has animation
@@ -120,11 +114,9 @@ test.describe("Progress Indicator", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
-
     // Send a message
     await chatInput.fill("test message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Find streaming message

@@ -11,12 +11,11 @@ test.describe("Features Integration", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message
     await chatInput.fill("hello world");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for streaming to start
@@ -42,12 +41,11 @@ test.describe("Features Integration", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a short message
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Verify both appear
@@ -71,12 +69,11 @@ test.describe("Features Integration", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message
     await chatInput.fill("tell me something long");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for both to appear
@@ -101,12 +98,11 @@ test.describe("Features Integration", () => {
   test("should handle multiple rapid messages with stops", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // First message
     await chatInput.fill("first");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
     await expect(stopButton).toBeVisible({ timeout: 2000 });
     await page.waitForTimeout(500);
@@ -115,7 +111,7 @@ test.describe("Features Integration", () => {
 
     // Second message immediately after
     await chatInput.fill("second");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
     await expect(stopButton).toBeVisible({ timeout: 2000 });
     await page.waitForTimeout(500);
@@ -124,7 +120,7 @@ test.describe("Features Integration", () => {
 
     // Third message
     await chatInput.fill("third");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
     await expect(stopButton).toBeVisible({ timeout: 2000 });
 
@@ -141,12 +137,11 @@ test.describe("Features Integration", () => {
   test("should stop during text content streaming", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send message that will stream text
     await chatInput.fill("tell me a story");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for streaming to start
@@ -175,12 +170,11 @@ test.describe("Features Integration", () => {
   test("should stop during tool use blocks", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send message that triggers tools
     await chatInput.fill("search for **/*.md files");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for streaming and stop button
@@ -201,12 +195,11 @@ test.describe("Features Integration", () => {
   test("should stop during thinking blocks", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send message that might trigger thinking
     await chatInput.fill("solve this complex problem: what is the meaning of life");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for streaming
@@ -231,12 +224,11 @@ test.describe("Features Integration", () => {
   test("should maintain all content rendering after stop", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send first message and let it complete
     await chatInput.fill("first complete message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
     await page.waitForTimeout(5000);
 
@@ -250,7 +242,7 @@ test.describe("Features Integration", () => {
 
     // Send second message and stop it
     await chatInput.fill("second stopped message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
     await expect(stopButton).toBeVisible({ timeout: 2000 });
     await page.waitForTimeout(1000);
@@ -268,7 +260,6 @@ test.describe("Features Integration", () => {
   test("should handle stop with no partial content loss", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send multiple messages, stopping some
@@ -276,7 +267,7 @@ test.describe("Features Integration", () => {
 
     for (let i = 0; i < messages.length; i++) {
       await chatInput.fill(messages[i]);
-      await sendButton.click();
+      await chatInput.press("Enter");
       await expect(chatInput).toHaveValue("", { timeout: 3000 });
       await expect(stopButton).toBeVisible({ timeout: 2000 });
 
@@ -306,11 +297,10 @@ test.describe("Features Integration", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Test basic chat flow (regression test)
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // User message should appear
@@ -332,7 +322,7 @@ test.describe("Features Integration", () => {
 
     // Should be able to send another message
     await chatInput.fill("second message");
-    await expect(sendButton).not.toBeDisabled();
+    await expect(chatInput).not.toBeDisabled();
   });
 
   test("should handle progress and stop with tool causal ordering", async ({
@@ -340,12 +330,11 @@ test.describe("Features Integration", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send message that triggers multiple tool calls
     await chatInput.fill("use glob to search for these: **/*.ts, **/*.json");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Verify streaming starts with progress indicator
@@ -373,6 +362,6 @@ test.describe("Features Integration", () => {
 
     // Can send new message
     await chatInput.fill("new message after tool stop");
-    await expect(sendButton).not.toBeDisabled();
+    await expect(chatInput).not.toBeDisabled();
   });
 });

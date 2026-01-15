@@ -9,7 +9,6 @@ test.describe("Stop Button Functionality", () => {
   test("should show stop button when message is sent", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Verify stop button is not visible initially
     const stopButton = leftPane.locator("button:has-text('Stop')");
@@ -17,7 +16,7 @@ test.describe("Stop Button Functionality", () => {
 
     // Send a message
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for input to clear
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -33,12 +32,11 @@ test.describe("Stop Button Functionality", () => {
   test("should hide stop button when streaming completes", async ({ page }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a short message
     await chatInput.fill("hi");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Stop button should appear
@@ -63,12 +61,11 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message that would normally take time to respond
     await chatInput.fill("tell me a long story");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for stop button to appear
@@ -95,12 +92,11 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for stop button
@@ -118,8 +114,8 @@ test.describe("Stop Button Functionality", () => {
     // Verify text was entered
     await expect(chatInput).toHaveValue("new message");
 
-    // Send button should be enabled
-    await expect(sendButton).not.toBeDisabled();
+    // Input should be enabled
+    await expect(chatInput).not.toBeDisabled();
   });
 
   test("should allow sending new message after cancellation", async ({
@@ -127,12 +123,11 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send first message
     await chatInput.fill("first message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for stop button and click it
@@ -145,7 +140,7 @@ test.describe("Stop Button Functionality", () => {
 
     // Send a new message
     await chatInput.fill("second message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // New streaming should start (stop button appears again)
@@ -163,12 +158,11 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message
     await chatInput.fill("test message");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for stop button
@@ -196,12 +190,11 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message that will trigger tool calls
     await chatInput.fill("search for files matching **/*.ts");
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Wait for stop button
@@ -232,13 +225,12 @@ test.describe("Stop Button Functionality", () => {
   }) => {
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
     const stopButton = leftPane.locator("button:has-text('Stop')");
 
     // Send a message
     const testMessage = "keep this message";
     await chatInput.fill(testMessage);
-    await sendButton.click();
+    await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
     // Verify user message is visible

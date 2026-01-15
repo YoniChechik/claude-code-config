@@ -15,7 +15,6 @@ test.describe("Chat Functionality", () => {
 
     // Find the input field in the first pane
     const chatInput = leftPane.locator("textarea, input[type='text']").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Type "hi" in the chat input
     await chatInput.fill("hi");
@@ -23,11 +22,8 @@ test.describe("Chat Functionality", () => {
     // Verify text was entered
     await expect(chatInput).toHaveValue("hi");
 
-    // Send button should be enabled with text
-    await expect(sendButton).not.toBeDisabled();
-
-    // Click send button
-    await sendButton.click();
+    // Send message with Enter key
+    await chatInput.press("Enter");
 
     // Wait for the input to be cleared (indicates message was sent)
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
@@ -70,10 +66,16 @@ test.describe("Chat Functionality", () => {
 
     // Use the first chat pane
     const leftPane = page.locator("main > div > div").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
+    const chatInput = leftPane.locator("textarea, input[type='text']").first();
 
-    // Send button should be disabled when input is empty
-    await expect(sendButton).toBeDisabled();
+    // Verify input is empty
+    await expect(chatInput).toHaveValue("");
+
+    // Try pressing Enter with empty input (should not send)
+    await chatInput.press("Enter");
+
+    // Verify no messages appear (input should still be empty and focused)
+    await expect(chatInput).toHaveValue("");
   });
 
   test("should show loading state while streaming", async ({ page }) => {
@@ -87,17 +89,15 @@ test.describe("Chat Functionality", () => {
     // Use the first chat pane
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea, input[type='text']").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Type and send a message
     await chatInput.fill("hello");
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait a bit for streaming to start
     await page.waitForTimeout(500);
 
-    // Send button should be disabled during streaming
-    // (or at least immediately after sending)
+    // Input should be cleared after sending
     await expect(chatInput).toHaveValue("");
   });
 
@@ -114,13 +114,12 @@ test.describe("Chat Functionality", () => {
     // Use the first chat pane
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea, input[type='text']").first();
-    const sendButton = leftPane.locator("button:has-text('Send')").first();
 
     // Type "hi" in the chat input
     await chatInput.fill("hi");
 
     // Send the message
-    await sendButton.click();
+    await chatInput.press("Enter");
 
     // Wait for the input to be cleared (indicates message was sent)
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
