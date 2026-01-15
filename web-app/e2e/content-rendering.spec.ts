@@ -193,8 +193,7 @@ test.describe("Content Rendering", () => {
     const relevantErrors = consoleErrors.filter(
       (err) =>
         !err.includes("Failed to load resource") &&
-        !err.includes("net::ERR_") &&
-        !err.includes("favicon"),
+        !err.includes("net::ERR_"),
     );
 
     expect(relevantErrors.length).toBe(0);
