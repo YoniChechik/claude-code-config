@@ -17,7 +17,6 @@ interface ChatPaneProps {
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
-  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
@@ -28,7 +27,6 @@ export default function ChatPane({
   commands,
   onClose,
   isFocused = false,
-  onResumeSession,
 }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -375,7 +373,6 @@ export default function ChatPane({
             disabled={false}
             isStreaming={isStreaming}
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
-            onResumeSession={onResumeSession}
             cancelStreamRef={cancelStreamRef}
           />
         </div>

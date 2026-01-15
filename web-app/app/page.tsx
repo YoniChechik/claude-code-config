@@ -176,24 +176,6 @@ export default function Home() {
     }
   };
 
-  const resumeSession = async (
-    sessionId: string,
-    filePath: string,
-    cwd: string,
-  ) => {
-    const response = await fetch("/api/sessions/resume", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, filePath, cwd }),
-    });
-
-    const data = await response.json();
-
-    if (data.session) {
-      setSessionIds([data.session.id]);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
@@ -234,7 +216,6 @@ export default function Home() {
         commands={commands}
         onAddSession={addSession}
         onCloseSession={closeSession}
-        onResumeSession={resumeSession}
       />
     </main>
   );

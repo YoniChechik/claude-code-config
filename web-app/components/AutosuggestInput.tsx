@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import type { SlashCommand } from "@/lib/types";
 import type { MutableRefObject } from "react";
 import { fuzzyMatchCommands } from "@/lib/autosuggest-client";
-import SessionPicker from "./SessionPicker";
 import StopButton from "./StopButton";
 
 interface AutosuggestInputProps {
@@ -16,7 +15,6 @@ interface AutosuggestInputProps {
   disabled?: boolean;
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
-  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
   cancelStreamRef?: MutableRefObject<(() => void) | undefined>;
 }
 
@@ -29,14 +27,12 @@ export default function AutosuggestInput({
   disabled = false,
   isStreaming = false,
   onFocusRef,
-  onResumeSession,
   cancelStreamRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isFlashing, setIsFlashing] = useState(false);
-  const [showResumePicker, setShowResumePicker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selectedItemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -66,16 +62,6 @@ export default function AutosuggestInput({
 
   const handleChange = (newValue: string) => {
     onChange(newValue);
-
-    const trimmed = newValue.trim();
-    if (trimmed === "/resume") {
-      if (onResumeSession) {
-        setShowResumePicker(true);
-        setSuggestMode(false);
-        setMatches([]);
-      }
-      return;
-    }
 
     const lastSlashIndex = newValue.lastIndexOf("/");
     if (lastSlashIndex >= 0) {
@@ -125,23 +111,6 @@ export default function AutosuggestInput({
         onSubmit();
       }
     }
-  };
-
-  const handleResumeSelect = (
-    sessionId: string,
-    filePath: string,
-    cwd: string,
-  ) => {
-    setShowResumePicker(false);
-    onChange("");
-    if (onResumeSession) {
-      onResumeSession(sessionId, filePath, cwd);
-    }
-  };
-
-  const handleResumeCancel = () => {
-    setShowResumePicker(false);
-    onChange("");
   };
 
   const _acceptSuggestion = () => {
@@ -234,12 +203,6 @@ export default function AutosuggestInput({
             ))}
           </div>
         )}
-
-        <SessionPicker
-          isOpen={showResumePicker}
-          onSelect={handleResumeSelect}
-          onCancel={handleResumeCancel}
-        />
       </div>
 
       {isStreaming && <StopButton onClick={handleStop} />}

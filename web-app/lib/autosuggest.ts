@@ -23,7 +23,6 @@ const BUILTIN_COMMANDS = [
   "memory",
   "model",
   "permissions",
-  "resume",
   "review",
   "status",
   "terminal-setup",

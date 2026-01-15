@@ -9,7 +9,6 @@ interface SplitLayoutProps {
   commands: SlashCommand[];
   onAddSession: () => void;
   onCloseSession: (sessionId: string) => void;
-  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
@@ -20,7 +19,6 @@ export default function SplitLayout({
   commands,
   onAddSession,
   onCloseSession,
-  onResumeSession,
 }: SplitLayoutProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -135,7 +133,6 @@ export default function SplitLayout({
               commands={commands}
               onClose={() => onCloseSession(sessionId)}
               isFocused={index === focusedPaneIndex}
-              onResumeSession={onResumeSession}
             />
           </div>
 
