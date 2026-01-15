@@ -11,6 +11,15 @@ test.describe("Chat Scroll Behavior", () => {
   test("should auto-scroll to bottom as new streaming data arrives by default", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Short test response for scroll testing"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 
@@ -55,6 +64,17 @@ test.describe("Chat Scroll Behavior", () => {
   test("should stop auto-scrolling when user scrolls up during streaming", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 
@@ -122,6 +142,17 @@ test.describe("Chat Scroll Behavior", () => {
   test("should resume auto-scrolling when user scrolls back to bottom", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 
@@ -190,6 +221,17 @@ test.describe("Chat Scroll Behavior", () => {
   test("should maintain scroll position on new message arrival when scrolled up", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
 

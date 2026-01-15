@@ -9,6 +9,15 @@ test.describe("Progress Indicator", () => {
   test("should show progress indicator animation during streaming", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Quick response"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message
@@ -37,6 +46,15 @@ test.describe("Progress Indicator", () => {
   test("should hide progress indicator when streaming completes", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Short response"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a short message
@@ -72,6 +90,17 @@ test.describe("Progress Indicator", () => {
   test("should show progress indicator for multiple messages", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send first message
@@ -112,6 +141,15 @@ test.describe("Progress Indicator", () => {
   test("should maintain message readability during animation", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Readable content"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message

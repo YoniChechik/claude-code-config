@@ -2,6 +2,15 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Chat Functionality", () => {
   test("should send a message and receive a response", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Hello! This is a mocked response."}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     // Navigate to the app
     await page.goto("/");
 
@@ -104,6 +113,15 @@ test.describe("Chat Functionality", () => {
   test("should display timestamps next to tool names in ToolUseCard", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response with tool use
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"{\\"name\\":\\"test\\"}"}\n\ndata: {"type":"text","text":"Here is the package.json content"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load

@@ -7,6 +7,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render text blocks without truncation", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Hello! This is a test response."}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message asking for a response
@@ -36,6 +45,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render thinking blocks correctly", async ({ page }) => {
+    // Mock Claude API with thinking block
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"thinking","text":"Let me think about this..."}\n\ndata: {"type":"text","text":"Here is the solution"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that might trigger thinking
@@ -64,6 +82,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should display tool use blocks correctly", async ({ page }) => {
+    // Mock Claude API with tool use
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"{\\"name\\":\\"test\\"}"}\n\ndata: {"type":"text","text":"Here is the content"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will trigger tool use
@@ -88,6 +115,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should display tool result blocks correctly", async ({ page }) => {
+    // Mock Claude API with tool use and results
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"{\\"name\\":\\"test-package\\"}"}\n\ndata: {"type":"text","text":"The file contains package info"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will trigger tool use and return results
@@ -112,6 +148,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle tool result expand/collapse", async ({ page }) => {
+    // Mock Claude API with tool use and results
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"Large result content that might be collapsible"}\n\ndata: {"type":"text","text":"Done"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will return tool results
@@ -150,6 +195,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should not have console errors during rendering", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Hello there!"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const consoleErrors: string[] = [];
 
     // Listen for console errors
@@ -190,6 +244,17 @@ test.describe("Content Rendering", () => {
   test("should display all messages without missing content", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send first message
@@ -232,6 +297,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render content blocks in correct order", async ({ page }) => {
+    // Mock Claude API with Glob tool use
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*.json"}}\n\ndata: {"type":"tool_result","content":"file1.json\\nfile2.json"}\n\ndata: {"type":"text","text":"Found JSON files"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send message that will trigger tool use
@@ -261,6 +335,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle streaming text without data loss", async ({ page }) => {
+    // Mock Claude API with streaming response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Here is an interesting fact about streaming!"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message
@@ -313,6 +396,15 @@ test.describe("Content Rendering", () => {
   test("messages should persist after sending and not disappear", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"text","text":"Hello! Message persistence test."}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load
@@ -364,6 +456,15 @@ test.describe("Content Rendering", () => {
   test("tool calls and results should maintain causal ordering", async ({
     page,
   }) => {
+    // Mock Claude API with multiple tool uses in causal order
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent1*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent2*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent3*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"text","text":"Search complete"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load
