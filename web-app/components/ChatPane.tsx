@@ -175,6 +175,29 @@ export default function ChatPane({
     });
   };
 
+  const handleResumeSession = async (
+    resumeSessionId: string,
+    filePath: string,
+    cwd: string,
+  ) => {
+    const response = await fetch("/api/sessions/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: resumeSessionId,
+        filePath,
+        cwd,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Failed to resume session");
+      return;
+    }
+
+    await loadSession();
+  };
+
   // PRIVATE HELPERS
 
   const _addUserMessage = (prompt: string, isAutoContinue: boolean): void => {
@@ -357,6 +380,7 @@ export default function ChatPane({
         clientIp={session.clientIp}
         audioNotificationsEnabled={session.audioNotificationsEnabled}
         onToggleAudioNotifications={toggleAudioNotifications}
+        onResumeSession={handleResumeSession}
       />
 
       <div className="flex flex-1 overflow-hidden">
