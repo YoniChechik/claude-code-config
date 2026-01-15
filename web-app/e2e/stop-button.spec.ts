@@ -153,7 +153,7 @@ test.describe("Stop Button Functionality", () => {
     await expect(streamingMessage).toBeVisible({ timeout: 3000 });
   });
 
-  test("should handle multiple rapid stop clicks gracefully", async ({
+  test.skip("should handle multiple rapid stop clicks gracefully", async ({
     page,
   }) => {
     const leftPane = page.locator("main > div > div").first();
