@@ -286,14 +286,19 @@ export class ClaudeClient {
               }
             }
 
+            // Handle stream_event wrapper (CLI sends wrapped events)
+            // Extract inner event if present
+            const innerEvent =
+              event.type === "stream_event" ? event.event : event;
+
             // Handle thinking content
             if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "thinking_delta"
+              innerEvent.type === "content_block_delta" &&
+              innerEvent.delta?.type === "thinking_delta"
             ) {
               eventQueue.push({
                 type: "thinking",
-                content: event.delta.thinking,
+                content: innerEvent.delta.thinking,
               });
               resolveNext?.();
               resolveNext = null;
@@ -301,12 +306,12 @@ export class ClaudeClient {
 
             // Handle text_delta content for partial messages
             if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "text_delta"
+              innerEvent.type === "content_block_delta" &&
+              innerEvent.delta?.type === "text_delta"
             ) {
               eventQueue.push({
                 type: "text",
-                content: event.delta.text,
+                content: innerEvent.delta.text,
               });
               resolveNext?.();
               resolveNext = null;
