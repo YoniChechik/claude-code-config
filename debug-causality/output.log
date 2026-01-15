@@ -1,0 +1,33 @@
+[2026-01-15T09:09:01.060Z] START: Spawning claude CLI with subagent that sleeps 10 seconds
+[2026-01-15T09:09:05.631Z] EVENT: Task tool_use: {
+  "id": "toolu_013nny7FQeMirLvKfQ99i9TH",
+  "description": "Sleep 10 seconds and print"
+}
+[2026-01-15T09:09:08.402Z] EVENT: Bash tool_use (inside agent): {
+  "id": "toolu_01PGbfupN7TTCo1yqKmzffLv",
+  "command": "sleep 10 && echo \"done\""
+}
+[2026-01-15T09:09:18.473Z] EVENT: tool_result: {
+  "tool_use_id": "toolu_01PGbfupN7TTCo1yqKmzffLv",
+  "preview": "done"
+}
+[2026-01-15T09:09:20.548Z] EVENT: tool_result: {
+  "tool_use_id": "toolu_013nny7FQeMirLvKfQ99i9TH",
+  "preview": "[{\"type\":\"text\",\"text\":\"Command completed successfully. After waiting 10 seconds, it printed \\\"done\\"
+}
+[2026-01-15T09:09:20.548Z] 🔴 AGENT COMPLETION (reports done): {
+  "tool_use_id": "toolu_013nny7FQeMirLvKfQ99i9TH"
+}
+[2026-01-15T09:09:22.499Z] EVENT: Final result
+[2026-01-15T09:09:23.071Z] CLOSE: claude exited with code 0
+[2026-01-15T09:09:23.071Z] 
+=== ANALYSIS ===
+[2026-01-15T09:09:23.071Z] Total events captured: 5
+[2026-01-15T09:09:23.071Z] 
+Event order:
+[2026-01-15T09:09:23.071Z] 1. Task tool_use at index: 0
+[2026-01-15T09:09:23.071Z] 2. Bash tool_use at index: 1
+[2026-01-15T09:09:23.071Z] 3. Bash tool_result at index: 2
+[2026-01-15T09:09:23.071Z] 4. Task tool_result at index: 3
+[2026-01-15T09:09:23.071Z] 
+✅ Correct: Bash output came before agent completion
