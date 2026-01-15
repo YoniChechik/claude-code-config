@@ -133,11 +133,21 @@ export default function AutosuggestInput({
 
   const suggestion = _getSuggestion();
 
+  const [isStopping, setIsStopping] = useState(false);
+
   const handleStop = () => {
+    if (isStopping) return;
     if (cancelStreamRef?.current) {
+      setIsStopping(true);
       cancelStreamRef.current();
     }
   };
+
+  useEffect(() => {
+    if (!isStreaming && isStopping) {
+      setIsStopping(false);
+    }
+  }, [isStreaming, isStopping]);
 
   return (
     <div className="relative flex-1 flex gap-3 items-end">
@@ -205,7 +215,7 @@ export default function AutosuggestInput({
         )}
       </div>
 
-      {isStreaming && <StopButton onClick={handleStop} />}
+      {isStreaming && <StopButton onClick={handleStop} disabled={isStopping} />}
     </div>
   );
 }

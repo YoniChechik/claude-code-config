@@ -104,7 +104,12 @@ export default function ChatPane({
 
     abortControllerRef.current = new AbortController();
     cancelStreamRef.current = () => {
-      abortControllerRef.current?.abort();
+      if (!abortControllerRef.current) return;
+
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
+
       setIsStreaming(false);
       setStreamingText("");
       setStreamingBlocks([]);
@@ -137,6 +142,9 @@ export default function ChatPane({
       setMessages((prev) => [...prev, assistantMessage]);
 
       await _updateSessionMetadata();
+
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
 
       setIsStreaming(false);
       setStreamingText("");
