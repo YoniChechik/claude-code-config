@@ -17,11 +17,27 @@ export default function ErrorModal({
 }: ErrorModalProps) {
   const [showStack, setShowStack] = useState(false);
   const [showComponentStack, setShowComponentStack] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   if (!isOpen) return null;
 
   const handleReload = () => {
     window.location.reload();
+  };
+
+  const handleCopyError = async () => {
+    const errorText = `Error Name: ${error.name || "Error"}
+Error Message: ${error.message || "An unknown error occurred"}
+
+Stack Trace:
+${error.stack || "No stack trace available"}
+
+Component Stack:
+${errorInfo?.componentStack || "No component stack available"}`;
+
+    await navigator.clipboard.writeText(errorText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -80,6 +96,13 @@ export default function ErrorModal({
           )}
 
           <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={handleCopyError}
+              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
+            >
+              {copied ? "Copied!" : "Copy Error"}
+            </button>
             <button
               type="button"
               onClick={onDismiss}
