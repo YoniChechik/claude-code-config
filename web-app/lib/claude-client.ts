@@ -146,8 +146,13 @@ export class ClaudeClient {
           if (!line.trim()) continue;
 
           try {
-            const event = JSON.parse(line);
-            _debugLog("RAW_JSON_LINE", event);
+            const rawEvent = JSON.parse(line);
+            _debugLog("RAW_JSON_LINE", rawEvent);
+
+            // Handle stream_event wrapper (CLI sends wrapped events)
+            // Extract inner event FIRST, before any type checks
+            const event =
+              rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
 
             // Handle init event to get model and session_id
             if (event.subtype === "init") {
@@ -292,19 +297,14 @@ export class ClaudeClient {
               }
             }
 
-            // Handle stream_event wrapper (CLI sends wrapped events)
-            // Extract inner event if present
-            const innerEvent =
-              event.type === "stream_event" ? event.event : event;
-
             // Handle thinking content
             if (
-              innerEvent.type === "content_block_delta" &&
-              innerEvent.delta?.type === "thinking_delta"
+              event.type === "content_block_delta" &&
+              event.delta?.type === "thinking_delta"
             ) {
               eventQueue.push({
                 type: "thinking",
-                content: innerEvent.delta.thinking,
+                content: event.delta.thinking,
               });
               resolveNext?.();
               resolveNext = null;
@@ -312,13 +312,13 @@ export class ClaudeClient {
 
             // Handle text_delta content for partial messages
             if (
-              innerEvent.type === "content_block_delta" &&
-              innerEvent.delta?.type === "text_delta"
+              event.type === "content_block_delta" &&
+              event.delta?.type === "text_delta"
             ) {
               hasReceivedTextDelta = true;
               eventQueue.push({
                 type: "text",
-                content: innerEvent.delta.text,
+                content: event.delta.text,
               });
               resolveNext?.();
               resolveNext = null;
@@ -404,7 +404,6 @@ export class ClaudeClient {
       while (!processEnded || eventQueue.length > 0) {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
-          console.log("[CLAUDE-CLIENT] Yielding event:", event.type);
           _debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
