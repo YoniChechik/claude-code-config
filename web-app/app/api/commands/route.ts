@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
           sessionId: claudeSessionId,
           appendSystemPrompt: systemPrompt,
           cwd: session.cwd,
+          includePartialMessages: session.includePartialMessages,
           onProcessSpawned: (process) => {
             // Register process for cleanup
             processRegistry.register(sessionId, process);
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
               sessionId: updatedSession.claudeSessionId,
               appendSystemPrompt: systemPrompt,
               cwd: updatedSession.cwd,
+              includePartialMessages: updatedSession.includePartialMessages,
               onProcessSpawned: (process) => {
                 // Register auto-continue process for cleanup
                 processRegistry.register(sessionId, process);

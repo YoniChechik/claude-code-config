@@ -175,6 +175,20 @@ export default function ChatPane({
     });
   };
 
+  const togglePartialMessages = async () => {
+    if (!session) return;
+
+    const newValue = !session.includePartialMessages;
+    setSession({ ...session, includePartialMessages: newValue });
+
+    // Persist to backend
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ includePartialMessages: newValue }),
+    });
+  };
+
   const handleResumeSession = async (
     resumeSessionId: string,
     filePath: string,
@@ -380,6 +394,8 @@ export default function ChatPane({
         clientIp={session.clientIp}
         audioNotificationsEnabled={session.audioNotificationsEnabled}
         onToggleAudioNotifications={toggleAudioNotifications}
+        includePartialMessages={session.includePartialMessages}
+        onTogglePartialMessages={togglePartialMessages}
       />
 
       <div className="flex flex-1 overflow-hidden">

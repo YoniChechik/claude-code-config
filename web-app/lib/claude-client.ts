@@ -62,7 +62,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string; onProcessSpawned?: (process: ChildProcess) => void },
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string; includePartialMessages?: boolean; onProcessSpawned?: (process: ChildProcess) => void },
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -109,6 +109,11 @@ export class ClaudeClient {
         const tempFile = `/tmp/ccweb_system_prompt_${Date.now()}.txt`;
         await fs.promises.writeFile(tempFile, options.appendSystemPrompt);
         args.push("--append-system-prompt", tempFile);
+      }
+
+      // Add includePartialMessages flag if enabled
+      if (options?.includePartialMessages) {
+        args.push("--include-partial-messages");
       }
 
       const claude = spawn("/home/ubuntu/.local/bin/claude", args, {
@@ -289,6 +294,19 @@ export class ClaudeClient {
               eventQueue.push({
                 type: "thinking",
                 content: event.delta.thinking,
+              });
+              resolveNext?.();
+              resolveNext = null;
+            }
+
+            // Handle text_delta content for partial messages
+            if (
+              event.type === "content_block_delta" &&
+              event.delta?.type === "text_delta"
+            ) {
+              eventQueue.push({
+                type: "text",
+                content: event.delta.text,
               });
               resolveNext?.();
               resolveNext = null;
