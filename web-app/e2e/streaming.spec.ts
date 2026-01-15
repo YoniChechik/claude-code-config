@@ -247,4 +247,58 @@ test.describe("Streaming Toggle Functionality", () => {
     expect(initialTitle).toMatch(/Enable|Disable/);
     expect(newTitle).toMatch(/Enable|Disable/);
   });
+
+  test("should not show duplicate text when streaming is enabled", async ({
+    page,
+  }) => {
+    const leftPane = page.locator("main > div > div").first();
+    const chatInput = leftPane.locator("textarea").first();
+    const streamingToggle = leftPane.locator(
+      'button[title*="streaming mode"]',
+    );
+
+    // Ensure streaming is enabled (⚡ icon)
+    const buttonText = await streamingToggle.textContent();
+    if (buttonText !== "⚡") {
+      await streamingToggle.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Send a message
+    await chatInput.fill("say hello");
+    await chatInput.press("Enter");
+    await expect(chatInput).toHaveValue("", { timeout: 3000 });
+
+    // Wait for Claude's response to start appearing
+    const claudeMessage = leftPane
+      .locator("div.bg-gray-800")
+      .filter({ has: page.locator("text=Claude") })
+      .last();
+    await expect(claudeMessage).toBeVisible({ timeout: 20000 });
+
+    // Get the content div that streams text
+    const contentDiv = claudeMessage.locator("div.whitespace-pre-wrap");
+    await expect(contentDiv).toBeVisible({ timeout: 5000 });
+
+    // Wait for streaming to complete
+    await page.waitForTimeout(3000);
+
+    // Get the final text
+    const finalText = await contentDiv.textContent();
+    expect(finalText).toBeTruthy();
+
+    // The text should not contain obvious duplicates
+    // For example, if the response is "Hello!" it should not be "Hello!Hello!"
+    const text = finalText!.trim();
+    const halfLength = Math.floor(text.length / 2);
+    const firstHalf = text.slice(0, halfLength);
+    const secondHalf = text.slice(halfLength);
+
+    // If text is duplicated exactly, both halves would be identical
+    // This is a simple check - if text is truly duplicated, this will catch it
+    if (text.length > 10) {
+      // Only check if response is reasonably long
+      expect(firstHalf).not.toBe(secondHalf);
+    }
+  });
 });

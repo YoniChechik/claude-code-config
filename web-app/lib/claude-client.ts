@@ -206,9 +206,11 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
+                  // Skip if includePartialMessages is enabled (text already sent via text_delta)
                   if (
                     block.name === "StructuredOutput" &&
-                    block.input?.response
+                    block.input?.response &&
+                    !options?.includePartialMessages
                   ) {
                     eventQueue.push({
                       type: "text",
