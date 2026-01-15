@@ -48,7 +48,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.reload();
+    await page.goto("http://localhost:6379");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Click the CWD button
@@ -114,7 +114,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.reload();
+    await page.goto("http://localhost:6379");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls
@@ -202,7 +202,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.reload();
+    await page.goto("http://localhost:6379");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Click the CWD button
@@ -267,7 +267,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.reload();
+    await page.goto("http://localhost:6379");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls
@@ -329,7 +329,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.reload();
+    await page.goto("http://localhost:6379");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls

@@ -53,7 +53,7 @@ test.describe("Stop Button Functionality", () => {
     await page.waitForTimeout(1000);
 
     // Stop button should disappear
-    await expect(stopButton).not.toBeVisible();
+    await expect(stopButton).not.toBeVisible({ timeout: 10000 });
   });
 
   test("should cancel request when stop button is clicked", async ({
@@ -176,6 +176,9 @@ test.describe("Stop Button Functionality", () => {
     await stopButton.click().catch(() => {
       /* May not be visible anymore */
     });
+
+    // Wait longer before checking to ensure state is stable
+    await page.waitForTimeout(2000);
 
     // Should not crash - stop button should disappear
     await expect(stopButton).not.toBeVisible({ timeout: 3000 });

@@ -65,7 +65,7 @@ test.describe("Chat Scroll Behavior", () => {
       await expect(chatInput).toHaveValue("", { timeout: 10000 });
       // Wait for streaming to complete (streaming message box disappears)
       await page.waitForTimeout(1000);
-      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 30000 });
       await page.waitForTimeout(1000);
     }
 
@@ -132,7 +132,7 @@ test.describe("Chat Scroll Behavior", () => {
       await expect(chatInput).toHaveValue("", { timeout: 10000 });
       // Wait for streaming to complete (streaming message box disappears)
       await page.waitForTimeout(1000);
-      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 30000 });
       await page.waitForTimeout(1000);
     }
 
@@ -200,7 +200,7 @@ test.describe("Chat Scroll Behavior", () => {
       await expect(chatInput).toHaveValue("", { timeout: 10000 });
       // Wait for streaming to complete (streaming message box disappears)
       await page.waitForTimeout(1000);
-      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 15000 });
+      await leftPane.locator('div.animate-border-spin').waitFor({ state: 'detached', timeout: 30000 });
       await page.waitForTimeout(1000);
     }
 

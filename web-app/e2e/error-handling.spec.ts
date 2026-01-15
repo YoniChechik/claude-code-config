@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Error Handling", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector("textarea", { timeout: 10000 });
   });
 
   test("should handle API errors gracefully when creating session", async ({
@@ -18,7 +18,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     const errorModal = page.locator('[role="dialog"]');
     await expect(errorModal).toBeVisible({ timeout: 5000 });
@@ -50,7 +50,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     const errorModal = page.locator('[role="dialog"]');
     await expect(errorModal).toBeVisible({ timeout: 5000 });
@@ -73,10 +73,10 @@ test.describe("Error Handling", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     const input = page.locator('textarea[placeholder*="Type a command"]');
     await expect(input).toBeVisible();
@@ -163,7 +163,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     const errorModal = page.locator('[role="dialog"]');
     await expect(errorModal).toBeVisible();
@@ -184,7 +184,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
 
     const errorModal = page.locator('[role="dialog"]');
     await expect(errorModal).toBeVisible();
@@ -203,7 +203,7 @@ test.describe("Error Handling", () => {
 test.describe("Network Failures", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector("textarea", { timeout: 10000 });
   });
 
   test("should handle complete network failure", async ({ page }) => {
