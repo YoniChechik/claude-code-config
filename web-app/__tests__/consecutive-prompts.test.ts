@@ -61,6 +61,68 @@ describe("ClaudeClient - Consecutive Prompts", () => {
     expect(textEvents[0].content).toBe("This is the second response");
   });
 
+  it("should stream text from input_json_delta for StructuredOutput on resumed sessions", async () => {
+    // Simulate resumed session: input_json_delta events instead of text_delta
+    const events: ClaudeStreamEvent[] = [];
+    const streamPromise = (async () => {
+      for await (const event of client.streamCommand("second prompt", {
+        includePartialMessages: true,
+        sessionId: "test-session-123"
+      })) {
+        events.push(event);
+      }
+    })();
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Send content_block_start for StructuredOutput tool
+    const blockStart = {
+      type: "stream_event",
+      event: {
+        type: "content_block_start",
+        content_block: {
+          type: "tool_use",
+          name: "StructuredOutput",
+          id: "tool_123"
+        }
+      }
+    };
+    mockProcess.emitData(JSON.stringify(blockStart) + "\n");
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Send input_json_delta events with partial JSON
+    const deltas = [
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '{"response":' } } },
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: ' "Hello ' } } },
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: 'World' } } },
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '!"}' } } },
+    ];
+
+    for (const delta of deltas) {
+      mockProcess.emitData(JSON.stringify(delta) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    // Send content_block_stop
+    const blockStop = {
+      type: "stream_event",
+      event: { type: "content_block_stop" }
+    };
+    mockProcess.emitData(JSON.stringify(blockStop) + "\n");
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    mockProcess.emitClose(0);
+    await streamPromise;
+
+    const textEvents = events.filter(e => e.type === "text");
+
+    // Should have multiple text events from parsing input_json_delta
+    expect(textEvents.length).toBeGreaterThan(0);
+    // Combined text should be "Hello World!"
+    const combinedText = textEvents.map(e => e.content).join("");
+    expect(combinedText).toBe("Hello World!");
+  });
+
   it("should NOT show StructuredOutput text when text_delta events ARE received", async () => {
     const events: ClaudeStreamEvent[] = [];
     const streamPromise = (async () => {

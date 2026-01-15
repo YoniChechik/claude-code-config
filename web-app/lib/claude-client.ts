@@ -83,6 +83,12 @@ export class ClaudeClient {
       const taskToolIds = new Set<string>(); // Track Task tool IDs (agents) - needed for agent-grouping later
       let hasReceivedTextDelta = false; // Track if any text_delta events were received
 
+      // Track StructuredOutput streaming state for input_json_delta parsing
+      let structuredOutputToolId: string | null = null; // Current StructuredOutput tool_use id
+      let structuredOutputJsonBuffer = ""; // Buffer for accumulating JSON
+      let structuredOutputEmittedLength = 0; // How much of response we've already emitted
+      let hasEmittedStreamingContent = false; // Track if ANY streaming content has been emitted
+
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
       let resolveNext: (() => void) | null = null;
@@ -179,10 +185,13 @@ export class ClaudeClient {
               event.content_block?.type === "tool_use"
             ) {
               const block = event.content_block;
-              if (
-                block.name !== "StructuredOutput" &&
-                !emittedToolUseIds.has(block.id)
-              ) {
+
+              // Track StructuredOutput for input_json_delta parsing
+              if (block.name === "StructuredOutput") {
+                structuredOutputToolId = block.id;
+                structuredOutputJsonBuffer = "";
+                structuredOutputEmittedLength = 0;
+              } else if (!emittedToolUseIds.has(block.id)) {
                 emittedToolUseIds.add(block.id);
                 // Track Task tools for agent-grouping
                 if (block.name === "Task") {
@@ -212,13 +221,13 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  // Skip if includePartialMessages is enabled AND text_delta events were received
-                  // If no text_delta events arrived, send StructuredOutput text as fallback
+                  // Skip if includePartialMessages is enabled AND streaming content was already emitted
+                  // If no streaming content was emitted, send StructuredOutput text as fallback
                   if (
                     block.name === "StructuredOutput" &&
                     block.input?.response
                   ) {
-                    const shouldSkip = options?.includePartialMessages && hasReceivedTextDelta;
+                    const shouldSkip = options?.includePartialMessages && hasEmittedStreamingContent;
                     if (!shouldSkip) {
                       eventQueue.push({
                         type: "text",
@@ -310,18 +319,67 @@ export class ClaudeClient {
               resolveNext = null;
             }
 
+            // Handle input_json_delta for StructuredOutput streaming
+            // This is the primary streaming mechanism for resumed sessions
+            // Skip if we already received text_delta events (to avoid duplicates)
+            if (
+              event.type === "content_block_delta" &&
+              event.delta?.type === "input_json_delta" &&
+              structuredOutputToolId !== null &&
+              options?.includePartialMessages &&
+              !hasReceivedTextDelta
+            ) {
+              structuredOutputJsonBuffer += event.delta.partial_json || "";
+
+              // Try to extract new text from the response field
+              // Look for "response": "..." pattern and extract incremental text
+              const responseMatch = structuredOutputJsonBuffer.match(
+                /"response"\s*:\s*"((?:[^"\\]|\\.)*)(")?/
+              );
+              if (responseMatch) {
+                // Unescape JSON string escapes
+                const currentText = responseMatch[1]
+                  .replace(/\\n/g, "\n")
+                  .replace(/\\r/g, "\r")
+                  .replace(/\\t/g, "\t")
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, "\\");
+
+                // Only emit new content
+                if (currentText.length > structuredOutputEmittedLength) {
+                  const newText = currentText.slice(structuredOutputEmittedLength);
+                  structuredOutputEmittedLength = currentText.length;
+                  hasEmittedStreamingContent = true;
+                  eventQueue.push({
+                    type: "text",
+                    content: newText,
+                  });
+                  resolveNext?.();
+                  resolveNext = null;
+                }
+              }
+            }
+
             // Handle text_delta content for partial messages
             if (
               event.type === "content_block_delta" &&
               event.delta?.type === "text_delta"
             ) {
               hasReceivedTextDelta = true;
+              hasEmittedStreamingContent = true;
               eventQueue.push({
                 type: "text",
                 content: event.delta.text,
               });
               resolveNext?.();
               resolveNext = null;
+            }
+
+            // Handle content_block_stop to reset StructuredOutput tracking
+            if (event.type === "content_block_stop") {
+              structuredOutputToolId = null;
+              structuredOutputJsonBuffer = "";
+              structuredOutputEmittedLength = 0;
             }
 
             // Handle result event
