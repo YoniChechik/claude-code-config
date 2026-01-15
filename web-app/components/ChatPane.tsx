@@ -134,6 +134,11 @@ export default function ChatPane({
       assistantText = streamResult.text;
       assistantBlocks = streamResult.blocks;
 
+      // Clear streaming state BEFORE adding final message to prevent flash
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamingBlocks([]);
+
       const assistantMessage: Message = {
         role: "assistant",
         content: assistantBlocks,
@@ -145,10 +150,6 @@ export default function ChatPane({
 
       abortControllerRef.current = null;
       cancelStreamRef.current = undefined;
-
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
 
       // Trigger notifications
       if (session?.audioNotificationsEnabled) {
