@@ -1,0 +1,78 @@
+[
+  {
+    "timestamp": "2026-01-15T09:07:16.792Z",
+    "elapsed_ms": 0,
+    "event_type": "init",
+    "content_preview": "{}"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:17.788Z",
+    "elapsed_ms": 996,
+    "event_type": "init",
+    "content_preview": "{}"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:29.319Z",
+    "elapsed_ms": 12527,
+    "event_type": "tool_use",
+    "tool_name": "Task",
+    "tool_id": "toolu_01NsVhWaXoyT1AWiynQmtcfp",
+    "content_preview": "{\"description\":\"Execute sleep and echo\",\"prompt\":\"Execute the following bash command: sleep 3 && ech"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:29.319Z",
+    "elapsed_ms": 12527,
+    "event_type": "tool_result",
+    "tool_id": "toolu_01NsVhWaXoyT1AWiynQmtcfp",
+    "content_preview": [
+      {
+        "type": "text",
+        "text": "The command completed successfully. It waited for 3 seconds and then printed \"done\"."
+      },
+      {
+        "type": "text",
+        "text": "agentId: a88b90c (for resuming to continue this agent's work if needed)"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-01-15T09:07:34.477Z",
+    "elapsed_ms": 17685,
+    "event_type": "text",
+    "content_preview": "The subagent completed successfully. The command waited for 3 seconds as instructed and then output "
+  },
+  {
+    "timestamp": "2026-01-15T09:07:34.495Z",
+    "elapsed_ms": 17703,
+    "event_type": "tool_use",
+    "tool_name": "Bash",
+    "tool_id": "toolu_01NRJ9usa2bWYEz9b2v9c4Bo",
+    "content_preview": "{\"command\":\"sleep 3 && echo done\",\"description\":\"Sleep for 3 seconds then print done\"}"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:34.495Z",
+    "elapsed_ms": 17703,
+    "event_type": "tool_result",
+    "tool_id": "toolu_01NRJ9usa2bWYEz9b2v9c4Bo",
+    "content_preview": "done"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:37.113Z",
+    "elapsed_ms": 20321,
+    "event_type": "result",
+    "content_preview": "{}"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:37.113Z",
+    "elapsed_ms": 20321,
+    "event_type": "structured_output",
+    "content_preview": "{}"
+  },
+  {
+    "timestamp": "2026-01-15T09:07:37.509Z",
+    "elapsed_ms": 20717,
+    "event_type": "tool_result",
+    "tool_id": "toolu_01XUDvkJgC6TP7Wu9QV5xkhU",
+    "content_preview": "Structured output provided successfully"
+  }
+]
