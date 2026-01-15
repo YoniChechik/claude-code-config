@@ -104,7 +104,12 @@ export default function ChatPane({
 
     abortControllerRef.current = new AbortController();
     cancelStreamRef.current = () => {
-      abortControllerRef.current?.abort();
+      if (!abortControllerRef.current) return;
+
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
+
       setIsStreaming(false);
       setStreamingText("");
       setStreamingBlocks([]);
@@ -129,6 +134,11 @@ export default function ChatPane({
       assistantText = streamResult.text;
       assistantBlocks = streamResult.blocks;
 
+      // Clear streaming state BEFORE adding final message to prevent flash
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamingBlocks([]);
+
       const assistantMessage: Message = {
         role: "assistant",
         content: assistantBlocks,
@@ -138,9 +148,8 @@ export default function ChatPane({
 
       await _updateSessionMetadata();
 
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
 
       // Trigger notifications
       if (session?.audioNotificationsEnabled) {
@@ -266,6 +275,7 @@ export default function ChatPane({
         id: event.tool.id,
         name: event.tool.name,
         input: event.tool.input,
+        timestamp: event.tool.timestamp ? new Date(event.tool.timestamp) : undefined,
         // No result yet - pending state
       });
       return { text: assistantText, blocks: assistantBlocks };

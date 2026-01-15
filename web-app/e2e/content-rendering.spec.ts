@@ -7,6 +7,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render text blocks without truncation", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello! This is a test response."}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message asking for a response
@@ -36,6 +45,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render thinking blocks correctly", async ({ page }) => {
+    // Mock Claude API with thinking block
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"thinking","content":"Let me think about this..."}\n\ndata: {"type":"text","content":"Here is the solution"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that might trigger thinking
@@ -64,6 +82,16 @@ test.describe("Content Rendering", () => {
   });
 
   test("should display tool use blocks correctly", async ({ page }) => {
+    // Mock Claude API with tool use
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_001","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_001","content":"{\\"name\\":\\"test\\"}"}}\n\ndata: {"type":"text","content":"Here is the content"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will trigger tool use
@@ -88,6 +116,16 @@ test.describe("Content Rendering", () => {
   });
 
   test("should display tool result blocks correctly", async ({ page }) => {
+    // Mock Claude API with tool use and results
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_002","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_002","content":"{\\"name\\":\\"test-package\\"}"}}\n\ndata: {"type":"text","content":"The file contains package info"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will trigger tool use and return results
@@ -112,6 +150,16 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle tool result expand/collapse", async ({ page }) => {
+    // Mock Claude API with tool use and results
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_003","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_003","content":"Large result content that might be collapsible"}}\n\ndata: {"type":"text","content":"Done"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message that will return tool results
@@ -150,6 +198,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should not have console errors during rendering", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello there!"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     const consoleErrors: string[] = [];
 
     // Listen for console errors
@@ -190,6 +247,17 @@ test.describe("Content Rendering", () => {
   test("should display all messages without missing content", async ({
     page,
   }) => {
+    // Mock multiple API responses
+    let callCount = 0;
+    await page.route("**/api/commands", async (route) => {
+      callCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send first message
@@ -232,6 +300,16 @@ test.describe("Content Rendering", () => {
   });
 
   test("should render content blocks in correct order", async ({ page }) => {
+    // Mock Claude API with Glob tool use
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_004","name":"Glob","input":{"pattern":"**/*.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_004","content":"file1.json\\nfile2.json"}}\n\ndata: {"type":"text","content":"Found JSON files"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send message that will trigger tool use
@@ -261,6 +339,15 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle streaming text without data loss", async ({ page }) => {
+    // Mock Claude API with streaming response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Here is an interesting fact about streaming!"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
     // Send a message
@@ -313,6 +400,15 @@ test.describe("Content Rendering", () => {
   test("messages should persist after sending and not disappear", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello! Message persistence test."}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load
@@ -364,6 +460,16 @@ test.describe("Content Rendering", () => {
   test("tool calls and results should maintain causal ordering", async ({
     page,
   }) => {
+    // Mock Claude API with multiple tool uses in causal order
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_005","name":"Glob","input":{"pattern":"**/*nonexistent1*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_005","content":"No matches"}}\n\ndata: {"type":"tool_use","tool":{"id":"tool_006","name":"Glob","input":{"pattern":"**/*nonexistent2*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_006","content":"No matches"}}\n\ndata: {"type":"tool_use","tool":{"id":"tool_007","name":"Glob","input":{"pattern":"**/*nonexistent3*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_007","content":"No matches"}}\n\ndata: {"type":"text","content":"Search complete"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load

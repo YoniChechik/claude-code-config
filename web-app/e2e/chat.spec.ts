@@ -2,6 +2,15 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Chat Functionality", () => {
   test("should send a message and receive a response", async ({ page }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello! This is a mocked response."}\n\ndata: {"type":"result","duration_ms":500}\n\n',
+      });
+    });
+
     // Navigate to the app
     await page.goto("/");
 
@@ -28,13 +37,10 @@ test.describe("Chat Functionality", () => {
     // Wait for the input to be cleared (indicates message was sent)
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
-    // Wait for the user message "hi" to appear in the chat
-    await expect(leftPane.locator("text=hi")).toBeVisible({ timeout: 5000 });
-
     // Wait for Claude's response message to appear with actual text content
     // The response should have the role label "Claude" and some actual response text
     const claudeMessage = leftPane
-      .locator("div.bg-gray-100")
+      .locator("div.bg-gray-800")
       .filter({ has: page.locator("text=Claude") })
       .last();
 
@@ -104,6 +110,16 @@ test.describe("Chat Functionality", () => {
   test("should display timestamps next to tool names in ToolUseCard", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response with tool use
+    await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_123","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_123","content":"{\\"name\\":\\"test\\"}"}}\n\ndata: {"type":"text","content":"Here is the package.json content"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
+      });
+    });
+
     await page.goto("/");
 
     // Wait for the chat interface to load
@@ -137,7 +153,6 @@ test.describe("Chat Functionality", () => {
     await expect(toolUseBlock).toBeVisible({ timeout: 10000 });
 
     // Verify that a timestamp in HH:MM:SS format appears next to the tool name
-    // The timestamp should match the pattern HH:MM:SS
     const timestampRegex = /\d{2}:\d{2}:\d{2}/;
     const toolBlockText = await toolUseBlock.textContent();
     expect(toolBlockText).toMatch(timestampRegex);

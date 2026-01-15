@@ -63,6 +63,15 @@ test.describe("Notification Features", () => {
     page,
     context,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response for notification test"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     await page.goto("/");
 
     await page.waitForSelector("textarea", { timeout: 10000 });
@@ -100,6 +109,15 @@ test.describe("Notification Features", () => {
   test("should clear tab notification when window regains focus", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response for focus test"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     await page.goto("/");
 
     await page.waitForSelector("textarea", { timeout: 10000 });
@@ -156,6 +174,15 @@ test.describe("Notification Features", () => {
   test("should not update tab title when window is focused", async ({
     page,
   }) => {
+    // Mock Claude API to return instant response
+    await page.route("**/api/commands", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response while focused"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
+      });
+    });
+
     await page.goto("/");
 
     await page.waitForSelector("textarea", { timeout: 10000 });

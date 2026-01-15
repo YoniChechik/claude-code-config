@@ -5,13 +5,17 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "build:test": "next build && mv .next .next-test",
     "start": "next start -p 6379",
+    "start:test": "next start -p 6380",
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:build": "./scripts/test-e2e-with-build.sh",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm test && ./scripts/test-e2e-with-build.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

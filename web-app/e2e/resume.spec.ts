@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Resume button", () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the app
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
 
     // Wait for the chat input to be ready
     await page.waitForSelector("textarea", { timeout: 10000 });
@@ -79,7 +79,7 @@ test.describe("Resume button", () => {
     await page.waitForTimeout(2000);
 
     // Reload page to get fresh session (button only shows when messagesCount === 0)
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Open the resume modal
@@ -121,7 +121,7 @@ test.describe("Resume button", () => {
     await page.waitForTimeout(3000);
 
     // Reload to get fresh start
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Open resume modal
