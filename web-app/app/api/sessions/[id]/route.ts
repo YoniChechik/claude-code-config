@@ -19,7 +19,7 @@ export async function GET(
 }
 
 /**
- * PATCH /api/sessions/[id] - Clear session messages
+ * PATCH /api/sessions/[id] - Update session settings
  */
 export async function PATCH(
   request: NextRequest,
@@ -32,7 +32,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  sessionManager.clearMessages(id);
+  const body = await request.json();
+
+  // Update session fields if provided
+  if (body.audioNotificationsEnabled !== undefined) {
+    session.audioNotificationsEnabled = body.audioNotificationsEnabled;
+  }
+  if (body.includePartialMessages !== undefined) {
+    session.includePartialMessages = body.includePartialMessages;
+  }
+
   return NextResponse.json({ session });
 }
 

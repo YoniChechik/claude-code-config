@@ -68,22 +68,16 @@ describe("API /api/sessions/[id]", () => {
   });
 
   describe("PATCH /api/sessions/[id]", () => {
-    it("should clear messages from session", async () => {
+    it("should update audioNotificationsEnabled setting", async () => {
       const session = sessionManager.createSession("/home/user");
-      sessionManager.addMessage(session.id, {
-        role: "user",
-        content: [{ type: "text", text: "Test" }],
-      });
-      sessionManager.addMessage(session.id, {
-        role: "assistant",
-        content: [{ type: "text", text: "Response" }],
-      });
-
-      expect(session.messages).toHaveLength(2);
+      expect(session.audioNotificationsEnabled).toBe(true);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
-        { method: "PATCH" },
+        {
+          method: "PATCH",
+          body: JSON.stringify({ audioNotificationsEnabled: false }),
+        },
       );
       const response = await PATCH(request, {
         params: Promise.resolve({ id: session.id }),
@@ -91,14 +85,61 @@ describe("API /api/sessions/[id]", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data.session.messages).toHaveLength(0);
-      expect(session.messages).toHaveLength(0);
+      expect(data.session.audioNotificationsEnabled).toBe(false);
+      expect(session.audioNotificationsEnabled).toBe(false);
+    });
+
+    it("should update includePartialMessages setting", async () => {
+      const session = sessionManager.createSession("/home/user");
+      expect(session.includePartialMessages).toBe(true);
+
+      const request = new NextRequest(
+        `http://localhost:6379/api/sessions/${session.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ includePartialMessages: false }),
+        },
+      );
+      const response = await PATCH(request, {
+        params: Promise.resolve({ id: session.id }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.session.includePartialMessages).toBe(false);
+      expect(session.includePartialMessages).toBe(false);
+    });
+
+    it("should update both settings simultaneously", async () => {
+      const session = sessionManager.createSession("/home/user");
+
+      const request = new NextRequest(
+        `http://localhost:6379/api/sessions/${session.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            audioNotificationsEnabled: false,
+            includePartialMessages: false,
+          }),
+        },
+      );
+      const response = await PATCH(request, {
+        params: Promise.resolve({ id: session.id }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.session.audioNotificationsEnabled).toBe(false);
+      expect(data.session.includePartialMessages).toBe(false);
     });
 
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
         "http://localhost:6379/api/sessions/non-existent-id",
-        { method: "PATCH" },
+        {
+          method: "PATCH",
+          body: JSON.stringify({ includePartialMessages: false }),
+        },
       );
       const response = await PATCH(request, {
         params: Promise.resolve({ id: "non-existent-id" }),
@@ -109,7 +150,7 @@ describe("API /api/sessions/[id]", () => {
       expect(data.error).toBe("Session not found");
     });
 
-    it("should preserve other session fields", async () => {
+    it("should preserve other session fields when updating", async () => {
       const session = sessionManager.createSession("/home/user");
       sessionManager.addMessage(session.id, {
         role: "user",
@@ -118,10 +159,14 @@ describe("API /api/sessions/[id]", () => {
 
       const originalCwd = session.cwd;
       const originalModel = session.model;
+      const originalMessageCount = session.messages.length;
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
-        { method: "PATCH" },
+        {
+          method: "PATCH",
+          body: JSON.stringify({ includePartialMessages: false }),
+        },
       );
       await PATCH(request, {
         params: Promise.resolve({ id: session.id }),
@@ -129,6 +174,7 @@ describe("API /api/sessions/[id]", () => {
 
       expect(session.cwd).toBe(originalCwd);
       expect(session.model).toBe(originalModel);
+      expect(session.messages.length).toBe(originalMessageCount);
     });
   });
 
