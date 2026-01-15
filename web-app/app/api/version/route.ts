@@ -5,7 +5,14 @@ const BUILD_TIMESTAMP = new Date().toISOString();
 const BUILD_COMMIT = process.env.BUILD_COMMIT || "unknown";
 
 export async function GET() {
-  const version = "claude-sonnet-4-5-20250929";
+  let version = "unknown";
+  try {
+    version = execSync("claude -V", {
+      encoding: "utf-8",
+    }).trim().split(" ")[0];
+  } catch (error) {
+    console.error("Failed to get claude version:", error);
+  }
 
   let currentCommit = "unknown";
   let isOutdated = false;
