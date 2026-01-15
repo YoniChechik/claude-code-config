@@ -116,31 +116,24 @@ export default function SessionHeader({
 
   const timeUntilReset = getTimeUntilReset();
 
-  // Check if hostname is localhost
-  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
-
   // Handle CWD click
   const handleCwdClick = async (e: React.MouseEvent) => {
     e.preventDefault();
 
-    // If not SSH or not localhost, open directly
-    if (sessionType !== "ssh" || !isLocalhost) {
+    // If not SSH, open directly
+    if (sessionType !== "ssh") {
       window.open(getVSCodeUrl(), "_blank");
       return;
     }
 
-    // If localhost but no clientIp, show error
+    // If SSH but no clientIp, show error
     if (!clientIp) {
       alert("Cannot resolve SSH hostname: client IP not available");
       return;
     }
 
     // If already resolved, open directly
-    if (
-      resolvedHostname &&
-      resolvedHostname !== "localhost" &&
-      resolvedHostname !== "127.0.0.1"
-    ) {
+    if (resolvedHostname) {
       window.open(getVSCodeUrl(), "_blank");
       return;
     }

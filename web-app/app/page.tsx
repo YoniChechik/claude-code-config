@@ -69,12 +69,10 @@ export default function Home() {
       if (data.session) {
         setSessionIds([data.session.id]);
 
-        // Auto-load hostname mapping if SSH with localhost hostname
+        // Auto-load hostname mapping if SSH session
         if (
           data.session.sessionType === "ssh" &&
-          data.session.clientIp &&
-          (data.session.hostname === "localhost" ||
-            data.session.hostname === "127.0.0.1")
+          data.session.clientIp
         ) {
           try {
             const mappingResponse = await fetch(
