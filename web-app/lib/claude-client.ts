@@ -81,6 +81,7 @@ export class ClaudeClient {
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
       const taskToolIds = new Set<string>(); // Track Task tool IDs (agents) - needed for agent-grouping later
+      let hasReceivedTextDelta = false; // Track if any text_delta events were received
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
@@ -206,16 +207,19 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  // Skip if includePartialMessages is enabled (text already sent via text_delta)
+                  // Skip if includePartialMessages is enabled AND text_delta events were received
+                  // If no text_delta events arrived, send StructuredOutput text as fallback
                   if (
                     block.name === "StructuredOutput" &&
-                    block.input?.response &&
-                    !options?.includePartialMessages
+                    block.input?.response
                   ) {
-                    eventQueue.push({
-                      type: "text",
-                      content: block.input.response,
-                    });
+                    const shouldSkip = options?.includePartialMessages && hasReceivedTextDelta;
+                    if (!shouldSkip) {
+                      eventQueue.push({
+                        type: "text",
+                        content: block.input.response,
+                      });
+                    }
                   }
 
                   // Handle tool_use for all tools (skip StructuredOutput and already-emitted)
@@ -311,6 +315,7 @@ export class ClaudeClient {
               innerEvent.type === "content_block_delta" &&
               innerEvent.delta?.type === "text_delta"
             ) {
+              hasReceivedTextDelta = true;
               eventQueue.push({
                 type: "text",
                 content: innerEvent.delta.text,

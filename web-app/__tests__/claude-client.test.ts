@@ -398,7 +398,7 @@ describe("ClaudeClient", () => {
       expect(args).not.toContain("--include-partial-messages");
     });
 
-    it("should combine partial messages with final StructuredOutput correctly", async () => {
+    it("should skip StructuredOutput text when text_delta events received", async () => {
       const events: ClaudeStreamEvent[] = [];
       const streamPromise = (async () => {
         for await (const event of client.streamCommand("test", { includePartialMessages: true })) {
@@ -443,11 +443,10 @@ describe("ClaudeClient", () => {
       await streamPromise;
 
       const textEvents = events.filter(e => e.type === "text");
-      // Should have 2 partial events + 1 final event
-      expect(textEvents.length).toBe(3);
+      // Should only have 2 delta events, NOT StructuredOutput text (to avoid duplication)
+      expect(textEvents.length).toBe(2);
       expect(textEvents[0].content).toBe("Partial ");
       expect(textEvents[1].content).toBe("message");
-      expect(textEvents[2].content).toBe("Partial message - complete");
     });
 
     it("should parse thinking_delta alongside text_delta", async () => {
