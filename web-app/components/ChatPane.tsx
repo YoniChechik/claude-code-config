@@ -380,7 +380,6 @@ export default function ChatPane({
         clientIp={session.clientIp}
         audioNotificationsEnabled={session.audioNotificationsEnabled}
         onToggleAudioNotifications={toggleAudioNotifications}
-        onResumeSession={handleResumeSession}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -398,6 +397,8 @@ export default function ChatPane({
             isStreaming={isStreaming}
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
             cancelStreamRef={cancelStreamRef}
+            messagesCount={messages.length}
+            onResumeSession={handleResumeSession}
           />
         </div>
       </div>

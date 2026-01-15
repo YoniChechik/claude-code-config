@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { formatDuration } from "@/lib/utils";
 import SSHHostPromptModal from "./SSHHostPromptModal";
-import SessionPicker from "./SessionPicker";
 
 interface SessionHeaderProps {
   cwd: string;
@@ -21,7 +20,6 @@ interface SessionHeaderProps {
   clientIp?: string;
   audioNotificationsEnabled?: boolean;
   onToggleAudioNotifications?: () => void;
-  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
@@ -40,7 +38,6 @@ export default function SessionHeader({
   clientIp,
   audioNotificationsEnabled = true,
   onToggleAudioNotifications,
-  onResumeSession,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{
     percentUsed: number;
@@ -51,7 +48,6 @@ export default function SessionHeader({
   const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(
     hostname,
   );
-  const [showResumePicker, setShowResumePicker] = useState(false);
 
   // Generate VSCode URL based on session type
   const getVSCodeUrl = (hostnameOverride?: string): string => {
@@ -196,14 +192,6 @@ export default function SessionHeader({
         onSave={handleSaveHostname}
         onCancel={() => setShowModal(false)}
       />
-      <SessionPicker
-        isOpen={showResumePicker}
-        onSelect={(sessionId, filePath, cwd) => {
-          setShowResumePicker(false);
-          onResumeSession?.(sessionId, filePath, cwd);
-        }}
-        onCancel={() => setShowResumePicker(false)}
-      />
       <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
         <button
           onClick={handleCwdClick}
@@ -242,15 +230,6 @@ export default function SessionHeader({
               <span className="text-gray-500">│</span>
               <span>{model}</span>
             </div>
-          )}
-          {onResumeSession && (
-            <button
-              onClick={() => setShowResumePicker(true)}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-sm"
-              title="Resume a previous session"
-            >
-              📂
-            </button>
           )}
           {onToggleAudioNotifications && (
             <button
