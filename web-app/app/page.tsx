@@ -21,8 +21,8 @@ export default function Home() {
   useEffect(() => {
     if (sessionIds.length === 0) return;
 
-    // Pagehide event for cleanup
-    const handlePagehide = () => {
+    // Cleanup handler for both beforeunload and pagehide
+    const handleCleanup = () => {
       // Use sendBeacon for non-blocking cleanup
       const blob = new Blob(
         [JSON.stringify({ sessionIds })],
@@ -31,7 +31,10 @@ export default function Home() {
       navigator.sendBeacon("/api/sessions/cleanup", blob);
     };
 
-    window.addEventListener("pagehide", handlePagehide);
+    // Beforeunload fires on refresh/navigation (earliest opportunity)
+    window.addEventListener("beforeunload", handleCleanup);
+    // Pagehide fires on tab close (fallback for edge cases)
+    window.addEventListener("pagehide", handleCleanup);
 
     // Heartbeat every 10s
     const heartbeatInterval = setInterval(() => {
@@ -45,7 +48,8 @@ export default function Home() {
     }, 10000);
 
     return () => {
-      window.removeEventListener("pagehide", handlePagehide);
+      window.removeEventListener("beforeunload", handleCleanup);
+      window.removeEventListener("pagehide", handleCleanup);
       clearInterval(heartbeatInterval);
     };
   }, [sessionIds]);
