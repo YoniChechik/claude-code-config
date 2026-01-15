@@ -1,0 +1,24 @@
+[2026-01-15T09:22:46.987Z] START: Testing parallel tool calls ordering
+[2026-01-15T09:22:51.032Z] tool_use: Glob [toolu_01Bjt8]
+[2026-01-15T09:22:51.106Z] tool_use: Glob [toolu_0179Bo]
+[2026-01-15T09:22:51.304Z] tool_use: Glob [toolu_01QeSd]
+[2026-01-15T09:22:52.016Z] tool_result: [toolu_01Bjt8]
+[2026-01-15T09:22:52.073Z] tool_result: [toolu_0179Bo]
+[2026-01-15T09:22:52.671Z] tool_result: [toolu_01QeSd]
+[2026-01-15T09:22:59.969Z] CLOSE
+[2026-01-15T09:22:59.969Z] 
+=== ANALYSIS ===
+[2026-01-15T09:22:59.969Z] Total events: 6
+[2026-01-15T09:22:59.969Z] 
+Tool uses: 3
+[2026-01-15T09:22:59.969Z] ❌ VIOLATION: 2 events between Glob tool_use and result:
+[2026-01-15T09:22:59.969Z]    - tool_use [toolu_0179Bo]
+[2026-01-15T09:22:59.969Z]    - tool_use [toolu_01QeSd]
+[2026-01-15T09:22:59.969Z] ❌ VIOLATION: 2 events between Glob tool_use and result:
+[2026-01-15T09:22:59.969Z]    - tool_use [toolu_01QeSd]
+[2026-01-15T09:22:59.969Z]    - tool_result [toolu_01Bjt8]
+[2026-01-15T09:22:59.969Z] ❌ VIOLATION: 2 events between Glob tool_use and result:
+[2026-01-15T09:22:59.969Z]    - tool_result [toolu_01Bjt8]
+[2026-01-15T09:22:59.969Z]    - tool_result [toolu_0179Bo]
+[2026-01-15T09:22:59.969Z] 
+❌ Found 3 ordering violations - buffering IS needed
