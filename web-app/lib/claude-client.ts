@@ -80,43 +80,13 @@ export class ClaudeClient {
       let stderrOutput = "";
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
-
-      // Buffer for maintaining causal ordering of tool_use/tool_result pairs
-      const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
-      const toolResultBuffer = new Map<string, ClaudeStreamEvent>(); // tool_use_id -> tool_result event
-      const toolUseOrder: string[] = []; // Track the order tool_use events arrive
-      const taskToolIds = new Set<string>(); // Track Task tool IDs (agents)
+      const taskToolIds = new Set<string>(); // Track Task tool IDs (agents) - needed for agent-grouping later
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
       let resolveNext: (() => void) | null = null;
       let processEnded = false;
       let processError: Error | null = null;
-
-      // Helper to emit tool_use/tool_result pairs in causal order
-      // NOTE: Task tools are emitted immediately (not buffered) to preserve causality
-      // with their child events. Only non-Task tools are buffered here.
-      const tryEmitPairedEvents = () => {
-        // Emit all tool_use events that have matching tool_results
-        for (const toolId of [...toolUseOrder]) {
-          const toolUseEvent = toolUseBuffer.get(toolId);
-          const toolResultEvent = toolResultBuffer.get(toolId);
-
-          // If we have both tool_use and tool_result, emit them in order
-          if (toolUseEvent && toolResultEvent) {
-            eventQueue.push(toolUseEvent);
-            eventQueue.push(toolResultEvent);
-
-            // Remove from buffers
-            toolUseBuffer.delete(toolId);
-            toolResultBuffer.delete(toolId);
-            toolUseOrder.splice(toolUseOrder.indexOf(toolId), 1);
-
-            resolveNext?.();
-            resolveNext = null;
-          }
-        }
-      };
 
       // Build args like ccui.sh does
       const args = [
@@ -192,6 +162,7 @@ export class ClaudeClient {
             }
 
             // Handle content_block_start for tool_use blocks (streaming)
+            // Emit immediately - no buffering
             if (
               event.type === "content_block_start" &&
               event.content_block?.type === "tool_use"
@@ -202,12 +173,11 @@ export class ClaudeClient {
                 !emittedToolUseIds.has(block.id)
               ) {
                 emittedToolUseIds.add(block.id);
-                const isTaskTool = block.name === "Task";
-                // Track if this is a Task tool (agent)
-                if (isTaskTool) {
+                // Track Task tools for agent-grouping
+                if (block.name === "Task") {
                   taskToolIds.add(block.id);
                 }
-                const toolUseEvent: ClaudeStreamEvent = {
+                eventQueue.push({
                   type: "tool_use",
                   tool: {
                     id: block.id,
@@ -215,19 +185,9 @@ export class ClaudeClient {
                     input: block.input || {},
                     timestamp: new Date(),
                   },
-                };
-                // Task tools: emit immediately to preserve causality with child events
-                // Non-Task tools: buffer until we have the matching tool_result
-                if (isTaskTool) {
-                  eventQueue.push(toolUseEvent);
-                  resolveNext?.();
-                  resolveNext = null;
-                } else {
-                  toolUseBuffer.set(block.id, toolUseEvent);
-                  toolUseOrder.push(block.id);
-                  // Try to emit paired events
-                  tryEmitPairedEvents();
-                }
+                });
+                resolveNext?.();
+                resolveNext = null;
               }
             }
 
@@ -252,17 +212,17 @@ export class ClaudeClient {
                   }
 
                   // Handle tool_use for all tools (skip StructuredOutput and already-emitted)
+                  // Emit immediately - no buffering
                   if (
                     block.name !== "StructuredOutput" &&
                     !emittedToolUseIds.has(block.id)
                   ) {
                     emittedToolUseIds.add(block.id);
-                    const isTaskTool = block.name === "Task";
-                    // Track if this is a Task tool (agent)
-                    if (isTaskTool) {
+                    // Track Task tools for agent-grouping
+                    if (block.name === "Task") {
                       taskToolIds.add(block.id);
                     }
-                    const toolUseEvent: ClaudeStreamEvent = {
+                    eventQueue.push({
                       type: "tool_use",
                       tool: {
                         id: block.id,
@@ -270,17 +230,7 @@ export class ClaudeClient {
                         input: block.input || {},
                         timestamp: new Date(),
                       },
-                    };
-                    // Task tools: emit immediately to preserve causality with child events
-                    // Non-Task tools: buffer until we have the matching tool_result
-                    if (isTaskTool) {
-                      eventQueue.push(toolUseEvent);
-                    } else {
-                      toolUseBuffer.set(block.id, toolUseEvent);
-                      toolUseOrder.push(block.id);
-                      // Try to emit paired events
-                      tryEmitPairedEvents();
-                    }
+                    });
                   }
 
                   resolveNext?.();
@@ -290,6 +240,7 @@ export class ClaudeClient {
             }
 
             // Handle tool results and system warnings from user messages
+            // Emit immediately - no buffering
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
                 if (
@@ -298,24 +249,15 @@ export class ClaudeClient {
                 ) {
                   emittedToolResultIds.add(block.tool_use_id);
                   _debugLog("TOOL_RESULT_BLOCK", block);
-                  const toolResultEvent: ClaudeStreamEvent = {
+                  eventQueue.push({
                     type: "tool_result",
                     tool_result: {
                       tool_use_id: block.tool_use_id,
                       content: block.content,
                     },
-                  };
-                  // Task tools: emit immediately to preserve causality with child events
-                  // Non-Task tools: buffer until we have the matching tool_use
-                  if (taskToolIds.has(block.tool_use_id)) {
-                    eventQueue.push(toolResultEvent);
-                    resolveNext?.();
-                    resolveNext = null;
-                  } else {
-                    toolResultBuffer.set(block.tool_use_id, toolResultEvent);
-                    // Try to emit paired events
-                    tryEmitPairedEvents();
-                  }
+                  });
+                  resolveNext?.();
+                  resolveNext = null;
                 }
 
                 // Parse token usage from system_reminder blocks
@@ -379,22 +321,6 @@ export class ClaudeClient {
 
       claude.on("close", (code: number | null, signal: string | null) => {
         processEnded = true;
-
-        // Flush any remaining buffered events when process ends
-        // Emit unpaired tool_use events first (in order)
-        for (const toolId of toolUseOrder) {
-          const toolUseEvent = toolUseBuffer.get(toolId);
-          if (toolUseEvent) {
-            eventQueue.push(toolUseEvent);
-            toolUseBuffer.delete(toolId);
-          }
-        }
-
-        // Then emit any remaining tool_result events
-        for (const toolResultEvent of toolResultBuffer.values()) {
-          eventQueue.push(toolResultEvent);
-        }
-        toolResultBuffer.clear();
 
         if (code !== 0 && code !== null) {
           processError = new Error(
