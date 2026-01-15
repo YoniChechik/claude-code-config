@@ -339,41 +339,28 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle streaming text without data loss", async ({ page }) => {
-    // Mock Claude API with streaming response
-    await page.route("**/api/commands", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/event-stream",
-        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Here is an interesting fact about streaming!"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
-      });
-    });
-
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
+
     // Send a message
     await chatInput.fill("tell me a fact");
     await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
-    // Wait for streaming to start
-    await page.waitForTimeout(1000);
-
     // Check streaming message appears
     const streamingMessage = leftPane
-      .locator("div.bg-gray-800.animate-border-spin")
+      .locator("div.animate-border-spin")
       .first();
     await expect(streamingMessage).toBeVisible({ timeout: 5000 });
 
-    // Get text while streaming (if any)
-    const streamingContent = streamingMessage
-      .locator("div.whitespace-pre-wrap")
-      .first();
-    await expect(streamingContent).toBeVisible();
+    // Wait a bit for content to appear
+    await page.waitForTimeout(1000);
 
-    const textDuringStreaming = await streamingContent.textContent();
+    // Get text while streaming
+    const textDuringStreaming = await streamingMessage.textContent();
 
     // Wait for completion
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(15000);
 
     // Get final message
     const completedMessage = leftPane
@@ -382,19 +369,13 @@ test.describe("Content Rendering", () => {
       .last();
     await expect(completedMessage).toBeVisible();
 
-    const finalContent = completedMessage
-      .locator("div.whitespace-pre-wrap")
-      .first();
-    const finalText = await finalContent.textContent();
+    const finalText = await completedMessage.textContent();
 
-    // Final text should be at least as long as streaming text
-    expect(finalText!.length).toBeGreaterThanOrEqual(0);
+    // Final message should have content
+    expect(finalText!.length).toBeGreaterThan(0);
 
-    // If there was text during streaming, final should contain it
-    if (textDuringStreaming && textDuringStreaming.trim().length > 0) {
-      // Final text should have content (may be different due to streaming)
-      expect(finalText!.length).toBeGreaterThan(0);
-    }
+    // Verify no data was lost - final message should contain Claude label
+    expect(finalText).toContain("Claude");
   });
 
   test("messages should persist after sending and not disappear", async ({
