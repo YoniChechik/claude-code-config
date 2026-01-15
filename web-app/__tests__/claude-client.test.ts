@@ -137,7 +137,7 @@ describe("ClaudeClient", () => {
       expect(textEvents[0].content).toBe("Hello from Claude!");
     });
 
-    it("should buffer tool_use events until matching tool_result arrives", async () => {
+    it("should emit tool_use and tool_result immediately without buffering", async () => {
       const events: ClaudeStreamEvent[] = [];
       const streamPromise = (async () => {
         for await (const event of client.streamCommand("test")) {
@@ -186,8 +186,9 @@ describe("ClaudeClient", () => {
       const toolUseEvents = events.filter(e => e.type === "tool_use");
       const toolResultEvents = events.filter(e => e.type === "tool_result");
 
-      expect(toolUseEvents.length).toBeGreaterThan(0);
-      expect(toolResultEvents.length).toBeGreaterThan(0);
+      // Both should be emitted immediately (no buffering)
+      expect(toolUseEvents.length).toBe(1);
+      expect(toolResultEvents.length).toBe(1);
 
       const toolUseIdx = events.findIndex(e => e.type === "tool_use");
       const toolResultIdx = events.findIndex(e => e.type === "tool_result");

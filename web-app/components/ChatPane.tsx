@@ -231,16 +231,29 @@ export default function ChatPane({
         id: event.tool.id,
         name: event.tool.name,
         input: event.tool.input,
+        // No result yet - pending state
       });
       return { text: assistantText, blocks: assistantBlocks };
     }
 
     if (event.type === "tool_result" && event.tool_result) {
-      assistantBlocks.push({
-        type: "tool_result" as const,
-        tool_use_id: event.tool_result.tool_use_id,
-        content: event.tool_result.content,
-      });
+      // Find the matching tool_use block and update it with the result
+      const toolUseBlock = assistantBlocks.find(
+        (block) =>
+          block.type === "tool_use" && block.id === event.tool_result!.tool_use_id
+      );
+
+      if (toolUseBlock && toolUseBlock.type === "tool_use") {
+        // Update the tool_use block with the result
+        toolUseBlock.result = event.tool_result.content;
+      } else {
+        // Fallback: if tool_use not found, add as separate block (shouldn't happen)
+        assistantBlocks.push({
+          type: "tool_result" as const,
+          tool_use_id: event.tool_result.tool_use_id,
+          content: event.tool_result.content,
+        });
+      }
       return { text: assistantText, blocks: assistantBlocks };
     }
 

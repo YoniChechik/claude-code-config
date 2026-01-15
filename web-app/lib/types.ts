@@ -26,6 +26,8 @@ export type ContentBlock =
       name: string;
       input: Record<string, unknown>;
       timestamp?: Date;
+      // Optional result field for pending state updates
+      result?: string | ContentBlock[];
     }
   | {
       type: "tool_result";

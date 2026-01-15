@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ContentBlock } from "@/lib/types";
 
 // Tool color mapping (from cc_filter.jq)
@@ -18,8 +19,10 @@ interface ToolUseCardProps {
 }
 
 export default function ToolUseCard({ tool }: ToolUseCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const colorClass =
     TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
+  const isPending = !tool.result;
 
   return (
     <div className={`border-l-4 p-3 pl-6 rounded ${colorClass}`}>
@@ -35,8 +38,18 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
             })}
           </span>
         )}
+        {isPending && (
+          <span className="text-xs opacity-70 animate-pulse">⏳ Running...</span>
+        )}
       </div>
       {renderToolDetails(tool)}
+
+      {/* Tool result (appears when result arrives) */}
+      {tool.result && (
+        <div className="mt-2 animate-fade-in">
+          {renderToolResult(tool.result, isExpanded, setIsExpanded)}
+        </div>
+      )}
     </div>
   );
 }
@@ -124,4 +137,49 @@ function getStatusEmoji(status: string): string {
     default:
       return "📝";
   }
+}
+
+function renderToolResult(
+  content: string | ContentBlock[],
+  isExpanded: boolean,
+  setIsExpanded: (expanded: boolean) => void
+) {
+  if (Array.isArray(content)) {
+    return null;
+  }
+
+  const contentStr =
+    typeof content === "string" ? content : JSON.stringify(content, null, 2);
+
+  const trimmedContent = contentStr.trim();
+  if (
+    trimmedContent === "Structured output provided successfully" ||
+    trimmedContent === "No response requested"
+  ) {
+    return null;
+  }
+
+  const lines = contentStr.split("\n");
+  const shouldCollapse = lines.length > 3;
+  const displayContent =
+    shouldCollapse && !isExpanded ? lines.slice(0, 3).join("\n") : contentStr;
+
+  return (
+    <div className="flex">
+      {shouldCollapse && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex-shrink-0 w-2 bg-blue-600 hover:bg-blue-500 cursor-pointer transition-colors rounded-l"
+          title={
+            isExpanded ? "Collapse" : `Expand ${lines.length - 3} more lines`
+          }
+        />
+      )}
+      <div
+        className={`text-gray-300 bg-gray-800 px-3 py-2 font-mono text-sm whitespace-pre-wrap flex-1 ${shouldCollapse ? "rounded-r" : "rounded"}`}
+      >
+        {displayContent}
+      </div>
+    </div>
+  );
 }
