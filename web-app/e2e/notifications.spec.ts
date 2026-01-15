@@ -68,7 +68,7 @@ test.describe("Notification Features", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Response for notification test"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response for notification test"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -114,7 +114,7 @@ test.describe("Notification Features", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Response for focus test"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response for focus test"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -179,7 +179,7 @@ test.describe("Notification Features", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Response while focused"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response while focused"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 

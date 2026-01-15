@@ -14,7 +14,7 @@ test.describe("Progress Indicator", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Quick response"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Quick response"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -51,7 +51,7 @@ test.describe("Progress Indicator", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Short response"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Short response"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -97,7 +97,7 @@ test.describe("Progress Indicator", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -146,7 +146,7 @@ test.describe("Progress Indicator", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Readable content"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Readable content"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 

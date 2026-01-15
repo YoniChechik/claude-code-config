@@ -252,6 +252,7 @@ export default function ChatPane({
         id: event.tool.id,
         name: event.tool.name,
         input: event.tool.input,
+        timestamp: event.tool.timestamp ? new Date(event.tool.timestamp) : undefined,
         // No result yet - pending state
       });
       return { text: assistantText, blocks: assistantBlocks };

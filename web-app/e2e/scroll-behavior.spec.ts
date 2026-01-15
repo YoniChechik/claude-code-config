@@ -16,7 +16,7 @@ test.describe("Chat Scroll Behavior", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Short test response for scroll testing"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Short test response for scroll testing"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -71,7 +71,7 @@ test.describe("Chat Scroll Behavior", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -149,7 +149,7 @@ test.describe("Chat Scroll Behavior", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -228,7 +228,7 @@ test.describe("Chat Scroll Behavior", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
