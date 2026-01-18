@@ -8,9 +8,8 @@ import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
 import {
   playAudioNotification,
-  updateTabTitle,
-  clearTabNotification,
-} from "@/lib/notifications";
+  notificationManager,
+} from "@/lib/notification-manager";
 import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
@@ -18,6 +17,7 @@ interface ChatPaneProps {
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
+  isWindowFocused?: boolean;
 }
 
 /**
@@ -28,6 +28,7 @@ export default function ChatPane({
   commands,
   onClose,
   isFocused = false,
+  isWindowFocused = true,
 }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -40,7 +41,6 @@ export default function ChatPane({
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
-  const [isWindowFocused, setIsWindowFocused] = useState(true);
 
   // Load session on mount
   useEffect(() => {
@@ -53,26 +53,6 @@ export default function ChatPane({
       inputFocusRef.current();
     }
   }, [isFocused]);
-
-  // Track window/tab focus state using Page Visibility API
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const isVisible = !document.hidden;
-      setIsWindowFocused(isVisible);
-      if (isVisible) {
-        clearTabNotification();
-      }
-    };
-
-    // Set initial state
-    setIsWindowFocused(!document.hidden);
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
 
   const loadSession = async () => {
     const windowId = getOrCreateWindowId();
@@ -164,7 +144,7 @@ export default function ChatPane({
         playAudioNotification();
       }
       if (!isWindowFocused) {
-        updateTabTitle("Done");
+        notificationManager.notifyComplete(sessionId);
       }
     } catch (error: unknown) {
       if ((error as Error).name === "AbortError") {

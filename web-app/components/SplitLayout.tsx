@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import ChatPane from "./ChatPane";
 import type { SlashCommand } from "@/lib/types";
+import { notificationManager } from "@/lib/notification-manager";
 
 interface SplitLayoutProps {
   sessionIds: string[];
@@ -26,6 +27,7 @@ export default function SplitLayout({
     sessionIds.map(() => 100 / sessionIds.length),
   );
   const [focusedPaneIndex, setFocusedPaneIndex] = useState(0);
+  const [isWindowFocused, setIsWindowFocused] = useState(!document.hidden);
 
   const handleMouseDown = (index: number) => {
     setIsDragging(true);
@@ -80,6 +82,20 @@ export default function SplitLayout({
     }
   }, [sessionIds.length, focusedPaneIndex]);
 
+  // Track window/tab focus state - single source of truth for all panes
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const isVisible = !document.hidden;
+      setIsWindowFocused(isVisible);
+      if (isVisible) {
+        notificationManager.clearAll();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   // Keyboard shortcuts for pane navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -133,6 +149,7 @@ export default function SplitLayout({
               commands={commands}
               onClose={() => onCloseSession(sessionId)}
               isFocused={index === focusedPaneIndex}
+              isWindowFocused={isWindowFocused}
             />
           </div>
 
