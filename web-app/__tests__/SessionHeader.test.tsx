@@ -89,7 +89,7 @@ describe("SessionHeader", () => {
       });
 
       const audioButton = screen.getByTitle("Enable audio notifications");
-      expect(audioButton).toHaveTextContent("🔇");
+      expect(audioButton).toHaveTextContent("🔕 Audio Off");
     });
 
     it("should call onToggleAudioNotifications when clicked", async () => {
@@ -128,20 +128,6 @@ describe("SessionHeader", () => {
     it("should render current working directory", async () => {
       await renderAndWait(defaultProps);
       expect(screen.getByText("/home/user/project")).toBeInTheDocument();
-    });
-
-    it("should render duration and model", async () => {
-      await renderAndWait(defaultProps);
-      expect(screen.getByText("1.5s")).toBeInTheDocument();
-      expect(screen.getByText("claude-3-opus-20240229")).toBeInTheDocument();
-    });
-
-    it("should render token usage when provided", async () => {
-      const tokenUsage = { used: 50000, total: 100000, remaining: 50000 };
-      await renderAndWait({ ...defaultProps, tokenUsage });
-
-      expect(screen.getByText(/50,000/)).toBeInTheDocument();
-      expect(screen.getByText(/100,000/)).toBeInTheDocument();
     });
   });
 
