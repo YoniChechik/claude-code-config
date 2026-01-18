@@ -24,8 +24,8 @@ describe("API /api/sessions", () => {
     });
 
     it("should return all sessions", async () => {
-      const session1 = sessionManager.createSession("/home/user1");
-      const session2 = sessionManager.createSession("/home/user2");
+      const session1 = sessionManager.createSession("/home/user1", "window-1");
+      const session2 = sessionManager.createSession("/home/user2", "window-2");
 
       const response = await GET();
       const data = await response.json();
@@ -41,7 +41,7 @@ describe("API /api/sessions", () => {
     });
 
     it("should return sessions with correct structure", async () => {
-      sessionManager.createSession("/home/test");
+      sessionManager.createSession("/home/test", "test-window");
 
       const response = await GET();
       const data = await response.json();
@@ -56,7 +56,7 @@ describe("API /api/sessions", () => {
 
   describe("POST /api/sessions", () => {
     it("should create new session with valid cwd", async () => {
-      const requestBody = { cwd: "/home/user" };
+      const requestBody = { cwd: "/home/user", windowId: "test-window-id" };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
@@ -88,7 +88,7 @@ describe("API /api/sessions", () => {
     });
 
     it("should normalize cwd with trailing slash", async () => {
-      const requestBody = { cwd: "/home/user/" };
+      const requestBody = { cwd: "/home/user/", windowId: "test-window-id" };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
@@ -106,6 +106,7 @@ describe("API /api/sessions", () => {
 
       const requestBody = {
         cwd: "/home/user",
+        windowId: "test-window-id",
         clientHostname: "my-laptop",
       };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
@@ -124,7 +125,7 @@ describe("API /api/sessions", () => {
     });
 
     it("should store created session in manager", async () => {
-      const requestBody = { cwd: "/home/user" };
+      const requestBody = { cwd: "/home/user", windowId: "test-window-id" };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
@@ -139,7 +140,7 @@ describe("API /api/sessions", () => {
     });
 
     it("should create session with empty messages array", async () => {
-      const requestBody = { cwd: "/home/user" };
+      const requestBody = { cwd: "/home/user", windowId: "test-window-id" };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),
@@ -152,7 +153,7 @@ describe("API /api/sessions", () => {
     });
 
     it("should create session with default model", async () => {
-      const requestBody = { cwd: "/home/user" };
+      const requestBody = { cwd: "/home/user", windowId: "test-window-id" };
       const request = new NextRequest("http://localhost:6379/api/sessions", {
         method: "POST",
         body: JSON.stringify(requestBody),

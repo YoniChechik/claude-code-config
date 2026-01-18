@@ -56,29 +56,25 @@ test.describe("Content Rendering", () => {
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    // Send a message that might trigger thinking
     await chatInput.fill("solve a complex problem");
     await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
-    // Wait for response to start
-    await page.waitForTimeout(2000);
+    // Since we're mocking a thinking block, it MUST appear
+    const thinkingBlock = leftPane.locator("div.italic.text-gray-400").first();
+    await expect(thinkingBlock).toBeVisible({ timeout: 5000 });
 
-    // Check if thinking block appears (they have italic style and gray color)
-    // Thinking blocks may or may not appear depending on model behavior
-    const thinkingBlocks = leftPane.locator("div.italic.text-gray-400");
-    const thinkingCount = await thinkingBlocks.count();
+    // Verify thinking emoji and content
+    const thinkingText = await thinkingBlock.textContent();
+    expect(thinkingText).toContain("💭");
+    expect(thinkingText).toContain("Let me think about this...");
 
-    // If thinking blocks exist, verify they're styled correctly
-    if (thinkingCount > 0) {
-      const firstThinking = thinkingBlocks.first();
-      await expect(firstThinking).toBeVisible();
-
-      // Verify styling
-      const classes = await firstThinking.getAttribute("class");
-      expect(classes).toContain("italic");
-      expect(classes).toContain("text-gray-400");
-    }
+    // Verify styling classes
+    const classes = await thinkingBlock.getAttribute("class");
+    expect(classes).toContain("italic");
+    expect(classes).toContain("text-gray-400");
+    expect(classes).toContain("bg-gray-800");
+    expect(classes).toContain("rounded-lg");
   });
 
   test("should display tool use blocks correctly", async ({ page }) => {

@@ -8,15 +8,16 @@ import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
 import {
   playAudioNotification,
-  updateTabTitle,
-  clearTabNotification,
-} from "@/lib/notifications";
+  notificationManager,
+} from "@/lib/notification-manager";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
   sessionId: string;
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
+  isWindowFocused?: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export default function ChatPane({
   commands,
   onClose,
   isFocused = false,
+  isWindowFocused = true,
 }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -39,7 +41,6 @@ export default function ChatPane({
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
-  const [isWindowFocused, setIsWindowFocused] = useState(true);
 
   // Load session on mount
   useEffect(() => {
@@ -53,28 +54,13 @@ export default function ChatPane({
     }
   }, [isFocused]);
 
-  // Track window/tab focus state using Page Visibility API
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const isVisible = !document.hidden;
-      setIsWindowFocused(isVisible);
-      if (isVisible) {
-        clearTabNotification();
-      }
-    };
-
-    // Set initial state
-    setIsWindowFocused(!document.hidden);
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
-
   const loadSession = async () => {
-    const response = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await response.json();
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
@@ -116,10 +102,12 @@ export default function ChatPane({
     };
 
     try {
+      const windowId = getOrCreateWindowId();
+
       const response = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, prompt }),
+        body: JSON.stringify({ sessionId, windowId, prompt }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -156,7 +144,7 @@ export default function ChatPane({
         playAudioNotification();
       }
       if (!isWindowFocused) {
-        updateTabTitle("Done");
+        notificationManager.notifyComplete(sessionId);
       }
     } catch (error: unknown) {
       if ((error as Error).name === "AbortError") {
@@ -176,24 +164,33 @@ export default function ChatPane({
     const newValue = !session.audioNotificationsEnabled;
     setSession({ ...session, audioNotificationsEnabled: newValue });
 
+    const windowId = getOrCreateWindowId();
+
     // Persist to backend
     await fetch(`/api/sessions/${sessionId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-window-id": windowId,
+      },
       body: JSON.stringify({ audioNotificationsEnabled: newValue }),
     });
   };
+
 
   const handleResumeSession = async (
     resumeSessionId: string,
     filePath: string,
     cwd: string,
   ) => {
+    const windowId = getOrCreateWindowId();
+
     const response = await fetch("/api/sessions/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: resumeSessionId,
+        windowId,
         filePath,
         cwd,
       }),
@@ -352,7 +349,12 @@ export default function ChatPane({
   };
 
   const _updateSessionMetadata = async (): Promise<void> => {
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await sessionResponse.json();
     setSession((prev) =>
       prev

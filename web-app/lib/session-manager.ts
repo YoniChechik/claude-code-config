@@ -6,13 +6,15 @@ import { execSync } from "child_process";
 class SessionManager {
   private sessions = new Map<string, Session>();
   private cdTrackers = new Map<string, CDTracker>();
+  private sessionOwnership = new Map<string, string>(); // sessionId → windowId
 
-  createSession(cwd: string, clientHostname?: string): Session {
+  createSession(cwd: string, windowId: string, clientHostname?: string): Session {
     const { sessionType, hostname, distroName, clientIp } =
       this._detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
+      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -23,10 +25,12 @@ class SessionManager {
       distroName,
       clientIp,
       audioNotificationsEnabled: true,
+      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
+    this.sessionOwnership.set(session.id, windowId);
 
     return session;
   }
@@ -57,12 +61,19 @@ class SessionManager {
     return { sessionType: "local" };
   }
 
-  resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
+  resumeSession(sessionId: string, windowId: string, cwd: string, messages: Message[]): Session {
+    // Validate ownership
+    const owner = this.sessionOwnership.get(sessionId);
+    if (owner && owner !== windowId) {
+      throw new Error("Session ownership mismatch");
+    }
+
     const { sessionType, hostname, distroName, clientIp } =
       this._detectSessionType();
 
     const session: Session = {
       id: sessionId,
+      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -74,10 +85,12 @@ class SessionManager {
       distroName,
       clientIp,
       audioNotificationsEnabled: true,
+      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
+    this.sessionOwnership.set(session.id, windowId);
 
     return session;
   }
@@ -92,6 +105,7 @@ class SessionManager {
 
   deleteSession(id: string): boolean {
     this.cdTrackers.delete(id);
+    this.sessionOwnership.delete(id);
     return this.sessions.delete(id);
   }
 
@@ -125,6 +139,21 @@ class SessionManager {
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
     const session = this.sessions.get(sessionId)!;
     session.claudeSessionId = claudeSessionId;
+  }
+
+  validateOwnership(sessionId: string, windowId: string): boolean {
+    return this.sessionOwnership.get(sessionId) === windowId;
+  }
+
+  getOwner(sessionId: string): string | undefined {
+    return this.sessionOwnership.get(sessionId);
+  }
+
+  getSessionWithOwnershipCheck(sessionId: string, windowId: string): Session | null {
+    if (!this.validateOwnership(sessionId, windowId)) {
+      return null;
+    }
+    return this.sessions.get(sessionId) || null;
   }
 }
 

@@ -15,7 +15,7 @@ describe("SessionManager", () => {
 
   describe("createSession", () => {
     it("should create session with default values", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       expect(session.id).toBeDefined();
       expect(session.id).toMatch(
@@ -29,12 +29,12 @@ describe("SessionManager", () => {
     });
 
     it("should normalize trailing slashes in cwd", () => {
-      const session = sessionManager.createSession("/home/user/");
+      const session = sessionManager.createSession("/home/user/", "test-window-id");
       expect(session.cwd).toBe("/home/user");
     });
 
     it("should detect local session type by default", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       expect(session.sessionType).toBe("local");
       expect(session.hostname).toBeUndefined();
@@ -45,7 +45,7 @@ describe("SessionManager", () => {
     it("should detect SSH session type", () => {
       process.env.SSH_CONNECTION = "192.168.1.100 12345 192.168.1.1 22";
 
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       expect(session.sessionType).toBe("ssh");
       expect(session.clientIp).toBe("192.168.1.100");
@@ -56,7 +56,7 @@ describe("SessionManager", () => {
       process.env.SSH_CONNECTION = "192.168.1.100 12345 192.168.1.1 22";
       process.env.CCWEB_SSH_HOST = "custom-hostname";
 
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       expect(session.sessionType).toBe("ssh");
       expect(session.hostname).toBe("custom-hostname");
@@ -65,14 +65,14 @@ describe("SessionManager", () => {
     it("should detect WSL session type", () => {
       process.env.WSL_DISTRO_NAME = "Ubuntu-22.04";
 
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       expect(session.sessionType).toBe("wsl");
       expect(session.distroName).toBe("Ubuntu-22.04");
     });
 
     it("should store session in manager", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const retrieved = sessionManager.getSession(session.id);
 
       expect(retrieved).toBe(session);
@@ -94,6 +94,7 @@ describe("SessionManager", () => {
 
       const session = sessionManager.resumeSession(
         "existing-session-id",
+        "test-window-id",
         "/home/user",
         messages,
       );
@@ -107,6 +108,7 @@ describe("SessionManager", () => {
     it("should normalize cwd on resume", () => {
       const session = sessionManager.resumeSession(
         "test-id",
+        "test-window-id",
         "/home/user//",
         [],
       );
@@ -117,7 +119,7 @@ describe("SessionManager", () => {
 
   describe("getSession", () => {
     it("should retrieve existing session", () => {
-      const created = sessionManager.createSession("/home/user");
+      const created = sessionManager.createSession("/home/user", "test-window-id");
       const retrieved = sessionManager.getSession(created.id);
 
       expect(retrieved).toBe(created);
@@ -151,7 +153,7 @@ describe("SessionManager", () => {
 
   describe("deleteSession", () => {
     it("should remove session from manager", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       const deleted = sessionManager.deleteSession(session.id);
       expect(deleted).toBe(true);
@@ -166,7 +168,7 @@ describe("SessionManager", () => {
     });
 
     it("should remove CD tracker when session is deleted", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       sessionManager.deleteSession(session.id);
 
@@ -177,7 +179,7 @@ describe("SessionManager", () => {
 
   describe("clearMessages", () => {
     it("should clear all messages from session", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "Test" }],
@@ -197,7 +199,7 @@ describe("SessionManager", () => {
 
   describe("addMessage", () => {
     it("should add message to session", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       const message: Message = {
         role: "user",
@@ -211,7 +213,7 @@ describe("SessionManager", () => {
     });
 
     it("should add multiple messages in order", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       const msg1: Message = {
         role: "user",
@@ -239,7 +241,7 @@ describe("SessionManager", () => {
 
   describe("getCDTracker", () => {
     it("should return CD tracker for session", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
       expect(tracker).toBeDefined();
@@ -247,7 +249,7 @@ describe("SessionManager", () => {
     });
 
     it("should return same tracker instance for multiple calls", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker1 = sessionManager.getCDTracker(session.id);
       const tracker2 = sessionManager.getCDTracker(session.id);
 
@@ -257,7 +259,7 @@ describe("SessionManager", () => {
 
   describe("updateSessionFromTracker", () => {
     it("should update session cwd from tracker", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
       tracker.processStructuredOutput({
@@ -272,7 +274,7 @@ describe("SessionManager", () => {
     });
 
     it("should not update cwd if tracker has no wanted_cwd", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       sessionManager.updateSessionFromTracker(session.id);
 
@@ -281,7 +283,7 @@ describe("SessionManager", () => {
     });
 
     it("should update model from tracker", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
       tracker.processInitEvent({ model: "claude-opus-4-5-20251101" });
@@ -292,7 +294,7 @@ describe("SessionManager", () => {
     });
 
     it("should update duration from tracker", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
       tracker.processResultEvent({ duration_ms: 5000 });
@@ -303,7 +305,7 @@ describe("SessionManager", () => {
     });
 
     it("should update all fields together", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
       tracker.processInitEvent({ model: "claude-opus-4-5-20251101" });
@@ -324,7 +326,7 @@ describe("SessionManager", () => {
 
   describe("setClaudeSessionId", () => {
     it("should set Claude session ID", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       sessionManager.setClaudeSessionId(session.id, "claude-session-123");
 
@@ -332,7 +334,7 @@ describe("SessionManager", () => {
     });
 
     it("should update existing Claude session ID", () => {
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
 
       sessionManager.setClaudeSessionId(session.id, "first-id");
       sessionManager.setClaudeSessionId(session.id, "second-id");
@@ -344,7 +346,7 @@ describe("SessionManager", () => {
   describe("integration scenarios", () => {
     it("should handle complete session lifecycle", () => {
       // Create session
-      const session = sessionManager.createSession("/home/user");
+      const session = sessionManager.createSession("/home/user", "test-window-id");
       expect(session.messages).toHaveLength(0);
 
       // Add messages
