@@ -476,7 +476,7 @@ test.describe("Content Rendering", () => {
     await expect(claudeMessage).toBeVisible({ timeout: 20000 });
 
     // Wait for at least 2 tool use blocks to appear (indicating multiple tool calls)
-    await page.waitForTimeout(5000); // Give time for streaming to show tools
+    await page.waitForTimeout(1000); // Give time for streaming to show tools
 
     // Get all tool-related elements within the Claude message
     // Tool use blocks have border-l-4 and contain [ToolName]
@@ -486,7 +486,7 @@ test.describe("Content Rendering", () => {
       .first();
 
     // Wait a bit more for all tool calls to complete
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(2000);
 
     // Get all child divs that could be tool blocks
     const allBlocks = await messageContent.locator("div").all();
