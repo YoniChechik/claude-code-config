@@ -491,6 +491,134 @@ describe("session-storage", () => {
     });
   });
 
+  describe("firstMessagePreview", () => {
+    it("should extract first user message as preview", async () => {
+      const testDir = path.join(tempDir, "test-preview");
+      const encoded = dirToClaudePath(testDir);
+      const dirPath = path.join(tempDir, ".claude", "projects", encoded);
+      await fs.mkdir(dirPath, { recursive: true });
+
+      const sessionFile = path.join(dirPath, "test-session.jsonl");
+      const sessionData = [
+        {
+          type: "user",
+          message: { role: "user", content: "Fix the authentication bug" },
+          cwd: testDir,
+          sessionId: "test-session",
+          timestamp: new Date().toISOString(),
+        },
+        {
+          type: "assistant",
+          message: { role: "assistant", content: "I'll help fix that" },
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await fs.writeFile(
+        sessionFile,
+        sessionData.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const sessions = await findSessionsByDirectory(testDir);
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].firstMessagePreview).toBe("Fix the authentication bug");
+    });
+
+    it("should clean up command wrapper tags from preview", async () => {
+      const testDir = path.join(tempDir, "test-cleanup");
+      const encoded = dirToClaudePath(testDir);
+      const dirPath = path.join(tempDir, ".claude", "projects", encoded);
+      await fs.mkdir(dirPath, { recursive: true });
+
+      const sessionFile = path.join(dirPath, "test-session.jsonl");
+      const sessionData = [
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: "<command-name>/commit</command-name>\nCommit the changes",
+          },
+          cwd: testDir,
+          sessionId: "test-session",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await fs.writeFile(
+        sessionFile,
+        sessionData.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const sessions = await findSessionsByDirectory(testDir);
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].firstMessagePreview).toBe("Commit the changes");
+      expect(sessions[0].firstMessagePreview).not.toContain("<command-name>");
+    });
+
+    it("should truncate long messages to 80 chars", async () => {
+      const testDir = path.join(tempDir, "test-truncate");
+      const encoded = dirToClaudePath(testDir);
+      const dirPath = path.join(tempDir, ".claude", "projects", encoded);
+      await fs.mkdir(dirPath, { recursive: true });
+
+      const longMessage = "A".repeat(100);
+      const sessionFile = path.join(dirPath, "test-session.jsonl");
+      const sessionData = [
+        {
+          type: "user",
+          message: { role: "user", content: longMessage },
+          cwd: testDir,
+          sessionId: "test-session",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await fs.writeFile(
+        sessionFile,
+        sessionData.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const sessions = await findSessionsByDirectory(testDir);
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].firstMessagePreview.length).toBeLessThanOrEqual(83);
+      expect(sessions[0].firstMessagePreview).toContain("...");
+    });
+
+    it("should use only first line of multiline message", async () => {
+      const testDir = path.join(tempDir, "test-multiline");
+      const encoded = dirToClaudePath(testDir);
+      const dirPath = path.join(tempDir, ".claude", "projects", encoded);
+      await fs.mkdir(dirPath, { recursive: true });
+
+      const sessionFile = path.join(dirPath, "test-session.jsonl");
+      const sessionData = [
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: "First line\nSecond line\nThird line",
+          },
+          cwd: testDir,
+          sessionId: "test-session",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await fs.writeFile(
+        sessionFile,
+        sessionData.map((line) => JSON.stringify(line)).join("\n"),
+      );
+
+      const sessions = await findSessionsByDirectory(testDir);
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].firstMessagePreview).toBe("First line");
+    });
+  });
+
   describe("formatRelativeTime", () => {
     it("should format time less than 1 hour", () => {
       const sessions = require("../lib/session-storage");
