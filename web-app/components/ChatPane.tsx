@@ -75,7 +75,12 @@ export default function ChatPane({
   }, []);
 
   const loadSession = async () => {
-    const response = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await response.json();
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
@@ -179,10 +184,15 @@ export default function ChatPane({
     const newValue = !session.audioNotificationsEnabled;
     setSession({ ...session, audioNotificationsEnabled: newValue });
 
+    const windowId = getOrCreateWindowId();
+
     // Persist to backend
     await fetch(`/api/sessions/${sessionId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-window-id": windowId,
+      },
       body: JSON.stringify({ audioNotificationsEnabled: newValue }),
     });
   };
@@ -359,7 +369,12 @@ export default function ChatPane({
   };
 
   const _updateSessionMetadata = async (): Promise<void> => {
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await sessionResponse.json();
     setSession((prev) =>
       prev
