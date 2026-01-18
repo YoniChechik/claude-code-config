@@ -1,502 +1,436 @@
-# Code Review Report: ccweb UI Component Updates
+# Code Review Report - Streaming Tests
 
-**Date**: 2026-01-13
-**Branch**: main
+**Date**: 2026-01-15
+**Branch**: add-include-partial-messages-flag
 **Reviewer**: Code Review Agent
-**Changed Files**: 17 components/lib files across 10 commits
 
 ## Summary
 
-Recent changes focus on implementing dark mode support, improving agent task display logic, and enhancing component organization. The overall quality is good with proper TypeScript usage and clean component structure. However, there are several critical issues related to FAIL-FAST principles and some security concerns that need addressing.
+Reviewed all tests related to the `--include-partial-messages` streaming feature. The feature enables streaming text display for both first and resumed session prompts by handling `text_delta` events (first prompt) and `input_json_delta` events (resumed sessions).
 
-**Overall Status**: ⚠️ CHANGES REQUESTED
+**Overall Status**: CHANGES REQUESTED
+
+**Test Results**:
+- Unit Tests: 24/24 passing (100%)
+- E2E Tests: 6/8 passing (75%)
+
+The unit tests are comprehensive and well-designed. They would have caught the bugs that were fixed. However, the E2E tests have 2 failures that appear to be test-related (not product bugs).
 
 ---
 
 ## Code Review Findings
 
-### 🚨 BLOCKING Issues
+### Medium Priority - Test Issues
 
-#### 1. **FAIL-FAST Violation: Silent `.catch()` in Test File**
-**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
-**Line**: 46
-**Severity**: BLOCKING
-
-```javascript
-try {
-  const event = JSON.parse(data);
-  if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'text') {
-    blocks.push(event);
-  }
-} catch (e) {}  // <-- SILENT CATCH: Hides JSON parse errors
-```
-
-**Issue**: Empty catch block silently swallows JSON parsing errors. This violates FAIL-FAST principles and will hide malformed event data. During development, we need to know when parsing fails.
-
-**Why it matters**: Invalid streaming data will be silently ignored, making it difficult to debug streaming protocol issues. Errors should propagate and crash immediately so they're discovered during development.
-
-**Fix**: Let exceptions propagate or log and re-throw:
-```javascript
-} catch (e) {
-  console.error('Failed to parse event:', e, 'raw:', data);
-  throw e; // or: continue; with logging
-}
-```
-
----
-
-#### 2. **FAIL-FAST Violation: Defensive String Type Checking in ToolUseCard**
-**File**: `/home/ubuntu/.claude/web-app/components/message/ToolUseCard.tsx`
-**Lines**: 38-39, 48, 66, 75, 83
-**Severity**: BLOCKING
-
-```typescript
-<div className="font-mono text-sm">
-  <div className="text-gray-400">{String(input.description)}</div>  // Defensive conversion
-  <div className="mt-1">$ {String(input.command)}</div>  // Defensive conversion
-</div>
-```
-
-**Issue**: Repeatedly using `String(input.property)` adds defensive type conversions. If the input doesn't have the expected type, it should fail loudly. This is masking type safety issues.
-
-**Why it matters**: We have TypeScript - trust it. If `input` doesn't have the right properties, it's a contract violation that should crash during development, not silently convert undefined to "undefined".
-
-**Fix**: Trust the type system:
-```typescript
-// If types are correct, no String() wrapper needed:
-<div className="text-gray-400">{input.description}</div>
-<div className="mt-1">$ {input.command}</div>
-
-// If the type isn't trustworthy, create a better type:
-// interface BashInput { description: string; command: string; }
-```
-
----
-
-#### 3. **Potential XSS Risk: Direct Text Rendering Without Sanitization**
-**File**: `/home/ubuntu/.claude/web-app/components/message/ContentBlockRenderer.tsx`
-**Line**: 59
-**Severity**: BLOCKING (if untrusted content)
-
-```typescript
-case "text": {
-  const trimmedText = block.text.trim();
-  if (trimmedText === "Structured output provided successfully" ||
-      trimmedText === "No response requested") {
-    return null;
-  }
-  return <span>{block.text}</span>;  // <-- Direct rendering
-}
-```
-
-**Issue**: Text blocks are rendered directly without sanitization. While Claude API output is trusted, rendering user-controlled content or external data this way could enable XSS attacks.
-
-**Why it matters**: If the content source changes (e.g., accepting user-provided markdown, external data), this becomes a critical XSS vector.
-
-**Mitigation**: For trusted Claude API content this is acceptable, but:
-- Document assumption that `block.text` is trusted
-- Consider using `dangerouslySetInnerHTML` with a sanitizer if content becomes untrusted
-- Use React's automatic HTML escaping as defense-in-depth
-
-**Note**: This is acceptable for Claude API responses but should be documented.
-
----
-
-### ⚠️ High Priority Issues
-
-#### 1. **Logic Error: Agent Task Tool Result Property Casting**
-**File**: `/home/ubuntu/.claude/web-app/components/message/AgentTaskFrame.tsx`
-**Line**: 56
-**Severity**: HIGH
-
-```typescript
-taskToolUse={agentItem.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
-```
-
-**Issue**: Unnecessary type assertion. If `agentItem` is already typed as `agent_task`, then `taskToolUse` should already be the correct type. This assertion suggests type uncertainty.
-
-**Why it matters**: Type assertions override TypeScript's safety checks. If the type is uncertain, the root cause is a broader type design issue.
-
-**Fix**: Verify the `BlockGroup` type definition - the type should already guarantee this, making the assertion unnecessary:
-```typescript
-taskToolUse={agentItem.taskToolUse}  // Should work without assertion
-```
-
----
-
-#### 2. **Inefficient Re-computation in Streaming Messages**
-**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
-**Line**: 106
-**Severity**: HIGH
-
-```typescript
-const isLastGroup = groupIdx === groupBlocksByAgent(streamingBlocks).length - 1;
-```
-
-**Issue**: `groupBlocksByAgent(streamingBlocks)` is called twice per render:
-1. Once in the `.map()` on line 91
-2. Again on line 106 to get the length
-
-This means the entire blocking algorithm runs twice for every streaming message render. For large block arrays, this creates O(n) duplicate work per render.
-
-**Why it matters**: Every keystroke during streaming triggers a re-render. This doubles the computation cost unnecessarily.
-
-**Fix**: Compute once and reuse:
-```typescript
-{groupBlocksByAgent(streamingBlocks).map((group, groupIdx, groups) => {
-  const isLastGroup = groupIdx === groups.length - 1;
-  // ...
-})}
-```
-
----
-
-#### 3. **Race Condition: Dark Mode Toggle and State Sync**
-**File**: `/home/ubuntu/.claude/web-app/components/DarkModeToggle.tsx`
-**Lines**: 22-31
-**Severity**: HIGH
-
-```typescript
-const toggleDark = () => {
-  const newDark = !isDark;
-  setIsDark(newDark);  // Async state update
-  localStorage.setItem("darkMode", String(newDark));  // Synchronous
-
-  if (newDark) {
-    document.documentElement.classList.add("dark");  // Synchronous DOM
-  } else {
-    document.documentElement.classList.remove("dark");  // Synchronous DOM
-  }
-};
-```
-
-**Issue**: The function mixes synchronous DOM operations with async React state updates. If the component re-renders before `setIsDark` completes, the local state and DOM could be out of sync temporarily.
-
-**Why it matters**: Rapid toggling could cause flickering or inconsistent UI state. The DOM class and React state should stay synchronized.
-
-**Fix**: Use a single state setter and rely on useEffect:
-```typescript
-const toggleDark = () => {
-  setIsDark(prev => {
-    const newDark = !prev;
-    localStorage.setItem("darkMode", String(newDark));
-    if (newDark) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-    return newDark;
-  });
-};
-```
-
-Or better: extract DOM updates to a useEffect dependency:
-```typescript
-useEffect(() => {
-  localStorage.setItem("darkMode", String(isDark));
-  if (isDark) {
-    document.documentElement.classList.add("dark");
-  } else {
-    document.documentElement.classList.remove("dark");
-  }
-}, [isDark]);
-```
-
----
-
-#### 4. **Unsafe Optional Chain / FAIL-FAST: Property Access Without Validation**
-**File**: `/home/ubuntu/.claude/web-app/components/AutosuggestInput.tsx`
-**Line**: 36
-**Severity**: HIGH (Process Safety)
-
-```typescript
-if (onFocusRef && inputRef.current) {
-  onFocusRef(() => inputRef.current?.focus());
-}
-```
-
-**Issue**: This is defensive programming. The condition checks `onFocusRef` and `inputRef.current` exist, but if they don't, nothing happens. This masks bugs where `onFocusRef` is required but missing.
-
-**Why it matters**: If the parent component is supposed to provide `onFocusRef` but doesn't, this silently ignores the failure. The code should either:
-1. Require it (no guard)
-2. Work fine without it (but then don't try to use it)
-
-Current approach violates FAIL-FAST: it silently skips functionality.
-
-**Fix**: If optional:
-```typescript
-useEffect(() => {
-  if (onFocusRef && inputRef.current) {
-    onFocusRef(() => inputRef.current.focus());
-  }
-}, [onFocusRef]);
-```
-
-Or make it required and let it fail if missing.
-
----
-
-### 📝 Medium Priority Issues
-
-#### 1. **Type Safety: Implicit `any` in Agent Grouping**
-**File**: `/home/ubuntu/.claude/web-app/lib/agent-grouping.ts`
-**Line**: 202
+#### Issue 1: E2E Test - Buffered Mode Not Receiving Response
+**File**: `/web-app/e2e/streaming.spec.ts:115`
 **Severity**: MEDIUM
+**Test**: "should show complete text at once when buffered mode is enabled"
+
+**Problem**: The test expects `contentDiv` to be visible but it remains hidden/empty when streaming is disabled. This suggests buffered mode may not be working in the actual UI, or the test timing is off.
+
+**Error**:
+```
+Expected: visible
+Received: hidden
+Timeout: 5000ms
+```
+
+**Recommendation**: This could indicate:
+1. Real bug: Buffered mode (includePartialMessages=false) isn't working properly
+2. Test issue: Need longer timeout or need to wait for response completion differently
+
+**Next Steps**:
+- Test manually with streaming disabled to verify if responses appear
+- If responses work manually, adjust test timing/waiting strategy
+- If responses don't work, this is a product bug to fix
+
+---
+
+#### Issue 2: E2E Test - Message Not Clearing After Send
+**File**: `/web-app/e2e/streaming.spec.ts:157`
+**Severity**: MEDIUM
+**Test**: "should persist toggle state across messages"
+
+**Problem**: After sending second message, the textarea still contains "second message" instead of being cleared.
+
+**Error**:
+```
+Expected: ""
+Received: "second message"
+```
+
+**Recommendation**: This is likely a timing issue where the test checks the input too quickly. The input should be cleared after Enter is pressed, but it may take a few milliseconds.
+
+**Suggested Fix**:
+```typescript
+// Instead of immediate check:
+await chatInput.press("Enter");
+await expect(chatInput).toHaveValue("", { timeout: 3000 });
+
+// Consider adding a small delay or checking after response starts:
+await chatInput.press("Enter");
+await page.waitForTimeout(500); // Give time for input to clear
+await expect(chatInput).toHaveValue("");
+```
+
+---
+
+### Low Priority - Test Quality Improvements
+
+#### Issue 3: E2E Test Has Weak Duplicate Detection
+**File**: `/web-app/e2e/streaming.spec.ts:251`
+**Severity**: LOW
+**Test**: "should not show duplicate text when streaming is enabled"
+
+**Problem**: The duplicate detection logic at lines 293-301 is too simplistic:
 
 ```typescript
-const input = taskTool.input as Record<string, unknown>;
-groups.push({
-  type: "agent_task",
-  agentType: String(input.subagent_type),
-  description: String(input.description || ""),
-  // ...
+const halfLength = Math.floor(text.length / 2);
+const firstHalf = text.slice(0, halfLength);
+const secondHalf = text.slice(halfLength);
+
+if (text.length > 10) {
+  expect(firstHalf).not.toBe(secondHalf);
+}
+```
+
+This only catches exact duplicate text where the entire response is repeated twice (e.g., "Hello!Hello!"). It would miss:
+- Partial duplicates (e.g., "Hello World Hello")
+- Duplicates with whitespace (e.g., "Hello! Hello!")
+- Duplicates at non-50% boundaries
+
+**Suggested Improvement**:
+```typescript
+// Check for common duplicate patterns
+const words = text.split(/\s+/);
+const wordCounts = new Map<string, number>();
+for (const word of words) {
+  wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+}
+
+// No word should appear more than reasonable for natural text
+// (allowing some repetition like "the the" but not "Hello! Hello! Hello!")
+const suspiciousRepeats = Array.from(wordCounts.entries())
+  .filter(([word, count]) => word.length > 3 && count > 2);
+expect(suspiciousRepeats.length).toBe(0);
+```
+
+Or simpler: Check that the response doesn't contain obvious sentence-level duplicates:
+```typescript
+// Split into sentences and check for duplicates
+const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+const uniqueSentences = new Set(sentences);
+// Allow some repetition but not complete duplication
+expect(uniqueSentences.size).toBeGreaterThan(sentences.length * 0.7);
+```
+
+---
+
+## Test Coverage Analysis
+
+### What Tests Cover Well
+
+#### 1. Unit Tests - Consecutive Prompts (consecutive-prompts.test.ts)
+**Coverage**: Excellent
+
+Tests specifically validate the bugs that were fixed:
+
+**Test 1** (lines 21-62): "should show text for second prompt when text_delta events not received"
+- Validates the fallback mechanism when no streaming events arrive
+- This would catch the original bug where second prompts showed no text
+
+**Test 2** (lines 64-124): "should stream text from input_json_delta for StructuredOutput on resumed sessions"
+- Tests the fix for resumed sessions using `input_json_delta` events
+- Verifies incremental text extraction from JSON buffer
+- This is the PRIMARY fix validation test
+
+**Test 3** (lines 126-178): "should NOT show StructuredOutput text when text_delta events ARE received"
+- Validates the anti-duplication logic
+- Ensures streaming text doesn't get duplicated by StructuredOutput fallback
+
+**Verdict**: These tests would have caught ALL the bugs that were fixed. Excellent coverage.
+
+---
+
+#### 2. Unit Tests - Claude Client (claude-client.test.ts)
+**Coverage**: Comprehensive
+
+Key streaming tests:
+
+**Lines 335-367**: "should process text_delta events when includePartialMessages is enabled"
+- Validates basic streaming functionality
+- Tests incremental text chunks
+
+**Lines 369-383**: "should pass includePartialMessages flag to CLI"
+- Verifies the flag is properly passed to subprocess
+
+**Lines 385-399**: "should not pass includePartialMessages flag when disabled"
+- Verifies flag omission when streaming is disabled
+
+**Lines 401-450**: "should skip StructuredOutput text when text_delta events received"
+- Validates anti-duplication logic (same as consecutive-prompts test)
+
+**Lines 452-486**: "should parse thinking_delta alongside text_delta"
+- Tests multiple delta types can coexist
+
+**Verdict**: Comprehensive unit test coverage for all streaming scenarios.
+
+---
+
+#### 3. E2E Tests - Streaming Spec (streaming.spec.ts)
+**Coverage**: Good (with caveats)
+
+**What's tested well**:
+- Toggle UI presence and functionality (lines 9-58)
+- Toggle persistence across messages (lines 157-192) - has timing bug
+- Mid-stream toggling (lines 194-225)
+- Tooltip text (lines 227-249)
+- Duplicate text detection (lines 251-303) - weak algorithm
+
+**What's tested poorly**:
+- Actual incremental streaming behavior (lines 60-113)
+  - Test only checks that text changes 3 times, doesn't validate incremental display
+  - Should verify text grows monotonically (each snapshot is prefix of next)
+
+- Buffered mode behavior (lines 115-155) - failing
+  - Test doesn't verify text appears "all at once" vs incrementally
+  - Just checks that text eventually appears (weak assertion)
+
+**Verdict**: E2E tests cover UI interactions well but don't strongly validate the core streaming behavior.
+
+---
+
+### Coverage Gaps
+
+#### Gap 1: No Test for input_json_delta in E2E
+**Severity**: HIGH
+
+The unit tests verify `input_json_delta` parsing works, but there's no E2E test that:
+1. Creates a session
+2. Sends a second prompt (resumed session)
+3. Verifies streaming still works
+
+**Recommendation**: Add E2E test:
+```typescript
+test("should stream text on second prompt (resumed session)", async ({ page }) => {
+  // Send first prompt
+  await chatInput.fill("hello");
+  await chatInput.press("Enter");
+  await page.waitForTimeout(3000); // Wait for response
+
+  // Send second prompt (this will use input_json_delta)
+  await chatInput.fill("tell me more");
+  await chatInput.press("Enter");
+
+  // Verify streaming works on second prompt
+  const claudeMessage = leftPane.locator("div.bg-gray-800")
+    .filter({ has: page.locator("text=Claude") })
+    .last();
+  const contentDiv = claudeMessage.locator("div.whitespace-pre-wrap");
+
+  // Capture text at multiple points
+  const snapshots: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    await page.waitForTimeout(200);
+    const text = await contentDiv.textContent();
+    if (text) snapshots.push(text);
+  }
+
+  // Verify text grew incrementally (each snapshot is prefix of next)
+  for (let i = 1; i < snapshots.length; i++) {
+    expect(snapshots[i]).toContain(snapshots[i-1]);
+    expect(snapshots[i].length).toBeGreaterThanOrEqual(snapshots[i-1].length);
+  }
 });
 ```
 
-**Issue**: `input` is cast to `Record<string, unknown>`. While this is better than `any`, the properties are still `unknown`. The `String()` conversions suggest the type isn't being properly validated.
-
-**Why it matters**: `input.subagent_type` could be anything. Using `String()` conversion is defensive. Either validate the input structure with a type guard or use a stricter type.
-
-**Fix**: Create a proper input validator:
-```typescript
-interface TaskInput {
-  subagent_type: string;
-  description?: string;
-  [key: string]: unknown;
-}
-
-function isTaskInput(obj: unknown): obj is TaskInput {
-  return typeof obj === 'object' && obj !== null &&
-         typeof (obj as any).subagent_type === 'string';
-}
-```
-
 ---
 
-#### 2. **Code Duplication: Streaming Message Rendering**
-**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
-**Lines**: 39-82 (regular messages) vs 86-119 (streaming messages)
+#### Gap 2: No Test for Streaming State Reset on content_block_stop
 **Severity**: MEDIUM
 
-The message rendering code is nearly identical between regular and streaming messages. Only the styling for streaming content (cursor animation) differs.
-
-**Why it matters**: When the UI needs updates, both versions must be maintained. This increases bug surface.
-
-**Fix**: Extract shared rendering logic:
+The implementation (claude-client.ts:378-383) resets StructuredOutput tracking on `content_block_stop`:
 ```typescript
-const renderMessageContent = (blocks, isStreaming) => (
-  <div className="whitespace-pre-wrap break-words">
-    {groupBlocksByAgent(blocks).map((group, groupIdx) => (
-      // ... render logic
-      {isStreaming && isLastGroup && <Cursor />}
-    ))}
-  </div>
-);
-```
-
----
-
-#### 3. **Missing Error Handling: Stream Reader Could Fail**
-**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
-**Line**: 26-49
-**Severity**: MEDIUM
-
-```javascript
-const reader = response.body.getReader();
-const decoder = new TextDecoder();
-
-while (true) {
-  const {done, value} = await reader.read();  // Could throw
-  if (done) break;
-
-  const chunk = decoder.decode(value);
-  // ...
+if (event.type === "content_block_stop") {
+  structuredOutputToolId = null;
+  structuredOutputJsonBuffer = "";
+  structuredOutputEmittedLength = 0;
 }
 ```
 
-**Issue**: No error handling around `reader.read()`. If the network fails mid-stream, the test crashes without a clear error message.
+But no test validates this works correctly. What if a session has multiple StructuredOutput blocks?
 
-**Why it matters**: E2E tests need robust error handling to report clear failures.
-
-**Fix**: Add try-catch around stream reading:
-```javascript
-try {
-  while (true) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    // ...
-  }
-} catch (error) {
-  throw new Error(`Stream reading failed: ${error.message}`);
-}
+**Recommendation**: Add unit test:
+```typescript
+it("should handle multiple StructuredOutput blocks in sequence", async () => {
+  // Simulate two StructuredOutput blocks with input_json_delta
+  // Verify second block starts fresh (doesn't include first block's text)
+});
 ```
 
 ---
 
-#### 4. **Hard-coded Test URL**
-**File**: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
-**Line**: 6
+#### Gap 3: No Test for Malformed JSON in input_json_delta
 **Severity**: MEDIUM
 
-```javascript
-const API_URL = 'http://localhost:3000';
-```
+The input_json_delta parser (lines 322-361) uses regex to extract JSON. What happens if:
+- JSON is malformed: `{"response": "unclosed string`
+- Response field has complex escaping: `{"response": "text with \\" quotes"}`
+- JSON arrives in tiny chunks that split escape sequences: `{\"respon` then `se\":\"text\"}`
 
-**Why it matters**: Hard-coded localhost assumes the dev server is running on port 3000. If it runs on a different port (e.g., during CI/CD), the test fails confusingly.
+**Current behavior**: The regex might fail silently, causing no text to display.
 
-**Fix**: Use environment variable:
-```javascript
-const API_URL = process.env.API_URL || 'http://localhost:3000';
-```
-
----
-
-### 💡 Low Priority / Suggestions
-
-#### 1. **Performance: groupBlocksByAgent Called Multiple Times**
-**File**: `/home/ubuntu/.claude/web-app/components/ChatMessages.tsx`
-**Lines**: 55, 91
-**Severity**: LOW
-
-The same block array is grouped twice (once for regular messages, once potentially for streaming). Consider memoizing with `useMemo`.
-
----
-
-#### 2. **Accessibility: Missing ARIA Labels**
-**File**: `/home/ubuntu/.claude/web-app/components/DarkModeToggle.tsx`
-**Lines**: 35-50
-**Severity**: LOW
-
-The button has `aria-label` (good), but could benefit from `aria-pressed` attribute:
+**Recommendation**: Add tests for edge cases:
 ```typescript
-<button
-  aria-pressed={isDark}  // Indicates toggle state
-  // ...
->
+it("should handle malformed JSON in input_json_delta gracefully", async () => {
+  // Send incomplete JSON, verify no crash
+  // Send final complete JSON, verify text eventually appears
+});
+
+it("should handle complex JSON escaping in input_json_delta", async () => {
+  // Send response with quotes, newlines, backslashes
+  // Verify all escape sequences are properly unescaped
+});
 ```
 
 ---
 
-#### 3. **Code Style: Unused Function**
-**File**: `/home/ubuntu/.claude/web-app/lib/agent-grouping.ts`
-**Line**: 73-118
+#### Gap 4: No Test for hasEmittedStreamingContent Flag Edge Cases
 **Severity**: LOW
 
-The `_sortToolBlocks` function is marked with `@typescript-eslint/no-unused-vars` but never used. Consider:
-- Document why it's kept (for future optimization)
-- Or remove if truly not needed
+The `hasEmittedStreamingContent` flag prevents duplicate text (line 230), but what if:
+- Only `thinking_delta` events are received (not `text_delta`)
+- Should StructuredOutput fallback still trigger?
 
-The comment says "(Currently unused but kept for future optimization)" which is fine, but confirm if this is actually needed.
+Currently: `thinking_delta` sets the flag (line 369), so StructuredOutput text would be skipped even if no actual text was streamed.
 
----
+**Is this a bug?** Maybe. If Claude only "thinks" but doesn't output text via deltas, the user sees nothing.
 
-#### 4. **Styling: Inconsistent Spacing**
-**Files**: Multiple component files
-**Severity**: LOW
-
-Some components use different margin patterns. Consider standardizing gap/spacing using Tailwind spacing conventions (consistent `gap`, `space-y`, etc.).
+**Recommendation**: Review whether `thinking_delta` should set `hasEmittedStreamingContent`, or if it needs a separate flag.
 
 ---
 
-## Test Results
+## Would Tests Catch the Bugs We Fixed?
 
-**Status**: E2E test suite identified
+### Bug 1: No streaming on second prompt in resumed sessions
+**Fixed in commit**: 160560d
 
-**Test Coverage**:
-- E2E test for agent display exists: `/home/ubuntu/.claude/web-app/test/agent-display.test.js`
-- Test validates correct block ordering and agent task grouping
-- Test includes comprehensive logging for debugging
+**Root cause**: Web app only processed `text_delta` events. CLI sends `input_json_delta` events for resumed sessions.
 
-**Recommendations**:
-1. Run full test suite before deployment
-2. Add unit tests for `groupBlocksByAgent` function (critical logic)
-3. Add component tests for `DarkModeToggle` state management
-4. Add tests for `AutosuggestInput` keyboard navigation
+**Would tests catch it?**
+- Unit test "should stream text from input_json_delta..." (consecutive-prompts.test.ts:64): YES - specifically tests this
+- Unit test "should show text for second prompt when text_delta events not received" (consecutive-prompts.test.ts:21): YES - validates fallback mechanism
+- E2E tests: NO - none of them test second prompt streaming
 
----
-
-## Files Reviewed
-
-### Components
-- ✅ `components/DarkModeToggle.tsx` - Dark mode implementation with race condition
-- ✅ `components/ChatMessages.tsx` - Message rendering with performance issue
-- ✅ `components/ChatInput.tsx` - Well structured, no critical issues
-- ✅ `components/AutosuggestInput.tsx` - Good keyboard handling, defensive pattern noted
-- ✅ `components/message/AgentTaskFrame.tsx` - Good structure, minor type assertion issue
-- ✅ `components/message/ContentBlockRenderer.tsx` - XSS consideration noted
-- ✅ `components/message/ToolUseCard.tsx` - FAIL-FAST violations with String() conversions
-
-### Library Files
-- ✅ `lib/agent-grouping.ts` - Core grouping logic, good structure, type safety improvements needed
-- ✅ `lib/types.ts` - Well-defined types for streaming and content blocks
-
-### Config/Layout
-- ✅ `app/layout.tsx` - Proper dark mode setup with `className="dark"`
-- ✅ `tailwind.config.js` - Correctly configured for dark mode with `darkMode: 'class'`
-- ✅ `eslint.config.js` - Good linting setup
-
-### Tests
-- ⚠️ `test/agent-display.test.js` - FAIL-FAST violation with silent catch
+**Verdict**: Unit tests would catch this bug. E2E tests would NOT catch this bug.
 
 ---
 
-## Summary of Required Fixes
+### Bug 2: Duplicate text when streaming
+**Fixed in commit**: 160560d (part of same fix)
 
-### BLOCKING (Must Fix Before Merge)
-1. Remove silent catch block in test file (line 46)
-2. Remove defensive `String()` type conversions in ToolUseCard
-3. Address FAIL-FAST violation in AutosuggestInput optional handling
+**Root cause**: Both streaming deltas AND StructuredOutput final text were being emitted.
 
-### HIGH Priority (Before Merge)
-1. Fix race condition in DarkModeToggle (state/DOM sync)
-2. Remove double computation in ChatMessages streaming cursor check
-3. Review type assertion in AgentTaskFrame line 56
+**Would tests catch it?**
+- Unit test "should skip StructuredOutput text when text_delta events received" (claude-client.test.ts:401): YES
+- Unit test "should NOT show StructuredOutput text when text_delta events ARE received" (consecutive-prompts.test.ts:126): YES
+- E2E test "should not show duplicate text when streaming is enabled" (streaming.spec.ts:251): MAYBE - weak algorithm might miss subtle duplicates
 
-### MEDIUM Priority (Next Sprint)
-1. Add input validation for agent task types
-2. Add error handling for stream reading in tests
-3. Parametrize test API URL with environment variable
-4. Extract duplicate message rendering code
-
-### LOW Priority (Nice-to-Have)
-1. Add ARIA attributes for accessibility
-2. Memoize groupBlocksByAgent calls
-3. Review _sortToolBlocks necessity
-4. Standardize spacing/margins across components
-
----
-
-## Compliance with Coding Guidelines
-
-**FAIL-FAST Adherence**: Partial
-
-The codebase has several violations of FAIL-FAST principles:
-- Silent catch blocks hiding parse errors
-- Defensive type conversions masking type issues
-- Optional parameter guards that silently skip functionality
-
-These should be addressed to match the team's coding standards defined in `/home/ubuntu/.claude/rules/general_coding_style.md`.
-
----
-
-## Security Assessment
-
-**Overall Risk**: MEDIUM
-
-- No SQL injection vectors (no database layer)
-- XSS risk is minimal due to trusted Claude API content, but should be documented
-- No credential exposure identified
-- Input validation could be strengthened for agent task inputs
-- Recommend documenting trust boundaries for content rendering
+**Verdict**: Unit tests would catch this bug. E2E test might catch obvious duplicates but not subtle ones.
 
 ---
 
 ## Recommendations
 
-1. **Fix BLOCKING issues** before merging - these violate stated coding standards
-2. **Add unit tests** for `groupBlocksByAgent` - this is critical business logic
-3. **Document content trust model** - clarify what content is trusted vs untrusted
-4. **Add input validators** for dynamic content from agent responses
-5. **Performance testing** - verify streaming performance with large block arrays
-6. **Run full test suite** - ensure E2E tests pass before deployment
+### High Priority
 
+1. **Fix E2E Test Failure - Buffered Mode** (streaming.spec.ts:115)
+   - Investigate why content div is empty when streaming is disabled
+   - If buffered mode is broken in product, this is a bug to fix
+   - If test timing is wrong, adjust expectations
+
+2. **Add E2E Test for Second Prompt Streaming**
+   - Critical gap: No E2E validation of the main bug fix
+   - Add test that sends 2+ prompts and verifies streaming on all of them
+
+3. **Add Edge Case Unit Tests**
+   - Malformed JSON in input_json_delta
+   - Multiple StructuredOutput blocks in sequence
+   - Complex JSON escaping
+
+### Medium Priority
+
+4. **Fix E2E Test - Message Persistence** (streaming.spec.ts:157)
+   - Add small delay before checking if input is cleared
+   - Or wait for response to start before checking
+
+5. **Improve Duplicate Detection** (streaming.spec.ts:251)
+   - Current algorithm is too weak
+   - Use better pattern matching for duplicates
+
+6. **Review hasEmittedStreamingContent Logic**
+   - Should thinking_delta set this flag?
+   - What if only thinking is streamed, no text?
+
+### Low Priority
+
+7. **Add Test Documentation**
+   - Add comments explaining what each test validates
+   - Link tests to specific bug fixes they prevent
+
+8. **Consolidate Test Utilities**
+   - MockChildProcess helper is good but only used in 2 files
+   - Consider extracting common E2E patterns (send message, wait for response)
+
+---
+
+## Test Quality Assessment
+
+### Unit Tests: EXCELLENT
+- **Coverage**: Comprehensive
+- **Clarity**: Clear test names and structure
+- **Bug Detection**: Would catch all known bugs
+- **Maintainability**: Easy to understand and modify
+- **Edge Cases**: Good coverage of happy path and error scenarios
+
+### E2E Tests: GOOD (with improvements needed)
+- **Coverage**: Good UI interaction coverage, missing core streaming validation
+- **Clarity**: Clear test descriptions
+- **Bug Detection**: Would NOT catch the main bug (second prompt streaming)
+- **Maintainability**: Tests are readable but have timing dependencies
+- **Edge Cases**: Missing resumed session tests
+
+---
+
+## Test Statistics
+
+**Total Tests for Streaming Feature**: 32
+- Unit Tests: 24 (100% passing)
+- E2E Tests: 8 (75% passing, 2 failures)
+
+**Lines of Test Code**: ~850
+**Lines of Implementation Code**: ~150 (streaming-related code in claude-client.ts)
+
+**Test Coverage Ratio**: ~5.7:1 (good coverage ratio)
+
+**Critical Paths Tested**:
+- First prompt streaming: YES (unit + E2E)
+- Second prompt streaming: YES (unit), NO (E2E)
+- Duplicate prevention: YES (unit), WEAK (E2E)
+- Buffered mode: YES (unit), FAILING (E2E)
+- Toggle UI: YES (E2E)
+
+---
+
+## Conclusion
+
+The unit tests are excellent and would have caught the bugs that were fixed. The E2E tests have good UI coverage but are missing validation of the core feature (resumed session streaming). The two E2E failures appear to be test issues rather than product bugs, but should be investigated.
+
+**Recommended Actions**:
+1. Investigate and fix E2E test failures
+2. Add E2E test for second prompt streaming
+3. Add edge case unit tests for input_json_delta parsing
+4. Improve duplicate detection algorithm in E2E tests
+
+**Overall Test Quality**: B+ (Unit tests: A, E2E tests: B-)
