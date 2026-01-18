@@ -15,13 +15,20 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as CreateSessionRequest;
-  const { cwd, clientHostname } = body;
+  const { cwd, windowId, clientHostname } = body;
 
   if (!cwd) {
     return NextResponse.json({ error: "cwd is required" }, { status: 400 });
   }
 
-  const session = sessionManager.createSession(cwd, clientHostname);
+  if (!windowId) {
+    return NextResponse.json(
+      { error: "windowId is required" },
+      { status: 400 }
+    );
+  }
+
+  const session = sessionManager.createSession(cwd, windowId, clientHostname);
 
   const response: CreateSessionResponse = { session };
   return NextResponse.json(response);

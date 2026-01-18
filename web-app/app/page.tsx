@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SplitLayout from "@/components/SplitLayout";
 import type { SlashCommand } from "@/lib/types";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 /**
  * Main page - initializes session(s) and renders dynamic split layout
@@ -61,11 +62,14 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
+      // Get or create windowId
+      const windowId = getOrCreateWindowId();
+
       // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, windowId }),
       });
 
       const data = await response.json();
@@ -139,11 +143,14 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
+      // Get or create windowId
+      const windowId = getOrCreateWindowId();
+
       // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, windowId }),
       });
 
       const data = await response.json();
@@ -158,15 +165,23 @@ export default function Home() {
 
   const closeSession = async (sessionId: string) => {
     try {
+      const windowId = getOrCreateWindowId();
+
       // If only 1 session, clear messages instead of deleting
       if (sessionIds.length === 1) {
         await fetch(`/api/sessions/${sessionId}`, {
           method: "PATCH",
+          headers: {
+            "x-window-id": windowId,
+          },
         });
       } else {
         // Multiple sessions: delete the session
         await fetch(`/api/sessions/${sessionId}`, {
           method: "DELETE",
+          headers: {
+            "x-window-id": windowId,
+          },
         });
 
         // Remove from local state

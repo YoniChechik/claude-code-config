@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 import { loadSessionMessages, validateSessionPath } from "@/lib/session-storage";
-import type { Message } from "@/lib/types";
+import type { Message, ResumeSessionRequest } from "@/lib/types";
 
 /**
  * POST /api/sessions/resume - Resume a session from JSONL file
  * Handles both real file paths and symlink paths with validation
  */
 export async function POST(request: NextRequest) {
-  const { sessionId, filePath, cwd } = await request.json();
+  const { sessionId, windowId, filePath, cwd } = (await request.json()) as ResumeSessionRequest;
 
-  if (!sessionId || !filePath || !cwd) {
+  if (!sessionId || !windowId || !filePath || !cwd) {
     return NextResponse.json(
-      { error: "sessionId, filePath, and cwd are required" },
+      { error: "sessionId, windowId, filePath, and cwd are required" },
       { status: 400 },
+    );
+  }
+
+  // Validate ownership
+  if (!sessionManager.validateOwnership(sessionId, windowId)) {
+    console.warn(
+      `[Security] Session ownership check failed: ` +
+        `sessionId=${sessionId}, windowId=${windowId}`
+    );
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
     );
   }
 
@@ -37,7 +49,7 @@ export async function POST(request: NextRequest) {
     const messages = loadedMessages as Message[];
 
     // Create resumed session
-    const session = sessionManager.resumeSession(sessionId, cwd, messages);
+    const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
 
     return NextResponse.json({ session });
   } catch (error) {

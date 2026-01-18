@@ -9,10 +9,26 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const windowId = request.headers.get("x-window-id");
+
+  if (!windowId) {
+    return NextResponse.json(
+      { error: "x-window-id header required" },
+      { status: 400 }
+    );
+  }
+
   const session = sessionManager.getSession(id);
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
   }
 
   return NextResponse.json({ session });
@@ -26,10 +42,25 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const windowId = request.headers.get("x-window-id");
+
+  if (!windowId) {
+    return NextResponse.json(
+      { error: "x-window-id header required" },
+      { status: 400 }
+    );
+  }
 
   const session = sessionManager.getSession(id);
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
   }
 
   const body = await request.json();
@@ -53,6 +84,27 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const windowId = request.headers.get("x-window-id");
+
+  if (!windowId) {
+    return NextResponse.json(
+      { error: "x-window-id header required" },
+      { status: 400 }
+    );
+  }
+
+  const session = sessionManager.getSession(id);
+  if (!session) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
+  }
+
   const deleted = sessionManager.deleteSession(id);
 
   if (!deleted) {

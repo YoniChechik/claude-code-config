@@ -11,6 +11,7 @@ import {
   updateTabTitle,
   clearTabNotification,
 } from "@/lib/notifications";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
   sessionId: string;
@@ -116,10 +117,12 @@ export default function ChatPane({
     };
 
     try {
+      const windowId = getOrCreateWindowId();
+
       const response = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, prompt }),
+        body: JSON.stringify({ sessionId, windowId, prompt }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -190,11 +193,14 @@ export default function ChatPane({
     filePath: string,
     cwd: string,
   ) => {
+    const windowId = getOrCreateWindowId();
+
     const response = await fetch("/api/sessions/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: resumeSessionId,
+        windowId,
         filePath,
         cwd,
       }),

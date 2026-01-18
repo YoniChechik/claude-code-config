@@ -1,6 +1,7 @@
 // Session types
 export interface Session {
   id: string;
+  windowId: string; // Track owning browser tab
   cwd: string;
   previousCwd?: string; // Track previous directory for symlink creation
   model: string;
@@ -61,6 +62,7 @@ export interface StructuredOutput {
 // API request/response types
 export interface CreateSessionRequest {
   cwd: string;
+  windowId: string;
   clientHostname?: string;
 }
 
@@ -70,7 +72,15 @@ export interface CreateSessionResponse {
 
 export interface SendCommandRequest {
   sessionId: string;
+  windowId: string;
   prompt: string;
+}
+
+export interface ResumeSessionRequest {
+  sessionId: string;
+  windowId: string;
+  filePath: string;
+  cwd: string;
 }
 
 export type SendCommandResponse = Record<string, never>;

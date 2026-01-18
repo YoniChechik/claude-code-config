@@ -16,10 +16,14 @@ describe("API /api/sessions/[id]", () => {
 
   describe("GET /api/sessions/[id]", () => {
     it("should return session by ID", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
+        {
+          headers: { "x-window-id": windowId },
+        }
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: session.id }),
@@ -34,6 +38,9 @@ describe("API /api/sessions/[id]", () => {
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
         "http://localhost:6379/api/sessions/non-existent-id",
+        {
+          headers: { "x-window-id": "test-window-id" },
+        }
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: "non-existent-id" }),
@@ -45,7 +52,8 @@ describe("API /api/sessions/[id]", () => {
     });
 
     it("should return session with all fields", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
@@ -53,6 +61,9 @@ describe("API /api/sessions/[id]", () => {
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
+        {
+          headers: { "x-window-id": windowId },
+        }
       );
       const response = await GET(request, {
         params: Promise.resolve({ id: session.id }),
@@ -69,13 +80,15 @@ describe("API /api/sessions/[id]", () => {
 
   describe("PATCH /api/sessions/[id]", () => {
     it("should update audioNotificationsEnabled setting", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
       expect(session.audioNotificationsEnabled).toBe(true);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
         {
           method: "PATCH",
+          headers: { "x-window-id": windowId },
           body: JSON.stringify({ audioNotificationsEnabled: false }),
         },
       );
@@ -90,13 +103,15 @@ describe("API /api/sessions/[id]", () => {
     });
 
     it("should update includePartialMessages setting", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
       expect(session.includePartialMessages).toBe(true);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
         {
           method: "PATCH",
+          headers: { "x-window-id": windowId },
           body: JSON.stringify({ includePartialMessages: false }),
         },
       );
@@ -111,12 +126,14 @@ describe("API /api/sessions/[id]", () => {
     });
 
     it("should update both settings simultaneously", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
         {
           method: "PATCH",
+          headers: { "x-window-id": windowId },
           body: JSON.stringify({
             audioNotificationsEnabled: false,
             includePartialMessages: false,
@@ -138,6 +155,7 @@ describe("API /api/sessions/[id]", () => {
         "http://localhost:6379/api/sessions/non-existent-id",
         {
           method: "PATCH",
+          headers: { "x-window-id": "test-window-id" },
           body: JSON.stringify({ includePartialMessages: false }),
         },
       );
@@ -151,7 +169,8 @@ describe("API /api/sessions/[id]", () => {
     });
 
     it("should preserve other session fields when updating", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "Test" }],
@@ -165,6 +184,7 @@ describe("API /api/sessions/[id]", () => {
         `http://localhost:6379/api/sessions/${session.id}`,
         {
           method: "PATCH",
+          headers: { "x-window-id": windowId },
           body: JSON.stringify({ includePartialMessages: false }),
         },
       );
@@ -180,11 +200,15 @@ describe("API /api/sessions/[id]", () => {
 
   describe("DELETE /api/sessions/[id]", () => {
     it("should delete existing session", async () => {
-      const session = sessionManager.createSession("/home/user");
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session.id}`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "x-window-id": windowId },
+        },
       );
       const response = await DELETE(request, {
         params: Promise.resolve({ id: session.id }),
@@ -201,7 +225,10 @@ describe("API /api/sessions/[id]", () => {
     it("should return 404 for non-existent session", async () => {
       const request = new NextRequest(
         "http://localhost:6379/api/sessions/non-existent-id",
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "x-window-id": "test-window-id" },
+        },
       );
       const response = await DELETE(request, {
         params: Promise.resolve({ id: "non-existent-id" }),
@@ -213,12 +240,16 @@ describe("API /api/sessions/[id]", () => {
     });
 
     it("should not affect other sessions", async () => {
-      const session1 = sessionManager.createSession("/home/user1");
-      const session2 = sessionManager.createSession("/home/user2");
+      const windowId = "test-window-id";
+      const session1 = sessionManager.createSession("/home/user1", windowId);
+      const session2 = sessionManager.createSession("/home/user2", windowId);
 
       const request = new NextRequest(
         `http://localhost:6379/api/sessions/${session1.id}`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "x-window-id": windowId },
+        },
       );
       await DELETE(request, {
         params: Promise.resolve({ id: session1.id }),

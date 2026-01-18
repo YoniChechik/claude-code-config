@@ -15,12 +15,25 @@ export const maxDuration = 0;
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as SendCommandRequest;
-  const { sessionId, prompt } = body;
+  const { sessionId, windowId, prompt } = body;
 
-  if (!sessionId || !prompt) {
+  if (!sessionId || !windowId || !prompt) {
     return new Response(
-      JSON.stringify({ error: "sessionId and prompt are required" }),
+      JSON.stringify({ error: "sessionId, windowId, and prompt are required" }),
       { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // Validate ownership BEFORE spawning process
+  if (!sessionManager.validateOwnership(sessionId, windowId)) {
+    console.warn(
+      `[Security] Command blocked: ` +
+        `sessionId=${sessionId}, windowId=${windowId}, ` +
+        `owner=${sessionManager.getOwner(sessionId)}`
+    );
+    return new Response(
+      JSON.stringify({ error: "You do not own this session" }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
     );
   }
 
