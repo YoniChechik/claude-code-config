@@ -121,7 +121,7 @@ describe("SessionHeader", () => {
       });
 
       let audioButton = screen.getByTitle("Disable audio notifications");
-      expect(audioButton).toHaveTextContent("🔊");
+      expect(audioButton).toHaveTextContent("🔔 Audio On");
 
       fireEvent.click(audioButton);
       expect(onToggle).toHaveBeenCalledTimes(1);
@@ -136,7 +136,7 @@ describe("SessionHeader", () => {
       );
 
       audioButton = screen.getByTitle("Enable audio notifications");
-      expect(audioButton).toHaveTextContent("🔇");
+      expect(audioButton).toHaveTextContent("🔕 Audio Off");
 
       fireEvent.click(audioButton);
       expect(onToggle).toHaveBeenCalledTimes(2);
@@ -151,7 +151,7 @@ describe("SessionHeader", () => {
       );
 
       audioButton = screen.getByTitle("Disable audio notifications");
-      expect(audioButton).toHaveTextContent("🔊");
+      expect(audioButton).toHaveTextContent("🔔 Audio On");
     });
   });
 
