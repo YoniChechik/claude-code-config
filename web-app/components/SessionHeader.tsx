@@ -217,59 +217,6 @@ export default function SessionHeader({
         >
           {isLoadingMapping ? `${cwd} (loading...)` : cwd}
         </button>
-        <div className="flex items-center gap-3">
-          {tokenUsage && (
-            <div
-              className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`}
-              title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}
-            >
-              <span>
-                🪙 {tokenUsage.used.toLocaleString()}/
-                {tokenUsage.total.toLocaleString()}
-              </span>
-              <span className="text-gray-400">({percentUsed.toFixed(0)}%)</span>
-            </div>
-          )}
-          {showHighUsageWarning && timeUntilReset && (
-            <div
-              className="flex items-center gap-2 text-xs font-medium bg-red-900/40 px-3 py-1 rounded-md text-red-300"
-              title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}
-            >
-              <span>
-                ⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m
-              </span>
-            </div>
-          )}
-          {lastDurationMs > 0 && (
-            <div className="flex items-center gap-3 text-sm font-medium bg-gray-700/50 px-3 py-1 rounded-md">
-              <span>{formatDuration(lastDurationMs)}</span>
-              <span className="text-gray-500">│</span>
-              <span>{model}</span>
-            </div>
-          )}
-          {onToggleAudioNotifications && (
-            <button
-              onClick={onToggleAudioNotifications}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-sm"
-              title={
-                audioNotificationsEnabled
-                  ? "Disable audio notifications"
-                  : "Enable audio notifications"
-              }
-            >
-              {audioNotificationsEnabled ? "🔊" : "🔇"}
-            </button>
-          )}
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
-              title="Close session"
-            >
-              ×
-            </button>
-          )}
-        </div>
       </div>
     </>
   );
