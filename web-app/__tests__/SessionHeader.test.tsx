@@ -105,6 +105,54 @@ describe("SessionHeader", () => {
 
       expect(onToggle).toHaveBeenCalledTimes(1);
     });
+
+    it("should toggle audio notification state when clicked multiple times", async () => {
+      const onToggle = jest.fn();
+      const { rerender } = render(
+        <SessionHeader
+          {...defaultProps}
+          onToggleAudioNotifications={onToggle}
+          audioNotificationsEnabled={true}
+        />
+      );
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled();
+      });
+
+      let audioButton = screen.getByTitle("Disable audio notifications");
+      expect(audioButton).toHaveTextContent("🔊");
+
+      fireEvent.click(audioButton);
+      expect(onToggle).toHaveBeenCalledTimes(1);
+
+      // Simulate state change from parent
+      rerender(
+        <SessionHeader
+          {...defaultProps}
+          onToggleAudioNotifications={onToggle}
+          audioNotificationsEnabled={false}
+        />
+      );
+
+      audioButton = screen.getByTitle("Enable audio notifications");
+      expect(audioButton).toHaveTextContent("🔇");
+
+      fireEvent.click(audioButton);
+      expect(onToggle).toHaveBeenCalledTimes(2);
+
+      // Toggle back
+      rerender(
+        <SessionHeader
+          {...defaultProps}
+          onToggleAudioNotifications={onToggle}
+          audioNotificationsEnabled={true}
+        />
+      );
+
+      audioButton = screen.getByTitle("Disable audio notifications");
+      expect(audioButton).toHaveTextContent("🔊");
+    });
   });
 
   describe("Button Layout", () => {

@@ -103,4 +103,91 @@ describe("StopButton", () => {
       expect(svg).toHaveAttribute("viewBox", "0 0 20 20");
     });
   });
+
+  describe("Accessibility", () => {
+    it("should be accessible via keyboard", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      button.focus();
+
+      expect(document.activeElement).toBe(button);
+    });
+
+    it("should be focusable and accessible via keyboard", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      fireEvent.keyDown(button, { key: "Enter", code: "Enter" });
+
+      // Button is accessible and can receive focus
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveAttribute("title", "Stop generation");
+    });
+  });
+
+  describe("Edge Cases", () => {
+    it("should handle undefined onClick gracefully", () => {
+      expect(() => {
+        render(<StopButton onClick={undefined as any} />);
+      }).not.toThrow();
+    });
+
+    it("should not throw when disabled and onClick is called", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} disabled={true} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+
+      expect(() => {
+        fireEvent.click(button);
+      }).not.toThrow();
+
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it("should have proper button structure", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      expect(button.tagName).toBe("BUTTON");
+      expect(button).toBeInTheDocument();
+    });
+  });
+
+  describe("Visual States", () => {
+    it("should have hover styles", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      const classes = button.className;
+
+      expect(classes).toContain("hover:bg-red-500");
+    });
+
+    it("should have transition classes", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      const classes = button.className;
+
+      // Check for transition-related classes
+      expect(classes).toMatch(/transition|duration/);
+    });
+
+    it("should have rounded corners", () => {
+      const onClick = jest.fn();
+      render(<StopButton onClick={onClick} />);
+
+      const button = screen.getByRole("button", { name: /stop/i });
+      const classes = button.className;
+
+      expect(classes).toMatch(/rounded/);
+    });
+  });
 });
