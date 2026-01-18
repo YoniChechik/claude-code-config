@@ -52,7 +52,9 @@ export default function SessionPicker({
       } else if (e.key === "Enter" && sessions.length > 0) {
         e.preventDefault();
         const session = sessions[selectedIndex];
-        onSelect(session.id, session.filePath, session.cwd);
+        if (session) {
+          onSelect(session.id, session.filePath, session.cwd);
+        }
       } else if (e.key === "Escape") {
         e.preventDefault();
         onCancel();

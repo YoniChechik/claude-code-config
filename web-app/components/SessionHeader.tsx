@@ -217,6 +217,27 @@ export default function SessionHeader({
         >
           {isLoadingMapping ? `${cwd} (loading...)` : cwd}
         </button>
+
+        <div className="flex items-center gap-3">
+          {onToggleAudioNotifications && (
+            <button
+              onClick={onToggleAudioNotifications}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-700 hover:bg-gray-600 transition-colors"
+              title={`${audioNotificationsEnabled ? "Disable" : "Enable"} audio notifications`}
+            >
+              {audioNotificationsEnabled ? "🔔 Audio On" : "🔕 Audio Off"}
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 transition-colors"
+              title="Close session"
+            >
+              Close
+            </button>
+          )}
+        </div>
       </div>
     </>
   );
