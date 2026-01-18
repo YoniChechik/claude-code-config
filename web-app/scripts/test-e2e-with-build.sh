@@ -9,14 +9,8 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}Building test version...${NC}"
 
-# Save production build if it exists (not symlink)
-if [ -d ".next" ] && [ ! -L ".next" ]; then
-    echo -e "${BLUE}Backing up production build...${NC}"
-    mv .next .next-prod-backup
-elif [ -L ".next" ]; then
-    # Remove old symlink
-    rm -f .next
-fi
+# Remove any existing .next symlink or directory
+rm -rf .next
 
 # Clean old test build
 rm -rf .next-test
@@ -25,7 +19,7 @@ rm -rf .next-test
 echo -e "${BLUE}Running next build...${NC}"
 npm run build
 
-echo -e "${BLUE}Saving test build...${NC}"
+echo -e "${BLUE}Saving test build to .next-test...${NC}"
 mv .next .next-test
 
 # Create symlink for test server
@@ -45,11 +39,7 @@ else
     echo -e "${RED}Tests failed with exit code $TEST_EXIT_CODE${NC}"
 fi
 
-# Restore production build if it was backed up
-if [ -d ".next-prod-backup" ]; then
-    echo -e "${BLUE}Restoring production build...${NC}"
-    rm -f .next
-    mv .next-prod-backup .next
-fi
+# Clean up symlink after tests
+rm -f .next
 
 exit $TEST_EXIT_CODE

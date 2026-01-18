@@ -14,10 +14,17 @@ echo "$VERSION" > /home/ubuntu/.claude/web-app/.version
 
 # Run build
 cd /home/ubuntu/.claude/web-app
+
+# Clean old production build
+rm -rf .next-prod
+
 npm run build
 
 if [ $? -eq 0 ]; then
+    # Move build to production directory
+    mv .next .next-prod
     echo "✓ Production build successful (version: $VERSION)"
+    echo "✓ Build saved to .next-prod"
 else
     echo "✗ Production build failed"
     exit 1

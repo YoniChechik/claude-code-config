@@ -22,6 +22,8 @@ stats-cache.json
 # Next.js / Node.js
 node_modules/
 .next/
+.next-prod/
+.next-test/
 next-env.d.ts
 
 # Playwright

@@ -26,6 +26,17 @@ if [ -f prod.pid ]; then
     rm -f prod.pid
 fi
 
+# Check if production build exists
+if [ ! -d ".next-prod" ]; then
+    echo "Error: Production build not found at .next-prod"
+    echo "Run ./build-prod.sh first"
+    exit 1
+fi
+
+# Create symlink to production build
+rm -f .next
+ln -sf .next-prod .next
+
 # Start production server in background
 echo "Starting Claude Code Web UI..."
 nohup npm run start > prod.log 2>&1 &
