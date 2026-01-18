@@ -77,7 +77,7 @@ describe("SessionHeader", () => {
 
       const audioButton = screen.getByTitle("Disable audio notifications");
       expect(audioButton).toBeInTheDocument();
-      expect(audioButton).toHaveTextContent("🔊");
+      expect(audioButton).toHaveTextContent("🔔 Audio On");
     });
 
     it("should show muted icon when audio is disabled", async () => {
