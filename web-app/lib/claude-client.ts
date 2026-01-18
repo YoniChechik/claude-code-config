@@ -191,8 +191,9 @@ export class ClaudeClient {
                 structuredOutputToolId = block.id;
                 structuredOutputJsonBuffer = "";
                 structuredOutputEmittedLength = 0;
-                // Reset text_delta flag for new response (resumed sessions use input_json_delta)
+                // Reset flags for new response
                 hasReceivedTextDelta = false;
+                hasEmittedStreamingContent = false;
               } else if (!emittedToolUseIds.has(block.id)) {
                 emittedToolUseIds.add(block.id);
                 // Track Task tools for agent-grouping

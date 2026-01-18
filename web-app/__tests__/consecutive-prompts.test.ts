@@ -176,4 +176,82 @@ describe("ClaudeClient - Consecutive Prompts", () => {
     expect(textEvents[0].content).toBe("This is ");
     expect(textEvents[1].content).toBe("the first response");
   });
+
+  it("should not show duplicate text for second prompt after streaming via input_json_delta", async () => {
+    const events: ClaudeStreamEvent[] = [];
+    const streamPromise = (async () => {
+      for await (const event of client.streamCommand("second prompt", {
+        includePartialMessages: true,
+        sessionId: "test-session-456"
+      })) {
+        events.push(event);
+      }
+    })();
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Send content_block_start for StructuredOutput
+    const blockStart = {
+      type: "stream_event",
+      event: {
+        type: "content_block_start",
+        content_block: {
+          type: "tool_use",
+          name: "StructuredOutput",
+          id: "tool_789"
+        }
+      }
+    };
+    mockProcess.emitData(JSON.stringify(blockStart) + "\n");
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Stream via input_json_delta
+    const deltas = [
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '{"response":"Second ' } } },
+      { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: 'response text"}' } } }
+    ];
+
+    for (const delta of deltas) {
+      mockProcess.emitData(JSON.stringify(delta) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    // Send content_block_stop
+    const blockStop = {
+      type: "stream_event",
+      event: { type: "content_block_stop" }
+    };
+    mockProcess.emitData(JSON.stringify(blockStop) + "\n");
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Send final assistant message with StructuredOutput
+    const finalMsg = {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "StructuredOutput",
+            input: { response: "Second response text" }
+          }
+        ]
+      }
+    };
+    mockProcess.emitData(JSON.stringify(finalMsg) + "\n");
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    mockProcess.emitClose(0);
+    await streamPromise;
+
+    const textEvents = events.filter(e => e.type === "text");
+
+    // Should have streamed text events but NOT the final StructuredOutput (to avoid duplication)
+    expect(textEvents.length).toBeGreaterThan(0);
+    const combinedText = textEvents.map(e => e.content).join("");
+    expect(combinedText).toBe("Second response text");
+
+    // Verify we don't have duplicate - text should appear exactly once
+    expect(textEvents.filter(e => e.content === "Second response text").length).toBe(0);
+  });
 });
