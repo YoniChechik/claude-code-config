@@ -7,6 +7,6 @@ cd /home/ubuntu/.claude/web-app
 echo "Restarting server..."
 
 # Start new server first (it will handle killing the old one)
-./start-prod.sh 2>&1 | grep -v "connection refused" | grep -v "channel.*open failed"
+./scripts/start-prod.sh 2>&1 | grep -v "connection refused" | grep -v "channel.*open failed"
 
 echo "Server restarted successfully"

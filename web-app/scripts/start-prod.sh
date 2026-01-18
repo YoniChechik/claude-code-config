@@ -29,7 +29,7 @@ fi
 # Check if production build exists
 if [ ! -d ".next-prod" ]; then
     echo "Error: Production build not found at .next-prod"
-    echo "Run ./build-prod.sh first"
+    echo "Run ./scripts/build-prod.sh first"
     exit 1
 fi
 
