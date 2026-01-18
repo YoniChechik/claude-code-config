@@ -52,7 +52,7 @@ export default function ChatInput({
         }}
         onCancel={() => setShowResumePicker(false)}
       />
-      <div className="flex flex-col gap-3 p-5 border-t border-gray-700 bg-gradient-to-b from-gray-800 to-gray-900">
+      <div className="flex flex-col gap-3 px-12 py-5 border-t border-gray-700 bg-gradient-to-b from-gray-800 to-gray-900">
         {showResumeButton && (
           <div className="flex justify-center pb-2">
             <button

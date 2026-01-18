@@ -208,7 +208,7 @@ export default function SessionHeader({
         onSave={handleSaveHostname}
         onCancel={() => setShowModal(false)}
       />
-      <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
+      <div className="flex items-center justify-between px-12 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
         <button
           onClick={handleCwdClick}
           disabled={isLoadingMapping}
