@@ -35,32 +35,6 @@ class SessionManager {
     return session;
   }
 
-  private _detectSessionType(clientHostname?: string): {
-    sessionType: "ssh" | "wsl" | "local";
-    hostname?: string;
-    distroName?: string;
-    clientIp?: string;
-  } {
-    if (process.env.SSH_CONNECTION) {
-      const parts = process.env.SSH_CONNECTION.split(" ");
-      const clientIp = parts[0];
-      const hostname =
-        clientHostname ||
-        process.env.CCWEB_SSH_HOST ||
-        execSync("hostname").toString().trim();
-      return { sessionType: "ssh", hostname, clientIp };
-    }
-
-    if (process.env.WSL_DISTRO_NAME) {
-      return {
-        sessionType: "wsl",
-        distroName: process.env.WSL_DISTRO_NAME,
-      };
-    }
-
-    return { sessionType: "local" };
-  }
-
   resumeSession(sessionId: string, windowId: string, cwd: string, messages: Message[]): Session {
     const owner = this.sessionOwnership.get(sessionId);
     if (owner !== undefined && owner !== windowId) {
@@ -180,6 +154,32 @@ class SessionManager {
       return null;
     }
     return session;
+  }
+
+  private _detectSessionType(clientHostname?: string): {
+    sessionType: "ssh" | "wsl" | "local";
+    hostname?: string;
+    distroName?: string;
+    clientIp?: string;
+  } {
+    if (process.env.SSH_CONNECTION) {
+      const parts = process.env.SSH_CONNECTION.split(" ");
+      const clientIp = parts[0];
+      const hostname =
+        clientHostname ||
+        process.env.CCWEB_SSH_HOST ||
+        execSync("hostname").toString().trim();
+      return { sessionType: "ssh", hostname, clientIp };
+    }
+
+    if (process.env.WSL_DISTRO_NAME) {
+      return {
+        sessionType: "wsl",
+        distroName: process.env.WSL_DISTRO_NAME,
+      };
+    }
+
+    return { sessionType: "local" };
   }
 }
 

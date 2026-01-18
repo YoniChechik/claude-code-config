@@ -1,59 +1,4 @@
 /**
- * Session-aware notification manager
- * Handles per-session completion notifications without cross-session interference
- */
-class NotificationManager {
-  private pendingNotifications = new Set<string>();
-  private originalTitle: string | null = null;
-
-  /**
-   * Register a completion notification for a session
-   */
-  notifyComplete(sessionId: string): void {
-    this.pendingNotifications.add(sessionId);
-    this.updateTitle();
-  }
-
-  /**
-   * Acknowledge and clear notification for a specific session
-   */
-  acknowledge(sessionId: string): void {
-    this.pendingNotifications.delete(sessionId);
-    if (this.pendingNotifications.size === 0) {
-      this.clearTitle();
-    } else {
-      this.updateTitle();
-    }
-  }
-
-  /**
-   * Clear all notifications (e.g., on window focus)
-   */
-  clearAll(): void {
-    this.pendingNotifications.clear();
-    this.clearTitle();
-  }
-
-  private updateTitle(): void {
-    if (this.originalTitle === null) {
-      this.originalTitle = document.title;
-    }
-    const count = this.pendingNotifications.size;
-    document.title = `${count} task${count > 1 ? "s" : ""} done - ${this.originalTitle}`;
-  }
-
-  private clearTitle(): void {
-    if (this.originalTitle !== null) {
-      document.title = this.originalTitle;
-      this.originalTitle = null;
-    }
-  }
-}
-
-// Singleton instance
-export const notificationManager = new NotificationManager();
-
-/**
  * Play an audio notification sound
  * Uses Web Audio API to generate a subtle beep
  */
@@ -76,3 +21,58 @@ export function playAudioNotification(): void {
   oscillator.start(audioContext.currentTime);
   oscillator.stop(audioContext.currentTime + 0.5);
 }
+
+/**
+ * Session-aware notification manager
+ * Handles per-session completion notifications without cross-session interference
+ */
+class NotificationManager {
+  private pendingNotifications = new Set<string>();
+  private originalTitle: string | null = null;
+
+  /**
+   * Register a completion notification for a session
+   */
+  notifyComplete(sessionId: string): void {
+    this.pendingNotifications.add(sessionId);
+    this._updateTitle();
+  }
+
+  /**
+   * Acknowledge and clear notification for a specific session
+   */
+  acknowledge(sessionId: string): void {
+    this.pendingNotifications.delete(sessionId);
+    if (this.pendingNotifications.size === 0) {
+      this._clearTitle();
+    } else {
+      this._updateTitle();
+    }
+  }
+
+  /**
+   * Clear all notifications (e.g., on window focus)
+   */
+  clearAll(): void {
+    this.pendingNotifications.clear();
+    this._clearTitle();
+  }
+
+  private _updateTitle(): void {
+    if (this.originalTitle === null) {
+      this.originalTitle = document.title;
+    }
+    const count = this.pendingNotifications.size;
+    document.title = `${count} task${count > 1 ? "s" : ""} done - ${this.originalTitle}`;
+  }
+
+  private _clearTitle(): void {
+    if (this.originalTitle !== null) {
+      document.title = this.originalTitle;
+      this.originalTitle = null;
+    }
+  }
+}
+
+// Singleton instance
+export const notificationManager = new NotificationManager();
