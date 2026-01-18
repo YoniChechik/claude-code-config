@@ -8,7 +8,8 @@ import type { Message, ResumeSessionRequest } from "@/lib/types";
  * Handles both real file paths and symlink paths with validation
  */
 export async function POST(request: NextRequest) {
-  const { sessionId, windowId, filePath, cwd } = (await request.json()) as ResumeSessionRequest;
+  const body = (await request.json()) as ResumeSessionRequest;
+  const { sessionId, windowId, filePath, cwd } = body;
 
   if (!sessionId || !windowId || !filePath || !cwd) {
     return NextResponse.json(
@@ -18,7 +19,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Validate and resolve the session path (handles symlinks and broken links)
     const validPath = await validateSessionPath(filePath);
     if (!validPath) {
       return NextResponse.json(
@@ -30,18 +30,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load messages from JSONL file (using validated real path)
     const loadedMessages = await loadSessionMessages(validPath);
-
-    // Messages are already in the correct format from loadSessionMessages
     const messages = loadedMessages as Message[];
-
-    // Create resumed session (ownership validation happens inside resumeSession)
     const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
 
     return NextResponse.json({ session });
   } catch (error) {
-    // Handle ownership mismatch errors
     if (error instanceof Error && error.message === "Session ownership mismatch") {
       console.warn(
         `[Security] Session ownership mismatch: ` +

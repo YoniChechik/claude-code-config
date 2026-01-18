@@ -218,8 +218,7 @@ describe("API /api/sessions/[id]", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
 
-      const retrieved = sessionManager.getSession(session.id);
-      expect(retrieved).toBeUndefined();
+      expect(() => sessionManager.getSession(session.id)).toThrow();
     });
 
     it("should return 404 for non-existent session", async () => {
@@ -255,11 +254,8 @@ describe("API /api/sessions/[id]", () => {
         params: Promise.resolve({ id: session1.id }),
       });
 
-      const retrieved1 = sessionManager.getSession(session1.id);
+      expect(() => sessionManager.getSession(session1.id)).toThrow();
       const retrieved2 = sessionManager.getSession(session2.id);
-
-      expect(retrieved1).toBeUndefined();
-      expect(retrieved2).toBeDefined();
       expect(retrieved2.cwd).toBe("/home/user2");
     });
   });

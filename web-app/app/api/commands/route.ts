@@ -24,7 +24,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate ownership BEFORE spawning process
   if (!sessionManager.validateOwnership(sessionId, windowId)) {
     console.warn(
       `[Security] Command blocked: ` +
@@ -37,20 +36,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const session = sessionManager.getSession(sessionId);
-  if (!session) {
+  let session;
+  let tracker;
+  try {
+    session = sessionManager.getSession(sessionId);
+    tracker = sessionManager.getCDTracker(sessionId);
+  } catch (error) {
     return new Response(JSON.stringify({ error: "Session not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
-  }
-
-  const tracker = sessionManager.getCDTracker(sessionId);
-  if (!tracker) {
-    return new Response(
-      JSON.stringify({ error: "Session tracker not found" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
   }
 
   // Add user message to session

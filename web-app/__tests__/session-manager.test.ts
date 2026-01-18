@@ -125,9 +125,8 @@ describe("SessionManager", () => {
       expect(retrieved).toBe(created);
     });
 
-    it("should return undefined for non-existent session", () => {
-      const retrieved = sessionManager.getSession("non-existent-id");
-      expect(retrieved).toBeUndefined();
+    it("should throw for non-existent session", () => {
+      expect(() => sessionManager.getSession("non-existent-id")).toThrow();
     });
   });
 
@@ -158,8 +157,7 @@ describe("SessionManager", () => {
       const deleted = sessionManager.deleteSession(session.id);
       expect(deleted).toBe(true);
 
-      const retrieved = sessionManager.getSession(session.id);
-      expect(retrieved).toBeUndefined();
+      expect(() => sessionManager.getSession(session.id)).toThrow();
     });
 
     it("should return false for non-existent session", () => {
@@ -172,8 +170,7 @@ describe("SessionManager", () => {
 
       sessionManager.deleteSession(session.id);
 
-      // Attempting to get tracker should not throw (will create new one)
-      expect(() => sessionManager.getCDTracker(session.id)).not.toThrow();
+      expect(() => sessionManager.getCDTracker(session.id)).toThrow();
     });
   });
 
@@ -380,8 +377,7 @@ describe("SessionManager", () => {
       const deleted = sessionManager.deleteSession(session.id);
       expect(deleted).toBe(true);
 
-      const retrieved = sessionManager.getSession(session.id);
-      expect(retrieved).toBeUndefined();
+      expect(() => sessionManager.getSession(session.id)).toThrow();
     });
 
     it("should handle multiple sessions independently", () => {
