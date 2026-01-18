@@ -20,8 +20,6 @@ interface SessionHeaderProps {
   clientIp?: string;
   audioNotificationsEnabled?: boolean;
   onToggleAudioNotifications?: () => void;
-  includePartialMessages?: boolean;
-  onTogglePartialMessages?: () => void;
 }
 
 /**
@@ -40,8 +38,6 @@ export default function SessionHeader({
   clientIp,
   audioNotificationsEnabled = true,
   onToggleAudioNotifications,
-  includePartialMessages = false,
-  onTogglePartialMessages,
 }: SessionHeaderProps) {
   const [accountUsage, setAccountUsage] = useState<{
     percentUsed: number;
@@ -250,19 +246,6 @@ export default function SessionHeader({
               <span className="text-gray-500">│</span>
               <span>{model}</span>
             </div>
-          )}
-          {onTogglePartialMessages && (
-            <button
-              onClick={onTogglePartialMessages}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-sm"
-              title={
-                includePartialMessages
-                  ? "Disable streaming mode (buffered messages)"
-                  : "Enable streaming mode (real-time text)"
-              }
-            >
-              {includePartialMessages ? "⚡" : "📝"}
-            </button>
           )}
           {onToggleAudioNotifications && (
             <button
