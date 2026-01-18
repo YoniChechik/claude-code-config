@@ -14,6 +14,7 @@ export interface Session {
   distroName?: string; // For WSL sessions
   clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
   audioNotificationsEnabled?: boolean; // Audio notification preference
+  includePartialMessages?: boolean; // Enable streaming text deltas in real-time
 }
 
 // Content block types (matches Claude API output)

@@ -184,6 +184,7 @@ export default function ChatPane({
     });
   };
 
+
   const handleResumeSession = async (
     resumeSessionId: string,
     filePath: string,
