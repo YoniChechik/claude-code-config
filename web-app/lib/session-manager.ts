@@ -62,9 +62,8 @@ class SessionManager {
   }
 
   resumeSession(sessionId: string, windowId: string, cwd: string, messages: Message[]): Session {
-    // Validate ownership
     const owner = this.sessionOwnership.get(sessionId);
-    if (owner && owner !== windowId) {
+    if (owner !== undefined && owner !== windowId) {
       throw new Error("Session ownership mismatch");
     }
 
@@ -96,7 +95,11 @@ class SessionManager {
   }
 
   getSession(id: string): Session {
-    return this.sessions.get(id)!;
+    const session = this.sessions.get(id);
+    if (session === undefined) {
+      throw new Error(`Session ${id} not found`);
+    }
+    return session;
   }
 
   getAllSessions(): Session[] {
@@ -110,22 +113,38 @@ class SessionManager {
   }
 
   clearMessages(id: string): void {
-    const session = this.sessions.get(id)!;
+    const session = this.sessions.get(id);
+    if (session === undefined) {
+      throw new Error(`Session ${id} not found`);
+    }
     session.messages = [];
   }
 
   addMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
     session.messages.push(message);
   }
 
   getCDTracker(sessionId: string): CDTracker {
-    return this.cdTrackers.get(sessionId)!;
+    const tracker = this.cdTrackers.get(sessionId);
+    if (tracker === undefined) {
+      throw new Error(`CD tracker for session ${sessionId} not found`);
+    }
+    return tracker;
   }
 
   updateSessionFromTracker(sessionId: string): void {
-    const session = this.sessions.get(sessionId)!;
-    const tracker = this.cdTrackers.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    const tracker = this.cdTrackers.get(sessionId);
+    if (tracker === undefined) {
+      throw new Error(`CD tracker for session ${sessionId} not found`);
+    }
 
     const wantedCwd = tracker.getWantedCwd();
     if (wantedCwd) {
@@ -137,7 +156,10 @@ class SessionManager {
   }
 
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
-    const session = this.sessions.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
     session.claudeSessionId = claudeSessionId;
   }
 
@@ -153,7 +175,11 @@ class SessionManager {
     if (!this.validateOwnership(sessionId, windowId)) {
       return null;
     }
-    return this.sessions.get(sessionId) || null;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      return null;
+    }
+    return session;
   }
 }
 
