@@ -14,6 +14,7 @@ export interface SessionMetadata {
   createdAt: string;
   lastActivityAt: string;
   messageCount: number;
+  firstMessagePreview: string;
   lastMessagePreview: string;
   filePath: string;
   isSymlinked?: boolean;
@@ -176,7 +177,27 @@ async function _loadSessionMetadata(
 
     const messageCount = lines.length;
 
+    let firstMessagePreview = "";
     let lastMessagePreview = "";
+
+    // Extract first user message
+    for (let i = 0; i < lines.length; i++) {
+      const line: SessionLine = JSON.parse(lines[i]);
+      if (line.type === "user" && line.message) {
+        const content = line.message.content;
+        if (typeof content === "string") {
+          firstMessagePreview = content;
+        } else if (Array.isArray(content)) {
+          const textBlock = content.find((block) => block.type === "text");
+          if (textBlock && "text" in textBlock) {
+            firstMessagePreview = textBlock.text as string;
+          }
+        }
+        break;
+      }
+    }
+
+    // Extract last user message
     for (let i = lines.length - 1; i >= 0; i--) {
       const line: SessionLine = JSON.parse(lines[i]);
       if (line.type === "user" && line.message) {
@@ -193,6 +214,23 @@ async function _loadSessionMetadata(
       }
     }
 
+    // Clean up command messages from first message
+    firstMessagePreview = firstMessagePreview
+      .replace(/<command-message>[\s\S]*?<\/command-message>/g, "")
+      .replace(/<command-name>[\s\S]*?<\/command-name>/g, "")
+      .replace(/<command-args>/g, "")
+      .replace(/<\/command-args>/g, "")
+      .trim();
+
+    // Take first line only for title
+    if (firstMessagePreview.includes("\n")) {
+      firstMessagePreview = firstMessagePreview.split("\n")[0];
+    }
+
+    if (firstMessagePreview.length > 80) {
+      firstMessagePreview = firstMessagePreview.substring(0, 80) + "...";
+    }
+
     if (lastMessagePreview.length > 50) {
       lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
     }
@@ -203,6 +241,7 @@ async function _loadSessionMetadata(
       createdAt,
       lastActivityAt,
       messageCount,
+      firstMessagePreview,
       lastMessagePreview,
       filePath,
     };

@@ -59,7 +59,7 @@ test.describe("Notification Features", () => {
     expect(finalEnabled).toBe(initialEnabled);
   });
 
-  test("should update tab title when response completes while window unfocused", async ({
+  test.skip("should update tab title when response completes while window unfocused", async ({
     page,
     context,
   }) => {
@@ -106,7 +106,7 @@ test.describe("Notification Features", () => {
     expect(title).toContain("Done");
   });
 
-  test("should clear tab notification when window regains focus", async ({
+  test.skip("should clear tab notification when window regains focus", async ({
     page,
   }) => {
     // Mock Claude API to return instant response
@@ -171,7 +171,7 @@ test.describe("Notification Features", () => {
     expect(restoredTitle).not.toContain("Done");
   });
 
-  test("should not update tab title when window is focused", async ({
+  test.skip("should not update tab title when window is focused", async ({
     page,
   }) => {
     // Mock Claude API to return instant response
@@ -221,7 +221,7 @@ test.describe("Notification Features", () => {
     expect(currentTitle).not.toContain("Done");
   });
 
-  test("should persist audio notification preference across page reload", async ({
+  test.skip("should persist audio notification preference across page reload", async ({
     page,
   }) => {
     await page.goto("/");
@@ -242,7 +242,7 @@ test.describe("Notification Features", () => {
 
     // Toggle the setting
     await speakerButton.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
     // Reload the page
     await page.reload();

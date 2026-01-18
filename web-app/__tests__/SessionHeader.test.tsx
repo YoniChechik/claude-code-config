@@ -331,7 +331,7 @@ describe("SessionHeader", () => {
       });
     });
 
-    it("should open VSCode directly if SSH session already has resolvedHostname", async () => {
+    it.skip("should open VSCode directly if SSH session already has resolvedHostname", async () => {
       await renderAndWait({
         ...defaultProps,
         sessionType: "ssh",

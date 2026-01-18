@@ -8,6 +8,7 @@ interface SessionMetadata {
   createdAt: string;
   lastActivityAt: string;
   messageCount: number;
+  firstMessagePreview: string;
   lastMessagePreview: string;
   filePath: string;
   isSymlinked?: boolean;
@@ -170,30 +171,34 @@ export default function SessionPicker({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="font-mono text-sm font-semibold text-blue-400 truncate">
-                          {session.cwd}
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="font-mono text-xs text-blue-400 truncate">
+                          📁 {session.cwd}
                         </span>
                         {session.isSymlinked && session.originalCwd && (
                           <span className="text-xs px-2 py-0.5 bg-purple-900 text-purple-200 rounded-full flex-shrink-0">
                             from another directory
                           </span>
                         )}
-                        <span className="text-xs text-gray-400 flex-shrink-0">
-                          {_formatRelativeTime(session.lastActivityAt)}
-                        </span>
                       </div>
                       {session.isSymlinked && session.originalCwd && (
                         <div className="text-xs text-purple-300 mb-1">
                           Originally created in: {session.originalCwd}
                         </div>
                       )}
-                      <div className="text-sm text-gray-300 mb-1">
-                        {session.messageCount} messages
+                      {session.firstMessagePreview && (
+                        <div className="text-sm font-semibold text-gray-200 mb-1">
+                          {session.firstMessagePreview}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+                        <span>{session.messageCount} messages</span>
+                        <span>•</span>
+                        <span>{_formatRelativeTime(session.lastActivityAt)}</span>
                       </div>
                       {session.lastMessagePreview && (
-                        <div className="text-sm text-gray-400 italic truncate">
-                          "{session.lastMessagePreview}"
+                        <div className="text-xs text-gray-500 italic truncate">
+                          Last: "{session.lastMessagePreview}"
                         </div>
                       )}
                     </div>

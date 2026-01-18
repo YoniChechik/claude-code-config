@@ -50,7 +50,7 @@ export default function SessionHeader({
   const [showModal, setShowModal] = useState(false);
   const [isLoadingMapping, setIsLoadingMapping] = useState(false);
   const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(
-    hostname,
+    undefined,
   );
 
   // Generate VSCode URL based on session type
@@ -64,6 +64,22 @@ export default function SessionHeader({
     }
     return `vscode://file${cwd}?windowId=_blank`;
   };
+
+  // Fetch SSH hostname mapping on mount
+  useEffect(() => {
+    if (sessionType === "ssh" && clientIp) {
+      fetch(`/api/ssh-host-mapping?clientIp=${encodeURIComponent(clientIp)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.hostname) {
+            setResolvedHostname(data.hostname);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch SSH hostname mapping:", err);
+        });
+    }
+  }, [sessionType, clientIp]);
 
   // Poll account-wide usage every 30 seconds
   useEffect(() => {
