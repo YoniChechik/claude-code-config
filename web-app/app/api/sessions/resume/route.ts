@@ -17,18 +17,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate ownership
-  if (!sessionManager.validateOwnership(sessionId, windowId)) {
-    console.warn(
-      `[Security] Session ownership check failed: ` +
-        `sessionId=${sessionId}, windowId=${windowId}`
-    );
-    return NextResponse.json(
-      { error: "Session ownership validation failed" },
-      { status: 403 }
-    );
-  }
-
   try {
     // Validate and resolve the session path (handles symlinks and broken links)
     const validPath = await validateSessionPath(filePath);
@@ -48,11 +36,23 @@ export async function POST(request: NextRequest) {
     // Messages are already in the correct format from loadSessionMessages
     const messages = loadedMessages as Message[];
 
-    // Create resumed session
+    // Create resumed session (ownership validation happens inside resumeSession)
     const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
 
     return NextResponse.json({ session });
   } catch (error) {
+    // Handle ownership mismatch errors
+    if (error instanceof Error && error.message === "Session ownership mismatch") {
+      console.warn(
+        `[Security] Session ownership mismatch: ` +
+          `sessionId=${sessionId}, windowId=${windowId}, ` +
+          `owner=${sessionManager.getOwner(sessionId)}`
+      );
+      return NextResponse.json(
+        { error: "Session ownership validation failed" },
+        { status: 403 }
+      );
+    }
     console.error("Error resuming session:", error);
     return NextResponse.json(
       {

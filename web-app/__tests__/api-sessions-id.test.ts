@@ -263,4 +263,131 @@ describe("API /api/sessions/[id]", () => {
       expect(retrieved2.cwd).toBe("/home/user2");
     });
   });
+
+  describe("Ownership validation", () => {
+    describe("GET with wrong windowId", () => {
+      it("should return 403 when windowId does not match", async () => {
+        const correctWindowId = "window-abc";
+        const wrongWindowId = "window-xyz";
+        const session = sessionManager.createSession("/home/user", correctWindowId);
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            headers: { "x-window-id": wrongWindowId },
+          }
+        );
+        const response = await GET(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(403);
+        expect(data.error).toBe("Session ownership validation failed");
+      });
+
+      it("should return 400 when windowId header is missing", async () => {
+        const session = sessionManager.createSession("/home/user", "window-abc");
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`
+        );
+        const response = await GET(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.error).toBe("x-window-id header required");
+      });
+    });
+
+    describe("PATCH with wrong windowId", () => {
+      it("should return 403 when windowId does not match", async () => {
+        const correctWindowId = "window-abc";
+        const wrongWindowId = "window-xyz";
+        const session = sessionManager.createSession("/home/user", correctWindowId);
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            method: "PATCH",
+            headers: { "x-window-id": wrongWindowId },
+            body: JSON.stringify({ audioNotificationsEnabled: false }),
+          }
+        );
+        const response = await PATCH(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(403);
+        expect(data.error).toBe("Session ownership validation failed");
+        // Verify the session was not modified
+        expect(session.audioNotificationsEnabled).toBe(true);
+      });
+
+      it("should return 400 when windowId header is missing", async () => {
+        const session = sessionManager.createSession("/home/user", "window-abc");
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ audioNotificationsEnabled: false }),
+          }
+        );
+        const response = await PATCH(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.error).toBe("x-window-id header required");
+      });
+    });
+
+    describe("DELETE with wrong windowId", () => {
+      it("should return 403 when windowId does not match", async () => {
+        const correctWindowId = "window-abc";
+        const wrongWindowId = "window-xyz";
+        const session = sessionManager.createSession("/home/user", correctWindowId);
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            method: "DELETE",
+            headers: { "x-window-id": wrongWindowId },
+          }
+        );
+        const response = await DELETE(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(403);
+        expect(data.error).toBe("Session ownership validation failed");
+        // Verify the session was not deleted
+        expect(sessionManager.getSession(session.id)).toBeDefined();
+      });
+
+      it("should return 400 when windowId header is missing", async () => {
+        const session = sessionManager.createSession("/home/user", "window-abc");
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            method: "DELETE",
+          }
+        );
+        const response = await DELETE(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.error).toBe("x-window-id header required");
+      });
+    });
+  });
 });
