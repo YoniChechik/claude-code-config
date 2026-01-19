@@ -29,7 +29,7 @@ export default function ContentBlockRenderer({
 
     case "thinking":
       return (
-        <div className="text-gray-400 italic bg-gray-800 px-3 py-2 rounded-lg">
+        <div className="text-text-secondary italic bg-surface-tertiary px-md py-sm rounded-lg">
           💭 {block.thinking}
         </div>
       );

@@ -17,8 +17,8 @@ describe("StopButton", () => {
       render(<StopButton onClick={onClick} />);
 
       const button = screen.getByRole("button", { name: /stop/i });
-      expect(button).toHaveClass("bg-red-600");
-      expect(button).toHaveClass("text-white");
+      expect(button).toHaveClass("bg-error");
+      expect(button).toHaveClass("text-text-primary");
     });
 
     it("should have correct title attribute", () => {
@@ -86,7 +86,7 @@ describe("StopButton", () => {
       render(<StopButton onClick={onClick} disabled={true} />);
 
       const button = screen.getByRole("button", { name: /stop/i });
-      expect(button).toHaveClass("disabled:bg-gray-600");
+      expect(button).toHaveClass("disabled:bg-surface-elevated");
       expect(button).toHaveClass("disabled:cursor-not-allowed");
     });
   });
@@ -166,7 +166,7 @@ describe("StopButton", () => {
       const button = screen.getByRole("button", { name: /stop/i });
       const classes = button.className;
 
-      expect(classes).toContain("hover:bg-red-500");
+      expect(classes).toContain("hover:bg-error/80");
     });
 
     it("should have transition classes", () => {

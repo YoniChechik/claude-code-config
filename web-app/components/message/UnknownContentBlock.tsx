@@ -40,12 +40,12 @@ export default function UnknownContentBlock({
       </p>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="text-sm text-yellow-400 hover:text-yellow-300 underline mb-2"
+        className="text-sm text-warning hover:text-warning/80 underline mb-sm"
       >
         {isExpanded ? "Hide" : "Show"} raw data
       </button>
       {isExpanded && (
-        <pre className="bg-gray-900 text-gray-300 p-3 rounded overflow-x-auto text-xs font-mono">
+        <pre className="bg-surface-primary text-text-secondary p-md rounded overflow-x-auto text-xs font-mono">
           {JSON.stringify(blockData, null, 2)}
         </pre>
       )}

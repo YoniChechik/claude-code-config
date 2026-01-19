@@ -20,7 +20,7 @@ describe("ChatMessages - Progress Indicator", () => {
 
       const streamingContainer = document.querySelector(".animate-border-spin");
       expect(streamingContainer).toBeInTheDocument();
-      expect(streamingContainer).toHaveClass("bg-gray-800");
+      expect(streamingContainer).toHaveClass("bg-surface-tertiary");
       expect(streamingContainer).toHaveClass("border-2");
     });
 
@@ -199,7 +199,7 @@ describe("ChatMessages - Progress Indicator", () => {
 
       const cursor = document.querySelector(".animate-pulse");
       expect(cursor).toBeInTheDocument();
-      expect(cursor).toHaveClass("bg-blue-500");
+      expect(cursor).toHaveClass("bg-brand-primary");
     });
 
     it("should not show cursor when not streaming", () => {

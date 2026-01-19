@@ -3,16 +3,16 @@ import type { ContentBlock } from "@/lib/types";
 
 // Tool color mapping (from cc_filter.jq)
 const TOOL_COLORS = {
-  Task: "bg-purple-900/40 text-purple-300 border-purple-700",
-  Bash: "bg-yellow-900/40 text-yellow-300 border-yellow-700",
-  Read: "bg-green-900/40 text-green-300 border-green-700",
-  Write: "bg-blue-900/40 text-blue-300 border-blue-700",
-  Edit: "bg-blue-900/40 text-blue-300 border-blue-700",
-  Grep: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
-  Glob: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
-  TodoWrite: "bg-purple-900/40 text-purple-300 border-purple-700",
-  Skill: "bg-pink-900/40 text-pink-300 border-pink-700",
-  default: "bg-gray-800 text-gray-300 border-gray-700",
+  Task: "bg-tool-task-dark/40 text-tool-task-light border-tool-task",
+  Bash: "bg-tool-bash-dark/40 text-tool-bash-light border-tool-bash",
+  Read: "bg-tool-read-dark/40 text-tool-read-light border-tool-read",
+  Write: "bg-tool-write-dark/40 text-tool-write-light border-tool-write",
+  Edit: "bg-tool-write-dark/40 text-tool-write-light border-tool-write",
+  Grep: "bg-tool-grep-dark/40 text-tool-grep-light border-tool-grep",
+  Glob: "bg-tool-grep-dark/40 text-tool-grep-light border-tool-grep",
+  TodoWrite: "bg-tool-task-dark/40 text-tool-task-light border-tool-task",
+  Skill: "bg-tool-skill-dark/40 text-tool-skill-light border-tool-skill",
+  default: "bg-surface-tertiary text-text-secondary border-border-default",
 };
 
 interface ToolUseCardProps {
@@ -26,8 +26,8 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
   const isPending = !tool.result;
 
   return (
-    <div className={`border-l-4 p-3 pl-6 rounded ${colorClass}`}>
-      <div className="flex items-center gap-2 mb-1">
+    <div className={`border-l-4 px-lg py-md rounded ${colorClass}`}>
+      <div className="flex items-center gap-md mb-1">
         <span className="font-semibold">[{tool.name}]</span>
         {tool.timestamp && (
           <span className="text-xs opacity-70">
@@ -65,7 +65,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
       return (
         <div className="font-mono text-sm">
           {description && (
-            <div className="text-gray-400">{description}</div>
+            <div className="text-text-secondary">{description}</div>
           )}
           {command && (
             <div className="mt-1">$ {command}</div>
@@ -83,13 +83,13 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
       return (
         <div className="space-y-1">
           {todos.map((todo: TodoItem, idx: number) => (
-            <div key={idx} className="flex items-center gap-2">
+            <div key={idx} className="flex items-center gap-md">
               <span>{getStatusEmoji(todo.status)}</span>
               <span
                 className={
                   todo.status === "completed"
-                    ? "line-through text-gray-500"
-                    : "text-gray-300"
+                    ? "line-through text-text-muted"
+                    : "text-text-secondary"
                 }
               >
                 {todo.content}
@@ -112,7 +112,7 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Write":
     case "Edit":
       return (
-        <div className="text-sm font-mono text-gray-400">
+        <div className="text-sm font-mono text-text-secondary">
           {String(input.file_path)}
         </div>
       );
@@ -120,14 +120,14 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Grep":
     case "Glob":
       return (
-        <div className="text-sm font-mono text-gray-400">
+        <div className="text-sm font-mono text-text-secondary">
           {String(input.pattern)}
         </div>
       );
 
     default:
       return (
-        <pre className="text-xs text-gray-400 overflow-x-auto">
+        <pre className="text-xs text-text-secondary overflow-x-auto">
           {JSON.stringify(input, null, 2)}
         </pre>
       );
@@ -177,14 +177,14 @@ function renderToolResult(
       {shouldCollapse && (
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex-shrink-0 w-2 bg-blue-600 hover:bg-blue-500 cursor-pointer transition-colors rounded-l"
+          className="flex-shrink-0 w-2 bg-brand-primary hover:bg-brand-secondary cursor-pointer transition-colors rounded-l"
           title={
             isExpanded ? "Collapse" : `Expand ${lines.length - 3} more lines`
           }
         />
       )}
       <div
-        className={`text-gray-300 bg-gray-800 px-3 py-2 font-mono text-sm whitespace-pre-wrap flex-1 ${shouldCollapse ? "rounded-r" : "rounded"}`}
+        className={`text-text-secondary bg-surface-tertiary px-md py-sm font-mono text-sm whitespace-pre-wrap flex-1 ${shouldCollapse ? "rounded-r" : "rounded"}`}
       >
         {displayContent}
       </div>

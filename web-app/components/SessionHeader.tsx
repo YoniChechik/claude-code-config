@@ -106,9 +106,9 @@ export default function SessionHeader({
     : 0;
 
   // Determine color based on usage
-  let tokenColor = "text-green-400";
-  if (percentUsed > 80) tokenColor = "text-red-400";
-  else if (percentUsed > 60) tokenColor = "text-yellow-400";
+  let tokenColor = "text-success";
+  if (percentUsed > 80) tokenColor = "text-error";
+  else if (percentUsed > 60) tokenColor = "text-warning";
 
   // Show high usage warning when account-wide > 70% used
   const showHighUsageWarning = accountUsage && accountUsage.percentUsed > 70;
@@ -208,21 +208,21 @@ export default function SessionHeader({
         onSave={handleSaveHostname}
         onCancel={() => setShowModal(false)}
       />
-      <div className="flex items-center justify-between px-12 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
+      <div className="flex items-center justify-between px-xl py-md bg-surface-secondary text-text-primary border-b border-border-default shadow-md">
         <button
           onClick={handleCwdClick}
           disabled={isLoadingMapping}
-          className="truncate font-mono text-sm font-medium hover:text-blue-400 hover:underline cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait text-left"
+          className="truncate font-mono text-sm font-medium hover:text-brand-primary hover:underline cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait text-left"
           title={`Open ${cwd} in VSCode`}
         >
           {isLoadingMapping ? `${cwd} (loading...)` : cwd}
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-md">
           {onToggleAudioNotifications && (
             <button
               onClick={onToggleAudioNotifications}
-              className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-700 hover:bg-gray-600 transition-colors"
+              className="px-md py-sm text-xs font-medium rounded-md bg-surface-elevated hover:bg-border-emphasis transition-colors"
               title={`${audioNotificationsEnabled ? "Disable" : "Enable"} audio notifications`}
             >
               {audioNotificationsEnabled ? "🔊" : "🔇"}
@@ -231,7 +231,7 @@ export default function SessionHeader({
           {onClose && (
             <button
               onClick={onClose}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
+              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-surface-elevated transition-all duration-200 text-xl leading-none font-light"
               title="Close session"
             >
               ×

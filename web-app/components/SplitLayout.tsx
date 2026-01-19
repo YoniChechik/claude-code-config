@@ -130,7 +130,7 @@ export default function SplitLayout({
       {/* Floating + button */}
       <button
         onClick={onAddSession}
-        className="absolute top-5 right-5 z-50 w-8 h-8 p-0 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-xl leading-none transition-all duration-200 hover:scale-110"
+        className="absolute top-5 right-5 z-50 w-8 h-8 p-0 bg-gradient-to-br from-brand-primary to-brand-secondary hover:from-brand-secondary hover:to-brand-primary text-text-primary rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-xl leading-none transition-all duration-200 hover:scale-110"
         title="Add new chat"
       >
         +
@@ -155,10 +155,10 @@ export default function SplitLayout({
 
           {index < sessionIds.length - 1 && (
             <div
-              className="flex items-center justify-center w-1.5 bg-gradient-to-b from-gray-200 via-gray-300 to-gray-200 cursor-col-resize hover:from-blue-400 hover:via-blue-500 hover:to-blue-400 active:from-blue-600 active:via-blue-700 active:to-blue-600 transition-all duration-200"
+              className="flex items-center justify-center w-1.5 bg-gradient-to-b from-border-default via-border-emphasis to-border-default cursor-col-resize hover:from-brand-primary hover:via-brand-secondary hover:to-brand-primary active:from-brand-secondary active:via-brand-primary active:to-brand-secondary transition-all duration-200"
               onMouseDown={() => handleMouseDown(index)}
             >
-              <div className="text-gray-500 text-xs">⋮</div>
+              <div className="text-text-muted text-xs">⋮</div>
             </div>
           )}
         </div>

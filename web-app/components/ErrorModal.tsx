@@ -46,19 +46,19 @@ ${errorInfo?.componentStack || "No component stack available"}`;
       onClick={onDismiss}
     >
       <div
-        className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-surface-elevated rounded-lg shadow-xl max-w-2xl w-full mx-md p-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-xl font-semibold text-red-400 mb-4">
+        <h2 className="text-xl font-semibold text-error mb-md">
           Application Error
         </h2>
 
-        <div className="space-y-4">
+        <div className="space-y-md">
           <div>
-            <p className="text-white text-lg font-semibold mb-2">
+            <p className="text-text-primary text-lg font-semibold mb-sm">
               {error.message || "An unknown error occurred"}
             </p>
-            <p className="text-gray-400 text-sm">
+            <p className="text-text-secondary text-sm">
               {error.name || "Error"}
             </p>
           </div>
@@ -67,12 +67,12 @@ ${errorInfo?.componentStack || "No component stack available"}`;
             <div>
               <button
                 onClick={() => setShowStack(!showStack)}
-                className="text-sm text-blue-400 hover:text-blue-300 mb-2"
+                className="text-sm text-text-accent hover:text-brand-primary mb-sm"
               >
                 {showStack ? "▼" : "▶"} Stack Trace
               </button>
               {showStack && (
-                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300 overflow-x-auto max-h-60 overflow-y-auto">
+                <pre className="bg-surface-primary p-md rounded text-xs font-mono text-text-secondary overflow-x-auto max-h-60 overflow-y-auto">
                   {error.stack}
                 </pre>
               )}
@@ -83,37 +83,37 @@ ${errorInfo?.componentStack || "No component stack available"}`;
             <div>
               <button
                 onClick={() => setShowComponentStack(!showComponentStack)}
-                className="text-sm text-blue-400 hover:text-blue-300 mb-2"
+                className="text-sm text-text-accent hover:text-brand-primary mb-sm"
               >
                 {showComponentStack ? "▼" : "▶"} Component Stack
               </button>
               {showComponentStack && (
-                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300 overflow-x-auto max-h-60 overflow-y-auto">
+                <pre className="bg-surface-primary p-md rounded text-xs font-mono text-text-secondary overflow-x-auto max-h-60 overflow-y-auto">
                   {errorInfo.componentStack}
                 </pre>
               )}
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-4">
+          <div className="flex justify-end gap-md pt-md">
             <button
               type="button"
               onClick={handleCopyError}
-              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
+              className="px-md py-sm bg-surface-tertiary text-text-secondary rounded-md hover:bg-surface-elevated transition-colors"
             >
               {copied ? "Copied!" : "Copy Error"}
             </button>
             <button
               type="button"
               onClick={onDismiss}
-              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
+              className="px-md py-sm bg-surface-tertiary text-text-secondary rounded-md hover:bg-surface-elevated transition-colors"
             >
               Dismiss
             </button>
             <button
               type="button"
               onClick={handleReload}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              className="px-md py-sm bg-brand-primary text-text-primary rounded-md hover:bg-brand-secondary transition-colors"
             >
               Reload Page
             </button>

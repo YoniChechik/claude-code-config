@@ -16,10 +16,10 @@ export default function StopButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors duration-200 shadow-sm hover:shadow-md"
+      className="px-md py-sm bg-error hover:bg-error/80 disabled:bg-surface-elevated disabled:cursor-not-allowed text-text-primary font-semibold rounded-xl transition-colors duration-200 shadow-md hover:shadow-lg"
       title="Stop generation"
     >
-      <span className="flex items-center gap-2">
+      <span className="flex items-center gap-md">
         <svg
           className="w-4 h-4"
           fill="currentColor"
