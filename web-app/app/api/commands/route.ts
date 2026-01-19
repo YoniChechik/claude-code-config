@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
           updatedSession && updatedSession.cwd !== previousCwd;
 
         // Send cwd_changed event to client so navbar updates immediately
-        if (didChangeCwd) {
+        if (didChangeCwd && updatedSession.cwd) {
           const cwdChangedEvent = {
             type: "cwd_changed",
             cwd: updatedSession.cwd,

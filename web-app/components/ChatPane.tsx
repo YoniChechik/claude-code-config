@@ -337,7 +337,7 @@ export default function ChatPane({
             assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
             setStreamingText(assistantText);
             setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed") {
+          } else if (event.type === "cwd_changed" && event.cwd) {
             setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
           } else if (event.type === "token_usage") {
             setTokenUsage(event.token_usage);
