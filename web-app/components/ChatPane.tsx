@@ -396,7 +396,7 @@ export default function ChatPane({
 
   if (!session) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
+      <div className="flex items-center justify-center h-full bg-surface-primary text-text-secondary">
         Loading session...
       </div>
     );
@@ -404,7 +404,7 @@ export default function ChatPane({
 
   return (
     <div
-      className={`relative flex flex-col h-full bg-gray-900 ${isFocused ? "ring-2 ring-blue-500" : ""}`}
+      className={`relative flex flex-col h-full bg-surface-primary ${isFocused ? "ring-2 ring-brand-primary" : ""}`}
     >
       <SessionHeader
         cwd={session.cwd}

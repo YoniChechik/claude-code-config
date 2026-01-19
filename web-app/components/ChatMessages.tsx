@@ -70,25 +70,25 @@ export default function ChatMessages({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-y-auto p-6 pl-12 pr-12 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900"
+      className="flex-1 overflow-y-auto px-xl py-lg space-y-lg bg-surface-primary"
     >
       {visibleMessages.length === 0 && !isStreaming && (
         <div className="flex items-center justify-center h-full">
-          <p className="text-2xl text-gray-500">Write something special...</p>
+          <p className="text-2xl text-text-muted">Write something special...</p>
         </div>
       )}
       {visibleMessages.map((message, index) => (
         <div
           key={index}
-          className={`flex flex-col gap-2 p-4 pl-12 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${
+          className={`flex flex-col gap-md px-lg py-md rounded-2xl shadow-md transition-all duration-200 hover:shadow-lg ${
             message.role === "user"
-              ? "bg-gradient-to-br from-blue-800 to-blue-900 text-gray-100 ml-auto max-w-[85%]"
-              : "bg-gray-800 border border-gray-700 text-gray-100 mr-auto max-w-[85%]"
+              ? "bg-gradient-to-br from-brand-primary to-brand-secondary text-text-primary ml-auto max-w-[85%]"
+              : "bg-surface-tertiary border border-border-default text-text-primary mr-auto max-w-[85%]"
           }`}
         >
           <div
             className={`flex items-center gap-2 text-xs font-semibold ${
-              message.role === "user" ? "text-blue-200" : "text-gray-400"
+              message.role === "user" ? "text-text-accent" : "text-text-secondary"
             }`}
           >
             <span>{message.role === "user" ? "You" : "Claude"}</span>
@@ -137,8 +137,8 @@ export default function ChatMessages({
 
       {/* Streaming message */}
       {isStreaming && (
-        <div className="flex flex-col gap-2 p-4 pl-12 rounded-2xl shadow-sm bg-gray-800 border-2 text-gray-100 mr-auto max-w-[85%] animate-border-spin">
-          <div className="text-xs font-semibold text-gray-400">Claude</div>
+        <div className="flex flex-col gap-md px-lg py-md rounded-2xl shadow-md bg-surface-tertiary border-2 text-text-primary mr-auto max-w-[85%] animate-border-spin">
+          <div className="text-xs font-semibold text-text-secondary">Claude</div>
           <div className="text-sm leading-relaxed">
             <div className="whitespace-pre-wrap break-words">
               {groupBlocksByAgent(streamingBlocks).map((group, groupIdx) => {
@@ -168,7 +168,7 @@ export default function ChatMessages({
                   <span key={groupIdx}>
                     <ContentBlockRenderer block={group.block} />
                     {isStreaming && isLastGroup && isTextBlock && (
-                      <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">
+                      <span className="inline-block w-0.5 h-5 ml-1 bg-brand-primary animate-pulse">
                         ▋
                       </span>
                     )}

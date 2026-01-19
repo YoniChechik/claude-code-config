@@ -23,7 +23,7 @@ export default function StatusBar() {
   if (!status) return null;
 
   return (
-    <div className="w-full border-b px-4 py-1 text-xs flex items-center justify-center gap-4 bg-gray-800 border-gray-700 text-gray-400">
+    <div className="w-full border-b px-md py-xs text-xs flex items-center justify-center gap-md bg-surface-secondary border-border-default text-text-secondary">
       <span>Claude Version: {status.version}</span>
     </div>
   );

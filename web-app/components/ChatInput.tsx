@@ -52,12 +52,12 @@ export default function ChatInput({
         }}
         onCancel={() => setShowResumePicker(false)}
       />
-      <div className="flex flex-col gap-3 px-12 py-5 border-t border-gray-700 bg-gradient-to-b from-gray-800 to-gray-900">
+      <div className="flex flex-col gap-md px-xl py-lg border-t border-border-default bg-surface-secondary">
         {showResumeButton && (
-          <div className="flex justify-center pb-2">
+          <div className="flex justify-center pb-md">
             <button
               onClick={() => setShowResumePicker(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-700/50 rounded-lg transition-all duration-200 border border-gray-700 hover:border-gray-600"
+              className="flex items-center gap-md px-md py-sm text-sm text-text-secondary hover:text-text-primary hover:bg-surface-elevated rounded-lg transition-all duration-200 border border-border-default hover:border-border-emphasis"
               title="Resume a previous session"
             >
               <span className="text-base">📂</span>

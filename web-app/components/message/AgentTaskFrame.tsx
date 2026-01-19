@@ -25,24 +25,24 @@ export default function AgentTaskFrame({
   childBlocks,
 }: AgentTaskFrameProps) {
   return (
-    <div className="my-3 border-2 border-purple-700 rounded-lg overflow-hidden bg-purple-950/20">
+    <div className="my-md border-2 border-brand-secondary rounded-lg overflow-hidden bg-brand-secondary/10">
       {/* Agent Header */}
-      <div className="bg-purple-900/40 border-b-2 border-purple-700 px-4 py-2 flex items-center gap-2">
+      <div className="bg-brand-secondary/20 border-b-2 border-brand-secondary px-md py-sm flex items-center gap-md">
         <span className="text-lg">🤖</span>
         <div className="flex-1">
-          <span className="font-semibold text-purple-300">{agentType}</span>
-          <span className="text-purple-400 ml-2">· {description}</span>
+          <span className="font-semibold text-text-accent">{agentType}</span>
+          <span className="text-brand-primary ml-2">· {description}</span>
         </div>
         <div
-          className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"
+          className="w-2 h-2 bg-brand-primary rounded-full animate-pulse"
           title="Running"
         />
       </div>
 
       {/* Agent Content - nested tool invocations and nested agents */}
-      <div className="px-4 py-3 space-y-2">
+      <div className="px-md py-md space-y-sm">
         {/* Display the Task tool invocation that spawned this agent */}
-        <div className="ml-2">
+        <div className="ml-sm">
           <ToolUseCard tool={taskToolUse} />
         </div>
 
@@ -54,7 +54,7 @@ export default function AgentTaskFrame({
               { type: "agent_task" }
             >;
             return (
-              <div key={index} className="ml-2">
+              <div key={index} className="ml-sm">
                 <AgentTaskFrame
                   agentType={agentItem.agentType}
                   description={agentItem.description}
@@ -77,14 +77,14 @@ export default function AgentTaskFrame({
               { type: "standalone" }
             >;
             return (
-              <div key={index} className="ml-2">
+              <div key={index} className="ml-sm">
                 <ContentBlockRenderer block={standaloneItem.block} isNested />
               </div>
             );
           }
           // Handle raw content blocks
           return (
-            <div key={index} className="ml-2">
+            <div key={index} className="ml-sm">
               <ContentBlockRenderer block={item as ContentBlock} isNested />
             </div>
           );

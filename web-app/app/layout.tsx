@@ -20,7 +20,7 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </Head>
-      <body className="bg-gray-900 text-gray-100">
+      <body className="bg-surface-primary text-text-primary">
         <StatusBar />
         <ErrorBoundary>
           <GlobalErrorHandler />
