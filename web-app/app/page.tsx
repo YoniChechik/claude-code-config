@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import SplitLayout from "@/components/SplitLayout";
 import type { SlashCommand } from "@/lib/types";
+import { getHeartbeatClient } from "@/lib/heartbeat-client";
+import { getCleanupHandler } from "@/lib/cleanup-handler";
 
 /**
  * Main page - initializes session(s) and renders dynamic split layout
@@ -15,6 +17,18 @@ export default function Home() {
 
   useEffect(() => {
     initializeSessions();
+
+    // Start cleanup handler
+    const cleanupHandler = getCleanupHandler();
+    cleanupHandler.start();
+
+    // Cleanup on unmount
+    return () => {
+      const heartbeatClient = getHeartbeatClient();
+      heartbeatClient.stop();
+
+      cleanupHandler.stop();
+    };
   }, []);
 
   const initializeSessions = async () => {
@@ -35,6 +49,14 @@ export default function Home() {
 
       if (data.session) {
         setSessionIds([data.session.id]);
+
+        // Add session to heartbeat client
+        const heartbeatClient = getHeartbeatClient();
+        heartbeatClient.addSession(data.session.id);
+
+        // Add session to cleanup handler
+        const cleanupHandler = getCleanupHandler();
+        cleanupHandler.addSession(data.session.id);
 
         // Auto-load hostname mapping if SSH with localhost hostname
         if (
@@ -112,6 +134,14 @@ export default function Home() {
 
       if (data.session) {
         setSessionIds([...sessionIds, data.session.id]);
+
+        // Add session to heartbeat client
+        const heartbeatClient = getHeartbeatClient();
+        heartbeatClient.addSession(data.session.id);
+
+        // Add session to cleanup handler
+        const cleanupHandler = getCleanupHandler();
+        cleanupHandler.addSession(data.session.id);
       }
     } catch (err) {
       console.error("Failed to add session:", err);
@@ -120,6 +150,14 @@ export default function Home() {
 
   const closeSession = async (sessionId: string) => {
     try {
+      // Remove session from heartbeat client
+      const heartbeatClient = getHeartbeatClient();
+      heartbeatClient.removeSession(sessionId);
+
+      // Remove session from cleanup handler (normal closure)
+      const cleanupHandler = getCleanupHandler();
+      cleanupHandler.removeSession(sessionId);
+
       // If only 1 session, clear messages instead of deleting
       if (sessionIds.length === 1) {
         await fetch(`/api/sessions/${sessionId}`, {
@@ -155,6 +193,14 @@ export default function Home() {
 
     if (data.session) {
       setSessionIds([data.session.id]);
+
+      // Add session to heartbeat client
+      const heartbeatClient = getHeartbeatClient();
+      heartbeatClient.addSession(data.session.id);
+
+      // Add session to cleanup handler
+      const cleanupHandler = getCleanupHandler();
+      cleanupHandler.addSession(data.session.id);
     }
   };
 
