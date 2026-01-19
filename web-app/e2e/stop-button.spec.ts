@@ -1,59 +1,15 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("Stop Button Functionality", () => {
+/**
+ * Stop Button E2E Tests - Real Streaming Cancellation
+ *
+ * These tests verify stop button behavior with real API streaming.
+ * UI-only tests are covered in __tests__/components/StopButton.test.tsx
+ */
+test.describe("Stop Button - Real Streaming Behavior", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
-  });
-
-  test("should show stop button when message is sent", async ({ page }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const chatInput = leftPane.locator("textarea").first();
-
-    // Verify stop button is not visible initially
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-    await expect(stopButton).not.toBeVisible();
-
-    // Send a message
-    await chatInput.fill("hello");
-    await chatInput.press("Enter");
-
-    // Wait for input to clear
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
-
-    // Stop button should appear during streaming
-    await expect(stopButton).toBeVisible({ timeout: 2000 });
-
-    // Verify stop button has correct styling (red background)
-    const classes = await stopButton.getAttribute("class");
-    expect(classes).toContain("bg-red-600");
-  });
-
-  test("should hide stop button when streaming completes", async ({ page }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const chatInput = leftPane.locator("textarea").first();
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-
-    // Send a short message
-    await chatInput.fill("hi");
-    await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
-
-    // Stop button should appear
-    await expect(stopButton).toBeVisible({ timeout: 2000 });
-
-    // Wait for response to complete
-    const completedMessage = leftPane
-      .locator("div.bg-gray-800")
-      .filter({ has: page.locator("text=Claude") })
-      .last();
-    await expect(completedMessage).toBeVisible({ timeout: 20000 });
-
-    // Give a moment for state to update
-    await page.waitForTimeout(1000);
-
-    // Stop button should disappear
-    await expect(stopButton).not.toBeVisible({ timeout: 10000 });
   });
 
   test("should cancel request when stop button is clicked", async ({
@@ -85,37 +41,6 @@ test.describe("Stop Button Functionality", () => {
       .locator("div.animate-border-spin")
       .count();
     expect(streamingMessages).toBe(0);
-  });
-
-  test("should re-enable input immediately after stopping", async ({
-    page,
-  }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const chatInput = leftPane.locator("textarea").first();
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-
-    // Send a message
-    await chatInput.fill("hello");
-    await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
-
-    // Wait for stop button
-    await expect(stopButton).toBeVisible({ timeout: 2000 });
-
-    // Click stop
-    await stopButton.click();
-
-    // Input should be immediately usable
-    await page.waitForTimeout(500);
-
-    // Type in input field
-    await chatInput.fill("new message");
-
-    // Verify text was entered
-    await expect(chatInput).toHaveValue("new message");
-
-    // Input should be enabled
-    await expect(chatInput).not.toBeDisabled();
   });
 
   test("should allow sending new message after cancellation", async ({
@@ -186,57 +111,5 @@ test.describe("Stop Button Functionality", () => {
     // Input should be functional
     await chatInput.fill("works after stop");
     await expect(chatInput).toHaveValue("works after stop");
-  });
-
-  test("should keep user message visible after cancellation", async ({
-    page,
-  }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const chatInput = leftPane.locator("textarea").first();
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-
-    // Send a message
-    const testMessage = "keep this message";
-    await chatInput.fill(testMessage);
-    await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
-
-    // Verify user message is visible
-    await expect(leftPane.locator(`text=${testMessage}`)).toBeVisible({
-      timeout: 5000,
-    });
-
-    // Wait for stop button and click it
-    await expect(stopButton).toBeVisible({ timeout: 2000 });
-    await page.waitForTimeout(500);
-    await stopButton.click();
-
-    // Wait for stop to complete
-    await expect(stopButton).not.toBeVisible({ timeout: 2000 });
-
-    // User message should STILL be visible
-    await expect(leftPane.locator(`text=${testMessage}`)).toBeVisible({
-      timeout: 2000,
-    });
-
-    // But streaming message should be gone
-    const streamingMessages = await leftPane
-      .locator("div.animate-border-spin")
-      .count();
-    expect(streamingMessages).toBe(0);
-  });
-
-  test("should not show stop button when not streaming", async ({ page }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-
-    // Initially, stop button should not be visible
-    await expect(stopButton).not.toBeVisible();
-
-    // Wait a bit to ensure it doesn't appear unexpectedly
-    await page.waitForTimeout(2000);
-
-    // Should still not be visible
-    await expect(stopButton).not.toBeVisible();
   });
 });
