@@ -379,7 +379,8 @@ export default function ChatPane({
     const data = await sessionResponse.json();
 
     if (!sessionResponse.ok || !data.session) {
-      throw new Error(data.error || "Failed to update session metadata");
+      // Session might have been deleted (tab close, cleanup, etc.) - ignore silently
+      return;
     }
 
     setSession((prev) =>
