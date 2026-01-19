@@ -15,7 +15,7 @@ export const maxDuration = 0;
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as SendCommandRequest;
-  const { sessionId, windowId, prompt, appendedSystemPromptFile } = body;
+  const { sessionId, windowId, prompt } = body;
 
   if (!sessionId || !windowId || !prompt) {
     return new Response(
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
         const claudeSessionId = session.claudeSessionId;
 
         // Load custom system prompt if exists
-        const systemPrompt = await loadSystemPrompt(appendedSystemPromptFile);
+        const systemPrompt = await loadSystemPrompt();
 
         // Stream events from Claude (uses claude CLI directly, no API key needed)
         for await (const event of client.streamCommand(prompt, {
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
         if (didChangeCwd) {
           try {
             const client = new ClaudeClient();
-            const systemPrompt = await loadSystemPrompt(appendedSystemPromptFile);
+            const systemPrompt = await loadSystemPrompt();
             const continuePrompt = `Now we are in ${updatedSession.cwd}. CONTINUE`;
 
             // Add user message for continue
