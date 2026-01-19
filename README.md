@@ -49,8 +49,6 @@ export PATH="$HOME/.claude/bin:$PATH"
 - **`ccui.sh`** - Runs `cc.sh` with custom UI wrapper (customize this file for your own UI enhancements)
 
 - **`ccweb`** - Starts the Claude Code Web UI (Next.js multi-session interface):
-  - Runs dev server in background with nohup
-  - Saves PID to `web-app/dev.pid`
-  - Logs to `web-app/dev.log`
+  - Builds and runs production server
   - Access at http://localhost:3000
-  - Add to PATH: `ln -sf ~/.claude/_clones/ccweb/start-dev.sh ~/.local/bin/ccweb`
+  - Add to shell config: `alias ccweb="$HOME/.claude/web-app/scripts/build-and-start-prod.sh"`
