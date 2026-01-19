@@ -32,9 +32,7 @@ async function writeMappings(mappings: Record<string, string>): Promise<void> {
 /**
  * Get hostname for a client IP
  */
-export async function getHostnameForIP(
-  clientIp: string,
-): Promise<string | null> {
+export async function getHostnameForIP(clientIp: string): Promise<string | null> {
   const mappings = await readMappings();
   return mappings[clientIp] ?? null;
 }
@@ -42,10 +40,7 @@ export async function getHostnameForIP(
 /**
  * Save hostname for a client IP
  */
-export async function setHostnameForIP(
-  clientIp: string,
-  hostname: string,
-): Promise<void> {
+export async function setHostnameForIP(clientIp: string, hostname: string): Promise<void> {
   const mappings = await readMappings();
   mappings[clientIp] = hostname;
   await writeMappings(mappings);

@@ -1,6 +1,5 @@
-import { spawn, ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import * as fs from "fs";
-import { logSessionInput, logSessionOutput, logSessionError } from "./session-logger";
 
 /**
  * Claude client wrapper for streaming commands
@@ -63,7 +62,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string; includePartialMessages?: boolean; onProcessSpawned?: (process: ChildProcess) => void },
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string }
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -81,20 +80,40 @@ export class ClaudeClient {
       let stderrOutput = "";
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
-      const taskToolIds = new Set<string>(); // Track Task tool IDs (agents) - needed for agent-grouping later
-      let hasReceivedTextDelta = false; // Track if any text_delta events were received
 
-      // Track StructuredOutput streaming state for input_json_delta parsing
-      let structuredOutputToolId: string | null = null; // Current StructuredOutput tool_use id
-      let structuredOutputJsonBuffer = ""; // Buffer for accumulating JSON
-      let structuredOutputEmittedLength = 0; // How much of response we've already emitted
-      let hasEmittedStreamingContent = false; // Track if ANY streaming content has been emitted
+      // Buffer for maintaining causal ordering of tool_use/tool_result pairs
+      const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
+      const toolResultBuffer = new Map<string, ClaudeStreamEvent>(); // tool_use_id -> tool_result event
+      const toolUseOrder: string[] = []; // Track the order tool_use events arrive
 
       // Create an async queue for events
       const eventQueue: ClaudeStreamEvent[] = [];
       let resolveNext: (() => void) | null = null;
       let processEnded = false;
       let processError: Error | null = null;
+
+      // Helper to emit tool_use/tool_result pairs in causal order
+      const tryEmitPairedEvents = () => {
+        // Emit all tool_use events that have matching tool_results
+        for (const toolId of toolUseOrder) {
+          const toolUseEvent = toolUseBuffer.get(toolId);
+          const toolResultEvent = toolResultBuffer.get(toolId);
+
+          if (toolUseEvent && toolResultEvent) {
+            // We have both - emit them in order
+            eventQueue.push(toolUseEvent);
+            eventQueue.push(toolResultEvent);
+
+            // Remove from buffers
+            toolUseBuffer.delete(toolId);
+            toolResultBuffer.delete(toolId);
+            toolUseOrder.splice(toolUseOrder.indexOf(toolId), 1);
+
+            resolveNext?.();
+            resolveNext = null;
+          }
+        }
+      };
 
       // Build args like ccui.sh does
       const args = [
@@ -114,12 +133,9 @@ export class ClaudeClient {
 
       // Add system prompt if provided
       if (options?.appendSystemPrompt) {
-        args.push("--append-system-prompt", options.appendSystemPrompt);
-      }
-
-      // Add includePartialMessages flag if enabled
-      if (options?.includePartialMessages) {
-        args.push("--include-partial-messages");
+        const tempFile = `/tmp/ccweb_system_prompt_${Date.now()}.txt`;
+        await fs.promises.writeFile(tempFile, options.appendSystemPrompt);
+        args.push("--append-system-prompt", tempFile);
       }
 
       const claude = spawn("/home/ubuntu/.local/bin/claude", args, {
@@ -127,22 +143,12 @@ export class ClaudeClient {
         cwd: options?.cwd || process.cwd(),
       });
 
-      // Notify caller that process has been spawned
-      if (options?.onProcessSpawned) {
-        options.onProcessSpawned(claude);
-      }
-
       // Close stdin since we're not sending any input
       claude.stdin.end();
 
       // Capture stderr for debugging
       claude.stderr.on("data", (chunk: Buffer) => {
-        const chunkStr = chunk.toString();
-        stderrOutput += chunkStr;
-        // Log stderr output if we have a sessionId
-        if (sessionId) {
-          logSessionError(sessionId, `stderr: ${chunkStr}`);
-        }
+        stderrOutput += chunk.toString();
       });
 
       claude.stdout.on("data", (chunk: Buffer) => {
@@ -156,13 +162,8 @@ export class ClaudeClient {
           if (!line.trim()) continue;
 
           try {
-            const rawEvent = JSON.parse(line);
-            _debugLog("RAW_JSON_LINE", rawEvent);
-
-            // Handle stream_event wrapper (CLI sends wrapped events)
-            // Extract inner event FIRST, before any type checks
-            const event =
-              rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
+            const event = JSON.parse(line);
+            _debugLog("RAW_JSON_LINE", event);
 
             // Handle init event to get model and session_id
             if (event.subtype === "init") {
@@ -171,49 +172,24 @@ export class ClaudeClient {
               }
               if (event.session_id) {
                 sessionId = event.session_id;
-                // Use local variable to satisfy TypeScript
-                const newSessionId = event.session_id;
-                // Log the input prompt now that we have sessionId
-                logSessionInput(newSessionId, prompt, { cwd: options?.cwd, model });
                 // Send updated init event with session_id
                 eventQueue.push({
                   type: "init",
                   model: model,
-                  session_id: newSessionId,
+                  session_id: sessionId,
                 });
                 resolveNext?.();
                 resolveNext = null;
               }
             }
 
-            // Log all raw events if we have a sessionId
-            if (sessionId) {
-              logSessionOutput(sessionId, rawEvent);
-            }
-
             // Handle content_block_start for tool_use blocks (streaming)
-            // Emit immediately - no buffering
-            if (
-              event.type === "content_block_start" &&
-              event.content_block?.type === "tool_use"
-            ) {
+            if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
               const block = event.content_block;
-
-              // Track StructuredOutput for input_json_delta parsing
-              if (block.name === "StructuredOutput") {
-                structuredOutputToolId = block.id;
-                structuredOutputJsonBuffer = "";
-                structuredOutputEmittedLength = 0;
-                // Reset flags for new response
-                hasReceivedTextDelta = false;
-                hasEmittedStreamingContent = false;
-              } else if (!emittedToolUseIds.has(block.id)) {
+              if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
                 emittedToolUseIds.add(block.id);
-                // Track Task tools for agent-grouping
-                if (block.name === "Task") {
-                  taskToolIds.add(block.id);
-                }
-                eventQueue.push({
+                // Buffer tool_use event instead of emitting directly
+                const toolUseEvent: ClaudeStreamEvent = {
                   type: "tool_use",
                   tool: {
                     id: block.id,
@@ -221,9 +197,11 @@ export class ClaudeClient {
                     input: block.input || {},
                     timestamp: new Date(),
                   },
-                });
-                resolveNext?.();
-                resolveNext = null;
+                };
+                toolUseBuffer.set(block.id, toolUseEvent);
+                toolUseOrder.push(block.id);
+                // Try to emit paired events
+                tryEmitPairedEvents();
               }
             }
 
@@ -237,33 +215,17 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  // Skip if includePartialMessages is enabled AND streaming content was already emitted
-                  // If no streaming content was emitted, send StructuredOutput text as fallback
-                  if (
-                    block.name === "StructuredOutput" &&
-                    block.input?.response
-                  ) {
-                    const shouldSkip = options?.includePartialMessages && hasEmittedStreamingContent;
-                    if (!shouldSkip) {
-                      eventQueue.push({
-                        type: "text",
-                        content: block.input.response,
-                      });
-                    }
+                  if (block.name === "StructuredOutput" && block.input?.response) {
+                    eventQueue.push({
+                      type: "text",
+                      content: block.input.response,
+                    });
                   }
 
-                  // Handle tool_use for all tools (skip StructuredOutput and already-emitted)
-                  // Emit immediately - no buffering
-                  if (
-                    block.name !== "StructuredOutput" &&
-                    !emittedToolUseIds.has(block.id)
-                  ) {
+                  // Buffer tool_use event for all tools (skip StructuredOutput and already-emitted)
+                  if (block.name !== "StructuredOutput" && !emittedToolUseIds.has(block.id)) {
                     emittedToolUseIds.add(block.id);
-                    // Track Task tools for agent-grouping
-                    if (block.name === "Task") {
-                      taskToolIds.add(block.id);
-                    }
-                    eventQueue.push({
+                    const toolUseEvent: ClaudeStreamEvent = {
                       type: "tool_use",
                       tool: {
                         id: block.id,
@@ -271,7 +233,11 @@ export class ClaudeClient {
                         input: block.input || {},
                         timestamp: new Date(),
                       },
-                    });
+                    };
+                    toolUseBuffer.set(block.id, toolUseEvent);
+                    toolUseOrder.push(block.id);
+                    // Try to emit paired events
+                    tryEmitPairedEvents();
                   }
 
                   resolveNext?.();
@@ -281,31 +247,27 @@ export class ClaudeClient {
             }
 
             // Handle tool results and system warnings from user messages
-            // Emit immediately - no buffering
             if (event.type === "user" && event.message?.content) {
               for (const block of event.message.content) {
-                if (
-                  block.type === "tool_result" &&
-                  !emittedToolResultIds.has(block.tool_use_id)
-                ) {
+                if (block.type === "tool_result" && !emittedToolResultIds.has(block.tool_use_id)) {
                   emittedToolResultIds.add(block.tool_use_id);
                   _debugLog("TOOL_RESULT_BLOCK", block);
-                  eventQueue.push({
+                  // Buffer tool_result event instead of emitting directly
+                  const toolResultEvent: ClaudeStreamEvent = {
                     type: "tool_result",
                     tool_result: {
                       tool_use_id: block.tool_use_id,
                       content: block.content,
                     },
-                  });
-                  resolveNext?.();
-                  resolveNext = null;
+                  };
+                  toolResultBuffer.set(block.tool_use_id, toolResultEvent);
+                  // Try to emit paired events
+                  tryEmitPairedEvents();
                 }
 
                 // Parse token usage from system_reminder blocks
                 if (block.type === "text" && block.text) {
-                  const tokenMatch = block.text.match(
-                    /Token usage: (\d+)\/(\d+); (\d+) remaining/,
-                  );
+                  const tokenMatch = block.text.match(/Token usage: (\d+)\/(\d+); (\d+) remaining/);
                   if (tokenMatch) {
                     eventQueue.push({
                       type: "token_usage",
@@ -323,87 +285,13 @@ export class ClaudeClient {
             }
 
             // Handle thinking content
-            if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "thinking_delta"
-            ) {
-              // Unescape JSON string escapes (same as StructuredOutput)
-              const unescapedThinking = event.delta.thinking
-                .replace(/\\n/g, "\n")
-                .replace(/\\r/g, "\r")
-                .replace(/\\t/g, "\t")
-                .replace(/\\"/g, '"')
-                .replace(/\\\\/g, "\\");
-
+            if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
               eventQueue.push({
                 type: "thinking",
-                content: unescapedThinking,
+                content: event.delta.thinking,
               });
               resolveNext?.();
               resolveNext = null;
-            }
-
-            // Handle input_json_delta for StructuredOutput streaming
-            // This is the primary streaming mechanism for resumed sessions
-            // Skip if we already received text_delta events (to avoid duplicates)
-            if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "input_json_delta" &&
-              structuredOutputToolId !== null &&
-              options?.includePartialMessages &&
-              !hasReceivedTextDelta
-            ) {
-              structuredOutputJsonBuffer += event.delta.partial_json || "";
-
-              // Try to extract new text from the response field
-              // Look for "response": "..." pattern and extract incremental text
-              const responseMatch = structuredOutputJsonBuffer.match(
-                /"response"\s*:\s*"((?:[^"\\]|\\.)*)(")?/
-              );
-              if (responseMatch) {
-                // Unescape JSON string escapes
-                const currentText = responseMatch[1]
-                  .replace(/\\n/g, "\n")
-                  .replace(/\\r/g, "\r")
-                  .replace(/\\t/g, "\t")
-                  .replace(/\\"/g, '"')
-                  .replace(/\\\\/g, "\\");
-
-                // Only emit new content
-                if (currentText.length > structuredOutputEmittedLength) {
-                  const newText = currentText.slice(structuredOutputEmittedLength);
-                  structuredOutputEmittedLength = currentText.length;
-                  hasEmittedStreamingContent = true;
-                  eventQueue.push({
-                    type: "text",
-                    content: newText,
-                  });
-                  resolveNext?.();
-                  resolveNext = null;
-                }
-              }
-            }
-
-            // Handle text_delta content for partial messages
-            if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "text_delta"
-            ) {
-              hasReceivedTextDelta = true;
-              hasEmittedStreamingContent = true;
-              eventQueue.push({
-                type: "text",
-                content: event.delta.text,
-              });
-              resolveNext?.();
-              resolveNext = null;
-            }
-
-            // Handle content_block_stop to reset StructuredOutput tracking
-            if (event.type === "content_block_stop") {
-              structuredOutputToolId = null;
-              structuredOutputJsonBuffer = "";
-              structuredOutputEmittedLength = 0;
             }
 
             // Handle result event
@@ -434,15 +322,27 @@ export class ClaudeClient {
       claude.on("close", (code: number | null, signal: string | null) => {
         processEnded = true;
 
+        // Flush any remaining buffered events when process ends
+        // Emit unpaired tool_use events first (in order)
+        for (const toolId of toolUseOrder) {
+          const toolUseEvent = toolUseBuffer.get(toolId);
+          if (toolUseEvent) {
+            eventQueue.push(toolUseEvent);
+            toolUseBuffer.delete(toolId);
+          }
+        }
+
+        // Then emit any remaining tool_result events
+        for (const toolResultEvent of toolResultBuffer.values()) {
+          eventQueue.push(toolResultEvent);
+        }
+        toolResultBuffer.clear();
+
         if (code !== 0 && code !== null) {
-          processError = new Error(
-            `claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`,
-          );
+          processError = new Error(`claude CLI exited with code ${code}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
         }
         if (signal) {
-          processError = new Error(
-            `claude CLI killed by signal ${signal}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`,
-          );
+          processError = new Error(`claude CLI killed by signal ${signal}${stderrOutput ? `\nStderr: ${stderrOutput}` : ""}`);
         }
         resolveNext?.();
         resolveNext = null;
@@ -462,8 +362,7 @@ export class ClaudeClient {
           fallbackUsed = true;
           eventQueue.push({
             type: "text",
-            content:
-              "Hello! I'm Claude, your AI assistant. I can help you with coding, analysis, creative writing, and much more. What would you like to work on?",
+            content: "Hello! I'm Claude, your AI assistant. I can help you with coding, analysis, creative writing, and much more. What would you like to work on?",
           });
           eventQueue.push({
             type: "result",
@@ -486,6 +385,7 @@ export class ClaudeClient {
       while (!processEnded || eventQueue.length > 0) {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
+          console.log("[CLAUDE-CLIENT] Yielding event:", event.type);
           _debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
@@ -504,11 +404,6 @@ export class ClaudeClient {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      // Log error if we have a sessionId (use options.sessionId as fallback)
-      const logSessionId = options?.sessionId;
-      if (logSessionId) {
-        logSessionError(logSessionId, errorMsg);
-      }
       yield {
         type: "error",
         error: errorMsg,

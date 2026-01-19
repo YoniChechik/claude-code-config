@@ -6,41 +6,26 @@ import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
-import {
-  playAudioNotification,
-  notificationManager,
-} from "@/lib/notification-manager";
-import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
   sessionId: string;
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
-  isWindowFocused?: boolean;
+  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
 }
 
 /**
  * Individual chat pane with session management
  */
-export default function ChatPane({
-  sessionId,
-  commands,
-  onClose,
-  isFocused = false,
-  isWindowFocused = true,
-}: ChatPaneProps) {
+export default function ChatPane({ sessionId, commands, onClose, isFocused = false, onResumeSession }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [tokenUsage, setTokenUsage] = useState<
-    { used: number; total: number; remaining: number } | undefined
-  >(undefined);
+  const [tokenUsage, setTokenUsage] = useState<{ used: number; total: number; remaining: number } | undefined>(undefined);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
 
   // Load session on mount
   useEffect(() => {
@@ -55,35 +40,26 @@ export default function ChatPane({
   }, [isFocused]);
 
   const loadSession = async () => {
-    const windowId = getOrCreateWindowId();
-    const response = await fetch(`/api/sessions/${sessionId}`, {
-      headers: {
-        "x-window-id": windowId,
-      },
-    });
+    const response = await fetch(`/api/sessions/${sessionId}`);
     const data = await response.json();
-
-    if (!response.ok || !data.session) {
-      throw new Error(data.error || "Failed to load session");
-    }
-
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
-    const messagesWithDates = data.session.messages.map((msg: Message) => ({
-      ...msg,
-      timestamp: new Date(msg.timestamp),
-      // Convert old string content to ContentBlock format
-      content:
-        typeof msg.content === "string"
+    const messagesWithDates = data.session.messages.map(
+      (msg: Message) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+        // Convert old string content to ContentBlock format
+        content: typeof msg.content === "string"
           ? [{ type: "text" as const, text: msg.content }]
           : msg.content,
-    }));
+      })
+    );
     setMessages(messagesWithDates);
   };
 
   const handleSubmitInternal = async (
     prompt: string,
-    isAutoContinue: boolean = false,
+    isAutoContinue: boolean = false
   ) => {
     if (!session) return;
 
@@ -93,136 +69,39 @@ export default function ChatPane({
     setStreamingText("");
     setStreamingBlocks([]);
 
-    abortControllerRef.current = new AbortController();
-    cancelStreamRef.current = () => {
-      if (!abortControllerRef.current) return;
+    const response = await fetch("/api/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, prompt }),
+    });
 
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      cancelStreamRef.current = undefined;
+    let assistantText = "";
+    let assistantBlocks: ContentBlock[] = [];
 
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
+    const streamResult = await _handleStreamEvents(
+      response,
+      assistantText,
+      assistantBlocks
+    );
+    assistantText = streamResult.text;
+    assistantBlocks = streamResult.blocks;
+
+    const assistantMessage: Message = {
+      role: "assistant",
+      content: assistantBlocks,
+      timestamp: new Date(),
     };
+    setMessages((prev) => [...prev, assistantMessage]);
 
-    try {
-      const windowId = getOrCreateWindowId();
+    await _updateSessionMetadata();
 
-      const response = await fetch("/api/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, windowId, prompt }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      let assistantText = "";
-      let assistantBlocks: ContentBlock[] = [];
-
-      const streamResult = await _handleStreamEvents(
-        response,
-        assistantText,
-        assistantBlocks,
-      );
-      assistantText = streamResult.text;
-      assistantBlocks = streamResult.blocks;
-
-      // Clear streaming state BEFORE adding final message to prevent flash
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
-
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: assistantBlocks,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-
-      await _updateSessionMetadata();
-
-      abortControllerRef.current = null;
-      cancelStreamRef.current = undefined;
-
-      // Trigger notifications
-      if (session?.audioNotificationsEnabled) {
-        playAudioNotification();
-      }
-      if (!isWindowFocused) {
-        notificationManager.notifyComplete(sessionId);
-      }
-    } catch (error: unknown) {
-      if ((error as Error).name === "AbortError") {
-        return;
-      }
-      throw error;
-    }
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamingBlocks([]);
   };
 
   const handleSubmit = async (prompt: string) => {
     return handleSubmitInternal(prompt, false);
-  };
-
-  const toggleAudioNotifications = async () => {
-    if (!session) return;
-
-    const newValue = !session.audioNotificationsEnabled;
-    setSession({ ...session, audioNotificationsEnabled: newValue });
-
-    const windowId = getOrCreateWindowId();
-
-    // Persist to backend
-    await fetch(`/api/sessions/${sessionId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "x-window-id": windowId,
-      },
-      body: JSON.stringify({ audioNotificationsEnabled: newValue }),
-    });
-  };
-
-
-  const handleResumeSession = async (
-    resumeSessionId: string,
-    filePath: string,
-    cwd: string,
-  ) => {
-    const windowId = getOrCreateWindowId();
-
-    const response = await fetch("/api/sessions/resume", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: resumeSessionId,
-        windowId,
-        filePath,
-        cwd,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("Failed to resume session");
-      return;
-    }
-
-    const data = await response.json();
-
-    if (!data.session) {
-      console.error("No session data in resume response");
-      return;
-    }
-
-    setSession(data.session);
-    const messagesWithDates = data.session.messages.map((msg: Message) => ({
-      ...msg,
-      timestamp: new Date(msg.timestamp),
-      content:
-        typeof msg.content === "string"
-          ? [{ type: "text" as const, text: msg.content }]
-          : msg.content,
-    }));
-    setMessages(messagesWithDates);
   };
 
   // PRIVATE HELPERS
@@ -249,7 +128,7 @@ export default function ChatPane({
   const _processStreamEvent = (
     event: ClaudeStreamEvent,
     assistantText: string,
-    assistantBlocks: ContentBlock[],
+    assistantBlocks: ContentBlock[]
   ): { text: string; blocks: ContentBlock[] } => {
     if (event.type === "text") {
       assistantText += event.content || "";
@@ -279,30 +158,16 @@ export default function ChatPane({
         id: event.tool.id,
         name: event.tool.name,
         input: event.tool.input,
-        timestamp: event.tool.timestamp ? new Date(event.tool.timestamp) : undefined,
-        // No result yet - pending state
       });
       return { text: assistantText, blocks: assistantBlocks };
     }
 
     if (event.type === "tool_result" && event.tool_result) {
-      // Find the matching tool_use block and update it with the result
-      const toolUseBlock = assistantBlocks.find(
-        (block) =>
-          block.type === "tool_use" && block.id === event.tool_result!.tool_use_id
-      );
-
-      if (toolUseBlock && toolUseBlock.type === "tool_use") {
-        // Update the tool_use block with the result
-        toolUseBlock.result = event.tool_result.content;
-      } else {
-        // Fallback: if tool_use not found, add as separate block (shouldn't happen)
-        assistantBlocks.push({
-          type: "tool_result" as const,
-          tool_use_id: event.tool_result.tool_use_id,
-          content: event.tool_result.content,
-        });
-      }
+      assistantBlocks.push({
+        type: "tool_result" as const,
+        tool_use_id: event.tool_result.tool_use_id,
+        content: event.tool_result.content,
+      });
       return { text: assistantText, blocks: assistantBlocks };
     }
 
@@ -312,7 +177,7 @@ export default function ChatPane({
   const _handleStreamEvents = async (
     response: Response,
     assistantText: string,
-    assistantBlocks: ContentBlock[],
+    assistantBlocks: ContentBlock[]
   ): Promise<{ text: string; blocks: ContentBlock[] }> => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
@@ -338,22 +203,13 @@ export default function ChatPane({
         try {
           const event = JSON.parse(data);
 
-          if (
-            event.type === "text" ||
-            event.type === "thinking" ||
-            event.type === "tool_use" ||
-            event.type === "tool_result"
-          ) {
-            const result = _processStreamEvent(
-              event,
-              assistantText,
-              assistantBlocks,
-            );
+          if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
+            const result = _processStreamEvent(event, assistantText, assistantBlocks);
             assistantText = result.text;
             assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
             setStreamingText(assistantText);
             setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed" && event.cwd) {
+          } else if (event.type === "cwd_changed") {
             setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
           } else if (event.type === "token_usage") {
             setTokenUsage(event.token_usage);
@@ -370,19 +226,8 @@ export default function ChatPane({
   };
 
   const _updateSessionMetadata = async (): Promise<void> => {
-    const windowId = getOrCreateWindowId();
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
-      headers: {
-        "x-window-id": windowId,
-      },
-    });
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
     const data = await sessionResponse.json();
-
-    if (!sessionResponse.ok || !data.session) {
-      // Session might have been deleted (tab close, cleanup, etc.) - ignore silently
-      return;
-    }
-
     setSession((prev) =>
       prev
         ? {
@@ -391,22 +236,20 @@ export default function ChatPane({
             model: data.session.model,
             lastDurationMs: data.session.lastDurationMs,
           }
-        : null,
+        : null
     );
   };
 
   if (!session) {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-primary text-text-secondary">
+      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
         Loading session...
       </div>
     );
   }
 
   return (
-    <div
-      className={`relative flex flex-col h-full bg-surface-primary ${isFocused ? "ring-2 ring-brand-primary" : ""}`}
-    >
+    <div className={`relative flex flex-col h-full bg-gray-900 ${isFocused ? 'ring-2 ring-blue-500' : ''}`}>
       <SessionHeader
         cwd={session.cwd}
         model={session.model}
@@ -417,8 +260,6 @@ export default function ChatPane({
         hostname={session.hostname}
         distroName={session.distroName}
         clientIp={session.clientIp}
-        audioNotificationsEnabled={session.audioNotificationsEnabled}
-        onToggleAudioNotifications={toggleAudioNotifications}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -435,9 +276,7 @@ export default function ChatPane({
             disabled={false}
             isStreaming={isStreaming}
             onFocusRef={(ref) => (inputFocusRef.current = ref)}
-            cancelStreamRef={cancelStreamRef}
-            messagesCount={messages.length}
-            onResumeSession={handleResumeSession}
+            onResumeSession={onResumeSession}
           />
         </div>
       </div>

@@ -3,8 +3,6 @@ import { sessionManager } from "@/lib/session-manager";
 import { ClaudeClient } from "@/lib/claude-client";
 import { createSessionSymlink } from "@/lib/symlink-manager";
 import { loadSystemPrompt } from "@/lib/system-prompt-loader";
-import { processRegistry } from "@/lib/process-registry";
-import { streamRegistry } from "@/lib/stream-registry";
 import type { SendCommandRequest } from "@/lib/types";
 
 // No timeout - allow responses to take as long as needed
@@ -15,37 +13,29 @@ export const maxDuration = 0;
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as SendCommandRequest;
-  const { sessionId, windowId, prompt } = body;
+  const { sessionId, prompt } = body;
 
-  if (!sessionId || !windowId || !prompt) {
+  if (!sessionId || !prompt) {
     return new Response(
-      JSON.stringify({ error: "sessionId, windowId, and prompt are required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({ error: "sessionId and prompt are required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  if (!sessionManager.validateOwnership(sessionId, windowId)) {
-    console.warn(
-      `[Security] Command blocked: ` +
-        `sessionId=${sessionId}, windowId=${windowId}, ` +
-        `owner=${sessionManager.getOwner(sessionId)}`
-    );
-    return new Response(
-      JSON.stringify({ error: "You do not own this session" }),
-      { status: 403, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  let session;
-  let tracker;
-  try {
-    session = sessionManager.getSession(sessionId);
-    tracker = sessionManager.getCDTracker(sessionId);
-  } catch (error) {
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
     return new Response(JSON.stringify({ error: "Session not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  const tracker = sessionManager.getCDTracker(sessionId);
+  if (!tracker) {
+    return new Response(
+      JSON.stringify({ error: "Session tracker not found" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   // Add user message to session
@@ -54,10 +44,6 @@ export async function POST(request: NextRequest) {
     content: [{ type: "text", text: prompt }],
     timestamp: new Date(),
   });
-
-  // Create AbortController for this stream
-  const abortController = new AbortController();
-  streamRegistry.register(sessionId, abortController);
 
   // Create streaming response
   const stream = new ReadableStream({
@@ -78,17 +64,7 @@ export async function POST(request: NextRequest) {
           sessionId: claudeSessionId,
           appendSystemPrompt: systemPrompt,
           cwd: session.cwd,
-          includePartialMessages: session.includePartialMessages,
-          onProcessSpawned: (process) => {
-            // Register process for cleanup
-            processRegistry.register(sessionId, process);
-          },
         })) {
-          // Check if stream was aborted
-          if (abortController.signal.aborted) {
-            console.log(`[Commands API] Stream aborted for session ${sessionId}`);
-            break;
-          }
           // Send event as SSE format
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));
@@ -102,10 +78,7 @@ export async function POST(request: NextRequest) {
             if (event.session_id) {
               sessionManager.setClaudeSessionId(sessionId, event.session_id);
             }
-          } else if (
-            event.type === "result" &&
-            event.duration_ms !== undefined
-          ) {
+          } else if (event.type === "result" && event.duration_ms !== undefined) {
             tracker.processResultEvent({ duration_ms: event.duration_ms });
           } else if (
             event.type === "structured_output" &&
@@ -119,11 +92,7 @@ export async function POST(request: NextRequest) {
               // Create symlink BEFORE updating session
               const claudeSessionId = session.claudeSessionId;
               if (claudeSessionId) {
-                await createSessionSymlink(
-                  claudeSessionId,
-                  session.cwd,
-                  wantedCwd,
-                );
+                await createSessionSymlink(claudeSessionId, session.cwd, wantedCwd);
               }
             }
           }
@@ -133,17 +102,16 @@ export async function POST(request: NextRequest) {
         const previousCwd = session.cwd;
         sessionManager.updateSessionFromTracker(sessionId);
         const updatedSession = sessionManager.getSession(sessionId);
-        const didChangeCwd =
-          updatedSession && updatedSession.cwd !== previousCwd;
+        const didChangeCwd = updatedSession && updatedSession.cwd !== previousCwd;
 
         // Send cwd_changed event to client so navbar updates immediately
-        if (didChangeCwd && updatedSession.cwd) {
+        if (didChangeCwd) {
           const cwdChangedEvent = {
             type: "cwd_changed",
             cwd: updatedSession.cwd,
           };
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(cwdChangedEvent)}\n\n`),
+            encoder.encode(`data: ${JSON.stringify(cwdChangedEvent)}\n\n`)
           );
         }
 
@@ -166,17 +134,7 @@ export async function POST(request: NextRequest) {
               sessionId: updatedSession.claudeSessionId,
               appendSystemPrompt: systemPrompt,
               cwd: updatedSession.cwd,
-              includePartialMessages: updatedSession.includePartialMessages,
-              onProcessSpawned: (process) => {
-                // Register auto-continue process for cleanup
-                processRegistry.register(sessionId, process);
-              },
             })) {
-              // Check if stream was aborted
-              if (abortController.signal.aborted) {
-                console.log(`[Commands API] Auto-continue stream aborted for session ${sessionId}`);
-                break;
-              }
               // Send event to client
               const data = `data: ${JSON.stringify(event)}\n\n`;
               controller.enqueue(encoder.encode(data));
@@ -186,20 +144,10 @@ export async function POST(request: NextRequest) {
               if (continueTracker) {
                 if (event.type === "init" && event.model) {
                   continueTracker.processInitEvent({ model: event.model });
-                } else if (
-                  event.type === "result" &&
-                  event.duration_ms !== undefined
-                ) {
-                  continueTracker.processResultEvent({
-                    duration_ms: event.duration_ms,
-                  });
-                } else if (
-                  event.type === "structured_output" &&
-                  event.structured_output
-                ) {
-                  continueTracker.processStructuredOutput(
-                    event.structured_output,
-                  );
+                } else if (event.type === "result" && event.duration_ms !== undefined) {
+                  continueTracker.processResultEvent({ duration_ms: event.duration_ms });
+                } else if (event.type === "structured_output" && event.structured_output) {
+                  continueTracker.processStructuredOutput(event.structured_output);
                 }
               }
             }
@@ -213,7 +161,7 @@ export async function POST(request: NextRequest) {
               error: err instanceof Error ? err.message : String(err),
             };
             controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`),
+              encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
             );
           }
         }
@@ -226,12 +174,9 @@ export async function POST(request: NextRequest) {
           error: error instanceof Error ? error.message : String(error),
         };
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`),
+          encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
         );
       } finally {
-        // Cleanup: unregister process and stream
-        processRegistry.unregister(sessionId);
-        streamRegistry.unregister(sessionId);
         controller.close();
       }
     },

@@ -8,11 +8,8 @@ interface SessionMetadata {
   createdAt: string;
   lastActivityAt: string;
   messageCount: number;
-  firstMessagePreview: string;
   lastMessagePreview: string;
   filePath: string;
-  isSymlinked?: boolean;
-  originalCwd?: string;
 }
 
 interface SessionPickerProps {
@@ -52,9 +49,7 @@ export default function SessionPicker({
       } else if (e.key === "Enter" && sessions.length > 0) {
         e.preventDefault();
         const session = sessions[selectedIndex];
-        if (session) {
-          onSelect(session.id, session.filePath, session.cwd);
-        }
+        onSelect(session.id, session.filePath, session.cwd);
       } else if (e.key === "Escape") {
         e.preventDefault();
         onCancel();
@@ -78,129 +73,95 @@ export default function SessionPicker({
     setLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch("/api/sessions/recent?limit=20");
+    const response = await fetch("/api/sessions/recent?limit=20");
+    const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(`Failed to load sessions: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      setSessions(data.sessions);
-      setSelectedIndex(0);
-    } catch (err) {
-      console.error("Error loading sessions:", err);
-      setError(err instanceof Error ? err.message : "Failed to load sessions");
-      setSessions([]);
-    } finally {
-      setLoading(false);
-    }
+    setSessions(data.sessions);
+    setSelectedIndex(0);
+    setLoading(false);
   };
 
   if (!isOpen) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
       onClick={onCancel}
       data-testid="session-picker-backdrop"
     >
       <div
         ref={modalRef}
-        className="bg-surface-tertiary border-2 border-border-default rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col"
+        className="bg-gray-800 border-2 border-gray-700 rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         data-testid="session-picker-modal"
       >
         {/* Header */}
-        <div className="px-lg py-md border-b border-border-default bg-surface-secondary">
-          <h2
-            className="text-xl font-bold text-text-primary"
-            data-testid="session-picker-header"
-          >
-            Resume Session
-          </h2>
-          <p className="text-sm text-text-secondary mt-1">
-            <span className="font-bold text-brand-primary">↑↓</span> to navigate •{" "}
-            <span className="font-bold text-brand-primary">Enter</span> to select •{" "}
-            <span className="font-bold text-brand-primary">Esc</span> to cancel
+        <div className="px-6 py-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900">
+          <h2 className="text-xl font-bold text-gray-100" data-testid="session-picker-header">Resume Session</h2>
+          <p className="text-sm text-gray-400 mt-1">
+            <span className="font-bold text-blue-400">↑↓</span> to navigate •{" "}
+            <span className="font-bold text-blue-400">Enter</span> to select •{" "}
+            <span className="font-bold text-blue-400">Esc</span> to cancel
           </p>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {loading && (
-            <div className="flex items-center justify-center py-xl">
-              <div className="text-text-secondary">Loading sessions...</div>
+            <div className="flex items-center justify-center py-12">
+              <div className="text-gray-400">Loading sessions...</div>
             </div>
           )}
 
           {error && (
-            <div className="flex items-center justify-center py-xl">
-              <div className="text-error">{error}</div>
+            <div className="flex items-center justify-center py-12">
+              <div className="text-red-400">{error}</div>
             </div>
           )}
 
           {!loading && !error && sessions.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-xl px-lg text-center">
-              <div className="text-text-secondary text-lg mb-md">
-                No previous sessions found
-              </div>
-              <div className="text-text-muted text-sm">
+            <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+              <div className="text-gray-400 text-lg mb-2">No previous sessions found</div>
+              <div className="text-gray-500 text-sm">
                 Start a new conversation to create your first session
               </div>
             </div>
           )}
 
           {!loading && !error && sessions.length > 0 && (
-            <div className="divide-y divide-border-default">
+            <div className="divide-y divide-gray-700">
               {sessions.map((session, index) => (
                 <div
                   key={`${session.id}-${index}`}
                   ref={(el) => {
                     selectedItemRefs.current[index] = el;
                   }}
-                  className={`px-lg py-md cursor-pointer transition-all duration-150 ${
+                  className={`px-6 py-4 cursor-pointer transition-all duration-150 ${
                     index === selectedIndex
-                      ? "bg-gradient-to-r from-brand-primary to-brand-secondary border-l-4 border-brand-primary"
-                      : "hover:bg-surface-elevated border-l-4 border-transparent"
+                      ? "bg-gradient-to-r from-blue-900 to-blue-800 border-l-4 border-blue-500"
+                      : "hover:bg-gray-700 border-l-4 border-transparent"
                   }`}
-                  onClick={() =>
-                    onSelect(session.id, session.filePath, session.cwd)
-                  }
+                  onClick={() => onSelect(session.id, session.filePath, session.cwd)}
                   data-testid="session-item"
                   data-session-id={session.id}
                   data-selected={index === selectedIndex}
                 >
-                  <div className="flex items-start justify-between gap-md">
+                  <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-md mb-1">
-                        <span className="font-mono text-xs text-brand-primary truncate">
-                          📁 {session.cwd}
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="font-mono text-sm font-semibold text-blue-400 truncate">
+                          {session.cwd}
                         </span>
-                        {session.isSymlinked && session.originalCwd && (
-                          <span className="text-xs px-sm py-xs bg-brand-secondary/20 text-text-accent rounded-full flex-shrink-0">
-                            from another directory
-                          </span>
-                        )}
+                        <span className="text-xs text-gray-400 flex-shrink-0">
+                          {_formatRelativeTime(session.lastActivityAt)}
+                        </span>
                       </div>
-                      {session.isSymlinked && session.originalCwd && (
-                        <div className="text-xs text-text-accent mb-1">
-                          Originally created in: {session.originalCwd}
-                        </div>
-                      )}
-                      {session.firstMessagePreview && (
-                        <div className="text-sm font-semibold text-text-primary mb-1">
-                          {session.firstMessagePreview}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 text-xs text-text-secondary mb-1">
-                        <span>{session.messageCount} messages</span>
-                        <span>•</span>
-                        <span>{_formatRelativeTime(session.lastActivityAt)}</span>
+                      <div className="text-sm text-gray-300 mb-1">
+                        {session.messageCount} messages
                       </div>
                       {session.lastMessagePreview && (
-                        <div className="text-xs text-text-muted italic truncate">
-                          Last: "{session.lastMessagePreview}"
+                        <div className="text-sm text-gray-400 italic truncate">
+                          "{session.lastMessagePreview}"
                         </div>
                       )}
                     </div>
@@ -212,10 +173,10 @@ export default function SessionPicker({
         </div>
 
         {/* Footer */}
-        <div className="px-lg py-md border-t border-border-default bg-surface-secondary flex justify-end">
+        <div className="px-6 py-3 border-t border-gray-700 bg-gray-900 flex justify-end">
           <button
             onClick={onCancel}
-            className="px-md py-sm text-sm text-text-secondary hover:text-text-primary hover:bg-surface-elevated rounded-lg transition-colors"
+            className="px-4 py-2 text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-700 rounded-lg transition-colors"
             data-testid="cancel-button"
           >
             Cancel

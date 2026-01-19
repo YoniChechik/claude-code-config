@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import SplitLayout from "@/components/SplitLayout";
 import type { SlashCommand } from "@/lib/types";
-import { getOrCreateWindowId } from "@/lib/window-id";
 
 /**
  * Main page - initializes session(s) and renders dynamic split layout
@@ -18,43 +17,6 @@ export default function Home() {
     initializeSessions();
   }, []);
 
-  // Tab close cleanup and heartbeat
-  useEffect(() => {
-    if (sessionIds.length === 0) return;
-
-    // Cleanup handler for both beforeunload and pagehide
-    const handleCleanup = () => {
-      // Use sendBeacon for non-blocking cleanup
-      const blob = new Blob(
-        [JSON.stringify({ sessionIds })],
-        { type: "application/json" },
-      );
-      navigator.sendBeacon("/api/sessions/cleanup", blob);
-    };
-
-    // Beforeunload fires on refresh/navigation (earliest opportunity)
-    window.addEventListener("beforeunload", handleCleanup);
-    // Pagehide fires on tab close (fallback for edge cases)
-    window.addEventListener("pagehide", handleCleanup);
-
-    // Heartbeat every 10s
-    const heartbeatInterval = setInterval(() => {
-      fetch("/api/sessions/heartbeat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionIds }),
-      }).catch((err) => {
-        console.error("Heartbeat failed:", err);
-      });
-    }, 10000);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleCleanup);
-      window.removeEventListener("pagehide", handleCleanup);
-      clearInterval(heartbeatInterval);
-    };
-  }, [sessionIds]);
-
   const initializeSessions = async () => {
     try {
       // Get current working directory from backend
@@ -62,14 +24,11 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Get or create windowId
-      const windowId = getOrCreateWindowId();
-
       // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, windowId }),
+        body: JSON.stringify({ cwd }),
       });
 
       const data = await response.json();
@@ -77,23 +36,22 @@ export default function Home() {
       if (data.session) {
         setSessionIds([data.session.id]);
 
-        // Auto-load hostname mapping if SSH session
+        // Auto-load hostname mapping if SSH with localhost hostname
         if (
-          data.session.sessionType === "ssh" &&
-          data.session.clientIp
+          data.session.sessionType === 'ssh' &&
+          data.session.clientIp &&
+          (data.session.hostname === 'localhost' || data.session.hostname === '127.0.0.1')
         ) {
           try {
             const mappingResponse = await fetch(
-              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`,
+              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`
             );
             const mappingData = await mappingResponse.json();
 
             // If mapping exists, update session with resolved hostname
             if (mappingData.hostname) {
               // No action needed - SessionHeader will handle this automatically
-              console.log(
-                `Auto-loaded SSH hostname mapping: ${mappingData.hostname}`,
-              );
+              console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
             }
           } catch (err) {
             console.error("Failed to auto-load SSH hostname mapping:", err);
@@ -143,14 +101,11 @@ export default function Home() {
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Get or create windowId
-      const windowId = getOrCreateWindowId();
-
       // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, windowId }),
+        body: JSON.stringify({ cwd }),
       });
 
       const data = await response.json();
@@ -165,23 +120,15 @@ export default function Home() {
 
   const closeSession = async (sessionId: string) => {
     try {
-      const windowId = getOrCreateWindowId();
-
       // If only 1 session, clear messages instead of deleting
       if (sessionIds.length === 1) {
         await fetch(`/api/sessions/${sessionId}`, {
           method: "PATCH",
-          headers: {
-            "x-window-id": windowId,
-          },
         });
       } else {
         // Multiple sessions: delete the session
         await fetch(`/api/sessions/${sessionId}`, {
           method: "DELETE",
-          headers: {
-            "x-window-id": windowId,
-          },
         });
 
         // Remove from local state
@@ -190,6 +137,24 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to close session:", err);
+    }
+  };
+
+  const resumeSession = async (
+    sessionId: string,
+    filePath: string,
+    cwd: string
+  ) => {
+    const response = await fetch("/api/sessions/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, filePath, cwd }),
+    });
+
+    const data = await response.json();
+
+    if (data.session) {
+      setSessionIds([data.session.id]);
     }
   };
 
@@ -227,12 +192,13 @@ export default function Home() {
   }
 
   return (
-    <main className="w-screen" style={{ height: "calc(100vh - 1.75rem)" }}>
+    <main className="h-screen w-screen">
       <SplitLayout
         sessionIds={sessionIds}
         commands={commands}
         onAddSession={addSession}
         onCloseSession={closeSession}
+        onResumeSession={resumeSession}
       />
     </main>
   );

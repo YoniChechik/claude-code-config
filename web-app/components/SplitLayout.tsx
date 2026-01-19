@@ -24,7 +24,7 @@ export default function SplitLayout({
   const [isDragging, setIsDragging] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [paneWidths, setPaneWidths] = useState<number[]>(
-    sessionIds.map(() => 100 / sessionIds.length),
+    sessionIds.map(() => 100 / sessionIds.length)
   );
   const [focusedPaneIndex, setFocusedPaneIndex] = useState(0);
   const [isWindowFocused, setIsWindowFocused] = useState(!document.hidden);
@@ -105,9 +105,7 @@ export default function SplitLayout({
           setFocusedPaneIndex((prev) => Math.max(0, prev - 1));
         } else if (e.key === "ArrowRight") {
           e.preventDefault();
-          setFocusedPaneIndex((prev) =>
-            Math.min(sessionIds.length - 1, prev + 1),
-          );
+          setFocusedPaneIndex((prev) => Math.min(sessionIds.length - 1, prev + 1));
         }
       }
     };
@@ -140,9 +138,7 @@ export default function SplitLayout({
         <div key={sessionId} className="flex">
           <div
             className="h-full overflow-hidden"
-            style={{
-              width: `calc(${paneWidths[index]}vw - ${(paneWidths[index] / 100) * dividerWidthPx}px)`,
-            }}
+            style={{ width: `calc(${paneWidths[index]}vw - ${paneWidths[index] / 100 * dividerWidthPx}px)` }}
           >
             <ChatPane
               sessionId={sessionId}

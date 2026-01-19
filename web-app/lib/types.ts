@@ -1,7 +1,6 @@
 // Session types
 export interface Session {
   id: string;
-  windowId: string; // Track owning browser tab
   cwd: string;
   previousCwd?: string; // Track previous directory for symlink creation
   model: string;
@@ -10,32 +9,18 @@ export interface Session {
   createdAt: Date;
   claudeSessionId?: string;
   isResumed?: boolean; // Flag for resumed sessions
-  sessionType: "ssh" | "wsl" | "local";
+  sessionType: 'ssh' | 'wsl' | 'local';
   hostname?: string; // For SSH sessions
   distroName?: string; // For WSL sessions
   clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
-  audioNotificationsEnabled?: boolean; // Audio notification preference
-  includePartialMessages?: boolean; // Enable streaming text deltas in real-time
 }
 
 // Content block types (matches Claude API output)
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | {
-      type: "tool_use";
-      id: string;
-      name: string;
-      input: Record<string, unknown>;
-      timestamp?: Date;
-      // Optional result field for pending state updates
-      result?: string | ContentBlock[];
-    }
-  | {
-      type: "tool_result";
-      tool_use_id: string;
-      content: string | ContentBlock[];
-    };
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown>; timestamp?: Date }
+  | { type: "tool_result"; tool_use_id: string; content: string | ContentBlock[] };
 
 // Message types
 export interface Message {
@@ -62,7 +47,6 @@ export interface StructuredOutput {
 // API request/response types
 export interface CreateSessionRequest {
   cwd: string;
-  windowId: string;
   clientHostname?: string;
 }
 
@@ -72,15 +56,7 @@ export interface CreateSessionResponse {
 
 export interface SendCommandRequest {
   sessionId: string;
-  windowId: string;
   prompt: string;
-}
-
-export interface ResumeSessionRequest {
-  sessionId: string;
-  windowId: string;
-  filePath: string;
-  cwd: string;
 }
 
 export type SendCommandResponse = Record<string, never>;

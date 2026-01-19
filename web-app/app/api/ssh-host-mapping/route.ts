@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (!clientIp) {
     return NextResponse.json(
       { error: "clientIp query parameter is required" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   if (!isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     console.error("Error fetching hostname mapping:", error);
     return NextResponse.json(
       { error: "Failed to fetch hostname mapping" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -47,7 +47,10 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: 400 }
+    );
   }
 
   const { clientIp, hostname } = body;
@@ -55,7 +58,7 @@ export async function POST(request: NextRequest) {
   if (!clientIp || !hostname) {
     return NextResponse.json(
       { error: "clientIp and hostname are required" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -63,7 +66,7 @@ export async function POST(request: NextRequest) {
   if (!isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -72,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!trimmedHostname) {
     return NextResponse.json(
       { error: "hostname cannot be empty" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -80,7 +83,7 @@ export async function POST(request: NextRequest) {
   if (!/^[a-zA-Z0-9\-_.]+$/.test(trimmedHostname)) {
     return NextResponse.json(
       { error: "hostname contains invalid characters" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -91,7 +94,7 @@ export async function POST(request: NextRequest) {
     console.error("Error saving hostname mapping:", error);
     return NextResponse.json(
       { error: "Failed to save hostname mapping" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

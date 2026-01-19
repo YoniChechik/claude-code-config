@@ -1,12 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { homedir as osHomedir } from "os";
-import { dirToClaudePath, resolveLinkPath } from "./symlink-manager";
-
-// Get home directory, respecting process.env.HOME for testing
-function homedir(): string {
-  return process.env.HOME || osHomedir();
-}
+import { homedir } from "os";
 
 export interface SessionMetadata {
   id: string;
@@ -14,20 +8,15 @@ export interface SessionMetadata {
   createdAt: string;
   lastActivityAt: string;
   messageCount: number;
-  firstMessagePreview: string;
   lastMessagePreview: string;
   filePath: string;
-  isSymlinked?: boolean;
-  originalCwd?: string;
 }
 
 interface SessionLine {
   type: "user" | "assistant";
   message?: {
     role: string;
-    content:
-      | string
-      | Array<{ type: string; text?: string; [key: string]: unknown }>;
+    content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
   };
   cwd?: string;
   sessionId?: string;
@@ -40,32 +29,26 @@ interface LoadedMessage {
   timestamp: Date;
 }
 
-export async function getRecentSessions(
-  limit = 20,
-): Promise<SessionMetadata[]> {
+export async function getRecentSessions(limit = 20): Promise<SessionMetadata[]> {
   const sessionFiles = await _discoverSessionFiles();
 
   const filesWithStats = await Promise.all(
     sessionFiles.map(async (filePath) => {
       const stats = await fs.stat(filePath);
       return { filePath, mtime: stats.mtime };
-    }),
+    })
   );
 
   filesWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
-  const recentFiles = filesWithStats.slice(0, limit).map((f) => f.filePath);
-  const metadataPromises = recentFiles.map((filePath) =>
-    _loadSessionMetadata(filePath),
-  );
+  const recentFiles = filesWithStats.slice(0, limit).map(f => f.filePath);
+  const metadataPromises = recentFiles.map(filePath => _loadSessionMetadata(filePath));
   const metadata = await Promise.all(metadataPromises);
 
-  const validMetadata = metadata.filter(
-    (m): m is SessionMetadata => m !== null,
-  );
+  const validMetadata = metadata.filter((m): m is SessionMetadata => m !== null);
 
   const seenIds = new Set<string>();
-  const uniqueMetadata = validMetadata.filter((session) => {
+  const uniqueMetadata = validMetadata.filter(session => {
     if (seenIds.has(session.id)) {
       return false;
     }
@@ -73,34 +56,23 @@ export async function getRecentSessions(
     return true;
   });
 
-  uniqueMetadata.sort(
-    (a, b) =>
-      new Date(b.lastActivityAt).getTime() -
-      new Date(a.lastActivityAt).getTime(),
+  uniqueMetadata.sort((a, b) =>
+    new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
   );
 
   return uniqueMetadata;
 }
 
-export async function loadSessionMessages(
-  filePath: string,
-): Promise<LoadedMessage[]> {
+export async function loadSessionMessages(filePath: string): Promise<LoadedMessage[]> {
   const content = await fs.readFile(filePath, "utf-8");
-  const lines = content
-    .trim()
-    .split("\n")
-    .filter((line) => line.trim());
+  const lines = content.trim().split("\n").filter(line => line.trim());
 
   const messages = lines
-    .map((line) => {
+    .map(line => {
       const parsed: SessionLine = JSON.parse(line);
       if (!parsed.message) return null;
 
-      let contentBlocks: Array<{
-        type: string;
-        text?: string;
-        [key: string]: unknown;
-      }>;
+      let contentBlocks: Array<{ type: string; text?: string; [key: string]: unknown }>;
 
       if (typeof parsed.message.content === "string") {
         contentBlocks = [{ type: "text", text: parsed.message.content }];
@@ -124,15 +96,6 @@ export async function loadSessionMessages(
 async function _discoverSessionFiles(): Promise<string[]> {
   const projectsDir = path.join(homedir(), ".claude", "projects");
   const sessionFiles: string[] = [];
-
-  try {
-    await fs.access(projectsDir);
-  } catch (error) {
-    throw new Error(
-      `Projects directory does not exist: ${projectsDir}. Error: ${error}`,
-    );
-  }
-
   const entries = await fs.readdir(projectsDir);
 
   for (const entry of entries) {
@@ -153,101 +116,52 @@ async function _discoverSessionFiles(): Promise<string[]> {
   return sessionFiles;
 }
 
-async function _loadSessionMetadata(
-  filePath: string,
-): Promise<SessionMetadata | null> {
-  try {
-    const content = await fs.readFile(filePath, "utf-8");
-    const lines = content
-      .trim()
-      .split("\n")
-      .filter((line) => line.trim());
+async function _loadSessionMetadata(filePath: string): Promise<SessionMetadata | null> {
+  const content = await fs.readFile(filePath, "utf-8");
+  const lines = content.trim().split("\n").filter(line => line.trim());
 
-    if (lines.length === 0) {
-      return null;
-    }
-
-    const firstLine: SessionLine = JSON.parse(lines[0]);
-    const sessionId = firstLine.sessionId!;
-    const createdAt = firstLine.timestamp!;
-    const cwd = firstLine.cwd!;
-
-    const lastLine: SessionLine = JSON.parse(lines[lines.length - 1]);
-    const lastActivityAt = lastLine.timestamp!;
-
-    const messageCount = lines.length;
-
-    let firstMessagePreview = "";
-    let lastMessagePreview = "";
-
-    // Extract first user message
-    for (let i = 0; i < lines.length; i++) {
-      const line: SessionLine = JSON.parse(lines[i]);
-      if (line.type === "user" && line.message) {
-        const content = line.message.content;
-        if (typeof content === "string") {
-          firstMessagePreview = content;
-        } else if (Array.isArray(content)) {
-          const textBlock = content.find((block) => block.type === "text");
-          if (textBlock && "text" in textBlock) {
-            firstMessagePreview = textBlock.text as string;
-          }
-        }
-        break;
-      }
-    }
-
-    // Extract last user message
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line: SessionLine = JSON.parse(lines[i]);
-      if (line.type === "user" && line.message) {
-        const content = line.message.content;
-        if (typeof content === "string") {
-          lastMessagePreview = content;
-        } else if (Array.isArray(content)) {
-          const textBlock = content.find((block) => block.type === "text");
-          if (textBlock && "text" in textBlock) {
-            lastMessagePreview = textBlock.text as string;
-          }
-        }
-        break;
-      }
-    }
-
-    // Clean up command messages from first message
-    firstMessagePreview = firstMessagePreview
-      .replace(/<command-message>[\s\S]*?<\/command-message>/g, "")
-      .replace(/<command-name>[\s\S]*?<\/command-name>/g, "")
-      .replace(/<command-args>/g, "")
-      .replace(/<\/command-args>/g, "")
-      .trim();
-
-    // Take first line only for title
-    if (firstMessagePreview.includes("\n")) {
-      firstMessagePreview = firstMessagePreview.split("\n")[0];
-    }
-
-    if (firstMessagePreview.length > 80) {
-      firstMessagePreview = firstMessagePreview.substring(0, 80) + "...";
-    }
-
-    if (lastMessagePreview.length > 50) {
-      lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
-    }
-
-    return {
-      id: sessionId,
-      cwd,
-      createdAt,
-      lastActivityAt,
-      messageCount,
-      firstMessagePreview,
-      lastMessagePreview,
-      filePath,
-    };
-  } catch (error) {
+  if (lines.length === 0) {
     return null;
   }
+
+  const firstLine: SessionLine = JSON.parse(lines[0]);
+  const sessionId = firstLine.sessionId!;
+  const createdAt = firstLine.timestamp!;
+  const cwd = firstLine.cwd!;
+
+  const lastLine: SessionLine = JSON.parse(lines[lines.length - 1]);
+  const lastActivityAt = lastLine.timestamp!;
+
+  const messageCount = lines.length;
+
+  let lastMessagePreview = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line: SessionLine = JSON.parse(lines[i]);
+    if (line.type === "user" && line.message) {
+      const content = line.message.content;
+      if (typeof content === "string") {
+        lastMessagePreview = content;
+      } else if (Array.isArray(content)) {
+        const textBlock = content.find(block => block.type === "text");
+        lastMessagePreview = textBlock!.text!;
+      }
+      break;
+    }
+  }
+
+  if (lastMessagePreview.length > 50) {
+    lastMessagePreview = lastMessagePreview.substring(0, 50) + "...";
+  }
+
+  return {
+    id: sessionId,
+    cwd,
+    createdAt,
+    lastActivityAt,
+    messageCount,
+    lastMessagePreview,
+    filePath,
+  };
 }
 
 export function formatRelativeTime(timestamp: string): string {
@@ -259,72 +173,4 @@ export function formatRelativeTime(timestamp: string): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return `${Math.floor(days / 7)}w ago`;
-}
-
-/**
- * Find all sessions accessible from a specific directory
- * This includes both sessions created in this directory and sessions
- * symlinked from other directories via cd operations.
- *
- * @param cwd - The current working directory to search from
- * @returns Array of session metadata for all accessible sessions
- */
-export async function findSessionsByDirectory(
-  cwd: string,
-): Promise<SessionMetadata[]> {
-  const encoded = dirToClaudePath(cwd);
-  const dirPath = path.join(homedir(), ".claude", "projects", encoded);
-
-  try {
-    await fs.access(dirPath);
-  } catch {
-    return [];
-  }
-
-  const files = await fs.readdir(dirPath);
-  const sessionFiles = files.filter(
-    (file) => file.endsWith(".jsonl") && !file.includes("subagents"),
-  );
-
-  const metadataPromises = sessionFiles.map(async (file) => {
-    const filePath = path.join(dirPath, file);
-    const realPath = await resolveLinkPath(filePath);
-    const isSymlinked = realPath !== filePath;
-
-    const metadata = await _loadSessionMetadata(realPath);
-    if (!metadata) return null;
-
-    if (isSymlinked && metadata.cwd !== cwd) {
-      return {
-        ...metadata,
-        isSymlinked: true,
-        originalCwd: metadata.cwd,
-        filePath: realPath,
-      };
-    }
-
-    return metadata;
-  });
-
-  const results = await Promise.all(metadataPromises);
-  return results.filter((m): m is SessionMetadata => m !== null);
-}
-
-/**
- * Check if a session file path is valid and accessible
- * Handles both real files and symlinks, returning the resolved real path
- *
- * @param filePath - Path to check (may be a symlink)
- * @returns The real file path if valid, null if broken or inaccessible
- */
-export async function validateSessionPath(
-  filePath: string,
-): Promise<string | null> {
-  try {
-    const realPath = await resolveLinkPath(filePath);
-    await fs.access(realPath);
-    return realPath;
-  } catch {
-    return null;
-  }
 }

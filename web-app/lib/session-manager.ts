@@ -6,15 +6,12 @@ import { execSync } from "child_process";
 class SessionManager {
   private sessions = new Map<string, Session>();
   private cdTrackers = new Map<string, CDTracker>();
-  private sessionOwnership = new Map<string, string>(); // sessionId → windowId
 
-  createSession(cwd: string, windowId: string, clientHostname?: string): Session {
-    const { sessionType, hostname, distroName, clientIp } =
-      this._detectSessionType(clientHostname);
+  createSession(cwd: string, clientHostname?: string): Session {
+    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
-      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -24,29 +21,42 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
-      audioNotificationsEnabled: true,
-      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
-    this.sessionOwnership.set(session.id, windowId);
 
     return session;
   }
 
-  resumeSession(sessionId: string, windowId: string, cwd: string, messages: Message[]): Session {
-    const owner = this.sessionOwnership.get(sessionId);
-    if (owner !== undefined && owner !== windowId) {
-      throw new Error("Session ownership mismatch");
+  private _detectSessionType(clientHostname?: string): {
+    sessionType: 'ssh' | 'wsl' | 'local';
+    hostname?: string;
+    distroName?: string;
+    clientIp?: string;
+  } {
+    if (process.env.SSH_CONNECTION) {
+      const parts = process.env.SSH_CONNECTION.split(' ');
+      const clientIp = parts[0];
+      const hostname = clientHostname || process.env.CCWEB_SSH_HOST || execSync('hostname').toString().trim();
+      return { sessionType: 'ssh', hostname, clientIp };
     }
 
-    const { sessionType, hostname, distroName, clientIp } =
-      this._detectSessionType();
+    if (process.env.WSL_DISTRO_NAME) {
+      return {
+        sessionType: 'wsl',
+        distroName: process.env.WSL_DISTRO_NAME
+      };
+    }
+
+    return { sessionType: 'local' };
+  }
+
+  resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
+    const { sessionType, hostname, distroName, clientIp } = this._detectSessionType();
 
     const session: Session = {
       id: sessionId,
-      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -57,23 +67,16 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
-      audioNotificationsEnabled: true,
-      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
-    this.sessionOwnership.set(session.id, windowId);
 
     return session;
   }
 
   getSession(id: string): Session {
-    const session = this.sessions.get(id);
-    if (session === undefined) {
-      throw new Error(`Session ${id} not found`);
-    }
-    return session;
+    return this.sessions.get(id)!;
   }
 
   getAllSessions(): Session[] {
@@ -82,43 +85,26 @@ class SessionManager {
 
   deleteSession(id: string): boolean {
     this.cdTrackers.delete(id);
-    this.sessionOwnership.delete(id);
     return this.sessions.delete(id);
   }
 
   clearMessages(id: string): void {
-    const session = this.sessions.get(id);
-    if (session === undefined) {
-      throw new Error(`Session ${id} not found`);
-    }
+    const session = this.sessions.get(id)!;
     session.messages = [];
   }
 
   addMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
+    const session = this.sessions.get(sessionId)!;
     session.messages.push(message);
   }
 
   getCDTracker(sessionId: string): CDTracker {
-    const tracker = this.cdTrackers.get(sessionId);
-    if (tracker === undefined) {
-      throw new Error(`CD tracker for session ${sessionId} not found`);
-    }
-    return tracker;
+    return this.cdTrackers.get(sessionId)!;
   }
 
   updateSessionFromTracker(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-    const tracker = this.cdTrackers.get(sessionId);
-    if (tracker === undefined) {
-      throw new Error(`CD tracker for session ${sessionId} not found`);
-    }
+    const session = this.sessions.get(sessionId)!;
+    const tracker = this.cdTrackers.get(sessionId)!;
 
     const wantedCwd = tracker.getWantedCwd();
     if (wantedCwd) {
@@ -130,56 +116,8 @@ class SessionManager {
   }
 
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
+    const session = this.sessions.get(sessionId)!;
     session.claudeSessionId = claudeSessionId;
-  }
-
-  validateOwnership(sessionId: string, windowId: string): boolean {
-    return this.sessionOwnership.get(sessionId) === windowId;
-  }
-
-  getOwner(sessionId: string): string | undefined {
-    return this.sessionOwnership.get(sessionId);
-  }
-
-  getSessionWithOwnershipCheck(sessionId: string, windowId: string): Session | null {
-    if (!this.validateOwnership(sessionId, windowId)) {
-      return null;
-    }
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) {
-      return null;
-    }
-    return session;
-  }
-
-  private _detectSessionType(clientHostname?: string): {
-    sessionType: "ssh" | "wsl" | "local";
-    hostname?: string;
-    distroName?: string;
-    clientIp?: string;
-  } {
-    if (process.env.SSH_CONNECTION) {
-      const parts = process.env.SSH_CONNECTION.split(" ");
-      const clientIp = parts[0];
-      const hostname =
-        clientHostname ||
-        process.env.CCWEB_SSH_HOST ||
-        execSync("hostname").toString().trim();
-      return { sessionType: "ssh", hostname, clientIp };
-    }
-
-    if (process.env.WSL_DISTRO_NAME) {
-      return {
-        sessionType: "wsl",
-        distroName: process.env.WSL_DISTRO_NAME,
-      };
-    }
-
-    return { sessionType: "local" };
   }
 }
 
@@ -190,6 +128,6 @@ const globalForSessionManager = globalThis as unknown as {
 export const sessionManager =
   globalForSessionManager.sessionManager ?? new SessionManager();
 
-if (process.env.NODE_ENV !== "production") {
+if (process.env.NODE_ENV !== 'production') {
   globalForSessionManager.sessionManager = sessionManager;
 }
