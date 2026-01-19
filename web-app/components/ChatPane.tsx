@@ -62,6 +62,11 @@ export default function ChatPane({
       },
     });
     const data = await response.json();
+
+    if (!response.ok || !data.session) {
+      throw new Error(data.error || "Failed to load session");
+    }
+
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
     const messagesWithDates = data.session.messages.map((msg: Message) => ({
@@ -356,6 +361,11 @@ export default function ChatPane({
       },
     });
     const data = await sessionResponse.json();
+
+    if (!sessionResponse.ok || !data.session) {
+      throw new Error(data.error || "Failed to update session metadata");
+    }
+
     setSession((prev) =>
       prev
         ? {
