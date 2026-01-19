@@ -5,7 +5,7 @@ import { formatDuration } from "@/lib/utils";
 import SSHHostPromptModal from "./SSHHostPromptModal";
 
 interface SessionHeaderProps {
-  cwd: string;
+  cwd?: string;
   model: string;
   lastDurationMs: number;
   tokenUsage?: {
@@ -52,13 +52,14 @@ export default function SessionHeader({
   // Generate VSCode URL based on session type
   const getVSCodeUrl = (hostnameOverride?: string): string => {
     const effectiveHostname = hostnameOverride || resolvedHostname;
+    const effectiveCwd = cwd || '/home/ubuntu';
     if (sessionType === "ssh" && effectiveHostname) {
-      return `vscode://vscode-remote/ssh-remote+${effectiveHostname}${cwd}?windowId=_blank`;
+      return `vscode://vscode-remote/ssh-remote+${effectiveHostname}${effectiveCwd}?windowId=_blank`;
     }
     if (sessionType === "wsl" && distroName) {
-      return `vscode://vscode-remote/wsl+${distroName}${cwd}?windowId=_blank`;
+      return `vscode://vscode-remote/wsl+${distroName}${effectiveCwd}?windowId=_blank`;
     }
-    return `vscode://file${cwd}?windowId=_blank`;
+    return `vscode://file${effectiveCwd}?windowId=_blank`;
   };
 
   // Fetch SSH hostname mapping on mount
@@ -213,9 +214,9 @@ export default function SessionHeader({
           onClick={handleCwdClick}
           disabled={isLoadingMapping}
           className="truncate font-mono text-sm font-medium hover:text-blue-400 hover:underline cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait text-left"
-          title={`Open ${cwd} in VSCode`}
+          title={`Open ${cwd || '/home/ubuntu'} in VSCode`}
         >
-          {isLoadingMapping ? `${cwd} (loading...)` : cwd}
+          {isLoadingMapping ? `${cwd || '/home/ubuntu'} (loading...)` : (cwd || '/home/ubuntu')}
         </button>
 
         <div className="flex items-center gap-3">
