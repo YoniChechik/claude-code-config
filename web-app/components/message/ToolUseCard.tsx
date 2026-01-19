@@ -19,6 +19,11 @@ interface ToolUseCardProps {
 }
 
 export default function ToolUseCard({ tool }: ToolUseCardProps) {
+  // Hide TodoWrite tool calls (official CLI behavior)
+  if (tool.name === "TodoWrite") {
+    return null;
+  }
+
   const [isExpanded, setIsExpanded] = useState(false);
   const colorClass =
     TOOL_COLORS[tool.name as keyof typeof TOOL_COLORS] || TOOL_COLORS.default;
