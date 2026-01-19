@@ -25,16 +25,16 @@ export default function AgentTaskFrame({
   childBlocks,
 }: AgentTaskFrameProps) {
   return (
-    <div className="my-md border-2 border-brand-secondary rounded-lg overflow-hidden bg-brand-secondary/10">
+    <div className="my-md border-2 border-purple-700 rounded-lg overflow-hidden bg-purple-950/20">
       {/* Agent Header */}
-      <div className="bg-brand-secondary/20 border-b-2 border-brand-secondary px-md py-sm flex items-center gap-md">
+      <div className="bg-purple-900/40 border-b-2 border-purple-700 px-md py-sm flex items-center gap-md">
         <span className="text-lg">🤖</span>
         <div className="flex-1">
-          <span className="font-semibold text-text-accent">{agentType}</span>
-          <span className="text-brand-primary ml-2">· {description}</span>
+          <span className="font-semibold text-purple-300">{agentType}</span>
+          <span className="text-purple-400 ml-2">· {description}</span>
         </div>
         <div
-          className="w-2 h-2 bg-brand-primary rounded-full animate-pulse"
+          className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"
           title="Running"
         />
       </div>
