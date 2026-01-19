@@ -40,32 +40,32 @@ export default function SSHHostPromptModal({
       onClick={onCancel}
     >
       <div
-        className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
+        className="bg-surface-elevated rounded-lg shadow-xl max-w-2xl w-full mx-md p-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-xl font-semibold text-white mb-4">
+        <h2 className="text-xl font-semibold text-text-primary mb-md">
           SSH Hostname Configuration
         </h2>
 
-        <div className="space-y-4 text-gray-300">
+        <div className="space-y-md text-text-secondary">
           <p>
-            <span className="text-gray-400">Your client IP:</span>{" "}
-            <span className="font-mono text-blue-400">{clientIp}</span>
+            <span className="text-text-muted">Your client IP:</span>{" "}
+            <span className="font-mono text-text-accent">{clientIp}</span>
           </p>
 
           <p>
             To open VSCode via SSH, we need your SSH host alias from{" "}
-            <code className="bg-gray-700 px-1 py-0.5 rounded text-sm">
+            <code className="bg-surface-tertiary px-xs py-0.5 rounded text-sm">
               ~/.ssh/config
             </code>
           </p>
 
           <div>
-            <p className="font-semibold text-white mb-2">Steps:</p>
+            <p className="font-semibold text-text-primary mb-sm">Steps:</p>
             <ol className="list-decimal list-inside space-y-1 text-sm">
               <li>
                 Open{" "}
-                <code className="bg-gray-700 px-1 py-0.5 rounded">
+                <code className="bg-surface-tertiary px-xs py-0.5 rounded">
                   ~/.ssh/config
                 </code>{" "}
                 on your local machine (not this server)
@@ -78,8 +78,8 @@ export default function SSHHostPromptModal({
           </div>
 
           <div>
-            <p className="text-sm text-gray-400 mb-2">Example SSH config:</p>
-            <pre className="bg-gray-900 p-3 rounded text-sm font-mono text-gray-300 overflow-x-auto">
+            <p className="text-sm text-text-muted mb-sm">Example SSH config:</p>
+            <pre className="bg-surface-primary p-md rounded text-sm font-mono text-text-secondary overflow-x-auto">
               {`Host mixtiles
   HostName 192.168.1.50
   User ubuntu`}
@@ -87,10 +87,10 @@ export default function SSHHostPromptModal({
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div className="mb-4">
+            <div className="mb-md">
               <label
                 htmlFor="ssh-host"
-                className="block text-sm font-medium text-gray-300 mb-2"
+                className="block text-sm font-medium text-text-secondary mb-sm"
               >
                 SSH Host:
               </label>
@@ -100,23 +100,23 @@ export default function SSHHostPromptModal({
                 value={hostname}
                 onChange={(e) => setHostname(e.target.value)}
                 placeholder="e.g., mixtiles"
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-md py-sm bg-surface-tertiary border border-border-default rounded-md text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 autoFocus
               />
             </div>
 
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-md">
               <button
                 type="button"
                 onClick={onCancel}
-                className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
+                className="px-md py-sm bg-surface-tertiary text-text-secondary rounded-md hover:bg-surface-elevated transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!hostname.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                className="px-md py-sm bg-brand-primary text-text-primary rounded-md hover:bg-brand-secondary disabled:bg-surface-tertiary disabled:text-text-muted disabled:cursor-not-allowed transition-colors"
               >
                 Save & Open
               </button>
