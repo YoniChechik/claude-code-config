@@ -327,9 +327,17 @@ export class ClaudeClient {
               event.type === "content_block_delta" &&
               event.delta?.type === "thinking_delta"
             ) {
+              // Unescape JSON string escapes (same as StructuredOutput)
+              const unescapedThinking = event.delta.thinking
+                .replace(/\\n/g, "\n")
+                .replace(/\\r/g, "\r")
+                .replace(/\\t/g, "\t")
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, "\\");
+
               eventQueue.push({
                 type: "thinking",
-                content: event.delta.thinking,
+                content: unescapedThinking,
               });
               resolveNext?.();
               resolveNext = null;

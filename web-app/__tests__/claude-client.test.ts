@@ -484,5 +484,31 @@ describe("ClaudeClient", () => {
       expect(textEvents.length).toBe(1);
       expect(textEvents[0].content).toBe("Here's the answer");
     });
+
+    it("should unescape JSON string escapes in thinking_delta", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test", { includePartialMessages: true })) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const thinkingDelta = {
+        type: "content_block_delta",
+        delta: { type: "thinking_delta", thinking: "First line\\nSecond line\\nThird line" },
+      };
+
+      mockProcess.emitData(JSON.stringify(thinkingDelta) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const thinkingEvents = events.filter(e => e.type === "thinking");
+      expect(thinkingEvents.length).toBe(1);
+      expect(thinkingEvents[0].content).toBe("First line\nSecond line\nThird line");
+    });
   });
 });
