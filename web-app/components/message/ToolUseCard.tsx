@@ -113,20 +113,53 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
 
     case "Read":
     case "Write":
-    case "Edit":
+    case "Edit": {
+      const filePath = input.file_path ? String(input.file_path) : "";
+      const description = (() => {
+        switch (tool.name) {
+          case "Read":
+            return "Reading file";
+          case "Write":
+            return "Writing file";
+          case "Edit":
+            return "Editing file";
+          default:
+            return "";
+        }
+      })();
       return (
-        <div className="text-sm font-mono text-text-secondary">
-          {String(input.file_path)}
+        <div className="text-sm">
+          <div className="text-text-secondary">{description}</div>
+          {filePath && <div className="font-mono mt-1">{filePath}</div>}
         </div>
       );
+    }
 
     case "Grep":
-    case "Glob":
+    case "Glob": {
+      const pattern = input.pattern ? String(input.pattern) : "";
+      const description = tool.name === "Grep" ? "Searching for pattern" : "Finding files matching";
       return (
-        <div className="text-sm font-mono text-text-secondary">
-          {String(input.pattern)}
+        <div className="text-sm">
+          <div className="text-text-secondary">{description}</div>
+          {pattern && <div className="font-mono mt-1">{pattern}</div>}
         </div>
       );
+    }
+
+    case "Skill": {
+      const skillName = input.skill ? String(input.skill) : "unknown";
+      const args = input.args ? String(input.args) : "";
+      return (
+        <div className="text-sm">
+          <div className="text-text-secondary">Running skill</div>
+          <div className="font-mono mt-1">
+            /{skillName}
+            {args && ` ${args}`}
+          </div>
+        </div>
+      );
+    }
 
     default:
       return (
