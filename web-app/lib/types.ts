@@ -74,6 +74,7 @@ export interface SendCommandRequest {
   sessionId: string;
   windowId: string;
   prompt: string;
+  appendedSystemPromptFile?: string; // Optional custom system prompt file path
 }
 
 export interface ResumeSessionRequest {

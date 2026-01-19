@@ -83,6 +83,14 @@ export default function AutosuggestInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "d" && e.ctrlKey) {
+      e.preventDefault();
+      if (isStreaming) {
+        handleStop();
+      }
+      return;
+    }
+
     if (suggestMode && matches.length > 0) {
       if (e.key === "Tab") {
         e.preventDefault();

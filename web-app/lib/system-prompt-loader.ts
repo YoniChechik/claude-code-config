@@ -3,17 +3,22 @@ import path from "path";
 
 /**
  * Load custom system prompt from project root
- * File location: PROJECT_ROOT/main_appended_system_prompt.md
+ * File location priority:
+ * 1. customPath parameter if provided
+ * 2. CCWEB_APPENDED_SYSTEM_PROMPT_FILE environment variable if set
+ * 3. Default: PROJECT_ROOT/main_appended_system_prompt.md
  * Gracefully handles missing file (returns undefined)
  */
-export async function loadSystemPrompt(): Promise<string | undefined> {
+export async function loadSystemPrompt(
+  customPath?: string,
+): Promise<string | undefined> {
   try {
-    // Path relative to web-app directory: ../main_appended_system_prompt.md
-    const promptPath = path.join(
-      process.cwd(),
-      "..",
-      "main_appended_system_prompt.md",
-    );
+    // Determine file path with fallback logic
+    const promptPath =
+      customPath ||
+      process.env.CCWEB_APPENDED_SYSTEM_PROMPT_FILE ||
+      path.join(process.cwd(), "..", "main_appended_system_prompt.md");
+
     const content = await fs.readFile(promptPath, "utf-8");
     return content.trim();
   } catch {
