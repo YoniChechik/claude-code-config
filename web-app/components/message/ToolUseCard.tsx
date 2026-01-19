@@ -100,13 +100,16 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
       );
     }
 
-    case "Task":
+    case "Task": {
+      const agentType = input.subagent_type ? String(input.subagent_type) : "(unnamed)";
+      const desc = input.description ? String(input.description) : "";
       return (
         <div className="text-sm">
-          <span className="font-medium">{String(input.subagent_type)}</span>:{" "}
-          {String(input.description)}
+          <span className="font-medium">{agentType}</span>:{" "}
+          {desc}
         </div>
       );
+    }
 
     case "Read":
     case "Write":

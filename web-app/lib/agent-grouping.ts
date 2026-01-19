@@ -218,7 +218,7 @@ function _processAgentTask(
   const input = taskTool.input as Record<string, unknown>;
   groups.push({
     type: "agent_task",
-    agentType: String(input.subagent_type || ""),
+    agentType: input.subagent_type ? String(input.subagent_type) : "(unnamed)",
     description: input.description ? String(input.description) : "",
     taskId: taskTool.id,
     taskToolUse: taskTool,
