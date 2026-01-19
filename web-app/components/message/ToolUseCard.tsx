@@ -48,7 +48,9 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
       {/* Tool result (appears when result arrives) */}
       {tool.result && (
         <div className="mt-2 animate-fade-in">
-          {renderToolResult(tool.result, isExpanded, setIsExpanded)}
+          {tool.name === "TodoWrite"
+            ? renderTodoWriteResult(tool)
+            : renderToolResult(tool.result, isExpanded, setIsExpanded, tool.name)}
         </div>
       )}
     </div>
@@ -150,10 +152,42 @@ function getStatusEmoji(status: string): string {
   }
 }
 
+function renderTodoWriteResult(tool: Extract<ContentBlock, { type: "tool_use" }>) {
+  interface TodoItem {
+    status: string;
+    content: string;
+  }
+  const input = tool.input as Record<string, unknown>;
+  const todos = (input.todos as TodoItem[]) || [];
+
+  return (
+    <div className="text-text-secondary bg-surface-tertiary px-md py-sm rounded">
+      <div className="text-xs opacity-70 mb-2">Updated todo list:</div>
+      <div className="space-y-1">
+        {todos.map((todo: TodoItem, idx: number) => (
+          <div key={idx} className="flex items-center gap-md">
+            <span>{getStatusEmoji(todo.status)}</span>
+            <span
+              className={
+                todo.status === "completed"
+                  ? "line-through text-text-muted"
+                  : ""
+              }
+            >
+              {todo.content}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function renderToolResult(
   content: string | ContentBlock[],
   isExpanded: boolean,
-  setIsExpanded: (expanded: boolean) => void
+  setIsExpanded: (expanded: boolean) => void,
+  _toolName?: string
 ) {
   if (Array.isArray(content)) {
     return null;
@@ -163,6 +197,7 @@ function renderToolResult(
     typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
   const trimmedContent = contentStr.trim();
+
   if (
     trimmedContent === "Structured output provided successfully" ||
     trimmedContent === "No response requested"
