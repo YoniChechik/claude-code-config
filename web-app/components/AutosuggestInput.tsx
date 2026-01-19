@@ -186,7 +186,7 @@ export default function AutosuggestInput({
         {suggestMode && matches.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute bottom-full left-0 right-0 mb-md bg-surface-elevated border-2 border-border-emphasis rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
+            className="absolute bottom-full left-0 right-0 mb-md bg-surface-secondary border-2 border-border-emphasis rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
           >
             <div className="px-md py-sm text-xs text-text-secondary border-b border-border-default bg-surface-secondary font-medium">
               <span className="font-bold text-brand-primary">Tab</span> to accept •{" "}
