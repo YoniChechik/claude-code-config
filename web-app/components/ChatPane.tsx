@@ -206,7 +206,23 @@ export default function ChatPane({
       return;
     }
 
-    await loadSession();
+    const data = await response.json();
+
+    if (!data.session) {
+      console.error("No session data in resume response");
+      return;
+    }
+
+    setSession(data.session);
+    const messagesWithDates = data.session.messages.map((msg: Message) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp),
+      content:
+        typeof msg.content === "string"
+          ? [{ type: "text" as const, text: msg.content }]
+          : msg.content,
+    }));
+    setMessages(messagesWithDates);
   };
 
   // PRIVATE HELPERS

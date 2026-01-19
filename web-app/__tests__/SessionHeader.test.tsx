@@ -77,7 +77,7 @@ describe("SessionHeader", () => {
 
       const audioButton = screen.getByTitle("Disable audio notifications");
       expect(audioButton).toBeInTheDocument();
-      expect(audioButton).toHaveTextContent("🔔 Audio On");
+      expect(audioButton).toHaveTextContent("🔊");
     });
 
     it("should show muted icon when audio is disabled", async () => {
@@ -89,7 +89,7 @@ describe("SessionHeader", () => {
       });
 
       const audioButton = screen.getByTitle("Enable audio notifications");
-      expect(audioButton).toHaveTextContent("🔕 Audio Off");
+      expect(audioButton).toHaveTextContent("🔇");
     });
 
     it("should call onToggleAudioNotifications when clicked", async () => {
@@ -121,7 +121,7 @@ describe("SessionHeader", () => {
       });
 
       let audioButton = screen.getByTitle("Disable audio notifications");
-      expect(audioButton).toHaveTextContent("🔔 Audio On");
+      expect(audioButton).toHaveTextContent("🔊");
 
       fireEvent.click(audioButton);
       expect(onToggle).toHaveBeenCalledTimes(1);
@@ -136,7 +136,7 @@ describe("SessionHeader", () => {
       );
 
       audioButton = screen.getByTitle("Enable audio notifications");
-      expect(audioButton).toHaveTextContent("🔕 Audio Off");
+      expect(audioButton).toHaveTextContent("🔇");
 
       fireEvent.click(audioButton);
       expect(onToggle).toHaveBeenCalledTimes(2);
@@ -151,7 +151,7 @@ describe("SessionHeader", () => {
       );
 
       audioButton = screen.getByTitle("Disable audio notifications");
-      expect(audioButton).toHaveTextContent("🔔 Audio On");
+      expect(audioButton).toHaveTextContent("🔊");
     });
   });
 

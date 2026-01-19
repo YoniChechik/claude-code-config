@@ -138,6 +138,18 @@ test.describe("Resume button", () => {
     const testSessionId = "test-resume-session-123";
     const testFilePath = "/test/path/session.jsonl";
     const testCwd = "/home/test";
+    const testMessages = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "Hello from previous session" }],
+        timestamp: new Date().toISOString(),
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Hi! This is a resumed message." }],
+        timestamp: new Date().toISOString(),
+      },
+    ];
 
     // Mock the sessions/recent API
     await page.route("**/api/sessions/recent**", async (route) => {
@@ -167,11 +179,39 @@ test.describe("Resume button", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          success: true,
           session: {
             id: testSessionId,
             cwd: testCwd,
-            messages: [],
+            messages: testMessages,
+            windowId: "test-window",
+            model: "claude-sonnet-4-5-20250929",
+            lastDurationMs: 0,
+            createdAt: new Date().toISOString(),
+            isResumed: true,
+            audioNotificationsEnabled: true,
+            includePartialMessages: true,
+          },
+        }),
+      });
+    });
+
+    // Mock the session GET API to return the resumed session
+    await page.route(`**/api/sessions/${testSessionId}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          session: {
+            id: testSessionId,
+            cwd: testCwd,
+            messages: testMessages,
+            windowId: "test-window",
+            model: "claude-sonnet-4-5-20250929",
+            lastDurationMs: 0,
+            createdAt: new Date().toISOString(),
+            isResumed: true,
+            audioNotificationsEnabled: true,
+            includePartialMessages: true,
           },
         }),
       });
@@ -207,5 +247,20 @@ test.describe("Resume button", () => {
     const modal = page.locator('[data-testid="session-picker-modal"]');
     const isVisible = await modal.isVisible().catch(() => false);
     expect(isVisible).toBe(false);
+
+    // Verify the session messages are actually loaded and displayed
+    await page.waitForTimeout(1000);
+
+    // Check for user message
+    const userMessage = page.locator('text="Hello from previous session"');
+    await expect(userMessage).toBeVisible({ timeout: 5000 });
+
+    // Check for assistant message
+    const assistantMessage = page.locator('text="Hi! This is a resumed message."');
+    await expect(assistantMessage).toBeVisible({ timeout: 5000 });
+
+    // Verify cwd is updated in the header
+    const cwdButton = page.locator(`button:has-text("${testCwd}")`);
+    await expect(cwdButton).toBeVisible({ timeout: 5000 });
   });
 });

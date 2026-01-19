@@ -225,16 +225,16 @@ export default function SessionHeader({
               className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-700 hover:bg-gray-600 transition-colors"
               title={`${audioNotificationsEnabled ? "Disable" : "Enable"} audio notifications`}
             >
-              {audioNotificationsEnabled ? "🔔 Audio On" : "🔕 Audio Off"}
+              {audioNotificationsEnabled ? "🔊" : "🔇"}
             </button>
           )}
           {onClose && (
             <button
               onClick={onClose}
-              className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 transition-colors"
+              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
               title="Close session"
             >
-              Close
+              ×
             </button>
           )}
         </div>
