@@ -14,6 +14,7 @@ export default function Home() {
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [windowId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     initializeSessions();
@@ -42,7 +43,7 @@ export default function Home() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, windowId }),
       });
 
       const data = await response.json();
@@ -127,7 +128,7 @@ export default function Home() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({ cwd, windowId }),
       });
 
       const data = await response.json();
