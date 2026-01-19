@@ -41,3 +41,4 @@ next-env.d.ts
 /playwright/.cache/
 .next-test/
 .next-prod-backup/
+_clones/

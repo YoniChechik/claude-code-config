@@ -62,6 +62,11 @@ export default function ChatPane({
       },
     });
     const data = await response.json();
+
+    if (!response.ok || !data.session) {
+      throw new Error(data.error || "Failed to load session");
+    }
+
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
     const messagesWithDates = data.session.messages.map((msg: Message) => ({
@@ -332,7 +337,7 @@ export default function ChatPane({
             assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
             setStreamingText(assistantText);
             setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed") {
+          } else if (event.type === "cwd_changed" && event.cwd) {
             setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
           } else if (event.type === "token_usage") {
             setTokenUsage(event.token_usage);
@@ -356,6 +361,11 @@ export default function ChatPane({
       },
     });
     const data = await sessionResponse.json();
+
+    if (!sessionResponse.ok || !data.session) {
+      throw new Error(data.error || "Failed to update session metadata");
+    }
+
     setSession((prev) =>
       prev
         ? {
