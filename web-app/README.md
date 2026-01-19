@@ -59,6 +59,8 @@ npm install
 ```bash
 CLAUDE_API_KEY=your_api_key_here
 NEXT_PUBLIC_DEFAULT_CWD=/home/ubuntu
+# Optional: Custom appended system prompt file path
+# CCWEB_APPENDED_SYSTEM_PROMPT_FILE=/path/to/custom/system-prompt.md
 ```
 
 3. Run development server:
@@ -67,6 +69,23 @@ npm run dev
 ```
 
 4. Open [http://localhost:3000](http://localhost:3000)
+
+## Custom System Prompt
+
+You can specify a custom appended system prompt file using the `CCWEB_APPENDED_SYSTEM_PROMPT_FILE` environment variable.
+
+**Priority order:**
+1. Custom path from request parameter (advanced use case)
+2. `CCWEB_APPENDED_SYSTEM_PROMPT_FILE` environment variable
+3. Default: `../main_appended_system_prompt.md` (relative to web-app directory)
+
+**Example:**
+```bash
+export CCWEB_APPENDED_SYSTEM_PROMPT_FILE=/home/user/my-custom-prompt.md
+npm run dev
+```
+
+The system gracefully handles missing files by returning undefined if the file cannot be read.
 
 ## Tailwind CSS v4
 
