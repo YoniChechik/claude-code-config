@@ -59,17 +59,20 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
   const input = tool.input as Record<string, unknown>;
 
   switch (tool.name) {
-    case "Bash":
+    case "Bash": {
+      const description = input.description ? String(input.description) : null;
+      const command = input.command ? String(input.command) : null;
       return (
         <div className="font-mono text-sm">
-          {input.description && (
-            <div className="text-gray-400">{String(input.description)}</div>
+          {description && (
+            <div className="text-gray-400">{description}</div>
           )}
-          {input.command && (
-            <div className="mt-1">$ {String(input.command)}</div>
+          {command && (
+            <div className="mt-1">$ {command}</div>
           )}
         </div>
       );
+    }
 
     case "TodoWrite": {
       interface TodoItem {
