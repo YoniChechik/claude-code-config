@@ -8,10 +8,18 @@ import type { Message } from "@/lib/types";
  */
 export async function POST(request: NextRequest) {
   const { sessionId, filePath, cwd } = await request.json();
+  const windowId = request.headers.get("x-window-id");
 
   if (!sessionId || !filePath || !cwd) {
     return NextResponse.json(
       { error: "sessionId, filePath, and cwd are required" },
+      { status: 400 }
+    );
+  }
+
+  if (!windowId) {
+    return NextResponse.json(
+      { error: "x-window-id header required" },
       { status: 400 }
     );
   }
@@ -23,7 +31,13 @@ export async function POST(request: NextRequest) {
   const messages = loadedMessages as Message[];
 
   // Create resumed session
-  const session = sessionManager.resumeSession(sessionId, cwd, messages);
-
-  return NextResponse.json({ session });
+  try {
+    const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
+    return NextResponse.json({ session });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to resume session" },
+      { status: 403 }
+    );
+  }
 }

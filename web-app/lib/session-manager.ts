@@ -6,8 +6,9 @@ import { execSync } from "child_process";
 class SessionManager {
   private sessions = new Map<string, Session>();
   private cdTrackers = new Map<string, CDTracker>();
+  private sessionOwners = new Map<string, string>();
 
-  createSession(cwd: string, clientHostname?: string): Session {
+  createSession(cwd: string, windowId?: string, clientHostname?: string): Session {
     const { sessionType, hostname, distroName, clientIp } = this._detectSessionType(clientHostname);
 
     const session: Session = {
@@ -21,10 +22,15 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
+      windowId,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
+
+    if (windowId) {
+      this.sessionOwners.set(session.id, windowId);
+    }
 
     return session;
   }
@@ -52,7 +58,12 @@ class SessionManager {
     return { sessionType: 'local' };
   }
 
-  resumeSession(sessionId: string, cwd: string, messages: Message[]): Session {
+  resumeSession(sessionId: string, windowId: string, cwd: string, messages: Message[]): Session {
+    const existingOwner = this.sessionOwners.get(sessionId);
+    if (existingOwner && existingOwner !== windowId) {
+      throw new Error("Session ownership mismatch");
+    }
+
     const { sessionType, hostname, distroName, clientIp } = this._detectSessionType();
 
     const session: Session = {
@@ -67,10 +78,12 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
+      windowId,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
+    this.sessionOwners.set(sessionId, windowId);
 
     return session;
   }
@@ -85,6 +98,7 @@ class SessionManager {
 
   deleteSession(id: string): boolean {
     this.cdTrackers.delete(id);
+    this.sessionOwners.delete(id);
     return this.sessions.delete(id);
   }
 
@@ -118,6 +132,22 @@ class SessionManager {
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
     const session = this.sessions.get(sessionId)!;
     session.claudeSessionId = claudeSessionId;
+  }
+
+  validateOwnership(sessionId: string, windowId: string): boolean {
+    const owner = this.sessionOwners.get(sessionId);
+    return owner === windowId;
+  }
+
+  getOwner(sessionId: string): string | undefined {
+    return this.sessionOwners.get(sessionId);
+  }
+
+  getSessionWithOwnershipCheck(sessionId: string, windowId: string): Session | null {
+    if (!this.validateOwnership(sessionId, windowId)) {
+      return null;
+    }
+    return this.sessions.get(sessionId) || null;
   }
 }
 

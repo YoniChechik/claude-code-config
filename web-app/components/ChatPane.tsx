@@ -12,13 +12,14 @@ interface ChatPaneProps {
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
-  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
+  isWindowFocused?: boolean;
+  onResumeSession?: (sessionId: string, filePath: string, cwd: string) => Promise<void>;
 }
 
 /**
  * Individual chat pane with session management
  */
-export default function ChatPane({ sessionId, commands, onClose, isFocused = false, onResumeSession }: ChatPaneProps) {
+export default function ChatPane({ sessionId, commands, onClose, isFocused = false, isWindowFocused = true, onResumeSession }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");

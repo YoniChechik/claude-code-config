@@ -13,6 +13,9 @@ export interface Session {
   hostname?: string; // For SSH sessions
   distroName?: string; // For WSL sessions
   clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
+  windowId?: string; // Track which browser window owns this session
+  audioNotificationsEnabled?: boolean; // Audio notification preference
+  includePartialMessages?: boolean; // Include partial messages preference
 }
 
 // Content block types (matches Claude API output)
@@ -47,6 +50,7 @@ export interface StructuredOutput {
 // API request/response types
 export interface CreateSessionRequest {
   cwd: string;
+  windowId?: string;
   clientHostname?: string;
 }
 

@@ -15,6 +15,7 @@ interface AutosuggestInputProps {
   isStreaming?: boolean;
   onFocusRef?: (focusFn: () => void) => void;
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => void;
+  cancelStreamRef?: React.MutableRefObject<(() => void) | undefined>;
 }
 
 export default function AutosuggestInput({
@@ -27,6 +28,7 @@ export default function AutosuggestInput({
   isStreaming = false,
   onFocusRef,
   onResumeSession,
+  cancelStreamRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
