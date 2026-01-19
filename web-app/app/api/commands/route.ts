@@ -15,29 +15,37 @@ export const maxDuration = 0;
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as SendCommandRequest;
-  const { sessionId, prompt } = body;
+  const { sessionId, windowId, prompt } = body;
 
-  if (!sessionId || !prompt) {
+  if (!sessionId || !windowId || !prompt) {
     return new Response(
-      JSON.stringify({ error: "sessionId and prompt are required" }),
+      JSON.stringify({ error: "sessionId, windowId, and prompt are required" }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
 
-  const session = sessionManager.getSession(sessionId);
-  if (!session) {
+  if (!sessionManager.validateOwnership(sessionId, windowId)) {
+    console.warn(
+      `[Security] Command blocked: ` +
+        `sessionId=${sessionId}, windowId=${windowId}, ` +
+        `owner=${sessionManager.getOwner(sessionId)}`
+    );
+    return new Response(
+      JSON.stringify({ error: "You do not own this session" }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  let session;
+  let tracker;
+  try {
+    session = sessionManager.getSession(sessionId);
+    tracker = sessionManager.getCDTracker(sessionId);
+  } catch (error) {
     return new Response(JSON.stringify({ error: "Session not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
-  }
-
-  const tracker = sessionManager.getCDTracker(sessionId);
-  if (!tracker) {
-    return new Response(
-      JSON.stringify({ error: "Session tracker not found" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
   }
 
   // Add user message to session
@@ -70,6 +78,7 @@ export async function POST(request: NextRequest) {
           sessionId: claudeSessionId,
           appendSystemPrompt: systemPrompt,
           cwd: session.cwd,
+          includePartialMessages: session.includePartialMessages,
           onProcessSpawned: (process) => {
             // Register process for cleanup
             processRegistry.register(sessionId, process);
@@ -128,7 +137,7 @@ export async function POST(request: NextRequest) {
           updatedSession && updatedSession.cwd !== previousCwd;
 
         // Send cwd_changed event to client so navbar updates immediately
-        if (didChangeCwd) {
+        if (didChangeCwd && updatedSession.cwd) {
           const cwdChangedEvent = {
             type: "cwd_changed",
             cwd: updatedSession.cwd,
@@ -157,6 +166,7 @@ export async function POST(request: NextRequest) {
               sessionId: updatedSession.claudeSessionId,
               appendSystemPrompt: systemPrompt,
               cwd: updatedSession.cwd,
+              includePartialMessages: updatedSession.includePartialMessages,
               onProcessSpawned: (process) => {
                 // Register auto-continue process for cleanup
                 processRegistry.register(sessionId, process);

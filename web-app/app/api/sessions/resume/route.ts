@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 import { loadSessionMessages, validateSessionPath } from "@/lib/session-storage";
-import type { Message } from "@/lib/types";
+import type { Message, ResumeSessionRequest } from "@/lib/types";
 
 /**
  * POST /api/sessions/resume - Resume a session from JSONL file
  * Handles both real file paths and symlink paths with validation
  */
 export async function POST(request: NextRequest) {
-  const { sessionId, filePath, cwd } = await request.json();
+  const body = (await request.json()) as ResumeSessionRequest;
+  const { sessionId, windowId, filePath, cwd } = body;
 
-  if (!sessionId || !filePath || !cwd) {
+  if (!sessionId || !windowId || !filePath || !cwd) {
     return NextResponse.json(
-      { error: "sessionId, filePath, and cwd are required" },
+      { error: "sessionId, windowId, filePath, and cwd are required" },
       { status: 400 },
     );
   }
 
   try {
-    // Validate and resolve the session path (handles symlinks and broken links)
     const validPath = await validateSessionPath(filePath);
     if (!validPath) {
       return NextResponse.json(
@@ -30,17 +30,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load messages from JSONL file (using validated real path)
     const loadedMessages = await loadSessionMessages(validPath);
-
-    // Messages are already in the correct format from loadSessionMessages
     const messages = loadedMessages as Message[];
-
-    // Create resumed session
-    const session = sessionManager.resumeSession(sessionId, cwd, messages);
+    const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
 
     return NextResponse.json({ session });
   } catch (error) {
+    if (error instanceof Error && error.message === "Session ownership mismatch") {
+      console.warn(
+        `[Security] Session ownership mismatch: ` +
+          `sessionId=${sessionId}, windowId=${windowId}, ` +
+          `owner=${sessionManager.getOwner(sessionId)}`
+      );
+      return NextResponse.json(
+        { error: "Session ownership validation failed" },
+        { status: 403 }
+      );
+    }
     console.error("Error resuming session:", error);
     return NextResponse.json(
       {

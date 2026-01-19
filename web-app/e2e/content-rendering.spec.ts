@@ -12,7 +12,7 @@ test.describe("Content Rendering", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Hello! This is a test response."}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello! This is a test response."}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -50,44 +50,41 @@ test.describe("Content Rendering", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"thinking","text":"Let me think about this..."}\n\ndata: {"type":"text","text":"Here is the solution"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"thinking","content":"Let me think about this..."}\n\ndata: {"type":"text","content":"Here is the solution"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
-    // Send a message that might trigger thinking
     await chatInput.fill("solve a complex problem");
     await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
-    // Wait for response to start
-    await page.waitForTimeout(2000);
+    // Since we're mocking a thinking block, it MUST appear
+    const thinkingBlock = leftPane.locator("div.italic.text-gray-400").first();
+    await expect(thinkingBlock).toBeVisible({ timeout: 5000 });
 
-    // Check if thinking block appears (they have italic style and gray color)
-    // Thinking blocks may or may not appear depending on model behavior
-    const thinkingBlocks = leftPane.locator("div.italic.text-gray-400");
-    const thinkingCount = await thinkingBlocks.count();
+    // Verify thinking emoji and content
+    const thinkingText = await thinkingBlock.textContent();
+    expect(thinkingText).toContain("💭");
+    expect(thinkingText).toContain("Let me think about this...");
 
-    // If thinking blocks exist, verify they're styled correctly
-    if (thinkingCount > 0) {
-      const firstThinking = thinkingBlocks.first();
-      await expect(firstThinking).toBeVisible();
-
-      // Verify styling
-      const classes = await firstThinking.getAttribute("class");
-      expect(classes).toContain("italic");
-      expect(classes).toContain("text-gray-400");
-    }
+    // Verify styling classes
+    const classes = await thinkingBlock.getAttribute("class");
+    expect(classes).toContain("italic");
+    expect(classes).toContain("text-gray-400");
+    expect(classes).toContain("bg-gray-800");
+    expect(classes).toContain("rounded-lg");
   });
 
   test("should display tool use blocks correctly", async ({ page }) => {
     // Mock Claude API with tool use
     await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"{\\"name\\":\\"test\\"}"}\n\ndata: {"type":"text","text":"Here is the content"}\n\ndata: {"type":"done"}\n\n',
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_001","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_001","content":"{\\"name\\":\\"test\\"}"}}\n\ndata: {"type":"text","content":"Here is the content"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -117,10 +114,11 @@ test.describe("Content Rendering", () => {
   test("should display tool result blocks correctly", async ({ page }) => {
     // Mock Claude API with tool use and results
     await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"{\\"name\\":\\"test-package\\"}"}\n\ndata: {"type":"text","text":"The file contains package info"}\n\ndata: {"type":"done"}\n\n',
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_002","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_002","content":"{\\"name\\":\\"test-package\\"}"}}\n\ndata: {"type":"text","content":"The file contains package info"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -150,10 +148,11 @@ test.describe("Content Rendering", () => {
   test("should handle tool result expand/collapse", async ({ page }) => {
     // Mock Claude API with tool use and results
     await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"tool_use","name":"Read","input":{"file_path":"/package.json"}}\n\ndata: {"type":"tool_result","content":"Large result content that might be collapsible"}\n\ndata: {"type":"text","text":"Done"}\n\ndata: {"type":"done"}\n\n',
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_003","name":"Read","input":{"file_path":"/package.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_003","content":"Large result content that might be collapsible"}}\n\ndata: {"type":"text","content":"Done"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -200,7 +199,7 @@ test.describe("Content Rendering", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Hello there!"}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello there!"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -251,7 +250,7 @@ test.describe("Content Rendering", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: {"type":"text","text":"Response ${callCount}"}\n\ndata: {"type":"done"}\n\n`,
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Response ${callCount}"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -299,10 +298,11 @@ test.describe("Content Rendering", () => {
   test("should render content blocks in correct order", async ({ page }) => {
     // Mock Claude API with Glob tool use
     await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*.json"}}\n\ndata: {"type":"tool_result","content":"file1.json\\nfile2.json"}\n\ndata: {"type":"text","text":"Found JSON files"}\n\ndata: {"type":"done"}\n\n',
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_004","name":"Glob","input":{"pattern":"**/*.json"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_004","content":"file1.json\\nfile2.json"}}\n\ndata: {"type":"text","content":"Found JSON files"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -335,41 +335,28 @@ test.describe("Content Rendering", () => {
   });
 
   test("should handle streaming text without data loss", async ({ page }) => {
-    // Mock Claude API with streaming response
-    await page.route("**/api/commands", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Here is an interesting fact about streaming!"}\n\ndata: {"type":"done"}\n\n',
-      });
-    });
-
     const leftPane = page.locator("main > div > div").first();
     const chatInput = leftPane.locator("textarea").first();
+
     // Send a message
     await chatInput.fill("tell me a fact");
     await chatInput.press("Enter");
     await expect(chatInput).toHaveValue("", { timeout: 3000 });
 
-    // Wait for streaming to start
-    await page.waitForTimeout(1000);
-
     // Check streaming message appears
     const streamingMessage = leftPane
-      .locator("div.bg-gray-800.animate-border-spin")
+      .locator("div.animate-border-spin")
       .first();
     await expect(streamingMessage).toBeVisible({ timeout: 5000 });
 
-    // Get text while streaming (if any)
-    const streamingContent = streamingMessage
-      .locator("div.whitespace-pre-wrap")
-      .first();
-    await expect(streamingContent).toBeVisible();
+    // Wait a bit for content to appear
+    await page.waitForTimeout(1000);
 
-    const textDuringStreaming = await streamingContent.textContent();
+    // Get text while streaming
+    const textDuringStreaming = await streamingMessage.textContent();
 
     // Wait for completion
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(15000);
 
     // Get final message
     const completedMessage = leftPane
@@ -378,19 +365,13 @@ test.describe("Content Rendering", () => {
       .last();
     await expect(completedMessage).toBeVisible();
 
-    const finalContent = completedMessage
-      .locator("div.whitespace-pre-wrap")
-      .first();
-    const finalText = await finalContent.textContent();
+    const finalText = await completedMessage.textContent();
 
-    // Final text should be at least as long as streaming text
-    expect(finalText!.length).toBeGreaterThanOrEqual(0);
+    // Final message should have content
+    expect(finalText!.length).toBeGreaterThan(0);
 
-    // If there was text during streaming, final should contain it
-    if (textDuringStreaming && textDuringStreaming.trim().length > 0) {
-      // Final text should have content (may be different due to streaming)
-      expect(finalText!.length).toBeGreaterThan(0);
-    }
+    // Verify no data was lost - final message should contain Claude label
+    expect(finalText).toContain("Claude");
   });
 
   test("messages should persist after sending and not disappear", async ({
@@ -401,7 +382,7 @@ test.describe("Content Rendering", () => {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"text","text":"Hello! Message persistence test."}\n\ndata: {"type":"done"}\n\n',
+        body: 'data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"text","content":"Hello! Message persistence test."}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n',
       });
     });
 
@@ -458,10 +439,11 @@ test.describe("Content Rendering", () => {
   }) => {
     // Mock Claude API with multiple tool uses in causal order
     await page.route("**/api/commands", async (route) => {
+      const timestamp = new Date().toISOString();
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: 'data: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent1*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent2*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"tool_use","name":"Glob","input":{"pattern":"**/*nonexistent3*.xyz"}}\n\ndata: {"type":"tool_result","content":"No matches"}\n\ndata: {"type":"text","text":"Search complete"}\n\ndata: {"type":"done"}\n\n',
+        body: `data: {"type":"init","model":"claude-sonnet-4-5-20250929"}\n\ndata: {"type":"tool_use","tool":{"id":"tool_005","name":"Glob","input":{"pattern":"**/*nonexistent1*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_005","content":"No matches"}}\n\ndata: {"type":"tool_use","tool":{"id":"tool_006","name":"Glob","input":{"pattern":"**/*nonexistent2*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_006","content":"No matches"}}\n\ndata: {"type":"tool_use","tool":{"id":"tool_007","name":"Glob","input":{"pattern":"**/*nonexistent3*.xyz"},"timestamp":"${timestamp}"}}\n\ndata: {"type":"tool_result","tool_result":{"tool_use_id":"tool_007","content":"No matches"}}\n\ndata: {"type":"text","content":"Search complete"}\n\ndata: {"type":"result","duration_ms":500}\n\ndata: [DONE]\n\n`,
       });
     });
 
@@ -494,7 +476,7 @@ test.describe("Content Rendering", () => {
     await expect(claudeMessage).toBeVisible({ timeout: 20000 });
 
     // Wait for at least 2 tool use blocks to appear (indicating multiple tool calls)
-    await page.waitForTimeout(5000); // Give time for streaming to show tools
+    await page.waitForTimeout(1000); // Give time for streaming to show tools
 
     // Get all tool-related elements within the Claude message
     // Tool use blocks have border-l-4 and contain [ToolName]
@@ -504,7 +486,7 @@ test.describe("Content Rendering", () => {
       .first();
 
     // Wait a bit more for all tool calls to complete
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(2000);
 
     // Get all child divs that could be tool blocks
     const allBlocks = await messageContent.locator("div").all();

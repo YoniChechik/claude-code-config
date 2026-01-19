@@ -331,5 +331,158 @@ describe("ClaudeClient", () => {
       );
       expect(hasStructuredOutput).toBe(false);
     });
+
+    it("should process text_delta events when includePartialMessages is enabled", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test", { includePartialMessages: true })) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Send multiple text_delta events
+      const delta1 = {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "Hello " },
+      };
+      const delta2 = {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "world!" },
+      };
+
+      mockProcess.emitData(JSON.stringify(delta1) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitData(JSON.stringify(delta2) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const textEvents = events.filter(e => e.type === "text");
+      expect(textEvents.length).toBeGreaterThanOrEqual(2);
+      expect(textEvents[0].content).toBe("Hello ");
+      expect(textEvents[1].content).toBe("world!");
+    });
+
+    it("should pass includePartialMessages flag to CLI", async () => {
+      const streamPromise = (async () => {
+        for await (const _ of client.streamCommand("test", { includePartialMessages: true })) {
+          // Consume stream
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const spawnCall = (child_process.spawn as jest.Mock).mock.calls[0];
+      const args = spawnCall[1] as string[];
+      expect(args).toContain("--include-partial-messages");
+    });
+
+    it("should not pass includePartialMessages flag when disabled", async () => {
+      const streamPromise = (async () => {
+        for await (const _ of client.streamCommand("test", { includePartialMessages: false })) {
+          // Consume stream
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const spawnCall = (child_process.spawn as jest.Mock).mock.calls[0];
+      const args = spawnCall[1] as string[];
+      expect(args).not.toContain("--include-partial-messages");
+    });
+
+    it("should skip StructuredOutput text when text_delta events received", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test", { includePartialMessages: true })) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Send text_delta events first
+      const delta1 = {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "Partial " },
+      };
+      const delta2 = {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "message" },
+      };
+      mockProcess.emitData(JSON.stringify(delta1) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitData(JSON.stringify(delta2) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Then send final StructuredOutput
+      const finalMsg = {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "StructuredOutput",
+              input: { response: "Partial message - complete" },
+            },
+          ],
+        },
+      };
+      mockProcess.emitData(JSON.stringify(finalMsg) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const textEvents = events.filter(e => e.type === "text");
+      // Should only have 2 delta events, NOT StructuredOutput text (to avoid duplication)
+      expect(textEvents.length).toBe(2);
+      expect(textEvents[0].content).toBe("Partial ");
+      expect(textEvents[1].content).toBe("message");
+    });
+
+    it("should parse thinking_delta alongside text_delta", async () => {
+      const events: ClaudeStreamEvent[] = [];
+      const streamPromise = (async () => {
+        for await (const event of client.streamCommand("test", { includePartialMessages: true })) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const thinkingDelta = {
+        type: "content_block_delta",
+        delta: { type: "thinking_delta", thinking: "Let me think..." },
+      };
+      const textDelta = {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "Here's the answer" },
+      };
+
+      mockProcess.emitData(JSON.stringify(thinkingDelta) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockProcess.emitData(JSON.stringify(textDelta) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      mockProcess.emitClose(0);
+      await streamPromise;
+
+      const thinkingEvents = events.filter(e => e.type === "thinking");
+      const textEvents = events.filter(e => e.type === "text");
+
+      expect(thinkingEvents.length).toBe(1);
+      expect(thinkingEvents[0].content).toBe("Let me think...");
+      expect(textEvents.length).toBe(1);
+      expect(textEvents[0].content).toBe("Here's the answer");
+    });
   });
 });

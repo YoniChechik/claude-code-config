@@ -46,7 +46,7 @@ export default function SessionHeader({
   const [showModal, setShowModal] = useState(false);
   const [isLoadingMapping, setIsLoadingMapping] = useState(false);
   const [resolvedHostname, setResolvedHostname] = useState<string | undefined>(
-    hostname,
+    undefined,
   );
 
   // Generate VSCode URL based on session type
@@ -60,6 +60,22 @@ export default function SessionHeader({
     }
     return `vscode://file${cwd}?windowId=_blank`;
   };
+
+  // Fetch SSH hostname mapping on mount
+  useEffect(() => {
+    if (sessionType === "ssh" && clientIp) {
+      fetch(`/api/ssh-host-mapping?clientIp=${encodeURIComponent(clientIp)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.hostname) {
+            setResolvedHostname(data.hostname);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch SSH hostname mapping:", err);
+        });
+    }
+  }, [sessionType, clientIp]);
 
   // Poll account-wide usage every 30 seconds
   useEffect(() => {
@@ -192,7 +208,7 @@ export default function SessionHeader({
         onSave={handleSaveHostname}
         onCancel={() => setShowModal(false)}
       />
-      <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
+      <div className="flex items-center justify-between px-12 py-3 bg-gradient-to-r from-gray-800 to-gray-900 text-gray-100 border-b border-gray-700 shadow-sm">
         <button
           onClick={handleCwdClick}
           disabled={isLoadingMapping}
@@ -201,56 +217,24 @@ export default function SessionHeader({
         >
           {isLoadingMapping ? `${cwd} (loading...)` : cwd}
         </button>
+
         <div className="flex items-center gap-3">
-          {tokenUsage && (
-            <div
-              className={`flex items-center gap-2 text-xs font-medium bg-gray-700/50 px-3 py-1 rounded-md ${tokenColor}`}
-              title={`Token usage: ${tokenUsage.used}/${tokenUsage.total} (resets every 5 hours)`}
-            >
-              <span>
-                🪙 {tokenUsage.used.toLocaleString()}/
-                {tokenUsage.total.toLocaleString()}
-              </span>
-              <span className="text-gray-400">({percentUsed.toFixed(0)}%)</span>
-            </div>
-          )}
-          {showHighUsageWarning && timeUntilReset && (
-            <div
-              className="flex items-center gap-2 text-xs font-medium bg-red-900/40 px-3 py-1 rounded-md text-red-300"
-              title={`Account usage at ${accountUsage?.percentUsed.toFixed(0)}% - resets at 6 PM EST`}
-            >
-              <span>
-                ⚠️ Resets in {timeUntilReset.hours}h {timeUntilReset.minutes}m
-              </span>
-            </div>
-          )}
-          {lastDurationMs > 0 && (
-            <div className="flex items-center gap-3 text-sm font-medium bg-gray-700/50 px-3 py-1 rounded-md">
-              <span>{formatDuration(lastDurationMs)}</span>
-              <span className="text-gray-500">│</span>
-              <span>{model}</span>
-            </div>
-          )}
           {onToggleAudioNotifications && (
             <button
               onClick={onToggleAudioNotifications}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-sm"
-              title={
-                audioNotificationsEnabled
-                  ? "Disable audio notifications"
-                  : "Enable audio notifications"
-              }
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-700 hover:bg-gray-600 transition-colors"
+              title={`${audioNotificationsEnabled ? "Disable" : "Enable"} audio notifications`}
             >
-              {audioNotificationsEnabled ? "🔊" : "🔇"}
+              {audioNotificationsEnabled ? "🔔 Audio On" : "🔕 Audio Off"}
             </button>
           )}
           {onClose && (
             <button
               onClick={onClose}
-              className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-gray-700 transition-all duration-200 text-xl leading-none font-light"
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 transition-colors"
               title="Close session"
             >
-              ×
+              Close
             </button>
           )}
         </div>

@@ -1,38 +1,87 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-test.describe("SSH Hostname Modal", () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to the app
-    await page.goto("http://localhost:6379");
+// Helper function to create a complete session mock
+function createMockSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "test-session-id",
+    cwd: "/home/ubuntu",
+    model: "claude-sonnet-4-5-20250929",
+    lastDurationMs: 0,
+    messages: [],
+    createdAt: new Date().toISOString(),
+    sessionType: "ssh",
+    hostname: "150-136-38-69",
+    clientIp: "150.136.38.69",
+    audioNotificationsEnabled: false,
+    ...overrides,
+  };
+}
 
-    // Wait for the chat input to be ready
-    await page.waitForSelector("textarea", { timeout: 10000 });
+// Helper function to setup common mocks
+async function setupBaseMocks(page: Page, sessionOverrides: Record<string, unknown> = {}) {
+  const mockSession = createMockSession(sessionOverrides);
+
+  // Mock /api/cwd
+  await page.route("**/api/cwd", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ cwd: "/home/ubuntu" }),
+    });
   });
+
+  // Mock /api/commands-list
+  await page.route("**/api/commands-list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        commands: [
+          { name: "help", source: "builtin" },
+          { name: "clear", source: "builtin" },
+        ],
+      }),
+    });
+  });
+
+  // Mock session creation and retrieval
+  await page.route("**/api/sessions/**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          session: mockSession,
+        }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          session: mockSession,
+        }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+}
+
+test.describe("SSH Hostname Modal", () => {
+  // Remove beforeEach - each test will setup its own mocks before navigation
 
   test("should show modal when clicking CWD with unmapped SSH session", async ({
     page,
   }) => {
-    // Mock the session to be SSH with non-localhost hostname
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: {
-              id: "test-session-id",
-              sessionType: "ssh",
-              hostname: "150-136-38-69",
-              clientIp: "150.136.38.69",
-              cwd: "/home/ubuntu",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
-    });
+    await setupBaseMocks(page);
 
     // Mock the SSH host mapping API to return no mapping
     await page.route("**/api/ssh-host-mapping*", async (route) => {
@@ -48,7 +97,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Click the CWD button
@@ -69,25 +118,9 @@ test.describe("SSH Hostname Modal", () => {
   test("should save hostname and open VSCode when user submits", async ({
     page,
   }) => {
-    // Mock the session to be SSH with non-localhost hostname
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: {
-              id: "test-session-id",
-              sessionType: "ssh",
-              hostname: "192-168-1-50",
-              clientIp: "192.168.1.50",
-              cwd: "/home/ubuntu",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+    await setupBaseMocks(page, {
+      hostname: "192-168-1-50",
+      clientIp: "192.168.1.50",
     });
 
     // Mock the SSH host mapping API
@@ -114,7 +147,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls
@@ -167,25 +200,9 @@ test.describe("SSH Hostname Modal", () => {
   });
 
   test("should close modal when cancel button is clicked", async ({ page }) => {
-    // Mock the session to be SSH with non-localhost hostname
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: {
-              id: "test-session-id",
-              sessionType: "ssh",
-              hostname: "10-0-0-5",
-              clientIp: "10.0.0.5",
-              cwd: "/home/ubuntu",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+    await setupBaseMocks(page, {
+      hostname: "10-0-0-5",
+      clientIp: "10.0.0.5",
     });
 
     // Mock the SSH host mapping API to return no mapping
@@ -202,7 +219,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Click the CWD button
@@ -232,25 +249,9 @@ test.describe("SSH Hostname Modal", () => {
   test("should use saved hostname on subsequent clicks without showing modal", async ({
     page,
   }) => {
-    // Mock the session to be SSH
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: {
-              id: "test-session-id",
-              sessionType: "ssh",
-              hostname: "172-16-0-10",
-              clientIp: "172.16.0.10",
-              cwd: "/home/ubuntu",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+    await setupBaseMocks(page, {
+      hostname: "172-16-0-10",
+      clientIp: "172.16.0.10",
     });
 
     // Mock the SSH host mapping API to return a saved mapping
@@ -267,7 +268,7 @@ test.describe("SSH Hostname Modal", () => {
     });
 
     // Reload to get the mocked session
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls
@@ -309,27 +310,12 @@ test.describe("SSH Hostname Modal", () => {
   test("should open VSCode directly for non-SSH sessions without showing modal", async ({
     page,
   }) => {
-    // Mock the session to be local (not SSH)
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: {
-              id: "test-session-id",
-              sessionType: "local",
-              cwd: "/home/ubuntu",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+    await setupBaseMocks(page, {
+      sessionType: "local",
     });
 
     // Reload to get the mocked session
-    await page.goto("http://localhost:6379");
+    await page.goto("/");
     await page.waitForSelector("textarea", { timeout: 10000 });
 
     // Track window.open calls

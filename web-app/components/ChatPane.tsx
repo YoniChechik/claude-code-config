@@ -8,15 +8,16 @@ import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
 import {
   playAudioNotification,
-  updateTabTitle,
-  clearTabNotification,
-} from "@/lib/notifications";
+  notificationManager,
+} from "@/lib/notification-manager";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
   sessionId: string;
   commands: SlashCommand[];
   onClose?: () => void;
   isFocused?: boolean;
+  isWindowFocused?: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export default function ChatPane({
   commands,
   onClose,
   isFocused = false,
+  isWindowFocused = true,
 }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -39,7 +41,6 @@ export default function ChatPane({
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
-  const [isWindowFocused, setIsWindowFocused] = useState(true);
 
   // Load session on mount
   useEffect(() => {
@@ -53,29 +54,19 @@ export default function ChatPane({
     }
   }, [isFocused]);
 
-  // Track window/tab focus state using Page Visibility API
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const isVisible = !document.hidden;
-      setIsWindowFocused(isVisible);
-      if (isVisible) {
-        clearTabNotification();
-      }
-    };
-
-    // Set initial state
-    setIsWindowFocused(!document.hidden);
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
-
   const loadSession = async () => {
-    const response = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await response.json();
+
+    if (!response.ok || !data.session) {
+      throw new Error(data.error || "Failed to load session");
+    }
+
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
     const messagesWithDates = data.session.messages.map((msg: Message) => ({
@@ -104,17 +95,24 @@ export default function ChatPane({
 
     abortControllerRef.current = new AbortController();
     cancelStreamRef.current = () => {
-      abortControllerRef.current?.abort();
+      if (!abortControllerRef.current) return;
+
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
+
       setIsStreaming(false);
       setStreamingText("");
       setStreamingBlocks([]);
     };
 
     try {
+      const windowId = getOrCreateWindowId();
+
       const response = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, prompt }),
+        body: JSON.stringify({ sessionId, windowId, prompt }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -129,6 +127,11 @@ export default function ChatPane({
       assistantText = streamResult.text;
       assistantBlocks = streamResult.blocks;
 
+      // Clear streaming state BEFORE adding final message to prevent flash
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamingBlocks([]);
+
       const assistantMessage: Message = {
         role: "assistant",
         content: assistantBlocks,
@@ -138,16 +141,15 @@ export default function ChatPane({
 
       await _updateSessionMetadata();
 
-      setIsStreaming(false);
-      setStreamingText("");
-      setStreamingBlocks([]);
+      abortControllerRef.current = null;
+      cancelStreamRef.current = undefined;
 
       // Trigger notifications
       if (session?.audioNotificationsEnabled) {
         playAudioNotification();
       }
       if (!isWindowFocused) {
-        updateTabTitle("Done");
+        notificationManager.notifyComplete(sessionId);
       }
     } catch (error: unknown) {
       if ((error as Error).name === "AbortError") {
@@ -167,24 +169,33 @@ export default function ChatPane({
     const newValue = !session.audioNotificationsEnabled;
     setSession({ ...session, audioNotificationsEnabled: newValue });
 
+    const windowId = getOrCreateWindowId();
+
     // Persist to backend
     await fetch(`/api/sessions/${sessionId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-window-id": windowId,
+      },
       body: JSON.stringify({ audioNotificationsEnabled: newValue }),
     });
   };
+
 
   const handleResumeSession = async (
     resumeSessionId: string,
     filePath: string,
     cwd: string,
   ) => {
+    const windowId = getOrCreateWindowId();
+
     const response = await fetch("/api/sessions/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: resumeSessionId,
+        windowId,
         filePath,
         cwd,
       }),
@@ -252,6 +263,7 @@ export default function ChatPane({
         id: event.tool.id,
         name: event.tool.name,
         input: event.tool.input,
+        timestamp: event.tool.timestamp ? new Date(event.tool.timestamp) : undefined,
         // No result yet - pending state
       });
       return { text: assistantText, blocks: assistantBlocks };
@@ -325,7 +337,7 @@ export default function ChatPane({
             assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
             setStreamingText(assistantText);
             setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed") {
+          } else if (event.type === "cwd_changed" && event.cwd) {
             setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
           } else if (event.type === "token_usage") {
             setTokenUsage(event.token_usage);
@@ -342,8 +354,18 @@ export default function ChatPane({
   };
 
   const _updateSessionMetadata = async (): Promise<void> => {
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
+      headers: {
+        "x-window-id": windowId,
+      },
+    });
     const data = await sessionResponse.json();
+
+    if (!sessionResponse.ok || !data.session) {
+      throw new Error(data.error || "Failed to update session metadata");
+    }
+
     setSession((prev) =>
       prev
         ? {

@@ -11,6 +11,7 @@ const TOOL_COLORS = {
   Grep: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
   Glob: "bg-cyan-900/40 text-cyan-300 border-cyan-700",
   TodoWrite: "bg-purple-900/40 text-purple-300 border-purple-700",
+  Skill: "bg-pink-900/40 text-pink-300 border-pink-700",
   default: "bg-gray-800 text-gray-300 border-gray-700",
 };
 
@@ -61,8 +62,12 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
     case "Bash":
       return (
         <div className="font-mono text-sm">
-          <div className="text-gray-400">{String(input.description)}</div>
-          <div className="mt-1">$ {String(input.command)}</div>
+          {input.description && (
+            <div className="text-gray-400">{String(input.description)}</div>
+          )}
+          {input.command && (
+            <div className="mt-1">$ {String(input.command)}</div>
+          )}
         </div>
       );
 

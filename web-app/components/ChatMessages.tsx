@@ -70,7 +70,7 @@ export default function ChatMessages({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-y-auto p-6 pl-12 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900"
+      className="flex-1 overflow-y-auto p-6 pl-12 pr-12 space-y-6 bg-gradient-to-b from-gray-900 to-gray-900"
     >
       {visibleMessages.length === 0 && !isStreaming && (
         <div className="flex items-center justify-center h-full">

@@ -5,19 +5,25 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "build:test": "next build && mv .next .next-test",
     "start": "next start -p 6379",
+    "start:test": "next start -p 6380",
+    "prod": "./scripts/build-and-start-prod.sh",
+    "stop-prod": "./scripts/stop-prod.sh",
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e": "./scripts/test-e2e-with-build.sh",
+    "test:e2e:no-build": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm test && ./scripts/test-e2e-with-build.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "next": "^16.1.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@jest/globals": "^30.2.0",
@@ -36,6 +42,6 @@
     "tailwindcss": "^4.0.0-alpha.25",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   }
 }
