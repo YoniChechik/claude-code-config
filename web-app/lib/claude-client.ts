@@ -173,13 +173,15 @@ export class ClaudeClient {
               }
               if (event.session_id) {
                 sessionId = event.session_id;
+                // Use local variable to satisfy TypeScript
+                const newSessionId = event.session_id;
                 // Log the input prompt now that we have sessionId
-                logSessionInput(event.session_id, prompt, { cwd: options?.cwd, model });
+                logSessionInput(newSessionId, prompt, { cwd: options?.cwd, model });
                 // Send updated init event with session_id
                 eventQueue.push({
                   type: "init",
                   model: model,
-                  session_id: sessionId,
+                  session_id: newSessionId,
                 });
                 resolveNext?.();
                 resolveNext = null;
