@@ -39,25 +39,15 @@ export function dirToClaudePath(dirPath: string): string {
 export async function createSessionSymlink(
   sessionId: string,
   sourceDir: string,
-  targetDir: string,
+  targetDir: string
 ): Promise<void> {
   if (!sessionId || sourceDir === targetDir) return;
 
   const sourceEncoded = dirToClaudePath(sourceDir);
   const targetEncoded = dirToClaudePath(targetDir);
 
-  const sourcePath = path.join(
-    process.env.HOME!,
-    ".claude",
-    "projects",
-    sourceEncoded,
-  );
-  const targetPath = path.join(
-    process.env.HOME!,
-    ".claude",
-    "projects",
-    targetEncoded,
-  );
+  const sourcePath = path.join(process.env.HOME!, ".claude", "projects", sourceEncoded);
+  const targetPath = path.join(process.env.HOME!, ".claude", "projects", targetEncoded);
 
   try {
     // Create target directory if it doesn't exist

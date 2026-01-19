@@ -35,10 +35,7 @@ export default function AgentTaskFrame({
             <span className="text-purple-400 ml-2">· {description}</span>
           )}
         </div>
-        <div
-          className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"
-          title="Running"
-        />
+        <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Running" />
       </div>
 
       {/* Agent Content - nested tool invocations and nested agents */}
@@ -51,22 +48,14 @@ export default function AgentTaskFrame({
         {childBlocks.map((item, index) => {
           // Handle nested agent task groups recursively
           if ("type" in item && item.type === "agent_task") {
-            const agentItem = item as Extract<
-              typeof item,
-              { type: "agent_task" }
-            >;
+            const agentItem = item as Extract<typeof item, { type: "agent_task" }>;
             return (
               <div key={index} className="ml-sm">
                 <AgentTaskFrame
                   agentType={agentItem.agentType}
                   description={agentItem.description}
                   taskId={agentItem.taskId}
-                  taskToolUse={
-                    agentItem.taskToolUse as Extract<
-                      ContentBlock,
-                      { type: "tool_use" }
-                    >
-                  }
+                  taskToolUse={agentItem.taskToolUse as Extract<ContentBlock, { type: "tool_use" }>}
                   childBlocks={agentItem.blocks}
                 />
               </div>
@@ -74,10 +63,7 @@ export default function AgentTaskFrame({
           }
           // Handle standalone block groups
           if ("type" in item && item.type === "standalone") {
-            const standaloneItem = item as Extract<
-              typeof item,
-              { type: "standalone" }
-            >;
+            const standaloneItem = item as Extract<typeof item, { type: "standalone" }>;
             return (
               <div key={index} className="ml-sm">
                 <ContentBlockRenderer block={standaloneItem.block} isNested />

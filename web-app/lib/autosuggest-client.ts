@@ -30,10 +30,7 @@ export function fuzzyScore(pattern: string, candidate: string): number {
   let totalDistance = 0;
   let lastMatchPos = -1;
 
-  while (
-    patternIndex < patternLower.length &&
-    candidateIndex < candidateLower.length
-  ) {
+  while (patternIndex < patternLower.length && candidateIndex < candidateLower.length) {
     if (patternLower[patternIndex] === candidateLower[candidateIndex]) {
       // Character matched
       const distance = candidateIndex - lastMatchPos - 1;
@@ -48,10 +45,7 @@ export function fuzzyScore(pattern: string, candidate: string): number {
   if (patternIndex === patternLower.length) {
     // Score: 2 (base for fuzzy match) + normalized distance (0-10 range)
     // Closer matches get better scores
-    const normalizedDistance = Math.min(
-      10,
-      totalDistance / patternLower.length,
-    );
+    const normalizedDistance = Math.min(10, totalDistance / patternLower.length);
     return 2 + normalizedDistance;
   }
 
@@ -65,7 +59,7 @@ export function fuzzyScore(pattern: string, candidate: string): number {
  */
 export function fuzzyMatchCommands(
   pattern: string,
-  commands: SlashCommand[],
+  commands: SlashCommand[]
 ): SlashCommand[] {
   const scored = commands
     .map((cmd) => ({

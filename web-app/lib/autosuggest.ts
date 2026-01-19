@@ -33,9 +33,7 @@ const BUILTIN_COMMANDS = [
  * Get slash commands from filesystem
  * Ported from get_slash_commands function (lines 304-365)
  */
-export async function getSlashCommands(
-  projectRoot?: string,
-): Promise<SlashCommand[]> {
+export async function getSlashCommands(projectRoot?: string): Promise<SlashCommand[]> {
   const commands: SlashCommand[] = [];
   const seen = new Set<string>();
 
@@ -126,13 +124,12 @@ export async function getSlashCommands(
   return commands;
 }
 
+
 /**
  * Find project root by looking for .git or .claude directories
  * Ported from find_project_root function (lines 367-372)
  */
-export async function findProjectRoot(
-  startDir: string,
-): Promise<string | null> {
+export async function findProjectRoot(startDir: string): Promise<string | null> {
   let dir = startDir;
 
   while (dir !== "/") {
