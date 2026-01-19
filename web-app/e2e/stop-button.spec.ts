@@ -153,32 +153,6 @@ test.describe("Stop Button Functionality", () => {
     await expect(streamingMessage).toBeVisible({ timeout: 3000 });
   });
 
-  test.skip("should handle multiple rapid stop clicks gracefully", async ({
-    page,
-  }) => {
-    const leftPane = page.locator("main > div > div").first();
-    const chatInput = leftPane.locator("textarea").first();
-    const stopButton = leftPane.locator("button:has-text('Stop')");
-
-    // Send a message
-    await chatInput.fill("test message");
-    await chatInput.press("Enter");
-    await expect(chatInput).toHaveValue("", { timeout: 3000 });
-
-    // Wait for stop button
-    await expect(stopButton).toBeVisible({ timeout: 2000 });
-
-    // Click stop once
-    await stopButton.click();
-
-    // Stop button should disappear quickly (either disabled or hidden)
-    await expect(stopButton).not.toBeVisible({ timeout: 3000 });
-
-    // Input should still be functional
-    await chatInput.fill("still works");
-    await expect(chatInput).toHaveValue("still works");
-  });
-
   test("should work when stopping during tool use blocks", async ({
     page,
   }) => {
