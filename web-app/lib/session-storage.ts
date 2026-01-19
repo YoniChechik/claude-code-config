@@ -164,6 +164,30 @@ async function _loadSessionMetadata(filePath: string): Promise<SessionMetadata |
   };
 }
 
+export async function findSessionsByDirectory(cwd: string): Promise<SessionMetadata[]> {
+  const sessionFiles = await _discoverSessionFiles();
+  const metadataPromises = sessionFiles.map(filePath => _loadSessionMetadata(filePath));
+  const metadata = await Promise.all(metadataPromises);
+  const validMetadata = metadata.filter((m): m is SessionMetadata => m !== null);
+
+  const sessionsInDirectory = validMetadata.filter(session => session.cwd === cwd);
+
+  const seenIds = new Set<string>();
+  const uniqueMetadata = sessionsInDirectory.filter(session => {
+    if (seenIds.has(session.id)) {
+      return false;
+    }
+    seenIds.add(session.id);
+    return true;
+  });
+
+  uniqueMetadata.sort((a, b) =>
+    new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
+  );
+
+  return uniqueMetadata;
+}
+
 export function formatRelativeTime(timestamp: string): string {
   const diff = Date.now() - new Date(timestamp).getTime();
   const hours = Math.floor(diff / 3600000);
