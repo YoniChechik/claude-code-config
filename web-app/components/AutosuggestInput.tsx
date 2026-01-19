@@ -162,7 +162,7 @@ export default function AutosuggestInput({
       <div className="relative flex-1">
         {suggestion && (
           <div
-            className="absolute inset-0 px-md py-md text-text-muted pointer-events-none whitespace-pre-wrap overflow-hidden"
+            className="absolute inset-0 px-md py-md text-text-muted pointer-events-none whitespace-pre-wrap overflow-hidden border-2 border-transparent"
             aria-hidden="true"
           >
             {suggestion}
@@ -186,7 +186,7 @@ export default function AutosuggestInput({
         {suggestMode && matches.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute bottom-full left-0 right-0 mb-md bg-surface-tertiary border-2 border-border-default rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
+            className="absolute bottom-full left-0 right-0 mb-md bg-surface-elevated border-2 border-border-emphasis rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10"
           >
             <div className="px-md py-sm text-xs text-text-secondary border-b border-border-default bg-surface-secondary font-medium">
               <span className="font-bold text-brand-primary">Tab</span> to accept •{" "}
