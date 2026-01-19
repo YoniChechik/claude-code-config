@@ -31,7 +31,9 @@ export default function AgentTaskFrame({
         <span className="text-lg">🤖</span>
         <div className="flex-1">
           <span className="font-semibold text-purple-300">{agentType}</span>
-          <span className="text-purple-400 ml-2">· {description}</span>
+          {description && (
+            <span className="text-purple-400 ml-2">· {description}</span>
+          )}
         </div>
         <div
           className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"

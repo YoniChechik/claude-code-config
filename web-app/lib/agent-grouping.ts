@@ -29,7 +29,9 @@ export type BlockGroup =
  * Those child blocks are recursively processed to find nested agents.
  */
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
-  const sortedBlocks = _sortToolBlocks(blocks);
+  // Filter out TodoWrite blocks completely (GitHub issue #1173)
+  const filteredBlocks = _filterTodoWriteBlocks(blocks);
+  const sortedBlocks = _sortToolBlocks(filteredBlocks);
   const groups: BlockGroup[] = [];
   const processedIndices = new Set<number>();
 
@@ -53,6 +55,30 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
 }
 
 // PRIVATE HELPERS
+
+/**
+ * Filters out TodoWrite tool_use and tool_result blocks (GitHub issue #1173)
+ */
+function _filterTodoWriteBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  // First pass: collect TodoWrite tool_use IDs
+  const todoWriteIds = new Set<string>();
+  for (const block of blocks) {
+    if (block.type === "tool_use" && block.name === "TodoWrite") {
+      todoWriteIds.add(block.id);
+    }
+  }
+
+  // Second pass: filter out TodoWrite tool_use and their corresponding tool_results
+  return blocks.filter((block) => {
+    if (block.type === "tool_use" && block.name === "TodoWrite") {
+      return false;
+    }
+    if (block.type === "tool_result" && todoWriteIds.has(block.tool_use_id)) {
+      return false;
+    }
+    return true;
+  });
+}
 
 /**
  * Checks if a block is a Task tool

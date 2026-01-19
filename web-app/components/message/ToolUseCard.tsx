@@ -10,7 +10,6 @@ const TOOL_COLORS = {
   Edit: "bg-tool-write-dark/40 text-tool-write-light border-tool-write",
   Grep: "bg-tool-grep-dark/40 text-tool-grep-light border-tool-grep",
   Glob: "bg-tool-grep-dark/40 text-tool-grep-light border-tool-grep",
-  TodoWrite: "bg-tool-task-dark/40 text-tool-task-light border-tool-task",
   Skill: "bg-tool-skill-dark/40 text-tool-skill-light border-tool-skill",
   default: "bg-surface-tertiary text-text-secondary border-border-default",
 };
@@ -48,9 +47,7 @@ export default function ToolUseCard({ tool }: ToolUseCardProps) {
       {/* Tool result (appears when result arrives) */}
       {tool.result && (
         <div className="mt-2 animate-fade-in">
-          {tool.name === "TodoWrite"
-            ? renderTodoWriteResult(tool)
-            : renderToolResult(tool.result, isExpanded, setIsExpanded, tool.name)}
+          {renderToolResult(tool.result, isExpanded, setIsExpanded, tool.name)}
         </div>
       )}
     </div>
@@ -76,39 +73,18 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
       );
     }
 
-    case "TodoWrite": {
-      interface TodoItem {
-        status: string;
-        content: string;
-      }
-      const todos = (input.todos as TodoItem[]) || [];
-      return (
-        <div className="space-y-1">
-          {todos.map((todo: TodoItem, idx: number) => (
-            <div key={idx} className="flex items-center gap-md">
-              <span>{getStatusEmoji(todo.status)}</span>
-              <span
-                className={
-                  todo.status === "completed"
-                    ? "line-through text-text-muted"
-                    : "text-text-secondary"
-                }
-              >
-                {todo.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
     case "Task": {
       const agentType = input.subagent_type ? String(input.subagent_type) : "(unnamed)";
       const desc = input.description ? String(input.description) : "";
       return (
         <div className="text-sm">
-          <span className="font-medium">{agentType}</span>:{" "}
-          {desc}
+          <span className="font-medium">{agentType}</span>
+          {desc && (
+            <>
+              :{" "}
+              {desc}
+            </>
+          )}
         </div>
       );
     }
@@ -166,50 +142,6 @@ function renderToolDetails(tool: Extract<ContentBlock, { type: "tool_use" }>) {
         </pre>
       );
   }
-}
-
-function getStatusEmoji(status: string): string {
-  switch (status) {
-    case "pending":
-      return "⏳";
-    case "in_progress":
-      return "🔄";
-    case "completed":
-      return "✅";
-    default:
-      return "📝";
-  }
-}
-
-function renderTodoWriteResult(tool: Extract<ContentBlock, { type: "tool_use" }>) {
-  interface TodoItem {
-    status: string;
-    content: string;
-  }
-  const input = tool.input as Record<string, unknown>;
-  const todos = (input.todos as TodoItem[]) || [];
-
-  return (
-    <div className="text-text-secondary bg-surface-tertiary px-md py-sm rounded">
-      <div className="text-xs opacity-70 mb-2">Updated todo list:</div>
-      <div className="space-y-1">
-        {todos.map((todo: TodoItem, idx: number) => (
-          <div key={idx} className="flex items-center gap-md">
-            <span>{getStatusEmoji(todo.status)}</span>
-            <span
-              className={
-                todo.status === "completed"
-                  ? "line-through text-text-muted"
-                  : ""
-              }
-            >
-              {todo.content}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function renderToolResult(
