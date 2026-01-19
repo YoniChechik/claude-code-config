@@ -174,7 +174,7 @@ export class ClaudeClient {
               if (event.session_id) {
                 sessionId = event.session_id;
                 // Log the input prompt now that we have sessionId
-                logSessionInput(sessionId, prompt, { cwd: options?.cwd, model });
+                logSessionInput(event.session_id, prompt, { cwd: options?.cwd, model });
                 // Send updated init event with session_id
                 eventQueue.push({
                   type: "init",
