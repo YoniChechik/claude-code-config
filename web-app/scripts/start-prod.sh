@@ -33,12 +33,13 @@ if [ ! -d ".next-prod" ]; then
     exit 1
 fi
 
-# Create symlink to production build
+# Create symlink to production build (exists while server is running)
 rm -f .next
 ln -sf .next-prod .next
 
 # Start production server in background
 echo "Starting Claude Code Web UI..."
+echo "Note: .next symlink will point to .next-prod while server is running"
 nohup npm run start > prod.log 2>&1 &
 NEW_PID=$!
 echo $NEW_PID > prod.pid

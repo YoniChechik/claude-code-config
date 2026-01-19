@@ -9,6 +9,7 @@
     "build:test": "next build && mv .next .next-test",
     "start": "next start -p 6379",
     "start:test": "next start -p 6380",
+    "prod": "./scripts/build-and-start-prod.sh",
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",
