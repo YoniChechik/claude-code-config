@@ -2,6 +2,9 @@
 # Smart build and start for production
 # Only rebuilds if source files changed or no build exists
 
+# Capture original working directory BEFORE cd
+export CCWEB_ORIGINAL_CWD="$(pwd)"
+
 cd /home/ubuntu/.claude/web-app
 
 NEEDS_BUILD=false
@@ -56,9 +59,6 @@ if [ "$NEEDS_BUILD" = true ]; then
 fi
 
 # Start the production server (inlined from start-prod.sh)
-# Capture original working directory
-export CCWEB_ORIGINAL_CWD="$(pwd)"
-
 # Kill any process LISTENING on port 6379 (works for both IPv4 and IPv6)
 PORT_PID=$(sudo fuser 6379/tcp 2>/dev/null)
 if [ ! -z "$PORT_PID" ]; then

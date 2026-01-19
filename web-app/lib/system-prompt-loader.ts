@@ -1,28 +1,16 @@
 import { promises as fs } from "fs";
-import path from "path";
+
+const SYSTEM_PROMPT_PATH = "/home/ubuntu/.claude/main_appended_system_prompt.md";
 
 /**
- * Load custom system prompt from project root
- * File location priority:
- * 1. customPath parameter if provided
- * 2. CCWEB_APPENDED_SYSTEM_PROMPT_FILE environment variable if set
- * 3. Default: PROJECT_ROOT/main_appended_system_prompt.md
- * Gracefully handles missing file (returns undefined)
+ * Load system prompt from /home/ubuntu/.claude/main_appended_system_prompt.md
+ * Returns undefined if file doesn't exist
  */
-export async function loadSystemPrompt(
-  customPath?: string,
-): Promise<string | undefined> {
+export async function loadSystemPrompt(): Promise<string | undefined> {
   try {
-    // Determine file path with fallback logic
-    const promptPath =
-      customPath ||
-      process.env.CCWEB_APPENDED_SYSTEM_PROMPT_FILE ||
-      path.join(process.cwd(), "..", "main_appended_system_prompt.md");
-
-    const content = await fs.readFile(promptPath, "utf-8");
+    const content = await fs.readFile(SYSTEM_PROMPT_PATH, "utf-8");
     return content.trim();
   } catch {
-    // File not found - that's okay, return undefined
     return undefined;
   }
 }

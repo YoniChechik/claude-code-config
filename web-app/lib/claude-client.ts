@@ -114,9 +114,7 @@ export class ClaudeClient {
 
       // Add system prompt if provided
       if (options?.appendSystemPrompt) {
-        const tempFile = `/tmp/ccweb_system_prompt_${Date.now()}.txt`;
-        await fs.promises.writeFile(tempFile, options.appendSystemPrompt);
-        args.push("--append-system-prompt", tempFile);
+        args.push("--append-system-prompt", options.appendSystemPrompt);
       }
 
       // Add includePartialMessages flag if enabled
