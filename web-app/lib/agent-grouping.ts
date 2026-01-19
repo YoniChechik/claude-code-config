@@ -218,8 +218,8 @@ function _processAgentTask(
   const input = taskTool.input as Record<string, unknown>;
   groups.push({
     type: "agent_task",
-    agentType: String(input.subagent_type),
-    description: String(input.description || ""),
+    agentType: String(input.subagent_type || ""),
+    description: input.description ? String(input.description) : "",
     taskId: taskTool.id,
     taskToolUse: taskTool,
     blocks: childGroups as BlockGroup[],

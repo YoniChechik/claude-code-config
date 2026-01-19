@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
+import { logSessionInput, logSessionOutput, logSessionError } from "./session-logger";
 
 /**
  * Claude client wrapper for streaming commands
@@ -138,7 +139,12 @@ export class ClaudeClient {
 
       // Capture stderr for debugging
       claude.stderr.on("data", (chunk: Buffer) => {
-        stderrOutput += chunk.toString();
+        const chunkStr = chunk.toString();
+        stderrOutput += chunkStr;
+        // Log stderr output if we have a sessionId
+        if (sessionId) {
+          logSessionError(sessionId, `stderr: ${chunkStr}`);
+        }
       });
 
       claude.stdout.on("data", (chunk: Buffer) => {
@@ -167,6 +173,8 @@ export class ClaudeClient {
               }
               if (event.session_id) {
                 sessionId = event.session_id;
+                // Log the input prompt now that we have sessionId
+                logSessionInput(sessionId, prompt, { cwd: options?.cwd, model });
                 // Send updated init event with session_id
                 eventQueue.push({
                   type: "init",
@@ -176,6 +184,11 @@ export class ClaudeClient {
                 resolveNext?.();
                 resolveNext = null;
               }
+            }
+
+            // Log all raw events if we have a sessionId
+            if (sessionId) {
+              logSessionOutput(sessionId, rawEvent);
             }
 
             // Handle content_block_start for tool_use blocks (streaming)
@@ -483,6 +496,11 @@ export class ClaudeClient {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      // Log error if we have a sessionId (use options.sessionId as fallback)
+      const logSessionId = options?.sessionId;
+      if (logSessionId) {
+        logSessionError(logSessionId, errorMsg);
+      }
       yield {
         type: "error",
         error: errorMsg,
