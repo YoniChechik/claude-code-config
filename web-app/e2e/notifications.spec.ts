@@ -35,7 +35,7 @@ test.describe("Notification Features", () => {
 
     // Get initial state
     const initialText = await speakerButton.textContent();
-    const initialEnabled = initialText?.includes("🔊");
+    const initialEnabled = initialText?.includes("Audio On");
 
     // Click to toggle
     await speakerButton.click();
@@ -45,7 +45,7 @@ test.describe("Notification Features", () => {
 
     // Verify state changed
     const newText = await speakerButton.textContent();
-    const newEnabled = newText?.includes("🔊");
+    const newEnabled = newText?.includes("Audio On");
 
     expect(newEnabled).toBe(!initialEnabled);
 
@@ -54,7 +54,7 @@ test.describe("Notification Features", () => {
     await page.waitForTimeout(500);
 
     const finalText = await speakerButton.textContent();
-    const finalEnabled = finalText?.includes("🔊");
+    const finalEnabled = finalText?.includes("Audio On");
 
     expect(finalEnabled).toBe(initialEnabled);
   });
