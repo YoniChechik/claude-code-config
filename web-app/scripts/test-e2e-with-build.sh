@@ -7,6 +7,16 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Check if production server is running
+if [ -f prod.pid ]; then
+    PROD_PID=$(cat prod.pid)
+    if ps -p "$PROD_PID" > /dev/null 2>&1; then
+        echo -e "${RED}ERROR: Production server is running (PID: $PROD_PID)${NC}"
+        echo -e "${RED}Stop it first with: npm run stop-prod${NC}"
+        exit 1
+    fi
+fi
+
 echo -e "${BLUE}Building test version...${NC}"
 
 # Remove any existing .next symlink or directory
