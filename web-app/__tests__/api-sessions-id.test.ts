@@ -387,5 +387,35 @@ describe("API /api/sessions/[id]", () => {
         expect(data.error).toBe("x-window-id header required");
       });
     });
+
+    describe("Server restart scenario", () => {
+      it("should allow session access after server restart (missing owner)", async () => {
+        const windowId = "window-abc";
+        const session = sessionManager.createSession("/home/user", windowId);
+
+        // Simulate server restart by clearing ownership data
+        sessionManager.deleteSession(session.id);
+        // Recreate session without ownership (simulating persistence layer restore)
+        sessionManager["sessions"].set(session.id, session);
+        sessionManager["cdTrackers"].set(session.id, sessionManager["cdTrackers"].get(session.id)!);
+
+        const request = new NextRequest(
+          `http://localhost:6379/api/sessions/${session.id}`,
+          {
+            headers: { "x-window-id": windowId },
+          }
+        );
+        const response = await GET(request, {
+          params: Promise.resolve({ id: session.id }),
+        });
+        const data = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(data.session).toBeDefined();
+        expect(data.session.id).toBe(session.id);
+        // Verify ownership was claimed
+        expect(sessionManager.getOwner(session.id)).toBe(windowId);
+      });
+    });
   });
 });
