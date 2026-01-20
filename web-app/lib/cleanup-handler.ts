@@ -1,7 +1,26 @@
 // Tab cleanup handler
 // Sends cleanup requests when tab closes or navigates away
 
-class CleanupHandler {
+// Public functions
+export function getCleanupHandler(): _CleanupHandler {
+  if (!_cleanupHandler) {
+    _cleanupHandler = new _CleanupHandler();
+  }
+  return _cleanupHandler;
+}
+
+export function resetCleanupHandler() {
+  if (_cleanupHandler) {
+    _cleanupHandler.stop();
+    _cleanupHandler = null;
+  }
+}
+
+// Private singleton instance
+let _cleanupHandler: _CleanupHandler | null = null;
+
+// Private class
+class _CleanupHandler {
   private sessionIds: Set<string> = new Set();
   private pagehideListener: (() => void) | null = null;
   private beforeunloadListener: (() => void) | null = null;
@@ -81,22 +100,5 @@ class CleanupHandler {
     }
 
     this.sessionIds.clear();
-  }
-}
-
-// Singleton instance
-let cleanupHandler: CleanupHandler | null = null;
-
-export function getCleanupHandler(): CleanupHandler {
-  if (!cleanupHandler) {
-    cleanupHandler = new CleanupHandler();
-  }
-  return cleanupHandler;
-}
-
-export function resetCleanupHandler() {
-  if (cleanupHandler) {
-    cleanupHandler.stop();
-    cleanupHandler = null;
   }
 }

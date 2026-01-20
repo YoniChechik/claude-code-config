@@ -1,9 +1,29 @@
 // Client-side heartbeat manager
 // Manages Web Worker for sending background heartbeats
 
+// Public constants
 const HEARTBEAT_INTERVAL = 15000; // 15 seconds
 
-class HeartbeatClient {
+// Public functions
+export function getHeartbeatClient(): _HeartbeatClient {
+  if (!_heartbeatClient) {
+    _heartbeatClient = new _HeartbeatClient();
+  }
+  return _heartbeatClient;
+}
+
+export function resetHeartbeatClient() {
+  if (_heartbeatClient) {
+    _heartbeatClient.stop();
+    _heartbeatClient = null;
+  }
+}
+
+// Private singleton instance
+let _heartbeatClient: _HeartbeatClient | null = null;
+
+// Private class
+class _HeartbeatClient {
   private worker: Worker | null = null;
   private sessionIds: Set<string> = new Set();
   private fallbackIntervalId: NodeJS.Timeout | null = null;
@@ -120,22 +140,5 @@ class HeartbeatClient {
 
     this.sessionIds.clear();
     this.usingFallback = false;
-  }
-}
-
-// Singleton instance
-let heartbeatClient: HeartbeatClient | null = null;
-
-export function getHeartbeatClient(): HeartbeatClient {
-  if (!heartbeatClient) {
-    heartbeatClient = new HeartbeatClient();
-  }
-  return heartbeatClient;
-}
-
-export function resetHeartbeatClient() {
-  if (heartbeatClient) {
-    heartbeatClient.stop();
-    heartbeatClient = null;
   }
 }
