@@ -27,9 +27,11 @@ export async function POST(request: NextRequest) {
   try {
     // Load messages from JSONL file
     const loadedMessages = await loadSessionMessages(filePath);
-
-    // Messages are already in the correct format from loadSessionMessages
-    const messages = loadedMessages as Message[];
+    const messages: Message[] = loadedMessages.map(msg => ({
+      role: msg.role,
+      content: msg.content as Message['content'],
+      timestamp: msg.timestamp,
+    }));
 
     // Create resumed session
     const session = sessionManager.resumeSession(sessionId, windowId, cwd, messages);
