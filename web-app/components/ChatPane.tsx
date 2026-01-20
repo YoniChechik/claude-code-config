@@ -43,6 +43,12 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const loadSession = async () => {
     const response = await fetch(`/api/sessions/${sessionId}`);
     const data = await response.json();
+
+    if (!data.session) {
+      console.error("Session not found:", sessionId);
+      return;
+    }
+
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
     const messagesWithDates = data.session.messages.map(

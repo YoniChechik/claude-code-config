@@ -125,8 +125,8 @@ describe("SessionManager", () => {
       expect(retrieved).toBe(created);
     });
 
-    it("should throw for non-existent session", () => {
-      expect(() => sessionManager.getSession("non-existent-id")).toThrow();
+    it("should return undefined for non-existent session", () => {
+      expect(sessionManager.getSession("non-existent-id")).toBeUndefined();
     });
   });
 
@@ -157,7 +157,7 @@ describe("SessionManager", () => {
       const deleted = sessionManager.deleteSession(session.id);
       expect(deleted).toBe(true);
 
-      expect(() => sessionManager.getSession(session.id)).toThrow();
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
 
     it("should return false for non-existent session", () => {
@@ -170,7 +170,7 @@ describe("SessionManager", () => {
 
       sessionManager.deleteSession(session.id);
 
-      expect(() => sessionManager.getCDTracker(session.id)).toThrow();
+      expect(sessionManager.getCDTracker(session.id)).toBeUndefined();
     });
   });
 
@@ -242,7 +242,7 @@ describe("SessionManager", () => {
       const tracker = sessionManager.getCDTracker(session.id);
 
       expect(tracker).toBeDefined();
-      expect(tracker.getWantedCwd()).toBeNull();
+      expect(tracker!.getWantedCwd()).toBeNull();
     });
 
     it("should return same tracker instance for multiple calls", () => {
@@ -259,7 +259,7 @@ describe("SessionManager", () => {
       const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
-      tracker.processStructuredOutput({
+      tracker!.processStructuredOutput({
         response: "Changed",
         wanted_cwd: "/home/user/project",
       });
@@ -283,7 +283,7 @@ describe("SessionManager", () => {
       const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
-      tracker.processInitEvent({ model: "claude-opus-4-5-20251101" });
+      tracker!.processInitEvent({ model: "claude-opus-4-5-20251101" });
 
       sessionManager.updateSessionFromTracker(session.id);
 
@@ -294,7 +294,7 @@ describe("SessionManager", () => {
       const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
-      tracker.processResultEvent({ duration_ms: 5000 });
+      tracker!.processResultEvent({ duration_ms: 5000 });
 
       sessionManager.updateSessionFromTracker(session.id);
 
@@ -305,12 +305,12 @@ describe("SessionManager", () => {
       const session = sessionManager.createSession("/home/user", "test-window-id");
       const tracker = sessionManager.getCDTracker(session.id);
 
-      tracker.processInitEvent({ model: "claude-opus-4-5-20251101" });
-      tracker.processStructuredOutput({
+      tracker!.processInitEvent({ model: "claude-opus-4-5-20251101" });
+      tracker!.processStructuredOutput({
         response: "Test",
         wanted_cwd: "/new/path",
       });
-      tracker.processResultEvent({ duration_ms: 3456 });
+      tracker!.processResultEvent({ duration_ms: 3456 });
 
       sessionManager.updateSessionFromTracker(session.id);
 
@@ -350,15 +350,16 @@ describe("SessionManager", () => {
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "cd /tmp" }],
+        timestamp: new Date(),
       });
 
       // Update from tracker
       const tracker = sessionManager.getCDTracker(session.id);
-      tracker.processStructuredOutput({
+      tracker!.processStructuredOutput({
         response: "Changed to /tmp",
         wanted_cwd: "/tmp",
       });
-      tracker.processResultEvent({ duration_ms: 1000 });
+      tracker!.processResultEvent({ duration_ms: 1000 });
       sessionManager.updateSessionFromTracker(session.id);
 
       expect(session.cwd).toBe("/tmp");
@@ -369,6 +370,7 @@ describe("SessionManager", () => {
       sessionManager.addMessage(session.id, {
         role: "assistant",
         content: [{ type: "text", text: "Changed to /tmp" }],
+        timestamp: new Date(),
       });
 
       expect(session.messages).toHaveLength(2);
@@ -377,7 +379,7 @@ describe("SessionManager", () => {
       const deleted = sessionManager.deleteSession(session.id);
       expect(deleted).toBe(true);
 
-      expect(() => sessionManager.getSession(session.id)).toThrow();
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
 
     it("should handle multiple sessions independently", () => {
@@ -387,11 +389,13 @@ describe("SessionManager", () => {
       sessionManager.addMessage(session1.id, {
         role: "user",
         content: [{ type: "text", text: "Session 1 message" }],
+        timestamp: new Date(),
       });
 
       sessionManager.addMessage(session2.id, {
         role: "user",
         content: [{ type: "text", text: "Session 2 message" }],
+        timestamp: new Date(),
       });
 
       expect(session1.messages).toHaveLength(1);

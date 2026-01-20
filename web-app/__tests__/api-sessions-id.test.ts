@@ -57,6 +57,7 @@ describe("API /api/sessions/[id]", () => {
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
+        timestamp: new Date(),
       });
 
       const request = new NextRequest(
@@ -174,6 +175,7 @@ describe("API /api/sessions/[id]", () => {
       sessionManager.addMessage(session.id, {
         role: "user",
         content: [{ type: "text", text: "Test" }],
+        timestamp: new Date(),
       });
 
       const originalCwd = session.cwd;
@@ -218,7 +220,7 @@ describe("API /api/sessions/[id]", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
 
-      expect(() => sessionManager.getSession(session.id)).toThrow();
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
 
     it("should return 404 for non-existent session", async () => {
@@ -254,9 +256,9 @@ describe("API /api/sessions/[id]", () => {
         params: Promise.resolve({ id: session1.id }),
       });
 
-      expect(() => sessionManager.getSession(session1.id)).toThrow();
+      expect(sessionManager.getSession(session1.id)).toBeUndefined();
       const retrieved2 = sessionManager.getSession(session2.id);
-      expect(retrieved2.cwd).toBe("/home/user2");
+      expect(retrieved2!.cwd).toBe("/home/user2");
     });
   });
 

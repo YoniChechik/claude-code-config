@@ -88,8 +88,8 @@ class SessionManager {
     return session;
   }
 
-  getSession(id: string): Session {
-    return this.sessions.get(id)!;
+  getSession(id: string): Session | undefined {
+    return this.sessions.get(id);
   }
 
   getAllSessions(): Session[] {
@@ -103,22 +103,32 @@ class SessionManager {
   }
 
   clearMessages(id: string): void {
-    const session = this.sessions.get(id)!;
+    const session = this.sessions.get(id);
+    if (!session) {
+      throw new Error(`Session ${id} not found`);
+    }
     session.messages = [];
   }
 
   addMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
     session.messages.push(message);
   }
 
-  getCDTracker(sessionId: string): CDTracker {
-    return this.cdTrackers.get(sessionId)!;
+  getCDTracker(sessionId: string): CDTracker | undefined {
+    return this.cdTrackers.get(sessionId);
   }
 
   updateSessionFromTracker(sessionId: string): void {
-    const session = this.sessions.get(sessionId)!;
-    const tracker = this.cdTrackers.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    const tracker = this.cdTrackers.get(sessionId);
+
+    if (!session || !tracker) {
+      throw new Error(`Session or tracker ${sessionId} not found`);
+    }
 
     const wantedCwd = tracker.getWantedCwd();
     if (wantedCwd) {
@@ -130,7 +140,10 @@ class SessionManager {
   }
 
   setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
-    const session = this.sessions.get(sessionId)!;
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
     session.claudeSessionId = claudeSessionId;
   }
 
