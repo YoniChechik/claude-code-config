@@ -17,9 +17,6 @@ interface ChatPaneProps {
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => Promise<void>;
 }
 
-/**
- * Individual chat pane with session management
- */
 export default function ChatPane({ sessionId, commands, onClose, isFocused = false, isWindowFocused = true, onResumeSession }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -29,12 +26,10 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const [tokenUsage, setTokenUsage] = useState<{ used: number; total: number; remaining: number } | undefined>(undefined);
   const inputFocusRef = useRef<(() => void) | undefined>(undefined);
 
-  // Load session on mount
   useEffect(() => {
     loadSession();
   }, [sessionId]);
 
-  // Focus input when pane becomes focused
   useEffect(() => {
     if (isFocused && inputFocusRef.current) {
       inputFocusRef.current();
@@ -47,24 +42,12 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       headers: { "x-window-id": windowId },
     });
 
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(`Failed to load session: ${data.error || response.statusText}`);
-    }
-
     const data = await response.json();
-
-    if (!data.session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
     setSession(data.session);
-    // Convert timestamp strings back to Date objects and handle old string content
-    const messagesWithDates = (data.session.messages || []).map(
+    const messagesWithDates = data.session.messages.map(
       (msg: Message) => ({
         ...msg,
         timestamp: new Date(msg.timestamp),
-        // Convert old string content to ContentBlock format
         content: typeof msg.content === "string"
           ? [{ type: "text" as const, text: msg.content }]
           : msg.content,
@@ -120,8 +103,6 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   const handleSubmit = async (prompt: string) => {
     return handleSubmitInternal(prompt, false);
   };
-
-  // PRIVATE HELPERS
 
   const _addUserMessage = (prompt: string, isAutoContinue: boolean): void => {
     if (isAutoContinue) {
@@ -208,7 +189,6 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
       buffer += chunk;
       const lines = buffer.split("\n");
 
-      // Keep the last incomplete line in the buffer
       buffer = lines.pop() || "";
 
       for (const line of lines) {
@@ -231,10 +211,10 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
           } else if (event.type === "token_usage") {
             setTokenUsage(event.token_usage);
           } else if (event.type === "error") {
-            console.error("Stream error:", event.error);
+            throw new Error(event.error);
           }
         } catch (e) {
-          console.error("Failed to parse SSE event:", data, e);
+          throw e;
         }
       }
     }
@@ -247,11 +227,6 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
       headers: { "x-window-id": windowId },
     });
-
-    if (!sessionResponse.ok) {
-      const data = await sessionResponse.json();
-      throw new Error(`Failed to update session metadata: ${data.error || sessionResponse.statusText}`);
-    }
 
     const data = await sessionResponse.json();
     setSession((prev) =>

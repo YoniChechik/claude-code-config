@@ -7,9 +7,6 @@ import { getHeartbeatClient } from "@/lib/heartbeat-client";
 import { getCleanupHandler } from "@/lib/cleanup-handler";
 import { getOrCreateWindowId } from "@/lib/window-id";
 
-/**
- * Main page - initializes session(s) and renders dynamic split layout
- */
 export default function Home() {
   const [sessionIds, setSessionIds] = useState<string[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
@@ -18,15 +15,12 @@ export default function Home() {
   const [windowId, setWindowId] = useState<string>("");
 
   useEffect(() => {
-    // Initialize windowId only in browser
     const wid = getOrCreateWindowId();
     setWindowId(wid);
 
-    // Start cleanup handler
     const cleanupHandler = getCleanupHandler();
     cleanupHandler.start();
 
-    // Cleanup on unmount
     return () => {
       const heartbeatClient = getHeartbeatClient();
       heartbeatClient.stop();
@@ -43,12 +37,10 @@ export default function Home() {
 
   const initializeSessions = async () => {
     try {
-      // Get current working directory from backend
       const cwdResponse = await fetch("/api/cwd");
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -60,15 +52,12 @@ export default function Home() {
       if (data.session) {
         setSessionIds([data.session.id]);
 
-        // Add session to heartbeat client
         const heartbeatClient = getHeartbeatClient();
         heartbeatClient.addSession(data.session.id);
 
-        // Add session to cleanup handler
         const cleanupHandler = getCleanupHandler();
         cleanupHandler.addSession(data.session.id);
 
-        // Auto-load hostname mapping if SSH with localhost hostname
         if (
           data.session.sessionType === 'ssh' &&
           data.session.clientIp &&
@@ -80,37 +69,27 @@ export default function Home() {
             );
             const mappingData = await mappingResponse.json();
 
-            // If mapping exists, update session with resolved hostname
             if (mappingData.hostname) {
-              // No action needed - SessionHeader will handle this automatically
               console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
             }
           } catch (err) {
-            console.error("Failed to auto-load SSH hostname mapping:", err);
+            throw err;
           }
         }
       } else {
         throw new Error("Failed to create session");
       }
 
-      // Load slash commands from API
       try {
         const commandsResponse = await fetch("/api/commands-list");
         const commandsData = await commandsResponse.json();
-        if (commandsData.commands) {
-          setCommands(commandsData.commands);
-        } else {
-          // Fallback to builtins if API fails
-          setCommands([
-            { name: "help", source: "builtin" },
-            { name: "clear", source: "builtin" },
-            { name: "model", source: "builtin" },
-            { name: "status", source: "builtin" },
-          ]);
-        }
+        setCommands(commandsData.commands || [
+          { name: "help", source: "builtin" },
+          { name: "clear", source: "builtin" },
+          { name: "model", source: "builtin" },
+          { name: "status", source: "builtin" },
+        ]);
       } catch (cmdErr) {
-        console.error("Failed to load commands:", cmdErr);
-        // Fallback to builtins
         setCommands([
           { name: "help", source: "builtin" },
           { name: "clear", source: "builtin" },
@@ -128,12 +107,10 @@ export default function Home() {
 
   const addSession = async () => {
     try {
-      // Get current working directory from backend
       const cwdResponse = await fetch("/api/cwd");
       const cwdData = await cwdResponse.json();
       const cwd = cwdData.cwd || "/home/ubuntu";
 
-      // Create session without hostname (server will detect from SSH_CONNECTION)
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -145,48 +122,41 @@ export default function Home() {
       if (data.session) {
         setSessionIds([...sessionIds, data.session.id]);
 
-        // Add session to heartbeat client
         const heartbeatClient = getHeartbeatClient();
         heartbeatClient.addSession(data.session.id);
 
-        // Add session to cleanup handler
         const cleanupHandler = getCleanupHandler();
         cleanupHandler.addSession(data.session.id);
       }
     } catch (err) {
-      console.error("Failed to add session:", err);
+      throw err;
     }
   };
 
   const closeSession = async (sessionId: string) => {
     try {
-      // Remove session from heartbeat client
       const heartbeatClient = getHeartbeatClient();
       heartbeatClient.removeSession(sessionId);
 
-      // Remove session from cleanup handler (normal closure)
       const cleanupHandler = getCleanupHandler();
       cleanupHandler.removeSession(sessionId);
 
-      // If only 1 session, clear messages instead of deleting
       if (sessionIds.length === 1) {
         await fetch(`/api/sessions/${sessionId}`, {
           method: "PATCH",
           headers: { "x-window-id": windowId },
         });
       } else {
-        // Multiple sessions: delete the session
         await fetch(`/api/sessions/${sessionId}`, {
           method: "DELETE",
           headers: { "x-window-id": windowId },
         });
 
-        // Remove from local state
         const newSessionIds = sessionIds.filter((id) => id !== sessionId);
         setSessionIds(newSessionIds);
       }
     } catch (err) {
-      console.error("Failed to close session:", err);
+      throw err;
     }
   };
 
@@ -209,11 +179,9 @@ export default function Home() {
     if (data.session) {
       setSessionIds([data.session.id]);
 
-      // Add session to heartbeat client
       const heartbeatClient = getHeartbeatClient();
       heartbeatClient.addSession(data.session.id);
 
-      // Add session to cleanup handler
       const cleanupHandler = getCleanupHandler();
       cleanupHandler.addSession(data.session.id);
     }
