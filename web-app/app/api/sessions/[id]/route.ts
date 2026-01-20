@@ -15,20 +15,19 @@ export async function GET(
     );
   }
 
-  try {
-    const session = sessionManager.getSession(id);
-
-    if (!sessionManager.validateOwnership(id, windowId)) {
-      return NextResponse.json(
-        { error: "Session ownership validation failed" },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json({ session });
-  } catch {
+  const session = sessionManager.getSession(id);
+  if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
+  }
+
+  return NextResponse.json({ session });
 }
 
 export async function PATCH(
@@ -45,29 +44,28 @@ export async function PATCH(
     );
   }
 
-  try {
-    const session = sessionManager.getSession(id);
-
-    if (!sessionManager.validateOwnership(id, windowId)) {
-      return NextResponse.json(
-        { error: "Session ownership validation failed" },
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-
-    if (body.audioNotificationsEnabled !== undefined) {
-      session.audioNotificationsEnabled = body.audioNotificationsEnabled;
-    }
-    if (body.includePartialMessages !== undefined) {
-      session.includePartialMessages = body.includePartialMessages;
-    }
-
-    return NextResponse.json({ session });
-  } catch {
+  const session = sessionManager.getSession(id);
+  if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
+  }
+
+  const body = await request.json();
+
+  if (body.audioNotificationsEnabled !== undefined) {
+    session.audioNotificationsEnabled = body.audioNotificationsEnabled;
+  }
+  if (body.includePartialMessages !== undefined) {
+    session.includePartialMessages = body.includePartialMessages;
+  }
+
+  return NextResponse.json({ session });
 }
 
 export async function DELETE(
@@ -84,19 +82,18 @@ export async function DELETE(
     );
   }
 
-  try {
-    sessionManager.getSession(id);
-
-    if (!sessionManager.validateOwnership(id, windowId)) {
-      return NextResponse.json(
-        { error: "Session ownership validation failed" },
-        { status: 403 }
-      );
-    }
-
-    sessionManager.deleteSession(id);
-    return NextResponse.json({ success: true });
-  } catch {
+  const session = sessionManager.getSession(id);
+  if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
+
+  if (!sessionManager.validateOwnership(id, windowId)) {
+    return NextResponse.json(
+      { error: "Session ownership validation failed" },
+      { status: 403 }
+    );
+  }
+
+  sessionManager.deleteSession(id);
+  return NextResponse.json({ success: true });
 }

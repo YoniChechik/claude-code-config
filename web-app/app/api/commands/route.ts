@@ -36,12 +36,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let session;
-  let tracker;
-  try {
-    session = sessionManager.getSession(sessionId);
-    tracker = sessionManager.getCDTracker(sessionId);
-  } catch {
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Session not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const tracker = sessionManager.getCDTracker(sessionId);
+  if (!tracker) {
     return new Response(JSON.stringify({ error: "Session not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },

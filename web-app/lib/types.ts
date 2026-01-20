@@ -1,6 +1,7 @@
 // Session types
 export interface Session {
   id: string;
+  windowId: string; // Track owning browser tab
   cwd: string;
   previousCwd?: string; // Track previous directory for symlink creation
   model: string;
@@ -13,9 +14,8 @@ export interface Session {
   hostname?: string; // For SSH sessions
   distroName?: string; // For WSL sessions
   clientIp?: string; // Client IP from SSH_CONNECTION for hostname mapping
-  windowId?: string; // Track which browser window owns this session
   audioNotificationsEnabled?: boolean; // Audio notification preference
-  includePartialMessages?: boolean; // Include partial messages preference
+  includePartialMessages?: boolean; // Enable streaming text deltas in real-time
 }
 
 // Content block types (matches Claude API output)
@@ -60,6 +60,7 @@ export interface CreateSessionResponse {
 
 export interface SendCommandRequest {
   sessionId: string;
+  windowId: string;
   prompt: string;
 }
 

@@ -4,3 +4,8 @@
 process.env.NODE_ENV = "test";
 
 import "@testing-library/jest-dom";
+
+// Mock scrollIntoView for JSDOM (only if Element exists)
+if (typeof Element !== "undefined") {
+  Element.prototype.scrollIntoView = jest.fn();
+}

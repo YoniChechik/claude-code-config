@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message, ContentBlock } from "@/lib/types";
 import ContentBlockRenderer from "./message/ContentBlockRenderer";
 import AgentTaskFrame from "./message/AgentTaskFrame";

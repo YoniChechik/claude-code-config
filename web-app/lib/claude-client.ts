@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 
 /**
@@ -62,7 +62,7 @@ export class ClaudeClient {
    */
   async *streamCommand(
     prompt: string,
-    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string }
+    options?: { sessionId?: string; appendSystemPrompt?: string; cwd?: string; includePartialMessages?: boolean; onProcessSpawned?: (process: ChildProcess) => void }
   ): AsyncGenerator<ClaudeStreamEvent> {
     const startTime = Date.now();
 
@@ -80,6 +80,7 @@ export class ClaudeClient {
       let stderrOutput = "";
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
+      let hasReceivedTextDelta = false; // Track if any text_delta events were received
 
       // Buffer for maintaining causal ordering of tool_use/tool_result pairs
       const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
@@ -138,10 +139,20 @@ export class ClaudeClient {
         args.push("--append-system-prompt", tempFile);
       }
 
+      // Add includePartialMessages flag if enabled
+      if (options?.includePartialMessages) {
+        args.push("--include-partial-messages");
+      }
+
       const claude = spawn("/home/ubuntu/.local/bin/claude", args, {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: options?.cwd || process.cwd(),
       });
+
+      // Call onProcessSpawned callback if provided
+      if (options?.onProcessSpawned) {
+        options.onProcessSpawned(claude);
+      }
 
       // Close stdin since we're not sending any input
       claude.stdin.end();
@@ -215,7 +226,8 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  if (block.name === "StructuredOutput" && block.input?.response) {
+                  // Skip if we already received text_delta events (to avoid duplication)
+                  if (block.name === "StructuredOutput" && block.input?.response && !hasReceivedTextDelta) {
                     eventQueue.push({
                       type: "text",
                       content: block.input.response,
@@ -284,11 +296,30 @@ export class ClaudeClient {
               }
             }
 
+            // Handle text_delta content for partial messages
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              hasReceivedTextDelta = true;
+              eventQueue.push({
+                type: "text",
+                content: event.delta.text,
+              });
+              resolveNext?.();
+              resolveNext = null;
+            }
+
             // Handle thinking content
             if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
+              // Unescape JSON string escapes (same as StructuredOutput)
+              const unescapedThinking = event.delta.thinking
+                .replace(/\\n/g, "\n")
+                .replace(/\\r/g, "\r")
+                .replace(/\\t/g, "\t")
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, "\\");
+
               eventQueue.push({
                 type: "thinking",
-                content: event.delta.thinking,
+                content: unescapedThinking,
               });
               resolveNext?.();
               resolveNext = null;

@@ -8,11 +8,12 @@ class SessionManager {
   private cdTrackers = new Map<string, CDTracker>();
   private sessionOwners = new Map<string, string>();
 
-  createSession(cwd: string, windowId?: string, clientHostname?: string): Session {
+  createSession(cwd: string, windowId: string, clientHostname?: string): Session {
     const { sessionType, hostname, distroName, clientIp } = this._detectSessionType(clientHostname);
 
     const session: Session = {
       id: generateSessionId(),
+      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -22,15 +23,13 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
-      windowId,
+      audioNotificationsEnabled: true,
+      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
     this.cdTrackers.set(session.id, new CDTracker());
-
-    if (windowId) {
-      this.sessionOwners.set(session.id, windowId);
-    }
+    this.sessionOwners.set(session.id, windowId);
 
     return session;
   }
@@ -68,6 +67,7 @@ class SessionManager {
 
     const session: Session = {
       id: sessionId,
+      windowId,
       cwd: normalizePath(cwd),
       model: "claude-sonnet-4-5-20250929",
       lastDurationMs: 0,
@@ -78,7 +78,8 @@ class SessionManager {
       hostname,
       distroName,
       clientIp,
-      windowId,
+      audioNotificationsEnabled: true,
+      includePartialMessages: true,
     };
 
     this.sessions.set(session.id, session);
