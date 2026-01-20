@@ -30,7 +30,6 @@ Add shortcuts to run Claude with config checks:
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
 alias cc="$HOME/.claude/bin/cc.sh"
-alias ccui="$HOME/.claude/bin/ccui.sh"
 ```
 
 Or add to PATH:
@@ -45,10 +44,3 @@ export PATH="$HOME/.claude/bin:$PATH"
   - Checks that your config is up-to-date with `origin/main`
   - Shows helpful error messages if updates are needed
   - Passes all arguments through to claude (e.g., `cc -p "hello"` runs `claude -p "hello"`)
-
-- **`ccui.sh`** - Runs `cc.sh` with custom UI wrapper (customize this file for your own UI enhancements)
-
-- **`ccweb`** - Starts the Claude Code Web UI (Next.js multi-session interface):
-  - Builds and runs production server
-  - Access at http://localhost:3000
-  - Add to shell config: `alias ccweb="$HOME/.claude/web-app/scripts/build-and-start-prod.sh"`
