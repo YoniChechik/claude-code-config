@@ -7,7 +7,7 @@ run_claude_cli() {
     local args=("$@")
 
     # Add verbose flag
-    args+=(--verbose)
+    # args+=(--verbose)
 
     # Add append-system-prompt if exists
     if [ -f "$CLAUDE_DIR/main_appended_system_prompt.md" ]; then
