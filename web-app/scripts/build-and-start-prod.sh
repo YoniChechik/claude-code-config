@@ -44,6 +44,7 @@ if [ "$NEEDS_BUILD" = true ]; then
 
     # Clean old production build
     rm -rf .next-prod
+    rm -f .next
 
     npm run build
 
