@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Basic IP validation
-  if (!_isValidIP(clientIp)) {
+  if (!__isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
       { status: 400 }
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Basic IP validation
-  if (!_isValidIP(clientIp)) {
+  if (!__isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
       { status: 400 }
