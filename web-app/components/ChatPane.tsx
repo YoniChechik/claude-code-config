@@ -51,7 +51,7 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
 
     setSession(data.session);
     // Convert timestamp strings back to Date objects and handle old string content
-    const messagesWithDates = data.session.messages.map(
+    const messagesWithDates = (data.session.messages || []).map(
       (msg: Message) => ({
         ...msg,
         timestamp: new Date(msg.timestamp),
