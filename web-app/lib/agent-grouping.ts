@@ -1,5 +1,6 @@
 import type { ContentBlock } from "./types";
 
+// Public types
 export type BlockGroup =
   | {
       type: "agent_task";
@@ -14,6 +15,7 @@ export type BlockGroup =
       block: ContentBlock;
     };
 
+// Public functions
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
   const filteredBlocks = _filterTodoWriteBlocks(blocks);
   const sortedBlocks = _sortToolBlocks(filteredBlocks);
@@ -38,6 +40,8 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
 
   return groups;
 }
+
+// Private functions
 
 function _filterTodoWriteBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const todoWriteIds = new Set<string>();

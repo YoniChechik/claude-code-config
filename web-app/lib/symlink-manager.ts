@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 
+// Public functions
 export function dirToClaudePath(dirPath: string): string {
   return dirPath.replace(/[^a-zA-Z0-9-]/g, "-");
 }

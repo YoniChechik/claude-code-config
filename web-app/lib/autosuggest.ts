@@ -2,6 +2,7 @@ import type { SlashCommand } from "./types";
 import { promises as fs } from "fs";
 import path from "path";
 
+// Public constants
 const BUILTIN_COMMANDS = [
   "bug",
   "clear",
@@ -23,6 +24,7 @@ const BUILTIN_COMMANDS = [
   "vim",
 ];
 
+// Public functions
 export async function getSlashCommands(projectRoot?: string): Promise<SlashCommand[]> {
   const commands: SlashCommand[] = [];
   const seen = new Set<string>();

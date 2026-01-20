@@ -1,5 +1,6 @@
 import type { SlashCommand } from "./types";
 
+// Public functions
 export function fuzzyScore(pattern: string, candidate: string): number {
   const patternLower = pattern.toLowerCase();
   const candidateLower = candidate.toLowerCase();

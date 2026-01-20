@@ -5,6 +5,7 @@ import ChatPane from "./ChatPane";
 import type { SlashCommand } from "@/lib/types";
 import { notificationManager } from "@/lib/notification-manager";
 
+// Public types
 interface SplitLayoutProps {
   sessionIds: string[];
   commands: SlashCommand[];
@@ -12,6 +13,7 @@ interface SplitLayoutProps {
   onCloseSession: (sessionId: string) => void;
 }
 
+// Public component
 export default function SplitLayout({
   sessionIds,
   commands,

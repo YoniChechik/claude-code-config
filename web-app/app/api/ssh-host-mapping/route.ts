@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHostnameForIP, setHostnameForIP } from "@/lib/ssh-host-mapper";
 
+// Public functions
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const clientIp = searchParams.get("clientIp");
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Basic IP validation
-  if (!isValidIP(clientIp)) {
+  if (!_isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
       { status: 400 }
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Basic IP validation
-  if (!isValidIP(clientIp)) {
+  if (!_isValidIP(clientIp)) {
     return NextResponse.json(
       { error: "Invalid IP address format" },
       { status: 400 }
@@ -90,7 +91,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function isValidIP(ip: string): boolean {
+// Private functions
+function __isValidIP(ip: string): boolean {
   const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
   const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
   return ipv4Pattern.test(ip) || ipv6Pattern.test(ip);

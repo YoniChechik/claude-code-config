@@ -5,6 +5,7 @@ import { BlockGroup } from "@/lib/agent-grouping";
 import ContentBlockRenderer from "./ContentBlockRenderer";
 import ToolUseCard from "./ToolUseCard";
 
+// Public types
 interface AgentTaskFrameProps {
   agentType: string;
   description: string;
@@ -13,6 +14,7 @@ interface AgentTaskFrameProps {
   childBlocks: (ContentBlock | BlockGroup)[];
 }
 
+// Public component
 export default function AgentTaskFrame({
   agentType,
   description,

@@ -3,6 +3,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { readdir } from "fs/promises";
 
+// Public types
 interface UsageData {
   totalTokensUsed: number;
   totalBudget: number;
@@ -11,6 +12,7 @@ interface UsageData {
   resetTime: string;
 }
 
+// Public functions
 export async function GET(request: NextRequest) {
   try {
     const projectsDir = path.join(process.env.HOME!, ".claude", "projects");
