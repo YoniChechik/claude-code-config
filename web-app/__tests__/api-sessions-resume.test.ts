@@ -47,7 +47,8 @@ describe("API /api/sessions/resume", () => {
 
       const request = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
 
       const response = await POST(request);
@@ -80,11 +81,12 @@ describe("API /api/sessions/resume", () => {
       const filePath = "/path/to/nonexistent.jsonl";
       const cwd = "/home/user";
 
-      mockValidateSessionPath.mockResolvedValue(null);
+      mockLoadSessionMessages.mockRejectedValue(new Error("ENOENT: no such file or directory"));
 
       const request = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
 
       const response = await POST(request);
@@ -107,7 +109,8 @@ describe("API /api/sessions/resume", () => {
       // First resume
       const request1 = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
       const response1 = await POST(request1);
       expect(response1.status).toBe(200);
@@ -115,7 +118,8 @@ describe("API /api/sessions/resume", () => {
       // Second resume with same windowId should succeed
       const request2 = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
       const response2 = await POST(request2);
       expect(response2.status).toBe(200);
@@ -135,7 +139,8 @@ describe("API /api/sessions/resume", () => {
       // First resume with windowId1
       const request1 = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId: windowId1, filePath, cwd }),
+        headers: { "x-window-id": windowId1 },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
       const response1 = await POST(request1);
       expect(response1.status).toBe(200);
@@ -143,13 +148,14 @@ describe("API /api/sessions/resume", () => {
       // Second resume with windowId2 should fail with 403
       const request2 = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId: windowId2, filePath, cwd }),
+        headers: { "x-window-id": windowId2 },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
       const response2 = await POST(request2);
       const data2 = await response2.json();
 
       expect(response2.status).toBe(403);
-      expect(data2.error).toBe("Session ownership validation failed");
+      expect(data2.error).toBe("Session ownership mismatch");
     });
 
     it("should preserve ownership after resume", async () => {
@@ -164,7 +170,8 @@ describe("API /api/sessions/resume", () => {
 
       const request = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
 
       await POST(request);
@@ -184,7 +191,8 @@ describe("API /api/sessions/resume", () => {
 
       const request = new NextRequest("http://localhost:6379/api/sessions/resume", {
         method: "POST",
-        body: JSON.stringify({ sessionId, windowId, filePath, cwd }),
+        headers: { "x-window-id": windowId },
+        body: JSON.stringify({ sessionId, filePath, cwd }),
       });
 
       const response = await POST(request);

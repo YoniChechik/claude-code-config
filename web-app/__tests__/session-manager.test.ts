@@ -137,9 +137,9 @@ describe("SessionManager", () => {
     });
 
     it("should return all created sessions", () => {
-      const session1 = sessionManager.createSession("/home/user1");
-      const session2 = sessionManager.createSession("/home/user2");
-      const session3 = sessionManager.createSession("/home/user3");
+      const session1 = sessionManager.createSession("/home/user1", "window-1");
+      const session2 = sessionManager.createSession("/home/user2", "window-2");
+      const session3 = sessionManager.createSession("/home/user3", "window-3");
 
       const sessions = sessionManager.getAllSessions();
 
@@ -383,8 +383,8 @@ describe("SessionManager", () => {
     });
 
     it("should handle multiple sessions independently", () => {
-      const session1 = sessionManager.createSession("/home/user1");
-      const session2 = sessionManager.createSession("/home/user2");
+      const session1 = sessionManager.createSession("/home/user1", "window-1");
+      const session2 = sessionManager.createSession("/home/user2", "window-2");
 
       sessionManager.addMessage(session1.id, {
         role: "user",
@@ -401,6 +401,33 @@ describe("SessionManager", () => {
       expect(session1.messages).toHaveLength(1);
       expect(session2.messages).toHaveLength(1);
       expect(session1.messages[0]).not.toBe(session2.messages[0]);
+    });
+
+    it("should always register owner when session is created", () => {
+      const windowId = "test-window-id";
+      const session = sessionManager.createSession("/home/user", windowId);
+
+      // Session should be retrievable
+      expect(sessionManager.getSession(session.id)).toBeDefined();
+
+      // Ownership validation should pass
+      const isOwner = sessionManager.validateOwnership(session.id, windowId);
+      expect(isOwner).toBe(true);
+      expect(sessionManager.getOwner(session.id)).toBe(windowId);
+    });
+
+    it("should fail ownership validation when using wrong windowId", () => {
+      const correctWindowId = "window-abc";
+      const wrongWindowId = "window-xyz";
+      const session = sessionManager.createSession("/home/user", correctWindowId);
+
+      // Session should be retrievable
+      expect(sessionManager.getSession(session.id)).toBeDefined();
+
+      // Ownership validation should fail with wrong windowId
+      const isOwner = sessionManager.validateOwnership(session.id, wrongWindowId);
+      expect(isOwner).toBe(false);
+      expect(sessionManager.getOwner(session.id)).toBe(correctWindowId);
     });
   });
 });
