@@ -69,6 +69,6 @@ Tell user:
 - The branch `$FEATURE_NAME` has been published to remote
 
 ### Step 7: Change to Feature Directory
-Run the permanent-cd skill to change to the feature clone directory.
+Change to the feature clone directory.
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**

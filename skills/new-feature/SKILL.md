@@ -17,7 +17,7 @@ Creates a new feature branch using git clone for isolated development with full 
 Run the create-clone skill.
 
 ### Step 2: Plan
-Use the planner subagent to create the feature plan
+Use the planner subagent with opus model to create the feature plan
 
 ### Step 3: Start Implementation
 According to plan.
