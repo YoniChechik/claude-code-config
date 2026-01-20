@@ -1,7 +1,3 @@
----
-paths: **/*.py
----
-
 # Python Coding Style Guide
 
 ## Python-Specific FAIL FAST Patterns
