@@ -17,7 +17,7 @@ interface ChatPaneProps {
   onResumeSession?: (sessionId: string, filePath: string, cwd: string) => Promise<void>;
 }
 
-export default function ChatPane({ sessionId, commands, onClose, isFocused = false, isWindowFocused = true, onResumeSession }: ChatPaneProps) {
+export default function ChatPane({ sessionId, commands, onClose, isFocused = false, onResumeSession }: ChatPaneProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -197,24 +197,20 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
         const data = line.slice(6);
         if (data === "[DONE]") break;
 
-        try {
-          const event = JSON.parse(data);
+        const event = JSON.parse(data);
 
-          if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
-            const result = _processStreamEvent(event, assistantText, assistantBlocks);
-            assistantText = result.text;
-            assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
-            setStreamingText(assistantText);
-            setStreamingBlocks([...assistantBlocks]);
-          } else if (event.type === "cwd_changed") {
-            setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
-          } else if (event.type === "token_usage") {
-            setTokenUsage(event.token_usage);
-          } else if (event.type === "error") {
-            throw new Error(event.error);
-          }
-        } catch (e) {
-          throw e;
+        if (event.type === "text" || event.type === "thinking" || event.type === "tool_use" || event.type === "tool_result") {
+          const result = _processStreamEvent(event, assistantText, assistantBlocks);
+          assistantText = result.text;
+          assistantBlocks.splice(0, assistantBlocks.length, ...result.blocks);
+          setStreamingText(assistantText);
+          setStreamingBlocks([...assistantBlocks]);
+        } else if (event.type === "cwd_changed") {
+          setSession((prev) => (prev ? { ...prev, cwd: event.cwd } : null));
+        } else if (event.type === "token_usage") {
+          setTokenUsage(event.token_usage);
+        } else if (event.type === "error") {
+          throw new Error(event.error);
         }
       }
     }

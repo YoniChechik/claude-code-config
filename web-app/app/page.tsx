@@ -63,17 +63,13 @@ export default function Home() {
           data.session.clientIp &&
           (data.session.hostname === 'localhost' || data.session.hostname === '127.0.0.1')
         ) {
-          try {
-            const mappingResponse = await fetch(
-              `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`
-            );
-            const mappingData = await mappingResponse.json();
+          const mappingResponse = await fetch(
+            `/api/ssh-host-mapping?clientIp=${encodeURIComponent(data.session.clientIp)}`
+          );
+          const mappingData = await mappingResponse.json();
 
-            if (mappingData.hostname) {
-              console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
-            }
-          } catch (err) {
-            throw err;
+          if (mappingData.hostname) {
+            console.log(`Auto-loaded SSH hostname mapping: ${mappingData.hostname}`);
           }
         }
       } else {
@@ -89,7 +85,7 @@ export default function Home() {
           { name: "model", source: "builtin" },
           { name: "status", source: "builtin" },
         ]);
-      } catch (cmdErr) {
+      } catch {
         setCommands([
           { name: "help", source: "builtin" },
           { name: "clear", source: "builtin" },
@@ -106,57 +102,49 @@ export default function Home() {
   };
 
   const addSession = async () => {
-    try {
-      const cwdResponse = await fetch("/api/cwd");
-      const cwdData = await cwdResponse.json();
-      const cwd = cwdData.cwd || "/home/ubuntu";
+    const cwdResponse = await fetch("/api/cwd");
+    const cwdData = await cwdResponse.json();
+    const cwd = cwdData.cwd || "/home/ubuntu";
 
-      const response = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd, windowId }),
-      });
+    const response = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd, windowId }),
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (data.session) {
-        setSessionIds([...sessionIds, data.session.id]);
+    if (data.session) {
+      setSessionIds([...sessionIds, data.session.id]);
 
-        const heartbeatClient = getHeartbeatClient();
-        heartbeatClient.addSession(data.session.id);
+      const heartbeatClient = getHeartbeatClient();
+      heartbeatClient.addSession(data.session.id);
 
-        const cleanupHandler = getCleanupHandler();
-        cleanupHandler.addSession(data.session.id);
-      }
-    } catch (err) {
-      throw err;
+      const cleanupHandler = getCleanupHandler();
+      cleanupHandler.addSession(data.session.id);
     }
   };
 
   const closeSession = async (sessionId: string) => {
-    try {
-      const heartbeatClient = getHeartbeatClient();
-      heartbeatClient.removeSession(sessionId);
+    const heartbeatClient = getHeartbeatClient();
+    heartbeatClient.removeSession(sessionId);
 
-      const cleanupHandler = getCleanupHandler();
-      cleanupHandler.removeSession(sessionId);
+    const cleanupHandler = getCleanupHandler();
+    cleanupHandler.removeSession(sessionId);
 
-      if (sessionIds.length === 1) {
-        await fetch(`/api/sessions/${sessionId}`, {
-          method: "PATCH",
-          headers: { "x-window-id": windowId },
-        });
-      } else {
-        await fetch(`/api/sessions/${sessionId}`, {
-          method: "DELETE",
-          headers: { "x-window-id": windowId },
-        });
+    if (sessionIds.length === 1) {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "x-window-id": windowId },
+      });
+    } else {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: { "x-window-id": windowId },
+      });
 
-        const newSessionIds = sessionIds.filter((id) => id !== sessionId);
-        setSessionIds(newSessionIds);
-      }
-    } catch (err) {
-      throw err;
+      const newSessionIds = sessionIds.filter((id) => id !== sessionId);
+      setSessionIds(newSessionIds);
     }
   };
 

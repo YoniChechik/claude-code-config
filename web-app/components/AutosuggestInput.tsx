@@ -28,7 +28,6 @@ export default function AutosuggestInput({
   isStreaming = false,
   onFocusRef,
   onResumeSession,
-  cancelStreamRef,
 }: AutosuggestInputProps) {
   const [suggestMode, setSuggestMode] = useState(false);
   const [matches, setMatches] = useState<SlashCommand[]>([]);
