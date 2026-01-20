@@ -3,18 +3,17 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { readdir } from "fs/promises";
 
+// Public types
 interface UsageData {
   totalTokensUsed: number;
   totalBudget: number;
   remaining: number;
   percentUsed: number;
-  resetTime: string; // ISO timestamp for 6 PM EST today/tomorrow
+  resetTime: string;
 }
 
-/**
- * GET /api/usage - Calculate account-wide token usage from local session files
- */
-export async function GET(request: NextRequest) {
+// Public functions
+export async function GET(_request: NextRequest) {
   try {
     const projectsDir = path.join(process.env.HOME!, ".claude", "projects");
 
@@ -64,7 +63,7 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
-          } catch (e) {
+          } catch {
             // Skip malformed lines
           }
         }

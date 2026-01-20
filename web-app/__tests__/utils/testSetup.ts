@@ -1,4 +1,4 @@
-export const mockFetchSuccess = (data: any) => {
+export const mockFetchSuccess = (data: unknown) => {
   (global.fetch as jest.Mock).mockResolvedValue({
     ok: true,
     json: async () => data,

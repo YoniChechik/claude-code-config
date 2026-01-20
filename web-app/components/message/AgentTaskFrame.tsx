@@ -5,6 +5,7 @@ import { BlockGroup } from "@/lib/agent-grouping";
 import ContentBlockRenderer from "./ContentBlockRenderer";
 import ToolUseCard from "./ToolUseCard";
 
+// Public types
 interface AgentTaskFrameProps {
   agentType: string;
   description: string;
@@ -13,10 +14,7 @@ interface AgentTaskFrameProps {
   childBlocks: (ContentBlock | BlockGroup)[];
 }
 
-/**
- * Visual frame for agent task execution
- * Shows agent header with type/description and wraps all agent's tool invocations
- */
+// Public component
 export default function AgentTaskFrame({
   agentType,
   description,
@@ -38,15 +36,12 @@ export default function AgentTaskFrame({
         <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Running" />
       </div>
 
-      {/* Agent Content - nested tool invocations and nested agents */}
       <div className="px-md py-md space-y-sm">
-        {/* Display the Task tool invocation that spawned this agent */}
         <div className="ml-sm">
           <ToolUseCard tool={taskToolUse} />
         </div>
 
         {childBlocks.map((item, index) => {
-          // Handle nested agent task groups recursively
           if ("type" in item && item.type === "agent_task") {
             const agentItem = item as Extract<typeof item, { type: "agent_task" }>;
             return (
@@ -61,7 +56,6 @@ export default function AgentTaskFrame({
               </div>
             );
           }
-          // Handle standalone block groups
           if ("type" in item && item.type === "standalone") {
             const standaloneItem = item as Extract<typeof item, { type: "standalone" }>;
             return (
@@ -70,7 +64,6 @@ export default function AgentTaskFrame({
               </div>
             );
           }
-          // Handle raw content blocks
           return (
             <div key={index} className="ml-sm">
               <ContentBlockRenderer block={item as ContentBlock} isNested />

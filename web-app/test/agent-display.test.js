@@ -43,7 +43,9 @@ async function sendCommand(sessionId, prompt) {
           if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'text') {
             blocks.push(event);
           }
-        } catch (e) {}
+        } catch {
+          // Skip invalid JSON lines
+        }
       }
     }
   }

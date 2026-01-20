@@ -2,9 +2,6 @@ import { NextResponse } from "next/server";
 import { ClaudeClient } from "@/lib/claude-client";
 import type { GetModelsResponse } from "@/lib/types";
 
-/**
- * GET /api/models - Get available Claude models
- */
 export async function GET() {
   try {
     const client = new ClaudeClient(process.env.CLAUDE_API_KEY);

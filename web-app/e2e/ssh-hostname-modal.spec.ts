@@ -160,7 +160,7 @@ test.describe("SSH Hostname Modal", () => {
     await page.evaluate(() => {
       window.open = (url: string | URL | undefined) => {
         if (url) {
-          (window as any).trackOpen(url.toString());
+          (window as Window & { trackOpen: (url: string) => void }).trackOpen(url.toString());
         }
         return null;
       };
@@ -281,7 +281,7 @@ test.describe("SSH Hostname Modal", () => {
     await page.evaluate(() => {
       window.open = (url: string | URL | undefined) => {
         if (url) {
-          (window as any).trackOpen2(url.toString());
+          (window as Window & { trackOpen2: (url: string) => void }).trackOpen2(url.toString());
         }
         return null;
       };
@@ -328,7 +328,7 @@ test.describe("SSH Hostname Modal", () => {
     await page.evaluate(() => {
       window.open = (url: string | URL | undefined) => {
         if (url) {
-          (window as any).trackOpen3(url.toString());
+          (window as Window & { trackOpen3: (url: string) => void }).trackOpen3(url.toString());
         }
         return null;
       };

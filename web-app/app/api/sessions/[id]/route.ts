@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 
-/**
- * GET /api/sessions/[id] - Get session by ID
- */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -18,25 +15,22 @@ export async function GET(
     );
   }
 
-  const session = sessionManager.getSession(id);
+  try {
+    const session = sessionManager.getSession(id);
 
-  if (!session) {
+    if (!sessionManager.validateOwnership(id, windowId)) {
+      return NextResponse.json(
+        { error: "Session ownership validation failed" },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json({ session });
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
-
-  if (!sessionManager.validateOwnership(id, windowId)) {
-    return NextResponse.json(
-      { error: "Session ownership validation failed" },
-      { status: 403 }
-    );
-  }
-
-  return NextResponse.json({ session });
 }
 
-/**
- * PATCH /api/sessions/[id] - Update session settings
- */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -51,34 +45,31 @@ export async function PATCH(
     );
   }
 
-  const session = sessionManager.getSession(id);
+  try {
+    const session = sessionManager.getSession(id);
 
-  if (!session) {
+    if (!sessionManager.validateOwnership(id, windowId)) {
+      return NextResponse.json(
+        { error: "Session ownership validation failed" },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+
+    if (body.audioNotificationsEnabled !== undefined) {
+      session.audioNotificationsEnabled = body.audioNotificationsEnabled;
+    }
+    if (body.includePartialMessages !== undefined) {
+      session.includePartialMessages = body.includePartialMessages;
+    }
+
+    return NextResponse.json({ session });
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
-
-  if (!sessionManager.validateOwnership(id, windowId)) {
-    return NextResponse.json(
-      { error: "Session ownership validation failed" },
-      { status: 403 }
-    );
-  }
-
-  const body = await request.json();
-
-  if (body.audioNotificationsEnabled !== undefined) {
-    session.audioNotificationsEnabled = body.audioNotificationsEnabled;
-  }
-  if (body.includePartialMessages !== undefined) {
-    session.includePartialMessages = body.includePartialMessages;
-  }
-
-  return NextResponse.json({ session });
 }
 
-/**
- * DELETE /api/sessions/[id] - Delete session
- */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -93,19 +84,19 @@ export async function DELETE(
     );
   }
 
-  const session = sessionManager.getSession(id);
+  try {
+    sessionManager.getSession(id);
 
-  if (!session) {
+    if (!sessionManager.validateOwnership(id, windowId)) {
+      return NextResponse.json(
+        { error: "Session ownership validation failed" },
+        { status: 403 }
+      );
+    }
+
+    sessionManager.deleteSession(id);
+    return NextResponse.json({ success: true });
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
-
-  if (!sessionManager.validateOwnership(id, windowId)) {
-    return NextResponse.json(
-      { error: "Session ownership validation failed" },
-      { status: 403 }
-    );
-  }
-
-  sessionManager.deleteSession(id);
-  return NextResponse.json({ success: true });
 }

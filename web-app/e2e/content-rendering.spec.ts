@@ -353,7 +353,7 @@ test.describe("Content Rendering", () => {
     await page.waitForTimeout(1000);
 
     // Get text while streaming
-    const textDuringStreaming = await streamingMessage.textContent();
+    const _textDuringStreaming = await streamingMessage.textContent();
 
     // Wait for completion
     await page.waitForTimeout(15000);

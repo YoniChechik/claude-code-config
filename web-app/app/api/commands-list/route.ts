@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSlashCommands, findProjectRoot } from "@/lib/autosuggest";
 
-/**
- * GET /api/commands-list - Get available slash commands
- */
 export async function GET() {
   try {
     // Find project root from cwd

@@ -131,7 +131,7 @@ describe("StopButton", () => {
   describe("Edge Cases", () => {
     it("should handle undefined onClick gracefully", () => {
       expect(() => {
-        render(<StopButton onClick={undefined as any} />);
+        render(<StopButton onClick={undefined as () => void} />);
       }).not.toThrow();
     });
 

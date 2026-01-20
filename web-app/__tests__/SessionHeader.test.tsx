@@ -24,7 +24,7 @@ jest.mock("../components/SSHHostPromptModal", () => {
         <input
           data-testid="ssh-hostname-input"
           placeholder="Enter hostname"
-          onChange={(e) => {}}
+          onChange={() => {}}
         />
         <button
           data-testid="ssh-save-button"
@@ -56,7 +56,7 @@ describe("SessionHeader", () => {
   });
 
   // Helper to render component and wait for async state updates
-  const renderAndWait = async (props: any) => {
+  const renderAndWait = async (props: React.ComponentProps<typeof SessionHeader>) => {
     const result = render(<SessionHeader {...props} />);
     // Wait for useEffect fetch to complete
     await waitFor(() => {
