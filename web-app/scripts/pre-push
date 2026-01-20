@@ -1,0 +1,56 @@
+#!/bin/bash
+# Pre-push hook to validate web-app before pushing to main
+# Prevents push if:
+#   - pushing to main AND
+#   - web-app has changes AND
+#   - (tests fail OR build fails)
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Read stdin for ref info
+while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+    # Extract branch name from remote ref
+    BRANCH="${REMOTE_REF##refs/heads/}"
+
+    # Only validate main branch
+    if [[ "$BRANCH" != "main" ]]; then
+        exit 0
+    fi
+
+    # Check if web-app has changes (compare against remote)
+    if git diff --quiet "$REMOTE_SHA..HEAD" -- web-app/ 2>/dev/null; then
+        echo -e "${BLUE}No changes in web-app directory, skipping validation${NC}"
+        exit 0
+    fi
+
+    echo -e "${YELLOW}Pre-push hook: Validating web-app for push to main${NC}"
+
+    # Change to web-app directory
+    cd web-app || exit 1
+
+    # Run tests
+    echo -e "${BLUE}Running tests...${NC}"
+    if ! npm test; then
+        echo -e "${RED}Tests failed! Push blocked.${NC}"
+        exit 1
+    fi
+
+    # Run build
+    echo -e "${BLUE}Running build...${NC}"
+    if ! npm run build; then
+        echo -e "${RED}Build failed! Push blocked.${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}All checks passed! Push allowed.${NC}"
+    exit 0
+done
+
+exit 0

@@ -70,6 +70,27 @@ npm run dev
 
 4. Open [http://localhost:3000](http://localhost:3000)
 
+5. Install git hooks (recommended):
+```bash
+npm run setup-hooks
+```
+
+## Pre-Push Hook
+
+A git hook automatically prevents pushing to `main` if tests or build fail for changes in the `web-app` directory. This ensures production quality.
+
+**Runs only on:** `main` branch with web-app changes
+**Expected runtime:** ~2 minutes (runs tests and build)
+**Skip if needed:** `git push --no-verify`
+**To disable:** `rm ../.git/hooks/pre-push`
+
+The hook will:
+- Exit early if not pushing to `main` branch
+- Exit early if no changes in web-app directory
+- Run `npm test` and block push if tests fail
+- Run `npm run build` and block push if build fails
+- Allow push only if both tests and build succeed
+
 ## Custom System Prompt
 
 You can specify a custom appended system prompt file using the `CCWEB_APPENDED_SYSTEM_PROMPT_FILE` environment variable.
