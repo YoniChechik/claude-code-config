@@ -15,10 +15,12 @@ export default function Home() {
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [windowId] = useState(() => getOrCreateWindowId());
+  const [windowId, setWindowId] = useState<string>("");
 
   useEffect(() => {
-    initializeSessions();
+    // Initialize windowId only in browser
+    const wid = getOrCreateWindowId();
+    setWindowId(wid);
 
     // Start cleanup handler
     const cleanupHandler = getCleanupHandler();
@@ -32,6 +34,12 @@ export default function Home() {
       cleanupHandler.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (windowId) {
+      initializeSessions();
+    }
+  }, [windowId]);
 
   const initializeSessions = async () => {
     try {
