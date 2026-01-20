@@ -8,12 +8,9 @@ interface UsageData {
   totalBudget: number;
   remaining: number;
   percentUsed: number;
-  resetTime: string; // ISO timestamp for 6 PM EST today/tomorrow
+  resetTime: string;
 }
 
-/**
- * GET /api/usage - Calculate account-wide token usage from local session files
- */
 export async function GET(request: NextRequest) {
   try {
     const projectsDir = path.join(process.env.HOME!, ".claude", "projects");

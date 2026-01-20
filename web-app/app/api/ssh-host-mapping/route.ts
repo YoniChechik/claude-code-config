@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHostnameForIP, setHostnameForIP } from "@/lib/ssh-host-mapper";
 
-/**
- * GET /api/ssh-host-mapping?clientIp=X
- * Returns saved hostname for the given client IP
- */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const clientIp = searchParams.get("clientIp");
@@ -36,11 +32,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * POST /api/ssh-host-mapping
- * Save hostname for a client IP
- * Body: { clientIp: string, hostname: string }
- */
 export async function POST(request: NextRequest) {
   let body: { clientIp?: string; hostname?: string };
 
@@ -99,14 +90,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * Basic IP address validation (IPv4 and IPv6)
- */
 function isValidIP(ip: string): boolean {
-  // IPv4 pattern
   const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
-  // IPv6 pattern (simplified)
   const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
-
   return ipv4Pattern.test(ip) || ipv6Pattern.test(ip);
 }

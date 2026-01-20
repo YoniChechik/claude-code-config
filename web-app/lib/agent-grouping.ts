@@ -1,35 +1,20 @@
 import type { ContentBlock } from "./types";
 
-// EXPORTS: Public types and functions
-
-/**
- * Represents a group of content blocks, either:
- * - An agent task with nested blocks (which can contain nested agents)
- * - A standalone block
- */
 export type BlockGroup =
   | {
       type: "agent_task";
       agentType: string;
       description: string;
       taskId: string;
-      taskToolUse: ContentBlock; // The Task tool_use block itself
-      blocks: (ContentBlock | BlockGroup)[]; // Child blocks from tool_result.content
+      taskToolUse: ContentBlock;
+      blocks: (ContentBlock | BlockGroup)[];
     }
   | {
       type: "standalone";
       block: ContentBlock;
     };
 
-/**
- * Groups content blocks by agent tasks (recursive)
- *
- * When a Task tool_use is found, we look for its matching tool_result.
- * The tool_result.content array contains the agent's child blocks.
- * Those child blocks are recursively processed to find nested agents.
- */
 export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
-  // Filter out TodoWrite blocks completely (GitHub issue #1173)
   const filteredBlocks = _filterTodoWriteBlocks(blocks);
   const sortedBlocks = _sortToolBlocks(filteredBlocks);
   const groups: BlockGroup[] = [];
@@ -54,13 +39,7 @@ export function groupBlocksByAgent(blocks: ContentBlock[]): BlockGroup[] {
   return groups;
 }
 
-// PRIVATE HELPERS
-
-/**
- * Filters out TodoWrite tool_use and tool_result blocks (GitHub issue #1173)
- */
 function _filterTodoWriteBlocks(blocks: ContentBlock[]): ContentBlock[] {
-  // First pass: collect TodoWrite tool_use IDs
   const todoWriteIds = new Set<string>();
   for (const block of blocks) {
     if (block.type === "tool_use" && block.name === "TodoWrite") {
@@ -68,7 +47,6 @@ function _filterTodoWriteBlocks(blocks: ContentBlock[]): ContentBlock[] {
     }
   }
 
-  // Second pass: filter out TodoWrite tool_use and their corresponding tool_results
   return blocks.filter((block) => {
     if (block.type === "tool_use" && block.name === "TodoWrite") {
       return false;
@@ -80,9 +58,6 @@ function _filterTodoWriteBlocks(blocks: ContentBlock[]): ContentBlock[] {
   });
 }
 
-/**
- * Checks if a block is a Task tool
- */
 function _isTaskTool(block: ContentBlock): boolean {
   return (
     block.type === "tool_use" &&
@@ -91,26 +66,14 @@ function _isTaskTool(block: ContentBlock): boolean {
   );
 }
 
-/**
- * Sorts content blocks to ensure tool_use blocks appear before their matching tool_result blocks.
- * This fixes the issue where tool inputs and outputs appear in scrambled order.
- *
- * IMPORTANT: Task (agent) tool_use blocks are NOT paired with their tool_results here.
- * Task tools have nested child blocks between tool_use and tool_result that must stay
- * in their original positions to maintain causality (child work appears before completion).
- */
 function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const toolUseMap = new Map<string, ContentBlock>();
   const toolResultMap = new Map<string, ContentBlock>();
-
-  // Identify Task tool IDs - these should not be paired during sorting
   const taskToolIds = new Set<string>();
 
-  // Separate blocks by type
   for (const block of blocks) {
     if (block.type === "tool_use") {
       toolUseMap.set(block.id, block);
-      // Check if this is a Task tool
       if (_isTaskTool(block)) {
         taskToolIds.add(block.id);
       }
@@ -119,7 +82,6 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
     }
   }
 
-  // Reconstruct the array with proper ordering
   const sorted: ContentBlock[] = [];
   const processedToolUseIds = new Set<string>();
 
@@ -130,9 +92,6 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
       sorted.push(block);
       processedToolUseIds.add(block.id);
 
-      // Add matching tool_result immediately after if it exists
-      // BUT NOT for Task tools - their results must stay in original position
-      // to preserve child blocks between tool_use and tool_result
       if (!taskToolIds.has(block.id)) {
         const toolResult = toolResultMap.get(block.id);
         if (toolResult) {
@@ -140,7 +99,6 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
         }
       }
     } else if (block.type === "tool_result") {
-      // Skip if already added with its tool_use (not applicable to Task tools)
       if (
         processedToolUseIds.has(block.tool_use_id) &&
         !taskToolIds.has(block.tool_use_id)
@@ -148,8 +106,6 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
         continue;
       }
 
-      // Add tool_result in its original position for Task tools
-      // or as orphaned tool_result for non-Task tools
       sorted.push(block);
     } else {
       sorted.push(block);
@@ -159,9 +115,6 @@ function _sortToolBlocks(blocks: ContentBlock[]): ContentBlock[] {
   return sorted;
 }
 
-/**
- * Find the matching tool_result for a Task tool_use
- */
 function _findToolResultIndex(
   taskTool: Extract<ContentBlock, { type: "tool_use" }>,
   startIdx: number,
@@ -176,9 +129,6 @@ function _findToolResultIndex(
   return -1;
 }
 
-/**
- * Extract child blocks from tool_result and streaming blocks
- */
 function _extractChildBlocks(
   taskToolIndex: number,
   toolResultIndex: number,
@@ -187,16 +137,13 @@ function _extractChildBlocks(
 ): ContentBlock[] {
   const childBlocks: ContentBlock[] = [];
 
-  // Collect all blocks between tool_use and tool_result (streaming agent work)
   const streamingBlocks = blocks.slice(taskToolIndex + 1, toolResultIndex);
   childBlocks.push(...streamingBlocks);
 
-  // Mark all streaming blocks as processed
   for (let k = taskToolIndex + 1; k < toolResultIndex; k++) {
     processedIndices.add(k);
   }
 
-  // Extract blocks from tool_result.content (if any)
   const toolResult = blocks[toolResultIndex] as Extract<
     ContentBlock,
     { type: "tool_result" }
@@ -205,15 +152,10 @@ function _extractChildBlocks(
     childBlocks.push(...toolResult.content);
   }
 
-  // Mark tool_result as processed
   processedIndices.add(toolResultIndex);
-
   return childBlocks;
 }
 
-/**
- * Process an agent task and add it to groups
- */
 function _processAgentTask(
   block: ContentBlock,
   blockIndex: number,
@@ -223,10 +165,8 @@ function _processAgentTask(
 ): void {
   const taskTool = block as Extract<ContentBlock, { type: "tool_use" }>;
 
-  // Find the matching tool_result
   const toolResultIndex = _findToolResultIndex(taskTool, blockIndex, blocks);
 
-  // Extract child blocks
   let childBlocks: ContentBlock[] = [];
   if (toolResultIndex !== -1) {
     childBlocks = _extractChildBlocks(
@@ -237,10 +177,8 @@ function _processAgentTask(
     );
   }
 
-  // Recursively group the child blocks
   const childGroups = groupBlocksByAgent(childBlocks);
 
-  // Add agent task group
   const input = taskTool.input as Record<string, unknown>;
   groups.push({
     type: "agent_task",

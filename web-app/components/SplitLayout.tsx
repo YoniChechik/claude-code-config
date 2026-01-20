@@ -12,9 +12,6 @@ interface SplitLayoutProps {
   onCloseSession: (sessionId: string) => void;
 }
 
-/**
- * Dynamic split-pane layout supporting N chat sessions
- */
 export default function SplitLayout({
   sessionIds,
   commands,
@@ -47,21 +44,18 @@ export default function SplitLayout({
     const mouseX = e.clientX - rect.left;
     const totalWidth = rect.width;
 
-    // Calculate cumulative widths
     const cumulativeWidths = paneWidths.reduce((acc, width) => {
       const last = acc[acc.length - 1] || 0;
       acc.push(last + (width / 100) * totalWidth);
       return acc;
     }, [] as number[]);
 
-    // Calculate new widths for the two panes being resized
     const leftPaneStart = dragIndex === 0 ? 0 : cumulativeWidths[dragIndex - 1];
     const rightPaneEnd = cumulativeWidths[dragIndex + 1];
 
     const newLeftWidth = ((mouseX - leftPaneStart) / totalWidth) * 100;
     const newRightWidth = ((rightPaneEnd - mouseX) / totalWidth) * 100;
 
-    // Constrain minimum width to 10%
     if (newLeftWidth >= 10 && newRightWidth >= 10) {
       const newWidths = [...paneWidths];
       newWidths[dragIndex] = newLeftWidth;
@@ -70,19 +64,16 @@ export default function SplitLayout({
     }
   };
 
-  // Update widths when sessions change
   if (paneWidths.length !== sessionIds.length) {
     setPaneWidths(sessionIds.map(() => 100 / sessionIds.length));
   }
 
-  // Keep focused index in bounds
   useEffect(() => {
     if (focusedPaneIndex >= sessionIds.length) {
       setFocusedPaneIndex(Math.max(0, sessionIds.length - 1));
     }
   }, [sessionIds.length, focusedPaneIndex]);
 
-  // Track window/tab focus state - single source of truth for all panes
   useEffect(() => {
     const handleVisibilityChange = () => {
       const isVisible = !document.hidden;
@@ -96,7 +87,6 @@ export default function SplitLayout({
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  // Keyboard shortcuts for pane navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey) {
@@ -114,7 +104,6 @@ export default function SplitLayout({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sessionIds.length]);
 
-  // Calculate total divider width in pixels (6px per divider, 1.5rem = 6px at 16px base)
   const dividerCount = sessionIds.length - 1;
   const dividerWidthPx = dividerCount * 6;
 
@@ -125,7 +114,6 @@ export default function SplitLayout({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Floating + button */}
       <button
         onClick={onAddSession}
         className="absolute top-5 right-5 z-50 w-8 h-8 p-0 bg-gradient-to-br from-brand-primary to-brand-secondary hover:from-brand-secondary hover:to-brand-primary text-text-primary rounded-full shadow-xl hover:shadow-2xl flex items-center justify-center text-xl leading-none transition-all duration-200 hover:scale-110"

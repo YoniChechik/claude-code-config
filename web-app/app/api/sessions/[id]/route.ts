@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionManager } from "@/lib/session-manager";
 
-/**
- * GET /api/sessions/[id] - Get session by ID
- */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,9 +31,6 @@ export async function GET(
   }
 }
 
-/**
- * PATCH /api/sessions/[id] - Update session settings
- */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -76,9 +70,6 @@ export async function PATCH(
   }
 }
 
-/**
- * DELETE /api/sessions/[id] - Delete session
- */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
