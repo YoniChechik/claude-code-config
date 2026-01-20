@@ -5,6 +5,7 @@ import SplitLayout from "@/components/SplitLayout";
 import type { SlashCommand } from "@/lib/types";
 import { getHeartbeatClient } from "@/lib/heartbeat-client";
 import { getCleanupHandler } from "@/lib/cleanup-handler";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 /**
  * Main page - initializes session(s) and renders dynamic split layout
@@ -14,7 +15,7 @@ export default function Home() {
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [windowId] = useState(() => crypto.randomUUID());
+  const [windowId] = useState(() => getOrCreateWindowId());
 
   useEffect(() => {
     initializeSessions();
@@ -163,11 +164,13 @@ export default function Home() {
       if (sessionIds.length === 1) {
         await fetch(`/api/sessions/${sessionId}`, {
           method: "PATCH",
+          headers: { "x-window-id": windowId },
         });
       } else {
         // Multiple sessions: delete the session
         await fetch(`/api/sessions/${sessionId}`, {
           method: "DELETE",
+          headers: { "x-window-id": windowId },
         });
 
         // Remove from local state
@@ -186,7 +189,10 @@ export default function Home() {
   ) => {
     const response = await fetch("/api/sessions/resume", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-window-id": windowId,
+      },
       body: JSON.stringify({ sessionId, filePath, cwd }),
     });
 
