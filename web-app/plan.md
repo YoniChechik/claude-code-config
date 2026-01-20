@@ -1,159 +1,136 @@
-# E2E Test Plan: Real AI Response Test
+# Web-App Implementation Plan
 
 ## Executive Summary
 
-Create an e2e test using Playwright that sends a real prompt to Claude (no mocks) and verifies receipt of an actual response. This test validates the complete end-to-end flow: UI → API → Claude CLI → streaming response → UI rendering. Single PR implementation.
+The project has recently completed:
+1. Added a real end-to-end test (`real-response.spec.ts`) that validates complete Claude API integration without mocks
+2. Modified `ChatPane.tsx` to include `windowId` in API requests (already uncommitted)
 
-## Current State
+**Current Status:** Changes need to be committed and the e2e test needs to be validated to ensure it passes with real Claude responses.
 
-- **Framework**: Playwright with chromium browser
-- **Config**: `playwright.config.ts`, tests run against `http://localhost:6379`
-- **Existing Tests**: `/e2e/chat.spec.ts` contains multiple tests (send message, empty messages, loading state, persistence, tool calling)
-- **Architecture**: Next.js app with:
-  - Frontend: React components handle chat UI and stream processing
-  - Backend: `/api/commands` route streams responses via Claude CLI
-  - Claude CLI: Called directly (no API key needed), yields streaming events
-  - Session management: Validates window ownership, tracks messages
+**Immediate Next Steps:**
+- Commit pending changes (.version bump + ChatPane.tsx modifications)
+- Run the new e2e test to verify it passes with actual Claude responses
+- Identify any test failures and fix them
+- Consider integrating the test into CI/CD pipeline
 
-## Target State
+---
 
-New test file `/e2e/real-response.spec.ts` that:
-1. Navigates to app homepage
-2. Types "hi" in chat input
-3. Clicks send button
-4. Waits for actual Claude response (not mock)
-5. Verifies response contains text content from real API call
-6. Confirms response persists in UI
+## What's Being Done
 
-## Implementation Approach
+### Recent Changes (Uncommitted)
 
-### Architecture Decisions
+1. **ChatPane.tsx modification**
+   - Added `windowId` capture via `getOrCreateWindowId()`
+   - Updated API request body to include `windowId` alongside `sessionId` and `prompt`
+   - Enables window-scoped session tracking for better multi-window support
 
-**Why no mocks?**
-- Real Claude CLI is invoked server-side in `/api/commands` route
-- Mock interception would require intercepting fetch at browser level
-- No sensible way to mock the subprocess spawning (`spawn('claude', ...)`)
-- Tests should validate actual streaming and response parsing
+2. **.version bump**
+   - Version file updated (shows `3e20ca5` commit)
 
-**How it works:**
-1. Playwright navigates to app
-2. App loads → creates session → window ID generated
-3. User types "hi" → sends to `/api/commands` POST
-4. Backend: Claude CLI subprocess spawns, streams events
-5. Frontend: Reads streaming response (SSE-like format), parses events
-6. Response accumulated as `ContentBlock[]`, rendered as it arrives
-7. Test waits for response to appear in DOM, verifies non-empty content
+3. **New e2e test: real-response.spec.ts**
+   - Tests complete end-to-end flow: UI → API → Claude CLI → streaming response → UI rendering
+   - Uses **real Claude API calls** (no mocks)
+   - Sends simple "hi" prompt and validates actual Claude response appears
+   - Includes robust selectors for async response detection with 30-second timeout
+   - Validates response persists and UI recovers for next message
 
-### Key Implementation Details
+---
 
-**Existing patterns to follow:**
-- Use `page.locator()` for element selection (not `page.$()`
-- Select "Send" button with `locator("button:has-text('Send')")`
-- Wait for elements with `toBeVisible({ timeout: 20000 })`
-- Target first chat pane: `page.locator("main > div > div").first()`
-- Extract text content: `textContent()` method
+## Implementation Phases
 
-**Response validation:**
-- Claude's response appears in `div.bg-gray-100` or `div.bg-gray-800` (depending on dark mode)
-- Response content is in `div.whitespace-pre-wrap` child element
-- Must wait long enough for streaming to complete (20s timeout recommended)
-- Verify `textContent()` is truthy and has length > 0
+### Phase 1: Commit Current Changes (Easy)
+**Goal:** Save uncommitted work with clear commit messages
 
-**Current test baseline:**
-- `/e2e/chat.spec.ts` already tests basic flow
-- Existing test waits for response with 20s timeout
-- Our test should follow same patterns and timeouts
+**Steps:**
+1. Stage modified files (.version, ChatPane.tsx)
+2. Create commit message explaining windowId addition
+3. Verify commit contains all pending changes
 
-## Implementation Steps
+**Difficulty:** Easy
 
-**Phase 1: Create test file (Easy)**
-- File: `/e2e/real-response.spec.ts`
-- Copy test structure from `chat.spec.ts`
-- Import Playwright test utilities: `import { test, expect } from "@playwright/test"`
+---
 
-**Phase 2: Implement core test steps (Easy)**
-- Navigate to "/" (baseURL configured in `playwright.config.ts`)
-- Wait for textarea/input to appear
-- Get first chat pane locator
-- Fill input with "hi", verify value set
-- Click send button
-- Wait for input to clear (indicates message sent)
-- Verify user message "hi" appears in pane
+### Phase 2: Validate E2E Test (Medium)
+**Goal:** Run the new real-response test and ensure it passes consistently
 
-**Phase 3: Implement response verification (Medium)**
-- Locate Claude's response message (last `div.bg-gray-100` containing "Claude" label)
-- Extract content div with `whitespace-pre-wrap` class
-- Verify it's visible (20s timeout for streaming)
-- Get textContent and verify non-empty
-- Check length > 0
+**Steps:**
+1. Run `npm run test:e2e` targeting `real-response.spec.ts`
+2. If test passes: Verify it's reliable (run multiple times)
+3. If test fails: Analyze failure reason
+   - Check if Claude API is accessible
+   - Verify .env.local has valid CLAUDE_API_KEY
+   - Review selector robustness for response detection
+   - Check API response streaming works correctly
+4. Document any adjustments needed
 
-**Phase 4: Test naming and documentation (Easy)**
-- Test name: "should send a real prompt and receive actual Claude response"
-- Add comments explaining what makes it different from existing tests
-- Document that this is a real e2e test (no mocks, uses actual Claude CLI)
+**Difficulty:** Medium (depends on environmental factors like API availability)
 
-## Testing Strategy
+---
 
-**Test execution:**
-- Run with: `npm run test:e2e` or `npm run test:e2e:no-build`
-- Server must be running with Claude CLI available in PATH
-- API key not needed (uses claude CLI directly)
-- Test requires ~10-30 seconds (Claude response time varies)
+### Phase 3: Update Test Suite Configuration (Medium)
+**Goal:** Ensure the new test is properly integrated into test pipeline
 
-**Success criteria:**
-- Test passes consistently (allow 2 retries for flakiness)
-- Response text is non-empty and from real Claude
-- Test times out if Claude doesn't respond (20s limit)
-- Validates both streaming receipt and DOM rendering
+**Potential tasks:**
+- Add skip/focus annotation if test needs special handling
+- Consider adding to dedicated e2e suite (separate from unit tests)
+- Document test requirements (API key needed, real calls made)
+- Add performance baseline if response time matters
 
-**What makes it real:**
-- No `page.route()` interception of fetch calls
-- Claude subprocess actually spawns in backend
-- No mocked streaming events
-- Actual token streaming from Claude API
+**Difficulty:** Medium
+
+---
+
+### Phase 4: Consider API Backend Support (Medium)
+**Goal:** Verify backend correctly handles `windowId` in requests
+
+**Check:**
+- Review `/api/commands` endpoint to ensure it receives and uses `windowId`
+- Verify no breaking changes to existing functionality
+- Consider if `windowId` needs to be persisted/logged
+
+**Difficulty:** Medium
+
+---
+
+## Architecture Notes
+
+### Session Management Enhancement
+The `windowId` addition enables:
+- Per-window session tracking (multiple browser tabs can have independent sessions)
+- Better correlation of requests to UI windows
+- Improved logging and debugging of multi-window scenarios
+
+### Test Strategy
+- **Unit tests**: Test individual components (existing)
+- **Integration tests**: Test API + component interaction (existing)
+- **E2E tests with mocks**: Test complete flow safely (existing)
+- **E2E tests with real API**: Validate actual Claude integration (NEW - real-response.spec.ts)
+
+---
+
+## Success Criteria
+
+- [ ] Uncommitted changes committed successfully
+- [ ] real-response.spec.ts passes at least once with actual Claude response
+- [ ] ChatPane.tsx correctly sends windowId to API
+- [ ] Backend API properly receives windowId parameter
+- [ ] No regression in existing tests
+
+---
+
+## Known Risks
+
+1. **API Rate Limiting**: Real e2e test makes actual Claude API calls - could hit rate limits if run too frequently
+2. **API Key Dependency**: Test only works if valid CLAUDE_API_KEY in .env.local
+3. **Network Issues**: Real API calls can fail due to network problems
+4. **Response Variability**: Claude's response length/format varies, test selectors must be robust
+
+---
 
 ## Dependencies
 
-- Existing: Playwright test framework, test infrastructure
-- No new dependencies needed
-- Requires: Claude CLI installed and working on test runner
-
-## Risks & Mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| Claude API rate limits | Test fails intermittently | Use simple prompt "hi", retries built-in |
-| Response time varies | Timing-sensitive failures | Set 20s timeout, match existing test patterns |
-| Multiple test runs consume tokens | Token quota issues | Keep test simple (one test, not test suite) |
-| Claude CLI not available | Test fails on CI/local | Assume CLI is setup; will fail clearly if missing |
-| Streaming parsing fails | Response never appears in DOM | Existing code handles this; we verify it works |
-
-## Difficulty Assessment
-
-- **Phase 1**: Easy - straightforward file creation and imports
-- **Phase 2**: Easy - follow existing test patterns exactly
-- **Phase 3**: Medium - understanding streaming response DOM structure
-- **Phase 4**: Easy - documentation and naming
-- **Overall**: Easy-Medium - mostly pattern matching against existing tests
-
-## Files to Modify
-
-**New file:**
-- `/home/ubuntu/.claude/web-app/e2e/real-response.spec.ts` - Complete test file
-
-**Reference files (read-only):**
-- `/home/ubuntu/.claude/web-app/e2e/chat.spec.ts` - Pattern reference
-- `/home/ubuntu/.claude/web-app/playwright.config.ts` - Test config
-- `/home/ubuntu/.claude/web-app/app/api/commands/route.ts` - Backend API
-- `/home/ubuntu/.claude/web-app/lib/claude-client.ts` - Stream event types
-- `/home/ubuntu/.claude/web-app/components/ChatPane.tsx` - Frontend streaming logic
-
-## Success Metrics
-
-- [x] Test file created and properly structured
-- [ ] Test navigates app and loads chat interface
-- [ ] Test sends "hi" and verifies user message appears
-- [ ] Test waits for Claude response (real streaming)
-- [ ] Test verifies response content is non-empty
-- [ ] Test passes consistently with existing infrastructure
-- [ ] Test demonstrates real e2e flow (no mocks)
+- Valid Claude API key (CLAUDE_API_KEY in .env.local)
+- Internet connectivity to Claude API
+- Playwright test environment configured
+- Node.js and npm dependencies installed

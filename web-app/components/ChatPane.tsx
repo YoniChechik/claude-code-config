@@ -85,10 +85,11 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
     setStreamingText("");
     setStreamingBlocks([]);
 
+    const windowId = getOrCreateWindowId();
     const response = await fetch("/api/commands", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, prompt }),
+      body: JSON.stringify({ sessionId, windowId, prompt }),
     });
 
     let assistantText = "";
