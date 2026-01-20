@@ -138,7 +138,9 @@ export default function ChatMessages({
                   <span key={groupIdx}>
                     <ContentBlockRenderer block={group.block} />
                     {isStreaming && isLastGroup && isTextBlock && (
-                      <span className="inline-block w-0.5 h-5 ml-1 bg-blue-500 animate-pulse">▋</span>
+                      <span className="animate-border-spin bg-surface-tertiary border-2 border-transparent inline-block">
+                        <span className="inline-block w-0.5 h-5 ml-1 bg-brand-primary animate-pulse">▋</span>
+                      </span>
                     )}
                   </span>
                 );

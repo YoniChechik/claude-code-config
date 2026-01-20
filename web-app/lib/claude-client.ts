@@ -81,6 +81,9 @@ export class ClaudeClient {
       const emittedToolUseIds = new Set<string>(); // Track tool_use IDs to avoid duplicates
       const emittedToolResultIds = new Set<string>(); // Track tool_result IDs to avoid duplicates
       let hasReceivedTextDelta = false; // Track if any text_delta events were received
+      let hasReceivedInputJsonDelta = false; // Track if any input_json_delta events were received
+      let jsonBuffer = ""; // Track accumulated JSON for input_json_delta parsing
+      let inResponseString = false; // Track if we're inside the "response" string value
 
       // Buffer for maintaining causal ordering of tool_use/tool_result pairs
       const toolUseBuffer = new Map<string, ClaudeStreamEvent>(); // tool_id -> tool_use event
@@ -173,8 +176,11 @@ export class ClaudeClient {
           if (!line.trim()) continue;
 
           try {
-            const event = JSON.parse(line);
-            _debugLog("RAW_JSON_LINE", event);
+            const rawEvent = JSON.parse(line);
+            _debugLog("RAW_JSON_LINE", rawEvent);
+
+            // Handle stream_event wrapper (CLI sends wrapped events)
+            const event = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
 
             // Handle init event to get model and session_id
             if (event.subtype === "init") {
@@ -226,8 +232,8 @@ export class ClaudeClient {
                 if (block.type === "tool_use") {
                   _debugLog("TOOL_USE_BLOCK", block);
                   // Extract text from StructuredOutput for display
-                  // Skip if we already received text_delta events (to avoid duplication)
-                  if (block.name === "StructuredOutput" && block.input?.response && !hasReceivedTextDelta) {
+                  // Skip if we already received text_delta or input_json_delta events (to avoid duplication)
+                  if (block.name === "StructuredOutput" && block.input?.response && !hasReceivedTextDelta && !hasReceivedInputJsonDelta) {
                     eventQueue.push({
                       type: "text",
                       content: block.input.response,
@@ -305,6 +311,97 @@ export class ClaudeClient {
               });
               resolveNext?.();
               resolveNext = null;
+            }
+
+            // Handle input_json_delta for StructuredOutput streaming
+            if (event.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+              hasReceivedInputJsonDelta = true;
+              const partialJson = event.delta.partial_json || "";
+
+              // Track if we need to check for opening quote after adding to buffer
+              const wasLookingForOpenQuote = !inResponseString && jsonBuffer.includes('"response"');
+              jsonBuffer += partialJson;
+
+              // Check if we just entered the "response" string or are waiting for opening quote
+              if (!inResponseString && jsonBuffer.includes('"response"')) {
+                const afterResponse = jsonBuffer.split('"response"')[1];
+                // Look for opening quote after colon
+                const openQuoteMatch = afterResponse.match(/:\s*"/);
+                if (openQuoteMatch) {
+                  inResponseString = true;
+                  // Extract any text after the opening quote
+                  const textStart = afterResponse.indexOf('"') + 1;
+                  const textAfterQuote = afterResponse.substring(textStart);
+
+                  // Now only process the NEW text from this delta
+                  // If we were already waiting for open quote, process entire partialJson
+                  // Otherwise, process text after the quote that appears in this delta
+                  let textToProcess = "";
+                  if (wasLookingForOpenQuote) {
+                    // The opening quote came in this delta, extract text from partialJson
+                    const quotePos = partialJson.indexOf('"');
+                    if (quotePos !== -1) {
+                      textToProcess = partialJson.substring(quotePos + 1);
+                    }
+                  } else {
+                    // Everything is new, use textAfterQuote
+                    textToProcess = textAfterQuote;
+                  }
+
+                  // Check if there's a closing quote in the text to process
+                  const closeQuoteIndex = textToProcess.indexOf('"');
+                  if (closeQuoteIndex === -1) {
+                    // No closing quote yet, emit all text
+                    if (textToProcess) {
+                      eventQueue.push({
+                        type: "text",
+                        content: textToProcess,
+                      });
+                      resolveNext?.();
+                      resolveNext = null;
+                    }
+                  } else {
+                    // Found closing quote, emit text before it
+                    const text = textToProcess.substring(0, closeQuoteIndex);
+                    if (text) {
+                      eventQueue.push({
+                        type: "text",
+                        content: text,
+                      });
+                      resolveNext?.();
+                      resolveNext = null;
+                    }
+                    inResponseString = false;
+                  }
+                }
+              } else if (inResponseString) {
+                // We're inside the response string, emit the partial text
+                // Check if this chunk contains the closing quote
+                const closeQuoteIndex = partialJson.indexOf('"');
+                if (closeQuoteIndex === -1) {
+                  // No closing quote, emit all text
+                  if (partialJson) {
+                    eventQueue.push({
+                      type: "text",
+                      content: partialJson,
+                    });
+                    resolveNext?.();
+                    resolveNext = null;
+                  }
+                } else {
+                  // Found closing quote, emit text before it
+                  const text = partialJson.substring(0, closeQuoteIndex);
+                  if (text) {
+                    eventQueue.push({
+                      type: "text",
+                      content: text,
+                    });
+                    resolveNext?.();
+                    resolveNext = null;
+                  }
+                  inResponseString = false;
+                }
+              }
             }
 
             // Handle thinking content
@@ -416,7 +513,6 @@ export class ClaudeClient {
       while (!processEnded || eventQueue.length > 0) {
         if (eventQueue.length > 0) {
           const event = eventQueue.shift()!;
-          console.log("[CLAUDE-CLIENT] Yielding event:", event.type);
           _debugLog("YIELDING_EVENT", event);
           yield event;
         } else if (!processEnded) {
