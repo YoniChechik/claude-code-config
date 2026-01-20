@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { formatDuration } from "@/lib/utils";
 import SSHHostPromptModal from "./SSHHostPromptModal";
 
 interface SessionHeaderProps {
@@ -28,12 +27,12 @@ interface SessionHeaderProps {
  */
 export default function SessionHeader({
   cwd,
-  model,
-  lastDurationMs,
+  model: _model,
+  lastDurationMs: _lastDurationMs,
   tokenUsage,
   onClose,
   sessionType = "local",
-  hostname,
+  hostname: _hostname,
   distroName,
   clientIp,
   audioNotificationsEnabled = true,
@@ -106,12 +105,12 @@ export default function SessionHeader({
     : 0;
 
   // Determine color based on usage
-  let tokenColor = "text-success";
-  if (percentUsed > 80) tokenColor = "text-error";
-  else if (percentUsed > 60) tokenColor = "text-warning";
+  let _tokenColor = "text-success";
+  if (percentUsed > 80) _tokenColor = "text-error";
+  else if (percentUsed > 60) _tokenColor = "text-warning";
 
   // Show high usage warning when account-wide > 70% used
-  const showHighUsageWarning = accountUsage && accountUsage.percentUsed > 70;
+  const _showHighUsageWarning = accountUsage && accountUsage.percentUsed > 70;
 
   // Calculate time until reset
   const getTimeUntilReset = () => {
@@ -126,7 +125,7 @@ export default function SessionHeader({
     return { hours, minutes };
   };
 
-  const timeUntilReset = getTimeUntilReset();
+  const _timeUntilReset = getTimeUntilReset();
 
   // Handle CWD click
   const handleCwdClick = async (e: React.MouseEvent) => {

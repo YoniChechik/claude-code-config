@@ -245,7 +245,7 @@ async function _loadSessionMetadata(
       lastMessagePreview,
       filePath,
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }

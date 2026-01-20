@@ -13,7 +13,7 @@ interface UsageData {
 }
 
 // Public functions
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const projectsDir = path.join(process.env.HOME!, ".claude", "projects");
 
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
-          } catch (e) {
+          } catch {
             // Skip malformed lines
           }
         }

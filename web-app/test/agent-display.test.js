@@ -47,7 +47,9 @@ async function sendCommand(sessionId, prompt) {
           ) {
             blocks.push(event);
           }
-        } catch (e) {}
+        } catch {
+          // Skip invalid JSON lines
+        }
       }
     }
   }

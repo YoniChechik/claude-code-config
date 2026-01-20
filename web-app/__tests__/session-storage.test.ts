@@ -620,8 +620,8 @@ describe("session-storage", () => {
   });
 
   describe("formatRelativeTime", () => {
-    it("should format time less than 1 hour", () => {
-      const sessions = require("../lib/session-storage");
+    it("should format time less than 1 hour", async () => {
+      const sessions = await import("../lib/session-storage");
       const now = new Date();
       const timestamp = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
@@ -629,8 +629,8 @@ describe("session-storage", () => {
       expect(formatted).toBe("< 1h ago");
     });
 
-    it("should format time in hours", () => {
-      const sessions = require("../lib/session-storage");
+    it("should format time in hours", async () => {
+      const sessions = await import("../lib/session-storage");
       const now = new Date();
       const timestamp = new Date(now.getTime() - 5 * 3600 * 1000).toISOString();
 
@@ -638,8 +638,8 @@ describe("session-storage", () => {
       expect(formatted).toBe("5h ago");
     });
 
-    it("should format time in days", () => {
-      const sessions = require("../lib/session-storage");
+    it("should format time in days", async () => {
+      const sessions = await import("../lib/session-storage");
       const now = new Date();
       const timestamp = new Date(now.getTime() - 3 * 24 * 3600 * 1000).toISOString();
 
@@ -647,8 +647,8 @@ describe("session-storage", () => {
       expect(formatted).toBe("3d ago");
     });
 
-    it("should format time in weeks", () => {
-      const sessions = require("../lib/session-storage");
+    it("should format time in weeks", async () => {
+      const sessions = await import("../lib/session-storage");
       const now = new Date();
       const timestamp = new Date(now.getTime() - 14 * 24 * 3600 * 1000).toISOString();
 

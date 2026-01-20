@@ -1,5 +1,4 @@
 import type { ClaudeStreamEvent } from "../lib/claude-client";
-import type { Session, Message } from "../lib/types";
 import { EventEmitter } from "events";
 
 /**
@@ -150,8 +149,6 @@ export async function collectAsyncGenerator<T>(
  * Mock child_process spawn for testing ClaudeClient
  */
 export function mockSpawn() {
-  const EventEmitter = require("events");
-
   class MockChildProcess extends EventEmitter {
     stdout = new EventEmitter();
     stderr = new EventEmitter();

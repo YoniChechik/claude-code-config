@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   try {
     session = sessionManager.getSession(sessionId);
     tracker = sessionManager.getCDTracker(sessionId);
-  } catch (error) {
+  } catch {
     return new Response(JSON.stringify({ error: "Session not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },

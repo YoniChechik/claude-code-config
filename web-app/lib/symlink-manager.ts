@@ -30,6 +30,7 @@ export async function createSessionSymlink(
       const targetFile = path.join(targetPath, `${sessionId}.jsonl`);
       await fs.symlink(sessionFile, targetFile);
     } catch {
+      // File doesn't exist or symlink failed, skip
     }
 
     // Create symlink for session directory (if exists)
@@ -39,6 +40,7 @@ export async function createSessionSymlink(
       const targetSessionDir = path.join(targetPath, sessionId);
       await fs.symlink(sessionDir, targetSessionDir);
     } catch {
+      // Directory doesn't exist or symlink failed, skip
     }
   } catch (error) {
     console.warn(`Failed to create session symlink: ${error}`);

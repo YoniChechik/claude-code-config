@@ -26,7 +26,7 @@ export async function GET(
     }
 
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 }
@@ -65,7 +65,7 @@ export async function PATCH(
     }
 
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 }
@@ -96,7 +96,7 @@ export async function DELETE(
 
     sessionManager.deleteSession(id);
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 }

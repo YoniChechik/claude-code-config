@@ -42,6 +42,7 @@ export async function getSlashCommands(projectRoot?: string): Promise<SlashComma
         }
       }
     } catch {
+      // Directory doesn't exist, skip
     }
   }
 
@@ -58,6 +59,7 @@ export async function getSlashCommands(projectRoot?: string): Promise<SlashComma
         }
       }
     } catch {
+      // Directory doesn't exist, skip
     }
   }
 
@@ -75,6 +77,7 @@ export async function getSlashCommands(projectRoot?: string): Promise<SlashComma
         }
       }
     } catch {
+      // Directory doesn't exist, skip
     }
   }
 
@@ -91,6 +94,7 @@ export async function getSlashCommands(projectRoot?: string): Promise<SlashComma
         }
       }
     } catch {
+      // Directory doesn't exist, skip
     }
   }
 

@@ -4,10 +4,28 @@ const react = require('eslint-plugin-react');
 
 module.exports = [
   {
-    ignores: ['node_modules', '.next', 'dist'],
+    ignores: ['node_modules', '.next', 'dist', '*.config.js', '*.config.ts'],
   },
   js.configs.recommended,
   ...typescript.configs.recommended,
+  {
+    files: ['**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        fetch: 'readonly',
+        TextDecoder: 'readonly',
+        module: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+      'no-undef': 'off',
+    },
+  },
   {
     files: ['**/*.ts', '**/*.tsx'],
     plugins: {
@@ -25,7 +43,10 @@ module.exports = [
       },
     },
     rules: {
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_'
+      }],
       'no-console': 'warn',
       'react/react-in-jsx-scope': 'off',
     },
