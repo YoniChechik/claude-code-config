@@ -20,4 +20,8 @@ Run the create-clone skill.
 Use the planner subagent with opus model to create the feature plan
 
 ### Step 3: Start Implementation
-According to plan.
+- code, commit, push with coder-agent
+- if problems occur, fix, commit, push with debugger-agent
+
+### Step 4: Finish
+finish with finish skill

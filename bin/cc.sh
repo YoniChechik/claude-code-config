@@ -8,6 +8,5 @@ CLAUDE_DIR="$HOME/.claude"
 source "$CLAUDE_DIR/bin/val.sh"
 validate_environment
 
-# Source and run claude
-source "$CLAUDE_DIR/bin/run.sh"
-run_claude_cli "$@"
+# run claude
+claude "$@"

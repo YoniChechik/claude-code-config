@@ -18,29 +18,10 @@ plugins/
 cache/
 telemetry/
 stats-cache.json
+paste-cache/
 
-# Next.js / Node.js
-node_modules/
-.next/
-.next-prod/
-.next-test/
-next-env.d.ts
 
-# Playwright
-playwright-report/
-test-results/
-
-# Dev server
-web-app/dev.log
-web-app/dev.pid
-dev.log
-dev.pid
 
 # Feature clones
 _clones/
 
-# Temporary plan files
-plan.md
-web-app/.env.local
-web-app/debug.log
-web-app/test-output.log

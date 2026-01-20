@@ -78,7 +78,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -86,10 +86,20 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat $HOME/.claude/settings_aux/user_prompt_submit_hook.md"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
     "type": "command",
-    "command": "input=$(cat); model=$(echo \"$input\" | jq -r '.model.display_name'); dir=$(echo \"$input\" | jq -r '.workspace.current_dir'); usage=$(echo \"$input\" | jq '.context_window.current_usage'); if [ \"$usage\" != \"null\" ]; then current=$(echo \"$usage\" | jq '.input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens'); size=$(echo \"$input\" | jq '.context_window.context_window_size'); pct=$((current * 100 / size)); printf '%s in %s | %d%% context' \"$model\" \"$dir\" \"$pct\"; else printf '%s in %s' \"$model\" \"$dir\"; fi"
+    "command": "bash $HOME/.claude/settings_aux/status_line.sh"
   }
 }

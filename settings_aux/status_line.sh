@@ -17,9 +17,6 @@ dir=$(echo "$input" | jq -r '.workspace.current_dir')
 git_dir=$(echo "$input" | jq -r '.workspace.git_dir // empty')
 remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 
-# Replace $HOME with ~
-dir="${dir/#$HOME/\~}"
-
 # Build status line
 status="${gray}${model}${reset} in ${blue}${dir}${reset}"
 
@@ -41,10 +38,5 @@ if [ -n "$remaining" ] && [ "$remaining" != "null" ]; then
   status="${status} | ${magenta}ctx:${remaining}%${reset}"
 fi
 
-# Add todo count if available and > 0
-todos=$(echo "$input" | jq -r '.workspace.todo_count // 0')
-if [ "$todos" -gt 0 ]; then
-  status="${status} | ${magenta}todos:${todos}${reset}"
-fi
 
 printf '%b' "$status"
