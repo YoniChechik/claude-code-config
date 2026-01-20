@@ -20,6 +20,11 @@ export async function GET(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  // Claim ownership if session exists but has no owner (server restart scenario)
+  if (!sessionManager.getOwner(id)) {
+    sessionManager.claimOwnership(id, windowId);
+  }
+
   if (!sessionManager.validateOwnership(id, windowId)) {
     return NextResponse.json(
       { error: "Session ownership validation failed" },

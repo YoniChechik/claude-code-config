@@ -163,6 +163,10 @@ class SessionManager {
     }
     return this.sessions.get(sessionId) || null;
   }
+
+  claimOwnership(sessionId: string, windowId: string): void {
+    this.sessionOwners.set(sessionId, windowId);
+  }
 }
 
 const globalForSessionManager = globalThis as unknown as {
