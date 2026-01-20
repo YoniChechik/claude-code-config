@@ -6,6 +6,7 @@ import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import type { Session, Message, SlashCommand, ContentBlock } from "@/lib/types";
 import type { ClaudeStreamEvent } from "@/lib/claude-client";
+import { getOrCreateWindowId } from "@/lib/window-id";
 
 interface ChatPaneProps {
   sessionId: string;
@@ -41,12 +42,20 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   }, [isFocused]);
 
   const loadSession = async () => {
-    const response = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      headers: { "x-window-id": windowId },
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(`Failed to load session: ${data.error || response.statusText}`);
+    }
+
     const data = await response.json();
 
     if (!data.session) {
-      console.error("Session not found:", sessionId);
-      return;
+      throw new Error(`Session not found: ${sessionId}`);
     }
 
     setSession(data.session);
@@ -233,7 +242,16 @@ export default function ChatPane({ sessionId, commands, onClose, isFocused = fal
   };
 
   const _updateSessionMetadata = async (): Promise<void> => {
-    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const windowId = getOrCreateWindowId();
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`, {
+      headers: { "x-window-id": windowId },
+    });
+
+    if (!sessionResponse.ok) {
+      const data = await sessionResponse.json();
+      throw new Error(`Failed to update session metadata: ${data.error || sessionResponse.statusText}`);
+    }
+
     const data = await sessionResponse.json();
     setSession((prev) =>
       prev
