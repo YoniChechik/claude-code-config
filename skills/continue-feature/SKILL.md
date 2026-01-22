@@ -14,24 +14,42 @@ If empty or missing: "Error: Feature description is required. Please provide a d
 
 ## Process
 
-### Step 1: Find Feature Clone
-Identify the appropriate clone:
+### Step 1: Find or Create Feature Clone
+
+#### 1.1: Search for Existing Clone
+List existing clones in _clones/ directory and try to match the feature description:
 ```bash
-# List existing clones
 ls -1 _clones/
 ```
 
-If clone doesn't exist, check if feature branch exists remotely and create clone:
-```bash
-git branch -a | grep feature
-REPO_URL=$(git config --get remote.origin.url)
+**Decision point**: If local clone found matching the feature description → Continue to Step 2.
+**Decision point**: If no local clone found → Continue to 1.2.
 
-# If remote branch exists:
-mkdir -p _clones
-git clone -b FEATURE_NAME "$REPO_URL" _clones/FEATURE_NAME
+#### 1.2: Check for Remote Branch (if no local clone)
+If no local clone exists, check if a remote feature branch exists that matches the description:
+```bash
+git fetch --prune
+git branch -a | grep "remotes/origin/feature"
 ```
 
-If couldn't find a right fit, stop and ask user for clarification.
+**Decision point**: If remote branch found matching the feature description → Continue to 1.3.
+**Decision point**: If no remote branch found → Continue to 1.4.
+
+#### 1.3: Clone from Remote (if remote branch exists)
+If remote branch exists but no local clone, create the local clone:
+```bash
+REPO_URL=$(git config --get remote.origin.url)
+mkdir -p _clones
+git clone -b FEATURE_BRANCH_NAME "$REPO_URL" _clones/FEATURE_BRANCH_NAME
+```
+
+After cloning successfully → Continue to Step 2.
+
+#### 1.4: Feature Not Found
+If neither local clone nor remote branch exists:
+- Tell user: "Feature branch not found locally or remotely"
+- Suggest: "Use the create-clone skill to create a new feature clone: /create-clone <feature-description>"
+- Exit the skill
 
 
 ### Step 2: Navigate to Feature Clone
