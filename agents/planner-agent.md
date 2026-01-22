@@ -38,20 +38,46 @@ Create plan.md with this structure:
 ## TLDR
 [2 lines typical, max 5 for complex features - WHAT and WHY in plain language]
 
-## Implementation Phases
+## Summary
+- Single PR or Multi-PR (if multi: state "This requires N PRs")
+- High-level approach
 
-### Phase X: [Name] 
-**Steps:**
+## Implementation Steps
+
+### Step 1: [Name]
+**What:**
 - Action 1
 - Action 2
-...
 
-**Tests:**
-- What tests are added/modified
-- How to verify this phase works
+### Step 2: [Name]
+**What:**
+- Action 1
+- Action 2
+
+## Testing Step
+
+### Step N: Run Tests
+**Tests to add/modify:**
+- test_feature_x() - verifies behavior Y
+- test_edge_case_z() - verifies edge case
+
+**How to run:**
+`pytest path/to/tests` or specific command
+
+**Expected results:**
+- All tests pass
+- Feature does X when Y happens
+
+## Debug Loop Step
+
+### Step N+1: Debug if Tests Fail
+**If tests fail:**
+1. Use debugger agent to investigate failures
+2. Fix issues
+3. Rerun tests
+4. Repeat until all tests pass
 
 **Success Criteria:**
-- How we know the feature actually works (not "code compiles" - actual behavior)
-
-
+- All tests pass
+- Feature works as specified in TLDR
 ```
