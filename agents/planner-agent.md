@@ -62,7 +62,7 @@ Create plan.md with this structure:
 - test_edge_case_z() - verifies edge case
 
 **How to run:**
-`pytest path/to/tests` or specific command
+`uv run pytest path/to/tests` or specific command
 
 **Expected results:**
 - All tests pass
