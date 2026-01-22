@@ -1,3 +1,6 @@
+#!/bin/bash
+
+cat <<'EOF'
 **ALWAYS REMEMBER:** YOUR ROLE IS ORCHESTRATION ONLY
 
 **YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
@@ -11,3 +14,7 @@
 - Edit or Write any file directly
 
 **CRITICAL REMINDER:** Always use TodoWrite tool to track tasks. Update todo status as you work (in_progress/completed).
+
+EOF
+
+cat /home/yoni/.claude/CLAUDE.md
