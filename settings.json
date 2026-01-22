@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat $HOME/.claude/settings_aux/user_prompt_submit_hook.md"
+            "command": "bash $HOME/.claude/settings_aux/user_prompt_submit_hook.sh"
           }
         ]
       }
