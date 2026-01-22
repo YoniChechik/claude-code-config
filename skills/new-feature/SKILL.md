@@ -28,15 +28,22 @@ This context will inform the planning phase.
 ### Step 3: Plan
 Use the planner subagent with opus model to create the feature plan. ask questions if needed.
 
-### Step 4: Start Implementation
+### Step 4: Create Todo List
+Create a structured todo list based on the plan:
+- Break down the plan into actionable tasks
+- Use the TodoWrite tool to create the todo list
+- Each task should be specific and measurable
+- Mark the first task as "in_progress" to begin work
+
+### Step 5: Start Implementation
 - code, commit, push with coder-agent
 - if problems occur, fix, commit, push with debugger-agent
 
-### Step 5: Quality
+### Step 6: Quality
 Run quality skill to fix code style, types, and remove AI slop.
 
-### Step 6: Reviewer
+### Step 7: Reviewer
 Use Task tool with subagent_type="reviewer-agent" for final code review and validation.
 
-### Step 7: Summary
+### Step 8: Summary
 Report findings and confirm ready for PR (or list remaining issues).
