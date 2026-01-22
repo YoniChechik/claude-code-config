@@ -66,12 +66,32 @@ Otherwise single PR.
 - Each PR must add independent value
 - Align with existing codebase patterns
 
+## plan.md Structure
+
+**Every plan.md MUST start with TLDR:**
+- 2 lines for most features
+- Up to 5 lines maximum for complex features
+- States WHAT is being built and WHY in plain language
+- Gives instant understanding before diving into details
+
+Example good TLDR:
+```
+# Feature: User Authentication
+TLDR: Add login/logout with JWT tokens. Users can securely authenticate and access protected routes.
+```
+
+Example bad TLDR (too detailed):
+```
+TLDR: Implement auth by creating database migration for users table, add bcrypt password hashing...
+```
+
 ## Template
 
-### plan.md (100-200 lines, summary 30-50)
+### plan.md (100-200 lines, TLDR 2-5 lines, summary 30-50)
 What | Why | Approach | Scope | Current State | Target State | Steps | Success | Risk | Difficulty
 
 Sections:
+- TLDR (REQUIRED: 2 lines typical, up to 5 for complex features - MUST be first)
 - Executive Summary
 - PR Breakdown (if multi-PR, list each PR's scope)
 - Architecture
