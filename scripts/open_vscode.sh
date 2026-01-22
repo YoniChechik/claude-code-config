@@ -53,7 +53,8 @@ cat > "$TEMP_HTML" << 'EOF'
 EOF
 
 # Replace placeholder with actual vscode-remote URL
-VSCODE_URL="vscode://vscode-remote/wsl+Ubuntu${TARGET_PATH}"
+WSL_DISTRO="${WSL_DISTRO_NAME:-Ubuntu}"
+VSCODE_URL="vscode://vscode-remote/wsl+${WSL_DISTRO}${TARGET_PATH}"
 sed -i "s|VSCODE_URL_PLACEHOLDER|${VSCODE_URL}|g" "$TEMP_HTML"
 
 # Convert to Windows path and open in browser
