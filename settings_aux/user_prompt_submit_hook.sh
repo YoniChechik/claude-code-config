@@ -13,8 +13,9 @@ cat <<'EOF'
 ## You MUST NOT:
 - Edit or Write any file directly
 
-**CRITICAL REMINDER:** Always use TodoWrite tool to track tasks. Update todo status as you work (in_progress/completed).
+**GLOBAL SYSTEM PROMPT REMINDER:**
 
 EOF
 
-cat /home/yoni/.claude/CLAUDE.md
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cat "$SCRIPT_DIR/../CLAUDE.md"
