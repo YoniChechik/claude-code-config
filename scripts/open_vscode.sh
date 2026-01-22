@@ -4,8 +4,7 @@
 # Works by generating a temporary HTML page that triggers the vscode:// URL protocol,
 # which is opened in the default browser to launch VS Code.
 #
-# Usage: open_vscode.sh [-n|--new-window] [path]
-#   -n, --new-window    Attempt to open in a new window (experimental)
+# Usage: open_vscode.sh [path]
 
 # Detect the runtime environment (WSL, Windows, or Linux)
 # Returns environment type to determine correct vscode:// URL format and browser launch method
@@ -47,7 +46,6 @@ get_absolute_path() {
 generate_vscode_url() {
     local target_path="$1"
     local env_type="$2"
-    local new_window="${3:-false}"
 
     local base_url
     case "$env_type" in
@@ -64,12 +62,8 @@ generate_vscode_url() {
             ;;
     esac
 
-    # Append new window parameter (experimental - may not work on all versions)
-    if [[ "$new_window" == "true" ]]; then
-        echo "${base_url}?windowId=_blank"
-    else
-        echo "$base_url"
-    fi
+    # Always open in a new window
+    echo "${base_url}?windowId=_blank"
 }
 
 # Create temporary HTML page that auto-triggers the vscode:// URL
@@ -140,27 +134,14 @@ open_in_browser() {
 }
 
 main() {
-    local new_window="false"
-    local target_arg="$1"
-
-    # Check if -n or --new-window flag is provided
-    if [[ "$1" == "-n" ]] || [[ "$1" == "--new-window" ]]; then
-        new_window="true"
-        target_arg="$2"
-    fi
-
     local env_type=$(check_environment)
-    local target_path=$(get_absolute_path "$target_arg")
-    local vscode_url=$(generate_vscode_url "$target_path" "$env_type" "$new_window")
+    local target_path=$(get_absolute_path "$1")
+    local vscode_url=$(generate_vscode_url "$target_path" "$env_type")
     local temp_html=$(generate_html "$vscode_url")
 
     open_in_browser "$temp_html" "$env_type"
 
-    if [[ "$new_window" == "true" ]]; then
-        echo "Opening VS Code in new window for: $target_path"
-    else
-        echo "Opening VS Code for: $target_path"
-    fi
+    echo "Opening VS Code in new window for: $target_path"
 }
 
 main "$@"
