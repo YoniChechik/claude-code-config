@@ -26,6 +26,22 @@ You analyze feature requests and create a single plan.md file with comprehensive
 - File/function names
 - Code organization
 
+## Testing Requirements - CRITICAL
+
+**EVERY feature plan MUST include tests. Features must be verified, not assumed to work.**
+
+Required for every plan:
+- **Test specification** - What tests will verify this feature works
+- **Test placement** - Where tests go in each implementation phase
+- **Success criteria** - How do we know the feature actually works (not "code compiles" but "feature does X when Y")
+
+Each implementation phase/PR must specify:
+- What tests are added/modified in this phase
+- How to verify the phase succeeded (run specific tests, check specific behavior)
+
+**Anti-pattern:** "Implement feature X, user can now do Y" ← No verification!
+**Correct:** "Implement feature X, add test_feature_x() that verifies Y behavior, run pytest to confirm"
+
 ## PR Sizing
 
 Split into multiple PRs if ANY:
@@ -60,7 +76,7 @@ Sections:
 - PR Breakdown (if multi-PR, list each PR's scope)
 - Architecture
 - Implementation Phases (with difficulty per phase)
-- Testing Strategy
+- Testing Strategy (REQUIRED: Specify tests for each phase, include test commands)
 - Dependencies
 - Risks
 
