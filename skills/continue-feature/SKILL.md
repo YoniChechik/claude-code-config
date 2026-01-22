@@ -41,6 +41,10 @@ If remote branch exists but no local clone, create the local clone:
 REPO_URL=$(git config --get remote.origin.url)
 mkdir -p _clones
 git clone -b FEATURE_BRANCH_NAME "$REPO_URL" _clones/FEATURE_BRANCH_NAME
+
+# Setup development environment
+cd _clones/FEATURE_BRANCH_NAME
+bash ~/.claude/scripts/setup_project_env.sh
 ```
 
 After cloning successfully → Continue to Step 2.

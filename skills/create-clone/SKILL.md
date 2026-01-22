@@ -48,19 +48,10 @@ git push -u origin $FEATURE_NAME
 Run the sync skill to commit and push.
 
 ### Step 5: Setup Environment
-Setup development environment based on project type:
+Setup development environment:
 ```bash
-# Python project - create virtual environment
-if [ -f "pyproject.toml" ]; then
-  echo "Python project detected. Creating virtual environment..."
-  uv venv
-fi
-
-# npm project - install dependencies
-if [ -f "package-lock.json" ]; then
-  echo "npm project detected. Installing dependencies..."
-  npm install
-fi
+# Setup development environment
+bash ~/.claude/scripts/setup_project_env.sh
 ```
 
 ### Step 6: Notify User
