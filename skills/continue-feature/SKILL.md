@@ -10,8 +10,7 @@ Continues work on an existing feature clone with proper context analysis.
 "$ARGUMENTS"
 
 ### Feature Description Validation
-  - If empty or missing: "Error: Feature description is required. Please provide a detailed description of the feature you want to continue implementing."
-
+If empty or missing: "Error: Feature description is required. Please provide a detailed description of the feature you want to continue implementing."
 
 ## Process
 
