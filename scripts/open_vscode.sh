@@ -1,24 +1,58 @@
 #!/bin/bash
 
-# Get path argument or default to current directory
-TARGET_PATH="${1:-$(pwd)}"
+check_environment() {
+    if [[ -n "$SSH_CONNECTION" ]] || [[ -n "$SSH_CLIENT" ]]; then
+        echo "Error: Opening VS Code via SSH is not supported currently" >&2
+        exit 1
+    fi
 
-# Convert to absolute path if relative
-if [[ ! "$TARGET_PATH" = /* ]]; then
-    TARGET_PATH="$(cd "$TARGET_PATH" 2>/dev/null && pwd)"
-fi
+    if [[ -n "$WSL_DISTRO_NAME" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
+        echo "windows"
+    else
+        echo "linux"
+    fi
+}
 
-# Check if path exists
-if [[ ! -e "$TARGET_PATH" ]]; then
-    echo "Error: Path does not exist: $TARGET_PATH" >&2
-    exit 1
-fi
+get_absolute_path() {
+    local target_path="${1:-$(pwd)}"
 
-# Generate temporary HTML file
-TEMP_HTML="/tmp/open_vscode_$(date +%s).html"
+    if [[ ! "$target_path" = /* ]]; then
+        target_path="$(cd "$target_path" 2>/dev/null && pwd)"
+    fi
 
-# Create HTML with vscode-remote URL
-cat > "$TEMP_HTML" << 'EOF'
+    if [[ ! -e "$target_path" ]]; then
+        echo "Error: Path does not exist: $target_path" >&2
+        exit 1
+    fi
+
+    echo "$target_path"
+}
+
+generate_vscode_url() {
+    local target_path="$1"
+    local env_type="$2"
+
+    case "$env_type" in
+        wsl)
+            local wsl_distro="${WSL_DISTRO_NAME:-Ubuntu}"
+            echo "vscode://vscode-remote/wsl+${wsl_distro}${target_path}"
+            ;;
+        windows)
+            echo "vscode://file/${target_path}"
+            ;;
+        *)
+            echo "vscode://file/${target_path}"
+            ;;
+    esac
+}
+
+generate_html() {
+    local vscode_url="$1"
+    local temp_html="/tmp/open_vscode_$(date +%s).html"
+
+    cat > "$temp_html" << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -52,16 +86,39 @@ cat > "$TEMP_HTML" << 'EOF'
 </html>
 EOF
 
-# Replace placeholder with actual vscode-remote URL
-WSL_DISTRO="${WSL_DISTRO_NAME:-Ubuntu}"
-VSCODE_URL="vscode://vscode-remote/wsl+${WSL_DISTRO}${TARGET_PATH}"
-sed -i "s|VSCODE_URL_PLACEHOLDER|${VSCODE_URL}|g" "$TEMP_HTML"
+    sed -i "s|VSCODE_URL_PLACEHOLDER|${vscode_url}|g" "$temp_html"
+    echo "$temp_html"
+}
 
-# Convert to Windows path and open in browser
-windows_path=$(wslpath -w "$TEMP_HTML")
-powershell.exe -Command "Start-Process '$windows_path'"
+open_in_browser() {
+    local temp_html="$1"
+    local env_type="$2"
 
-# Clean up temp file after delay
-(sleep 5 && rm -f "$TEMP_HTML") &
+    case "$env_type" in
+        wsl)
+            local windows_path=$(wslpath -w "$temp_html")
+            powershell.exe -Command "Start-Process '$windows_path'"
+            ;;
+        windows)
+            start "$temp_html"
+            ;;
+        *)
+            xdg-open "$temp_html" 2>/dev/null || open "$temp_html" 2>/dev/null
+            ;;
+    esac
 
-echo "Opening VS Code for: $TARGET_PATH"
+    (sleep 5 && rm -f "$temp_html") &
+}
+
+main() {
+    local env_type=$(check_environment)
+    local target_path=$(get_absolute_path "$1")
+    local vscode_url=$(generate_vscode_url "$target_path" "$env_type")
+    local temp_html=$(generate_html "$vscode_url")
+
+    open_in_browser "$temp_html" "$env_type"
+
+    echo "Opening VS Code for: $target_path"
+}
+
+main "$@"
