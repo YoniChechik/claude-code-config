@@ -38,17 +38,13 @@ Create plan.md with this structure:
 ## TLDR
 [2 lines typical, max 5 for complex features - WHAT and WHY in plain language]
 
-## Summary
-- Single PR or Multi-PR (if multi: state "This requires N PRs: PR1 - scope, PR2 - scope")
-- High-level approach
-- Key dependencies
-
 ## Implementation Phases
 
-### Phase 1: [Name] (Difficulty: Easy/Medium/Hard)
+### Phase X: [Name] 
 **Steps:**
 - Action 1
 - Action 2
+...
 
 **Tests:**
 - What tests are added/modified
@@ -57,9 +53,5 @@ Create plan.md with this structure:
 **Success Criteria:**
 - How we know the feature actually works (not "code compiles" - actual behavior)
 
-### Phase 2: [Name] (Difficulty: Easy/Medium/Hard)
-...
 
-## Risks
-[Technical challenges, potential blockers]
 ```
