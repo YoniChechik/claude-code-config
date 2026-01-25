@@ -12,10 +12,7 @@ gray="\033[38;2;76;79;105m"
 reset="\033[0m"
 
 input=$(cat)
-model=$(echo "$input" | jq -r '.model.display_name')
-dir=$(echo "$input" | jq -r '.workspace.current_dir')
-git_dir=$(echo "$input" | jq -r '.workspace.git_dir // empty')
-remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
+read -r model dir git_dir remaining < <(echo "$input" | jq -r '[.model.display_name, .workspace.current_dir, .workspace.git_dir // "", .context_window.remaining_percentage // ""] | @tsv')
 
 # Add git branch with dirty status if in a git repo
 # Try to detect git repo even if git_dir not provided in JSON
