@@ -1,7 +1,11 @@
 #!/bin/bash
 # Status line command for Claude Code
-# Displays: {model} in {dir} {branch}* | ctx:XX% 
+# Displays: {model} in {dir} {branch}* | ctx:XX%
 # With RGB ANSI colors
+
+set -euo pipefail
+
+trap 'echo "(status error)"' ERR
 
 # ANSI color codes (RGB format: \033[38;2;R;G;Bm)
 blue="\033[38;2;30;102;245m"
@@ -9,14 +13,24 @@ green="\033[38;2;64;160;43m"
 yellow="\033[38;2;223;142;29m"
 magenta="\033[38;2;136;57;239m"
 gray="\033[38;2;76;79;105m"
+red="\033[38;2;214;40;40m"
 reset="\033[0m"
 
 input=$(cat)
-read -r model dir git_dir remaining < <(echo "$input" | jq -r '[.model.display_name, .workspace.current_dir, .workspace.git_dir // "", .context_window.remaining_percentage // ""] | @tsv')
+if ! read -r model dir git_dir remaining < <(echo "$input" | jq -r '[.model.display_name, .workspace.current_dir, .workspace.git_dir // "", .context_window.remaining_percentage // ""] | @tsv' 2>/dev/null); then
+  printf '%b' "${red}(json parse error)${reset}"
+  exit 0
+fi
+
+# Fallback to minimal status if jq parsing gave us nothing
+if [ -z "$model" ] || [ -z "$dir" ]; then
+  printf '%b' "${red}(incomplete status)${reset}"
+  exit 0
+fi
 
 # Add git branch with dirty status if in a git repo
 # Try to detect git repo even if git_dir not provided in JSON
-branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
 if [ -n "$branch" ]; then
   dirty_marker=""
@@ -24,6 +38,9 @@ if [ -n "$branch" ]; then
     dirty_marker="${yellow}*${reset}"
   fi
   git_status="${green}(${branch})${reset}${dirty_marker}"
+elif [ -n "$git_dir" ] || git -C "$dir" rev-parse --git-dir &>/dev/null; then
+  # Git repo exists but branch detection failed
+  git_status="${red}(no git)${reset}"
 fi
 
 # Replace home directory with ~ for display
