@@ -25,25 +25,11 @@ status="${gray}${model}${reset} in ${blue}${dir}${reset}"
 
 # Add git branch with dirty status if in a git repo
 if [ -n "$git_dir" ]; then
-  branch=$(echo "$input" | jq -r '.workspace.git_branch // empty')
-
-  # Fallback: get branch name directly if not provided in input
-  if [ -z "$branch" ]; then
-    branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  fi
+  branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
   if [ -n "$branch" ]; then
-    dirty=$(echo "$input" | jq -r '.workspace.git_dirty // false')
-
-    # Fallback: check dirty status directly if not provided
-    if [ "$dirty" = "false" ] || [ -z "$dirty" ]; then
-      if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
-        dirty="true"
-      fi
-    fi
-
     dirty_marker=""
-    if [ "$dirty" = "true" ]; then
+    if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
       dirty_marker="${yellow}*${reset}"
     fi
     status="${status} ${green}${branch}${reset}${dirty_marker}"
