@@ -1,6 +1,6 @@
 #!/bin/bash
 # Status line command for Claude Code
-# Displays: {model} in {dir} {branch}* | ctx:XX% | todos:N
+# Displays: {model} in {dir} {branch}* | ctx:XX% 
 # With RGB ANSI colors
 
 # ANSI color codes (RGB format: \033[38;2;R;G;Bm)

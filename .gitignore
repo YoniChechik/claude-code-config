@@ -19,7 +19,7 @@ cache/
 telemetry/
 stats-cache.json
 paste-cache/
-
+tasks/
 
 
 # Feature clones

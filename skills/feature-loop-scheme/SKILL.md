@@ -20,10 +20,10 @@ This context will inform the planning phase.
 - **If plan.md doesn't exist** → Create plan using planner subagent with opus model, ask questions if needed
 - **If plan.md exists** → Analyze current progress compared to origin/main, examine plan.md and documentation, identify next steps
 
-### Step 3: Create Todo List
-Create a structured todo list based on the plan or next steps:
+### Step 3: Create Task List
+Create a structured task list based on the plan or next steps:
 - Break down into actionable tasks
-- Use the TodoWrite tool to create the todo list
+- Use the TaskCreate tool to create the task list
 - Each task should be specific and measurable
 - Mark the first task as "in_progress" to begin work
 
