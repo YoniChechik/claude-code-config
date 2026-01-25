@@ -98,7 +98,7 @@ cost.session_source = "auto"
 # Alert users when costs exceed configured thresholds
 # Visual warnings change cost display color when approaching limits
 
-cost.alerts.enabled = false                # Enable cost threshold monitoring
+cost.alerts.enabled = true                 # Enable cost threshold monitoring
 cost.alerts.daily_threshold = 5.00         # Alert if daily cost > $5.00
 cost.alerts.weekly_threshold = 25.00       # Alert if weekly cost > $25.00
 cost.alerts.monthly_threshold = 100.00     # Alert if monthly cost > $100.00
@@ -477,8 +477,8 @@ version_info.show_update_indicator = true  # Show ⬆️ when update available
 # Number of lines to display (1-9) - SHOWCASING ALL 26 ATOMIC COMPONENTS!
 display.lines = 1
 
-# Line 1: Minimal single-line display
-display.line1.components = ["model_info", "repo_info", "context_window", "cost_repo"]
+# Line 1: Minimal single-line display with session and daily costs
+display.line1.components = ["model_info", "repo_info", "context_window", "cost_repo", "cost_daily"]
 display.line1.separator = " | "
 display.line1.show_when_empty = true
 
