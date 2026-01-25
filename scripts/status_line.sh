@@ -26,7 +26,7 @@ if [ -n "$branch" ]; then
   if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
     dirty_marker="${yellow}*${reset}"
   fi
-  git_status="${green}${branch}${reset}${dirty_marker}"
+  git_status="${green}(${branch})${reset}${dirty_marker}"
 fi
 
 # Replace home directory with ~ for display
