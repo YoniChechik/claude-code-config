@@ -17,6 +17,9 @@ dir=$(echo "$input" | jq -r '.workspace.current_dir')
 git_dir=$(echo "$input" | jq -r '.workspace.git_dir // empty')
 remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 
+# Replace home directory with ~
+dir="${dir/#$HOME/\~}"
+
 # Build status line
 status="${gray}${model}${reset} in ${blue}${dir}${reset}"
 
