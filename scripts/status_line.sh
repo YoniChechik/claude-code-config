@@ -17,12 +17,6 @@ dir=$(echo "$input" | jq -r '.workspace.current_dir')
 git_dir=$(echo "$input" | jq -r '.workspace.git_dir // empty')
 remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 
-# Replace home directory with ~
-dir="${dir/#$HOME/\~}"
-
-# Build status line
-status="${gray}${model}${reset} in ${blue}${dir}${reset}"
-
 # Add git branch with dirty status if in a git repo
 if [ -n "$git_dir" ]; then
   branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -32,8 +26,19 @@ if [ -n "$git_dir" ]; then
     if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
       dirty_marker="${yellow}*${reset}"
     fi
-    status="${status} ${green}${branch}${reset}${dirty_marker}"
+    git_status="${green}${branch}${reset}${dirty_marker}"
   fi
+fi
+
+# Replace home directory with ~ for display
+display_dir="${dir/#$HOME/\~}"
+
+# Build status line
+status="${gray}${model}${reset} in ${blue}${display_dir}${reset}"
+
+# Add git status if available
+if [ -n "$git_status" ]; then
+  status="${status} ${git_status}"
 fi
 
 # Add context percentage if available
