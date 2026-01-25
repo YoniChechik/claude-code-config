@@ -17,10 +17,15 @@ red="\033[38;2;214;40;40m"
 reset="\033[0m"
 
 input=$(cat)
-if ! read -r model dir git_dir remaining < <(echo "$input" | jq -r '[.model.display_name, .workspace.current_dir, .workspace.git_dir // "", .context_window.remaining_percentage // ""] | @tsv' 2>/dev/null); then
+if ! mapfile -t fields < <(echo "$input" | jq -r '.model.display_name, .workspace.current_dir, (.workspace.git_dir // ""), (.context_window.remaining_percentage // "")' 2>/dev/null); then
   printf '%b' "${red}(json parse error)${reset}"
   exit 0
 fi
+
+model="${fields[0]}"
+dir="${fields[1]}"
+git_dir="${fields[2]}"
+remaining="${fields[3]}"
 
 # Fallback to minimal status if jq parsing gave us nothing
 if [ -z "$model" ] || [ -z "$dir" ]; then
@@ -30,6 +35,7 @@ fi
 
 # Add git branch with dirty status if in a git repo
 # Try to detect git repo even if git_dir not provided in JSON
+git_status=""
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
 if [ -n "$branch" ]; then
