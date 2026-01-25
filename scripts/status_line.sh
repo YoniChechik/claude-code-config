@@ -18,16 +18,15 @@ git_dir=$(echo "$input" | jq -r '.workspace.git_dir // empty')
 remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 
 # Add git branch with dirty status if in a git repo
-if [ -n "$git_dir" ]; then
-  branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+# Try to detect git repo even if git_dir not provided in JSON
+branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
-  if [ -n "$branch" ]; then
-    dirty_marker=""
-    if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
-      dirty_marker="${yellow}*${reset}"
-    fi
-    git_status="${green}${branch}${reset}${dirty_marker}"
+if [ -n "$branch" ]; then
+  dirty_marker=""
+  if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
+    dirty_marker="${yellow}*${reset}"
   fi
+  git_status="${green}${branch}${reset}${dirty_marker}"
 fi
 
 # Replace home directory with ~ for display
