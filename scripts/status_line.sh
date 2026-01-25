@@ -33,7 +33,7 @@ fi
 display_dir="${dir/#$HOME/\~}"
 
 # Build status line
-status="${gray}${model}${reset} in ${blue}${display_dir}${reset}"
+status="${gray}${model}${reset} | ${blue}${display_dir}${reset}"
 
 # Add git status if available
 if [ -n "$git_status" ]; then
