@@ -42,5 +42,12 @@ if [ -n "$remaining" ] && [ "$remaining" != "null" ]; then
   status="${status} | ${magenta}ctx:${remaining}%${reset}"
 fi
 
+# Add API cost if ccusage is available
+if command -v ccusage &> /dev/null; then
+  cost=$(ccusage --session 2>/dev/null | grep -oP 'Total: \$\K[0-9.]+' || echo "")
+  if [ -n "$cost" ]; then
+    status="${status} | ${yellow}cost:\$${cost}${reset}"
+  fi
+fi
 
 printf '%b' "$status"
