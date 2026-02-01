@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo -e '\\a'"
+            "command": "echo -e '\\\\a'"
           }
         ]
       }
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo -e '\\a'"
+            "command": "echo -e '\\\\a'"
           }
         ]
       }
