@@ -17,8 +17,13 @@ red="\033[38;2;214;40;40m"
 reset="\033[0m"
 
 input=$(cat)
-if ! mapfile -t fields < <(echo "$input" | jq -r '.model.display_name, .workspace.current_dir, (.workspace.git_dir // ""), (.context_window.remaining_percentage // "")' 2>/dev/null); then
-  printf '%b' "${red}(json parse error)${reset}"
+fields=()
+while IFS= read -r line; do
+  fields+=("$line")
+done < <(echo "$input" | jq -r '.model.display_name, .workspace.current_dir, (.workspace.git_dir // ""), (.context_window.remaining_percentage // "")' 2>/dev/null)
+
+if [ $? -ne 0 ] || [ ${#fields[@]} -eq 0 ]; then
+  printf '%b' "${red}(status_line.sh: json parse error)${reset}"
   exit 0
 fi
 
@@ -29,7 +34,7 @@ remaining="${fields[3]}"
 
 # Fallback to minimal status if jq parsing gave us nothing
 if [ -z "$model" ] || [ -z "$dir" ]; then
-  printf '%b' "${red}(incomplete status)${reset}"
+  printf '%b' "${red}(status_line.sh: incomplete status)${reset}"
   exit 0
 fi
 
