@@ -1,6 +1,7 @@
 ---
 name: "todo"
 description: "Parse input and create todo items"
+argument-hint: "[tasks]"
 ---
 
 Parse user input and create todo items.

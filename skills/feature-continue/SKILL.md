@@ -1,6 +1,7 @@
 ---
 name: "feature-continue"
 description: "Resume work on existing feature clone"
+argument-hint: "[feature-description]"
 ---
 
 Continues work on an existing feature clone with proper context analysis.

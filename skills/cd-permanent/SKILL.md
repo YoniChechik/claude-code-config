@@ -1,6 +1,7 @@
 ---
 name: "cd-permanent"
 description: "Change directory permanently within the session (project tree only)"
+argument-hint: "[path]"
 ---
 
 ## Instructions

@@ -1,6 +1,7 @@
 ---
 name: "pr-create"
 description: "Create pull request from feature branch"
+argument-hint: "[title]"
 ---
 
 Creates a professional pull request when a feature is complete and ready for review.

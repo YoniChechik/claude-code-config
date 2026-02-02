@@ -1,6 +1,7 @@
 ---
 name: "feature-new"
 description: "Start new feature with full planning"
+argument-hint: "[feature-description]"
 ---
 
 Creates a new feature branch using git clone for isolated development with full planning.

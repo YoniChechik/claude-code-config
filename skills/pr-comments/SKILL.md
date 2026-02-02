@@ -1,6 +1,7 @@
 ---
 name: "pr-comments"
 description: "Review and triage PR comments interactively"
+argument-hint: "[pr-number]"
 ---
 
 Displays all comments (from users and bots) and test results for a pull request, then helps triage them interactively.
