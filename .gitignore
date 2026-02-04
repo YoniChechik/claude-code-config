@@ -1,4 +1,5 @@
 # Existing local files - added during repo setup
+.env
 .credentials.json
 debug/
 downloads/
