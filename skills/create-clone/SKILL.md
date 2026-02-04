@@ -22,6 +22,9 @@ Creates a git clone for isolated feature development.
 ### Step 2: Create Git Clone
 Set up isolated feature branch from origin/main (unless user stated a different branch)
 ```bash
+# Save original repo directory for later symlink step
+ORIGINAL_REPO_DIR=$(pwd)
+
 # Get the current repo URL
 REPO_URL=$(git config --get remote.origin.url)
 
@@ -48,19 +51,26 @@ git push -u origin $FEATURE_NAME
 ### Step 4: Sync with Main
 Run the sync skill to commit and push.
 
-### Step 5: Setup Environment
+### Step 5: Symlink Environment Files
+Symlink .env* files from the original repo to the clone:
+```bash
+# Symlink .env* files from original repo
+bash ~/.claude/scripts/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/$FEATURE_NAME"
+```
+
+### Step 6: Setup Environment
 Setup development environment:
 ```bash
 # Setup development environment
 bash ~/.claude/scripts/setup_project_env.sh
 ```
 
-### Step 6: Notify User
+### Step 7: Notify User
 Tell user:
 - The clone has been created at `_clones/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` has been published to remote
 
-### Step 7: Change to Feature Directory
+### Step 8: Change to Feature Directory
 Change to the feature clone directory.
 
 **FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
