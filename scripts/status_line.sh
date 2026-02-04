@@ -55,7 +55,7 @@ elif [ -n "$git_dir" ] || git -C "$dir" rev-parse --git-dir &>/dev/null; then
 fi
 
 # Replace home directory with ~ for display
-display_dir="${dir/#$HOME/\~}"
+display_dir="${dir/#$HOME/~}"
 
 # Build status line
 status="${gray}${model}${reset} | ${blue}${display_dir}${reset}"
