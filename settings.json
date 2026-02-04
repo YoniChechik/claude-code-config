@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "afplay /System/Library/Sounds/Glass.aiff"
+            "command": "bash -c 'TYPE=$(cat | jq -r .notification_type); if [ \"$TYPE\" != \"idle_prompt\" ]; then afplay /System/Library/Sounds/Glass.aiff; fi'"
           }
         ]
       }
