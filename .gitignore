@@ -23,6 +23,8 @@ paste-cache/
 tasks/
 
 
+sound_debug.log
+
 # Feature clones
 _clones/
 
