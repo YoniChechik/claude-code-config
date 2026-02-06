@@ -6,7 +6,7 @@
 # CLAUDE.md and rules/*.md are automatically loaded by Claude Code into BOTH
 # the main agent AND all subagents on every prompt. No hook needed for that.
 #
-# However, the orchestration rules (CLAUDE_append_to_user_prompt.md) should
+# However, the orchestration rules (CLAUDE_append_to_user_prompt_main_agent_only.md) should
 # ONLY apply to the main agent, NOT to subagents. The main agent is the
 # orchestrator - it delegates work but doesn't write code itself. Subagents
 # (coder, explorer, etc.) need full freedom to edit files, run code, etc.
@@ -19,4 +19,4 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "**ORCHESTRATION RULES:**"
 echo ""
-cat "$SCRIPT_DIR/../CLAUDE_append_to_user_prompt.md"
+cat "$SCRIPT_DIR/../CLAUDE_append_to_user_prompt_main_agent_only.md"
