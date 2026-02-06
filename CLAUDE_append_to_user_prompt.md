@@ -33,5 +33,3 @@
 
 ## You MUST NOT:
 - Edit or Write any file directly
-
-**GLOBAL SYSTEM PROMPT REMINDER:**
