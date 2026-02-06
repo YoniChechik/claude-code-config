@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# notification_type values found via: strings $(readlink -f $(which claude)) | grep -oE '"[a-z_]+"' | sort -u
 
 TYPE=$(cat | jq -r .notification_type)
 
