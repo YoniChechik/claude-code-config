@@ -42,6 +42,15 @@
             "command": "bash $HOME/.claude/scripts/post_edit_ruff.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
