@@ -208,6 +208,17 @@
             "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/ci_monitor.sh",
+            "async": true,
+            "timeout": 660
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
