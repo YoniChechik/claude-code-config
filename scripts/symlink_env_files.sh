@@ -26,7 +26,8 @@ ENV_FILES=$(find "$SOURCE_DIR" \
     -path "*/venv" -prune -o \
     -path "*/.venv" -prune -o \
     -path "*/__pycache__" -prune -o \
-    -name ".env*" -type f -print 2>/dev/null)
+    -path "*/_clones" -prune -o \
+    -name ".env*" ! -name "*.example" -type f -print 2>/dev/null)
 
 if [ -z "$ENV_FILES" ]; then
     echo "No .env* files found in $SOURCE_DIR"
