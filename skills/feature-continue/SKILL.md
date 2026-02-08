@@ -28,8 +28,10 @@ If not found → Continue to Step 2
 Check if a remote feature branch exists that matches the description:
 ```bash
 git fetch --prune
-git branch -a | grep "remotes/origin/feature"
+git branch -r
 ```
+
+Review the list of remote branches and match one to the user's feature description.
 
 If found → Continue to Step 3
 If not found → Exit with error message:
@@ -40,11 +42,13 @@ If not found → Exit with error message:
 ### Step 3: Clone from Remote
 Create the local clone from the remote branch:
 ```bash
+ORIGINAL_REPO_DIR=$(pwd)
 REPO_URL=$(git config --get remote.origin.url)
 mkdir -p _clones
 git clone -b FEATURE_BRANCH_NAME "$REPO_URL" _clones/FEATURE_BRANCH_NAME
 
-# Setup development environment
+# Symlink env files and setup development environment
+bash ~/.claude/scripts/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/FEATURE_BRANCH_NAME"
 cd _clones/FEATURE_BRANCH_NAME
 bash ~/.claude/scripts/setup_project_env.sh
 ```
@@ -57,7 +61,7 @@ cd _clones/FEATURE_NAME
 ```
 
 ### Step 5: Sync with Main
-Run the sync skill to commit and push.
+Run `/sync` to commit and push.
 
 ### Step 6: Run Feature Loop
-Run the feature-loop-scheme skill to execute the full development workflow.
+Run `/feature-loop-scheme` to execute the full development workflow.
