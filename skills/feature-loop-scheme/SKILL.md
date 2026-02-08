@@ -17,8 +17,15 @@ Use the explorer subagent to gather context about the codebase relevant to the f
 This context will inform the planning phase.
 
 ### Step 2: Plan or Analyze
-- **If plan.md doesn't exist** → Create plan using planner subagent with opus model, ask questions if needed
-- **If plan.md exists** → Analyze current progress compared to origin/main, examine plan.md and documentation, identify next steps
+Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
+- **If plan_$FEATURE_NAME.md doesn't exist** → Create plan using planner subagent with opus model, ask questions if needed
+- **If plan_$FEATURE_NAME.md exists** → Analyze current progress compared to origin/main, examine plan_$FEATURE_NAME.md and documentation, identify next steps
+
+### Step 2.5: Commit Plan (if just created)
+If plan was just created in Step 2, commit and push it immediately so it survives session crashes:
+```bash
+git add plan_$FEATURE_NAME.md && git commit -m 'Add feature plan' && git push
+```
 
 ### Step 3: Create Task List
 Create a structured task list based on the plan or next steps:

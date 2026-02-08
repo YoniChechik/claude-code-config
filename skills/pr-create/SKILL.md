@@ -17,12 +17,12 @@ Creates a professional pull request when a feature is complete and ready for rev
 git log origin/main..HEAD --oneline
 git diff origin/main...HEAD --stat
 ```
-- Erase `plan.md` and any other dev/workflow related files and commit. If not sure, ask user for directions.
+- Erase `plan_*.md` and any other dev/workflow related files and commit. If not sure, ask user for directions.
 
 ### Step 2: Generate PR Title and Body
 Create professional PR content:
 
-**Title Format**: `Feature: [Descriptive title based on plan.md and commits]`
+**Title Format**: `Feature: [Descriptive title based on plan_*.md and commits]`
 
 **Body Structure**:
 ```markdown
