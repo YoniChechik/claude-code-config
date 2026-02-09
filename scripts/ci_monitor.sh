@@ -39,10 +39,9 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
         else
             echo "fail|$TIMESTAMP" > "$CACHE_FILE"
             FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name')
-            echo "CI failed on branch '$BRANCH' (workflow: $WORKFLOW_NAME)" >&2
-            echo "Failed jobs:" >&2
-            echo "$FAILED_JOBS" >&2
-            echo "View logs: gh run view $RUN_ID --log-failed" >&2
+            echo "ACTION REQUIRED: CI failed on branch '$BRANCH' (workflow: $WORKFLOW_NAME)." >&2
+            echo "Failed jobs: $FAILED_JOBS" >&2
+            echo "You MUST fix this now: run 'gh run view $RUN_ID --log-failed' to get the logs, then use debugger-agent to fix the issue, commit, and push." >&2
             exit 1
         fi
     fi
@@ -53,5 +52,5 @@ done
 
 TIMESTAMP=$(date +%s)
 echo "fail|$TIMESTAMP" > "$CACHE_FILE"
-echo "CI monitoring timed out after 10 minutes on branch '$BRANCH'" >&2
+echo "CI monitoring timed out after 10 minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH --limit 1'." >&2
 exit 1

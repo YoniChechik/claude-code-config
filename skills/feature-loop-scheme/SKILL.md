@@ -41,18 +41,6 @@ Create a structured task list based on the plan or next steps:
 ### Step 5: Quality
 Run quality skill to fix code style, types, and remove AI slop.
 
-### Step 5.5: CI Check & Auto-Fix
-Wait for GitHub Actions CI to complete and fix failures if needed:
-
-1. Run `gh run watch --branch $(git rev-parse --abbrev-ref HEAD) --exit-status` in the background using Bash with run_in_background=true
-2. While CI runs, check TaskOutput periodically (every 30 seconds)
-3. **If CI passes** → Continue to Step 6
-4. **If CI fails** (max 2 retry attempts):
-   - Fetch failure logs: `gh run view <run-id> --log-failed`
-   - Launch debugger-agent to analyze logs and fix the issue
-   - After fix: commit, push, and re-run this step
-5. **If CI not configured or no workflows found** → Skip and continue to Step 6
-
 ### Step 6: Review
 Use Task tool with subagent_type="reviewer-agent" for final code review and validation.
 
