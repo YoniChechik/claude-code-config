@@ -16,6 +16,7 @@ CACHE_FILE="$CACHE_DIR/$BRANCH"
 
 sleep 5
 
+FOUND_RUN=false
 MAX_ITERATIONS=40
 for ((i = 0; i < MAX_ITERATIONS; i++)); do
     RUN_JSON=$(gh run list --branch "$BRANCH" --limit 1 --json databaseId,status,conclusion,name)
@@ -29,6 +30,8 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
         sleep 15
         continue
     fi
+
+    FOUND_RUN=true
 
     TIMESTAMP=$(date +%s)
 
@@ -49,6 +52,11 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
     echo "running|$TIMESTAMP" > "$CACHE_FILE"
     sleep 15
 done
+
+if [ "$FOUND_RUN" = false ]; then
+    # No CI workflows found for this branch - exit silently
+    exit 0
+fi
 
 TIMESTAMP=$(date +%s)
 echo "fail|$TIMESTAMP" > "$CACHE_FILE"
