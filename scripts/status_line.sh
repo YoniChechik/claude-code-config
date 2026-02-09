@@ -65,7 +65,7 @@ if [ -n "$branch" ] && [ -f "$ci_cache_file" ]; then
     case "$ci_state" in
       pass)    ci_status="${green}CI:ok${reset}" ;;
       fail)    ci_status="${red}CI:fail${reset}" ;;
-      running) ci_status="${yellow}CI:...${reset}" ;;
+      running) ci_status="${yellow}CI:running${reset}" ;;
     esac
   fi
 fi
