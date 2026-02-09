@@ -10,7 +10,9 @@ if [[ "$COMMAND" != *"git push"* ]] && [[ "$COMMAND" != *"gh pr create"* ]]; the
 fi
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-CACHE_FILE="$HOME/.claude/ci_status_cache"
+CACHE_DIR="$HOME/.claude/ci_status_cache"
+mkdir -p "$CACHE_DIR"
+CACHE_FILE="$CACHE_DIR/$BRANCH"
 
 sleep 5
 
@@ -32,10 +34,10 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
 
     if [ "$STATUS" = "completed" ]; then
         if [ "$CONCLUSION" = "success" ]; then
-            echo "pass|$BRANCH|$TIMESTAMP" > "$CACHE_FILE"
+            echo "pass|$TIMESTAMP" > "$CACHE_FILE"
             exit 0
         else
-            echo "fail|$BRANCH|$TIMESTAMP" > "$CACHE_FILE"
+            echo "fail|$TIMESTAMP" > "$CACHE_FILE"
             FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name')
             echo "CI failed on branch '$BRANCH' (workflow: $WORKFLOW_NAME)" >&2
             echo "Failed jobs:" >&2
@@ -45,11 +47,11 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
         fi
     fi
 
-    echo "running|$BRANCH|$TIMESTAMP" > "$CACHE_FILE"
+    echo "running|$TIMESTAMP" > "$CACHE_FILE"
     sleep 15
 done
 
 TIMESTAMP=$(date +%s)
-echo "fail|$BRANCH|$TIMESTAMP" > "$CACHE_FILE"
+echo "fail|$TIMESTAMP" > "$CACHE_FILE"
 echo "CI monitoring timed out after 10 minutes on branch '$BRANCH'" >&2
 exit 1

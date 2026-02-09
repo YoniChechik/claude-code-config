@@ -56,19 +56,17 @@ fi
 
 # CI status from cache
 ci_status=""
-ci_cache="$HOME/.claude/ci_status_cache"
-if [ -n "$branch" ] && [ -f "$ci_cache" ]; then
-  IFS='|' read -r ci_state ci_branch ci_ts < "$ci_cache"
-  if [ "$ci_branch" = "$branch" ]; then
-    now=$(date +%s)
-    age=$(( now - ci_ts ))
-    if [ "$age" -lt 1800 ]; then
-      case "$ci_state" in
-        pass)    ci_status="${green}CI:ok${reset}" ;;
-        fail)    ci_status="${red}CI:fail${reset}" ;;
-        running) ci_status="${yellow}CI:...${reset}" ;;
-      esac
-    fi
+ci_cache_file="$HOME/.claude/ci_status_cache/$branch"
+if [ -n "$branch" ] && [ -f "$ci_cache_file" ]; then
+  IFS='|' read -r ci_state ci_ts < "$ci_cache_file"
+  now=$(date +%s)
+  age=$(( now - ci_ts ))
+  if [ "$age" -lt 1800 ]; then
+    case "$ci_state" in
+      pass)    ci_status="${green}CI:ok${reset}" ;;
+      fail)    ci_status="${red}CI:fail${reset}" ;;
+      running) ci_status="${yellow}CI:...${reset}" ;;
+    esac
   fi
 fi
 
