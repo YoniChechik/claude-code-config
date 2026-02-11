@@ -214,9 +214,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/ci_monitor.sh",
-            "async": true,
-            "timeout": 660
+            "command": "bash $HOME/.claude/scripts/ci_post_push_hook.sh"
           }
         ]
       }

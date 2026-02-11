@@ -54,22 +54,6 @@ elif [ -n "$git_dir" ] || git -C "$dir" rev-parse --git-dir &>/dev/null; then
   git_status="${red}(no git)${reset}"
 fi
 
-# CI status from cache
-ci_status=""
-ci_cache_file="$HOME/.claude/ci_status_cache/$branch"
-if [ -n "$branch" ] && [ -f "$ci_cache_file" ]; then
-  IFS='|' read -r ci_state ci_ts < "$ci_cache_file"
-  now=$(date +%s)
-  age=$(( now - ci_ts ))
-  if [ "$age" -lt 1800 ]; then
-    case "$ci_state" in
-      pass)    ci_status="${green}CI:ok${reset}" ;;
-      fail)    ci_status="${red}CI:fail${reset}" ;;
-      running) ci_status="${yellow}CI:running${reset}" ;;
-    esac
-  fi
-fi
-
 # Replace home directory with ~ for display
 display_dir="${dir/#$HOME/~}"
 
@@ -79,10 +63,6 @@ status="${gray}${model}${reset} | ${blue}${display_dir}${reset}"
 # Add git status if available
 if [ -n "$git_status" ]; then
   status="${status} ${git_status}"
-fi
-
-if [ -n "$ci_status" ]; then
-  status="${status} | ${ci_status}"
 fi
 
 # Add context percentage if available
