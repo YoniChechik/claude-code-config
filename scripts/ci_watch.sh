@@ -50,7 +50,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
 
     # Check for any completed failures — exit immediately on first fail
-    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion != "success")]')
+    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
     if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
         break
     fi
