@@ -168,6 +168,15 @@
             "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh"
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/validate_env.sh"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -233,5 +242,6 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
-  }
+  },
+  "skipDangerousModePermissionPrompt": true
 }

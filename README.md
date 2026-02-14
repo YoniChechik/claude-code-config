@@ -23,24 +23,9 @@ This approach "git-enables" your existing Claude Code config directory instead o
 
 This makes your config trackable and syncable across machines while keeping Claude Code running smoothly.
 
-## Quick Start Alias
-
-Add shortcuts to run Claude with config checks:
+### Optional: Short alias
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-alias cc="$HOME/.claude/bin/cc.sh"
+alias cc="claude"
 ```
-
-Or add to PATH:
-```bash
-export PATH="$HOME/.claude/bin:$PATH"
-```
-
-### Available Scripts
-
-- **`cc.sh`** - Core Claude Code wrapper with configuration checks:
-  - Verifies `~/.claude` is a git repository
-  - Checks that your config is up-to-date with `origin/main`
-  - Shows helpful error messages if updates are needed
-  - Passes all arguments through to claude (e.g., `cc -p "hello"` runs `claude -p "hello"`)
