@@ -4,7 +4,7 @@ description: "Create isolated git clone for feature"
 argument-hint: "[feature-description]"
 ---
 
-Creates a git clone for isolated feature development.
+Creates a git clone for isolated feature development. Handles both new features and existing remote branches.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -17,58 +17,55 @@ Creates a git clone for isolated feature development.
 ### Step 1: Parse Feature Description
 - Decide on feature name based on description
 - Convert feature name to kebab-case for branch naming
-- Validate description is sufficient for planning
 
-### Step 2: Create Git Clone
-Set up isolated feature branch from origin/main (unless user stated a different branch)
+### Step 2: Check for Existing Remote Branch
 ```bash
-# Save original repo directory for later symlink step
-ORIGINAL_REPO_DIR=$(pwd)
-
-# Get the current repo URL
-REPO_URL=$(git config --get remote.origin.url)
-
-# Create _clones directory if it doesn't exist
-mkdir -p _clones
-
-# Create clone in _clones subdirectory with branch name as folder
-git clone -b main "$REPO_URL" _clones/$FEATURE_NAME
-
-# Move to new clone directory
-cd _clones/$FEATURE_NAME
-
-# Create and checkout the feature branch
-git checkout -b $FEATURE_NAME
+git fetch --prune
+git branch -r | grep "$FEATURE_NAME" || true
 ```
 
-### Step 3: Publish Branch to Remote
-Push the empty branch to remote to establish tracking:
+- If a matching remote branch exists → **Existing branch mode**
+- If no match → **New branch mode**
+
+### Step 3: Create Git Clone
+
 ```bash
-# Push the branch to remote and set upstream
+ORIGINAL_REPO_DIR=$(pwd)
+REPO_URL=$(git config --get remote.origin.url)
+mkdir -p _clones
+```
+
+**New branch mode:**
+```bash
+git clone -b main "$REPO_URL" _clones/$FEATURE_NAME
+cd _clones/$FEATURE_NAME
+git checkout -b $FEATURE_NAME
 git push -u origin $FEATURE_NAME
+```
+
+**Existing branch mode:**
+```bash
+git clone -b $FEATURE_NAME "$REPO_URL" _clones/$FEATURE_NAME
+cd _clones/$FEATURE_NAME
 ```
 
 ### Step 4: Sync with Main
 Run the sync skill to commit and push.
 
 ### Step 5: Symlink Environment Files
-Symlink .env* files from the original repo to the clone:
 ```bash
-# Symlink .env* files from original repo
 bash ~/.claude/skills/create-clone/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/$FEATURE_NAME"
 ```
 
 ### Step 6: Setup Environment
-Setup development environment:
 ```bash
-# Setup development environment
 bash ~/.claude/skills/create-clone/setup_project_env.sh
 ```
 
 ### Step 7: Notify User
 Tell user:
 - The clone has been created at `_clones/$FEATURE_NAME`
-- The branch `$FEATURE_NAME` has been published to remote
+- The branch `$FEATURE_NAME` is tracking remote
 
 ### Step 8: Change to Feature Directory
 Change to the feature clone directory.
