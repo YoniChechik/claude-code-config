@@ -1,56 +1,54 @@
 #!/usr/bin/env bash
+# Polls GitHub Actions CI status after a push and reports results to Claude.
+# Triggered as a background task by ci_post_push_hook.sh.
+# Output (echo) is what Claude sees when checking on the task.
+# Exit code: 0 = CI passed or no workflows, 1 = CI failed or timed out.
 set -euo pipefail
 
 BRANCH="${1:?Usage: ci_watch.sh <branch>}"
 
+# Wait for GitHub to register the push and trigger workflows
 sleep 5
 
-FOUND_RUN=false
 LATEST_SHA=""
-MAX_ITERATIONS=40
+MAX_ITERATIONS=40  # 40 * 15s = ~10 minutes max
+
 for ((i = 0; i < MAX_ITERATIONS; i++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --limit 10 --json databaseId,status,conclusion,name,headSha)
 
-    RUN_COUNT=$(echo "$RUNS_JSON" | jq 'length')
-    if [ "$RUN_COUNT" = "0" ]; then
+    # No workflows yet — keep waiting
+    if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep 15
         continue
     fi
 
-    # On first detection, lock onto the latest headSha
+    # Lock onto the SHA from the first detected run (= the push that triggered us)
     if [ -z "$LATEST_SHA" ]; then
         LATEST_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     fi
 
-    # Filter to only runs matching the latest push's SHA
+    # Only look at runs for our specific push
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
-
-    SHA_RUN_COUNT=$(echo "$SHA_RUNS" | jq 'length')
-    if [ "$SHA_RUN_COUNT" = "0" ]; then
+    if [ "$(echo "$SHA_RUNS" | jq 'length')" = "0" ]; then
         sleep 15
         continue
     fi
 
-    FOUND_RUN=true
-
-    # Check how many are still in progress
-    PENDING_COUNT=$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')
-
-    if [ "$PENDING_COUNT" -gt 0 ]; then
+    # Still running — keep polling
+    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -gt 0 ]; then
         sleep 15
         continue
     fi
 
-    # All runs completed - check conclusions
+    # All runs completed — check for failures
     FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.conclusion != "success")]')
-    FAILED_COUNT=$(echo "$FAILED_RUNS" | jq 'length')
 
-    if [ "$FAILED_COUNT" -eq 0 ]; then
+    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -eq 0 ]; then
         echo "CI passed on branch '$BRANCH'. All workflows green."
         exit 0
     fi
 
-    # At least one workflow failed
+    # Collect failure details for Claude's error message
     FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
     FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
 
@@ -72,10 +70,6 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
     exit 1
 done
 
-if [ "$FOUND_RUN" = false ]; then
-    echo "No CI workflows found for branch '$BRANCH'."
-    exit 0
-fi
-
+# Loop exhausted without resolving
 echo "CI monitoring timed out after 10 minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
 exit 1
