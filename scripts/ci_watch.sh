@@ -7,7 +7,7 @@ set -euo pipefail
 
 BRANCH="${1:?Usage: ci_watch.sh <branch>}"
 
-# Quick check: if repo has no CI runs at all, exit immediately
+# If repo has never had a CI run, there's no CI configured — exit immediately
 if [ "$(gh run list --limit 1 --json databaseId | jq 'length')" = "0" ]; then
     echo "No CI workflows configured."
     exit 0
