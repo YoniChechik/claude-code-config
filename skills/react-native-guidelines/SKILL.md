@@ -1,3 +1,7 @@
+---
+description: "Conventions and patterns for React Native/Expo mobile development including component structure, styling with NativeWind, hooks, testing, and Storybook"
+---
+
 # React Native Component Guidelines
 
 This skill provides conventions for React Native/Expo mobile development.
