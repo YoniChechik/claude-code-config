@@ -23,7 +23,7 @@ MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 LATEST_SHA=""
 
 for ((i = 0; i < MAX_ITERATIONS; i++)); do
-    RUNS_JSON=$(gh run list --branch "$BRANCH" --limit 10 --json databaseId,status,conclusion,name,headSha)
+    RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
     # No workflows yet — keep waiting
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
