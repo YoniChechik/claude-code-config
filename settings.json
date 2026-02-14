@@ -223,7 +223,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/ci.sh"
+            "command": "bash $HOME/.claude/scripts/ci_post_push_hook.sh"
           }
         ]
       }

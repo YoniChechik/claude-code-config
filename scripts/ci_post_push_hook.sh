@@ -21,7 +21,7 @@ hook() {
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "You just pushed to branch '$BRANCH'. Run a background CI watch task now: use Bash with run_in_background=true to execute '$HOME/.claude/scripts/ci.sh watch $BRANCH'. Continue your current work while it runs."
+    "additionalContext": "You just pushed to branch '$BRANCH'. Run a background CI watch task now: use Bash with run_in_background=true to execute '$HOME/.claude/scripts/ci_post_push_hook.sh watch $BRANCH'. Continue your current work while it runs."
   }
 }
 HOOK_EOF
