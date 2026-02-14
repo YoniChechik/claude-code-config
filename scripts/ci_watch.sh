@@ -23,41 +23,49 @@ MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 LATEST_SHA=""
 
 for ((i = 0; i < MAX_ITERATIONS; i++)); do
+    # Fetch all workflow runs for this branch (each workflow = separate run, e.g. "lint", "test", "build")
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
-    # No workflows yet — keep waiting
+    # GitHub may not have registered the push yet — no runs exist at all for this branch
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep $POLL_INTERVAL
         continue
     fi
 
-    # Lock onto the SHA from the first detected run (= the push that triggered us)
+    # On first detection, save the SHA of the most recent run.
+    # This "locks" us to the specific push we're monitoring, so subsequent pushes
+    # by other branches or force-pushes don't confuse the watcher.
     if [ -z "$LATEST_SHA" ]; then
         LATEST_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     fi
 
-    # Only look at runs for our specific push
+    # Filter to only runs matching our locked SHA.
+    # A branch can have runs from older pushes — we only care about the current one.
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
     if [ "$(echo "$SHA_RUNS" | jq 'length')" = "0" ]; then
         sleep $POLL_INTERVAL
         continue
     fi
 
-    # Still running — keep polling
+    # Some workflows still running (status: queued/in_progress) — wait for all to finish
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -gt 0 ]; then
         sleep $POLL_INTERVAL
         continue
     fi
 
-    # All runs completed — check for failures
+    # === All runs completed — evaluate results ===
+
     FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.conclusion != "success")]')
 
+    # All green
     if [ "$(echo "$FAILED_RUNS" | jq 'length')" -eq 0 ]; then
         echo "CI passed on branch '$BRANCH'. All workflows green."
         exit 0
     fi
 
-    # Collect failure details for Claude's error message
+    # At least one workflow failed — collect details for Claude's error message.
+    # For each failed workflow run, fetch its individual failed job names
+    # (a workflow can have multiple jobs, we want the specific ones that failed).
     FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
     FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
 
@@ -69,6 +77,7 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
         fi
     done <<< "$FAILED_IDS"
 
+    # Build the error message with workflow names, failed job names, and a command to view logs
     FIRST_FAILED_ID=$(echo "$FAILED_RUNS" | jq -r '.[0].databaseId')
     MSG="CI failed on branch '$BRANCH' (workflows: $FAILED_NAMES)."
     if [ -n "$ALL_FAILED_JOBS" ]; then
