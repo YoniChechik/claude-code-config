@@ -55,14 +55,14 @@ Run the sync skill to commit and push.
 Symlink .env* files from the original repo to the clone:
 ```bash
 # Symlink .env* files from original repo
-bash ~/.claude/scripts/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/$FEATURE_NAME"
+bash ~/.claude/skills/create-clone/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/$FEATURE_NAME"
 ```
 
 ### Step 6: Setup Environment
 Setup development environment:
 ```bash
 # Setup development environment
-bash ~/.claude/scripts/setup_project_env.sh
+bash ~/.claude/skills/create-clone/setup_project_env.sh
 ```
 
 ### Step 7: Notify User

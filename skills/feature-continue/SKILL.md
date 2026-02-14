@@ -48,9 +48,9 @@ mkdir -p _clones
 git clone -b FEATURE_BRANCH_NAME "$REPO_URL" _clones/FEATURE_BRANCH_NAME
 
 # Symlink env files and setup development environment
-bash ~/.claude/scripts/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/FEATURE_BRANCH_NAME"
+bash ~/.claude/skills/feature-continue/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/FEATURE_BRANCH_NAME"
 cd _clones/FEATURE_BRANCH_NAME
-bash ~/.claude/scripts/setup_project_env.sh
+bash ~/.claude/skills/feature-continue/setup_project_env.sh
 ```
 
 After cloning → Continue to Step 4
