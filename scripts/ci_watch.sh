@@ -24,7 +24,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
     # GitHub may not have registered the push yet — no runs exist for this branch.
-    # After 15s with no runs, assume no CI is configured for this branch and exit.
+    # After x iters with no runs, assume no CI is configured for this branch and exit.
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         if [ "$num_iter" -ge 3 ]; then
             echo "No CI workflows found for branch '$BRANCH'."
@@ -49,23 +49,26 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     # Filter to only runs matching our SHA (ignore older runs from previous pushes)
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
 
-    # Some workflows still running (status: queued/in_progress) — wait for all to finish
-    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -gt 0 ]; then
-        sleep $POLL_INTERVAL
-        continue
+    # Check for any completed failures — exit immediately on first fail
+    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion != "success")]')
+    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
+        break
     fi
 
-    # === All runs completed — evaluate results ===
-
-    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.conclusion != "success")]')
-
-    # All green
-    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -eq 0 ]; then
+    # All completed and all green
+    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
         echo "CI passed on branch '$BRANCH'. All workflows green."
         exit 0
     fi
 
-    # At least one workflow failed — collect details for Claude's error message.
+    # Some workflows still running, no failures yet — keep polling
+    sleep $POLL_INTERVAL
+    continue
+
+done
+
+# === Failure detected — collect details for Claude's error message ===
+if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
     # For each failed workflow run, fetch its individual failed job names
     # (a workflow can have multiple jobs, we want the specific ones that failed).
     FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
@@ -79,7 +82,6 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         fi
     done <<< "$FAILED_IDS"
 
-    # Build the error message with workflow names, failed job names, and a command to view logs
     FIRST_FAILED_ID=$(echo "$FAILED_RUNS" | jq -r '.[0].databaseId')
     MSG="CI failed on branch '$BRANCH' (workflows: $FAILED_NAMES)."
     if [ -n "$ALL_FAILED_JOBS" ]; then
@@ -88,7 +90,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     MSG="${MSG} You MUST fix this now: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, then use debugger-agent to fix the issue, commit, and push."
     echo "$MSG"
     exit 1
-done
+fi
 
 # Loop exhausted without resolving
 echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
