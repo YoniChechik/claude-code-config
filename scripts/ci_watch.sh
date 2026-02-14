@@ -34,20 +34,20 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         continue
     fi
 
-    # On first detection, save the SHA of the most recent run.
-    # This "locks" us to the specific push we're monitoring, so subsequent pushes
-    # by other branches or force-pushes don't confuse the watcher.
+    # On first detection, lock onto this SHA (= the push that triggered us)
     if [ -z "$LATEST_SHA" ]; then
         LATEST_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     fi
 
-    # Filter to only runs matching our locked SHA.
-    # A branch can have runs from older pushes — we only care about the current one.
-    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
-    if [ "$(echo "$SHA_RUNS" | jq 'length')" = "0" ]; then
-        sleep $POLL_INTERVAL
-        continue
+    # If a newer push happened, a new watcher will handle it — exit this one
+    CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
+    if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
+        echo "Newer push detected on branch '$BRANCH'. Exiting — new watcher will handle it."
+        exit 0
     fi
+
+    # Filter to only runs matching our SHA (ignore older runs from previous pushes)
+    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
 
     # Some workflows still running (status: queued/in_progress) — wait for all to finish
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -gt 0 ]; then
