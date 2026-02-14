@@ -2,6 +2,12 @@
 
 CLAUDE_DIR="$HOME/.claude"
 
+# Check jq is installed (required by hooks)
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is not installed. Run: brew install jq" >&2
+    exit 1
+fi
+
 # Check Claude directory exists
 if [ ! -d "$CLAUDE_DIR" ]; then
     echo "Error: Claude config directory does not exist at $CLAUDE_DIR" >&2
