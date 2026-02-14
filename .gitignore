@@ -21,9 +21,8 @@ telemetry/
 stats-cache.json
 paste-cache/
 tasks/
+image-cache/
 
-
-sound_debug.log
 
 # Feature clones
 _clones/
