@@ -10,15 +10,18 @@ BRANCH="${1:?Usage: ci_watch.sh <branch>}"
 # Wait for GitHub to register the push and trigger workflows
 sleep 5
 
+POLL_INTERVAL=15
+MAX_TIMEOUT=600
+MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
+
 LATEST_SHA=""
-MAX_ITERATIONS=40  # 40 * 15s = ~10 minutes max
 
 for ((i = 0; i < MAX_ITERATIONS; i++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --limit 10 --json databaseId,status,conclusion,name,headSha)
 
     # No workflows yet — keep waiting
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
-        sleep 15
+        sleep $POLL_INTERVAL
         continue
     fi
 
@@ -30,13 +33,13 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
     # Only look at runs for our specific push
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
     if [ "$(echo "$SHA_RUNS" | jq 'length')" = "0" ]; then
-        sleep 15
+        sleep $POLL_INTERVAL
         continue
     fi
 
     # Still running — keep polling
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -gt 0 ]; then
-        sleep 15
+        sleep $POLL_INTERVAL
         continue
     fi
 
@@ -71,5 +74,5 @@ for ((i = 0; i < MAX_ITERATIONS; i++)); do
 done
 
 # Loop exhausted without resolving
-echo "CI monitoring timed out after 10 minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
+echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
 exit 1
