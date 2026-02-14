@@ -19,14 +19,14 @@ MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 
 LATEST_SHA=""
 
-for ((i = 0; i < MAX_ITERATIONS; i++)); do
+for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     # Fetch all workflow runs for this branch (each workflow = separate run, e.g. "lint", "test", "build")
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
     # GitHub may not have registered the push yet — no runs exist for this branch.
     # After 15s with no runs, assume no CI is configured for this branch and exit.
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
-        if [ "$i" -ge 3 ]; then
+        if [ "$num_iter" -ge 3 ]; then
             echo "No CI workflows found for branch '$BRANCH'."
             exit 0
         fi
