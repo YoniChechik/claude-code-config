@@ -7,12 +7,6 @@ set -euo pipefail
 
 BRANCH="${1:?Usage: ci_watch.sh <branch>}"
 
-# If repo has never had a CI run, there's no CI configured — exit immediately
-if [ "$(gh run list --limit 1 --json databaseId | jq 'length')" = "0" ]; then
-    echo "No CI workflows configured."
-    exit 0
-fi
-
 POLL_INTERVAL=5
 MAX_TIMEOUT=600
 MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
