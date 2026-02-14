@@ -11,7 +11,7 @@ Format and auto-fix linting and type issues on changed Python files.
 
 1. Run the quality check script with fix mode:
 ```bash
-~/.claude/scripts/quality_check.sh --fix
+~/.claude/skills/quality/quality_check.sh --fix
 ```
 
 2. If errors remain, read files and fix manually:
@@ -21,7 +21,7 @@ Format and auto-fix linting and type issues on changed Python files.
 
 3. Re-run script without --fix to verify:
 ```bash
-~/.claude/scripts/quality_check.sh
+~/.claude/skills/quality/quality_check.sh
 ```
 
 Report what was fixed.
