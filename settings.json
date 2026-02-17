@@ -165,7 +165,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh"
+            "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       },
@@ -174,7 +176,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/validate_env.sh"
+            "command": "bash $HOME/.claude/scripts/validate_env.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       },
