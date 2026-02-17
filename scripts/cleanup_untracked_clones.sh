@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cleanup clones and local branches whose remote tracking branches have been deleted.
-# Outputs a JSON systemMessage summarizing what happened.
+# Prints colored summary for the user.
 
 # Not in a git repo — exit silently
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -8,7 +8,7 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 git_root=$(git rev-parse --show-toplevel 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$git_root" ]; then
+if [[ $? -ne 0 ]] || [[ -z "$git_root" ]]; then
     exit 0
 fi
 
@@ -19,7 +19,6 @@ clones_dir="${git_root}/_clones"
 
 # Track results
 removed_clones=()
-removed_clone_reasons=()
 existing_clones=()
 removed_branches=()
 
@@ -46,8 +45,7 @@ if [[ -d "$clones_dir" ]]; then
 
         # Remote branch is gone — remove the clone
         if rm -rf "$clone_dir" 2>/dev/null; then
-            removed_clones+=("$dir_name")
-            removed_clone_reasons+=("remote branch '$branch' deleted")
+            removed_clones+=("$dir_name (remote deleted)")
         fi
     done
 fi
@@ -66,38 +64,35 @@ while read -r line; do
     fi
 done < <(git branch -vv)
 
-# --- Build systemMessage ---
+# --- Print colored output ---
 has_existing=${#existing_clones[@]}
 has_removed_clones=${#removed_clones[@]}
 has_removed_branches=${#removed_branches[@]}
 
-# Nothing interesting — exit silently
+# Nothing to report — exit silently
 if [[ $has_existing -eq 0 && $has_removed_clones -eq 0 && $has_removed_branches -eq 0 ]]; then
     exit 0
 fi
 
-msg="Git cleanup results for ${git_root}:"
+CYAN='\033[36m'
+BOLD_CYAN='\033[1;36m'
+RESET='\033[0m'
+SEP="════════════════════════════════════════"
 
-if [[ $has_existing -gt 0 ]]; then
-    msg+="\n\nExisting clones in _clones/:"
-    for c in "${existing_clones[@]}"; do
-        msg+="\n- $c"
-    done
-fi
+printf "${CYAN}${SEP}${RESET}\n"
+printf "${BOLD_CYAN}  Clone Cleanup${RESET}\n"
 
-if [[ $has_removed_clones -gt 0 ]]; then
-    msg+="\n\nRemoved clones:"
-    for i in "${!removed_clones[@]}"; do
-        msg+="\n- ${removed_clones[$i]} (${removed_clone_reasons[$i]})"
-    done
-fi
+for c in "${existing_clones[@]}"; do
+    printf "  Existing: %s\n" "$c"
+done
 
-if [[ $has_removed_branches -gt 0 ]]; then
-    msg+="\n\nRemoved local branches (remote gone):"
-    for b in "${removed_branches[@]}"; do
-        msg+="\n- $b"
-    done
-fi
+for c in "${removed_clones[@]}"; do
+    printf "  Removed clone: %s\n" "$c"
+done
 
-jq -n --arg msg "$msg" '{"systemMessage": $msg}'
+for b in "${removed_branches[@]}"; do
+    printf "  Removed branch: %s\n" "$b"
+done
+
+printf "${CYAN}${SEP}${RESET}\n"
 exit 0

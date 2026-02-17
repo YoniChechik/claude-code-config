@@ -164,9 +164,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh",
-            "async": true,
-            "timeout": 30
+            "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh"
           }
         ]
       },
@@ -175,9 +173,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/validate_env.sh",
-            "async": true,
-            "timeout": 30
+            "command": "bash $HOME/.claude/scripts/validate_env.sh"
           }
         ]
       },
@@ -186,9 +182,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/git_sync_on_start.sh",
-            "async": true,
-            "timeout": 30
+            "command": "bash $HOME/.claude/scripts/git_sync_on_start.sh"
           }
         ]
       }

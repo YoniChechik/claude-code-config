@@ -3,4 +3,26 @@
 state=$(bash "$HOME/.claude/scripts/git_branch_state.sh")
 [ -z "$state" ] && exit 0
 
-jq -n --arg msg "Git branch state: $state. Tell user current branch state and suggest running /sync if behind main or diverged." '{"systemMessage": $msg}'
+branch=$(echo "$state" | jq -r '.branch')
+diverged=$(echo "$state" | jq -r '.diverged')
+behind_main=$(echo "$state" | jq -r '.behind_main')
+
+# Exit silently if everything is fine
+[ "$diverged" = "false" ] && [ "$behind_main" = "0" ] && exit 0
+
+GREEN='\033[32m'
+BOLD_GREEN='\033[1;32m'
+YELLOW='\033[33m'
+RESET='\033[0m'
+SEP="════════════════════════════════════════"
+
+printf "${GREEN}${SEP}${RESET}\n"
+printf "${BOLD_GREEN}  Git Branch State${RESET}\n"
+printf "  Branch: %s\n" "$branch"
+if [ "$diverged" = "true" ]; then
+    printf "${YELLOW}  ⚠ Diverged from origin. Run: git pull${RESET}\n"
+fi
+if [ "$behind_main" != "0" ]; then
+    printf "${YELLOW}  ⚠ %s commit(s) behind main. Run: /sync${RESET}\n" "$behind_main"
+fi
+printf "${GREEN}${SEP}${RESET}\n"
