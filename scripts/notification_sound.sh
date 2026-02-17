@@ -12,11 +12,7 @@ INPUT=$(cat)
 TYPE=$(echo "$INPUT" | jq -r .notification_type)
 
 # Skip sound for non-interactive notifications
-if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ]; then
-    exit 0
-fi
-
-if [[ "$TYPE" == *"background"* ]]; then
+if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" == *"background"* ]]; then
     exit 0
 fi
 
