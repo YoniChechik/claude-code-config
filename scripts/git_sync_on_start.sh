@@ -22,6 +22,6 @@ if [ "$branch" != "main" ]; then
     behind_count=$(git rev-list HEAD..origin/main --count)
     if [ "$behind_count" -gt 0 ]; then
         echo "WARNING: origin/main has $behind_count commit(s) not in your branch. Run /sync to merge latest main."
-        exit 1
+        exit 0
     fi
 fi
