@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 
+# Startup hook: fetch + pull, then report branch state warnings.
+
 git rev-parse --is-inside-work-tree &>/dev/null || exit 0
 git remote | grep -q '^origin$' || exit 0
 
-# Fetch and pull latest
 git fetch origin &>/dev/null
+
 branch=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
 if git rev-parse --verify "origin/$branch" &>/dev/null; then
-    git pull --ff-only origin "$branch" &>/dev/null
+    git pull --ff-only &>/dev/null
 fi
 
-# Check state after pull
 state=$(bash "$HOME/.claude/scripts/git_branch_state.sh")
 [ -z "$state" ] && exit 0
 
 diverged=$(echo "$state" | jq -r '.diverged')
 behind_main=$(echo "$state" | jq -r '.behind_main')
+branch=$(echo "$state" | jq -r '.branch')
 
 messages=""
 
