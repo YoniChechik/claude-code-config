@@ -199,7 +199,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop_sound.sh"
+            "command": "bash $HOME/.claude/scripts/stop_sound.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       }
@@ -209,7 +211,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/notification_sound.sh"
+            "command": "bash $HOME/.claude/scripts/notification_sound.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       }
@@ -220,7 +224,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_edit_ruff.sh"
+            "command": "bash $HOME/.claude/scripts/post_edit_ruff.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       },
@@ -229,7 +235,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh"
+            "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       },
