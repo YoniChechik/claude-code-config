@@ -183,7 +183,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/git_sync_on_start.sh"
+            "command": "bash $HOME/.claude/scripts/git_sync_on_start.sh",
+            "async": true,
+            "timeout": 30
           }
         ]
       }
