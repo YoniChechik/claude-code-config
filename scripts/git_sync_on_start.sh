@@ -16,3 +16,12 @@ if git pull --ff-only origin "$branch" &>/dev/null; then
 else
     echo "WARNING: Branch has diverged from origin. Run 'git pull' manually to resolve."
 fi
+
+if [ "$branch" != "main" ]; then
+    git fetch origin main &>/dev/null
+    behind_count=$(git rev-list HEAD..origin/main --count)
+    if [ "$behind_count" -gt 0 ]; then
+        echo "WARNING: origin/main has $behind_count commit(s) not in your branch. Run /sync to merge latest main."
+        exit 1
+    fi
+fi
