@@ -20,8 +20,18 @@ if [ "$branch" != "main" ] && git rev-parse --verify origin/main &>/dev/null; th
     behind_main=$(git rev-list "HEAD..origin/main" --count 2>/dev/null || echo 0)
 fi
 
+warnings=""
+if [ "$diverged" = "true" ]; then
+    warnings="Branch '$branch' has diverged from origin. Run 'git pull' manually to resolve."
+fi
+if [ "$behind_main" -gt 0 ] 2>/dev/null; then
+    [ -n "$warnings" ] && warnings="$warnings "
+    warnings="${warnings}origin/main has $behind_main commit(s) not in your branch. Run /sync to merge latest main."
+fi
+
 jq -n \
     --arg branch "$branch" \
     --argjson diverged "$diverged" \
     --argjson behind_main "$behind_main" \
-    '{branch: $branch, diverged: $diverged, behind_main: $behind_main}'
+    --arg warnings "$warnings" \
+    '{branch: $branch, diverged: $diverged, behind_main: $behind_main, warnings: $warnings}'
