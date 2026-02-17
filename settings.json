@@ -21,7 +21,6 @@
       "Bash(gh run delete:*)",
       "Bash(gh run cancel:*)",
       "Bash(gh run rerun:*)",
-      "Bash(gh secret set:*)",
       "Bash(gh secret delete:*)",
       "Bash(gh variable set:*)",
       "Bash(gh variable delete:*)",
