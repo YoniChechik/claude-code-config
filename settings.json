@@ -1,7 +1,8 @@
 {
   "includeCoAuthoredBy": false,
   "permissions": {
-    "deny": [
+    "allow": [],
+    "ask": [
       "Bash(gh repo delete:*)",
       "Bash(gh repo archive:*)",
       "Bash(gh repo unarchive:*)",
@@ -154,6 +155,7 @@
       "Bash(supabase encryption update-root-key:*)",
       "Bash(supabase storage mv:*)"
     ],
+    "deny": [],
     "defaultMode": "bypassPermissions"
   },
   "model": "opus",
