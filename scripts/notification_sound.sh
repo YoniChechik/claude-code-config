@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+source "$(dirname "${BASH_SOURCE[0]}")/terminal_title.sh"
+
 INPUT=$(cat)
 TYPE=$(echo "$INPUT" | jq -r .notification_type)
 
@@ -8,3 +10,4 @@ if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" =
 fi
 
 afplay /System/Library/Sounds/Glass.aiff
+set_waiting_title
