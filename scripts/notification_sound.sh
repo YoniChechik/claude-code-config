@@ -9,5 +9,4 @@ if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" =
     exit 0
 fi
 
-afplay /System/Library/Sounds/Glass.aiff
 set_waiting_title
