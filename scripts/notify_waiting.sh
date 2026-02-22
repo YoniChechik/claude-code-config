@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set_waiting_title() {
+notify_waiting() {
     afplay /System/Library/Sounds/Glass.aiff
     local branch
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-repo")

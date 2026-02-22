@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source "$(dirname "${BASH_SOURCE[0]}")/terminal_title.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/notify_waiting.sh"
 
 INPUT=$(cat)
 TYPE=$(echo "$INPUT" | jq -r .notification_type)
@@ -9,4 +9,4 @@ if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" =
     exit 0
 fi
 
-set_waiting_title
+notify_waiting

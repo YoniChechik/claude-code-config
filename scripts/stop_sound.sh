@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 
-source "$(dirname "${BASH_SOURCE[0]}")/terminal_title.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/notify_waiting.sh"
 
-set_waiting_title
+notify_waiting
