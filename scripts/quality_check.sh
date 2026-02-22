@@ -4,7 +4,6 @@
 
 set -e
 
-# Get changed Python files
 FILES=$(comm -12 \
   <(git diff --name-only main...HEAD -- '*.py' | sort) \
   <(git ls-files -- '*.py' | sort) 2>/dev/null || true)

@@ -1,8 +1,6 @@
 #!/bin/bash
 # Cleanup clones and local branches whose remote tracking branches have been deleted.
-# Prints colored summary for the user.
 
-# Not in a git repo — exit silently
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
     exit 0
 fi
@@ -12,17 +10,14 @@ if [[ $? -ne 0 ]] || [[ -z "$git_root" ]]; then
     exit 0
 fi
 
-# Fetch remote updates and prune deleted remote branches
 git fetch -p 2>/dev/null
 
 clones_dir="${git_root}/_clones"
 
-# Track results
 removed_clones=()
 existing_clones=()
 removed_branches=()
 
-# --- Clone cleanup ---
 if [[ -d "$clones_dir" ]]; then
     for clone_dir in "${clones_dir}"/*; do
         [[ ! -d "$clone_dir" ]] && continue
@@ -43,14 +38,12 @@ if [[ -d "$clones_dir" ]]; then
             continue
         fi
 
-        # Remote branch is gone — remove the clone
         if rm -rf "$clone_dir" 2>/dev/null; then
             removed_clones+=("$dir_name (remote deleted)")
         fi
     done
 fi
 
-# --- Local branch cleanup ---
 while read -r line; do
     [[ $line == \** ]] && continue
 
@@ -64,12 +57,10 @@ while read -r line; do
     fi
 done < <(git branch -vv)
 
-# --- Print colored output ---
 has_existing=${#existing_clones[@]}
 has_removed_clones=${#removed_clones[@]}
 has_removed_branches=${#removed_branches[@]}
 
-# Nothing to report — exit silently
 if [[ $has_existing -eq 0 && $has_removed_clones -eq 0 && $has_removed_branches -eq 0 ]]; then
     exit 0
 fi

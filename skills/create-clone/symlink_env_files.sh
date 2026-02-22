@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 # Symlink .env* files from source repo to target clone
 # Usage: symlink_env_files.sh <source_repo_dir> <target_clone_dir>
 
@@ -14,12 +13,9 @@ if [ -z "$SOURCE_DIR" ] || [ -z "$TARGET_DIR" ]; then
     exit 1
 fi
 
-# Convert to absolute paths
 SOURCE_DIR=$(cd "$SOURCE_DIR" && pwd)
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-# Find all .env* files in source directory and subdirectories
-# Skip .git, node_modules, venv, .venv, __pycache__ directories
 ENV_FILES=$(find "$SOURCE_DIR" \
     -path "*/.git" -prune -o \
     -path "*/node_modules" -prune -o \
@@ -40,10 +36,8 @@ for SOURCE_FILE in $ENV_FILES; do
     REL_PATH="${SOURCE_FILE#$SOURCE_DIR/}"
     TARGET_FILE="$TARGET_DIR/$REL_PATH"
 
-    # Create parent directories in target if needed
     mkdir -p "$(dirname "$TARGET_FILE")"
 
-    # Remove existing file/symlink if present
     if [ -e "$TARGET_FILE" ] || [ -L "$TARGET_FILE" ]; then
         rm "$TARGET_FILE"
     fi

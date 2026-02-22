@@ -1,24 +1,20 @@
 #!/usr/bin/env bash
-# PostToolUse hook for Bash commands.
-# Detects git push / gh pr create and tells Claude to start a background CI watcher.
+# PostToolUse hook: detects git push / gh pr create and tells Claude to start a background CI watcher.
 set -euo pipefail
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-# Only proceed for git push or gh pr create
 if [[ "$COMMAND" != *"git push"* ]] && [[ "$COMMAND" != *"gh pr create"* ]]; then
     exit 0
 fi
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# Skip if no PR exists for this branch
 if ! gh pr view "$BRANCH" --json number 2>/dev/null; then
     exit 0
 fi
 
-# Fast check: skip CI watch if repo has no CI workflows configured
 if [ "$(gh run list --limit 1 --json databaseId | jq 'length')" = "0" ]; then
     exit 0
 fi

@@ -9,7 +9,6 @@ branch=$(echo "$state" | jq -r '.branch')
 diverged=$(echo "$state" | jq -r '.diverged')
 behind_main=$(echo "$state" | jq -r '.behind_main')
 
-# Exit silently if everything is fine
 [ "$diverged" = "false" ] && [ "$behind_main" = "0" ] && exit 0
 
 GREEN='\033[32m'

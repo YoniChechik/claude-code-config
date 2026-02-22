@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-
-# Read-only: reports local git branch state as JSON. No fetch, no pull, no writes.
+# Reports local git branch state as JSON. Read-only: no fetch, no pull, no writes.
 
 git rev-parse --is-inside-work-tree &>/dev/null || exit 0
 git remote | grep -q '^origin$' || exit 0
