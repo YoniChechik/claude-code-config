@@ -194,9 +194,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop_sound.sh",
-            "async": true,
-            "timeout": 30
+            "command": "bash $HOME/.claude/scripts/stop_sound.sh"
           }
         ]
       }
@@ -206,9 +204,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/notification_sound.sh",
-            "async": true,
-            "timeout": 30
+            "command": "bash $HOME/.claude/scripts/notification_sound.sh"
           }
         ]
       }

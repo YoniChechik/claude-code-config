@@ -22,7 +22,8 @@ stats-cache.json
 paste-cache/
 tasks/
 image-cache/
-
+mcp-needs-auth-cache.json
+chrome/
 
 # Feature clones
 _clones/

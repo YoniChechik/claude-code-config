@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+git fetch origin --quiet
+
 state=$(bash "$HOME/.claude/scripts/git_branch_state.sh")
 [ -z "$state" ] && exit 0
 
