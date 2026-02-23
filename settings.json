@@ -257,5 +257,8 @@
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
 }
