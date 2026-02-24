@@ -15,7 +15,7 @@ if git rev-parse --verify "origin/$branch" &>/dev/null; then
 fi
 
 behind_main=0
-if [ "$branch" != "main" ] && git rev-parse --verify origin/main &>/dev/null; then
+if git rev-parse --verify origin/main &>/dev/null; then
     behind_main=$(git rev-list "HEAD..origin/main" --count 2>/dev/null || echo 0)
 fi
 
