@@ -42,8 +42,28 @@ If not found → Exit with error:
 cd _clones/FEATURE_NAME
 ```
 
-### Step 4: Sync with Main
-Run `/sync` to commit and push.
+### Step 4: Gather Context & Analyze Status
+Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
-### Step 5: Run Feature Loop
-Run `/feature-loop-scheme` to execute the full development workflow.
+1. Use explorer subagent to understand the codebase relevant to the feature
+2. Check if `plan_$FEATURE_NAME.md` exists — if yes, read it
+3. Run `git diff origin/main...HEAD` to see what's been done so far
+4. Compare progress against the plan (if exists)
+
+### Step 5: Check State & Report
+1. Check git branch state:
+```bash
+bash ~/.claude/scripts/git_branch_state.sh
+```
+2. Report to the user:
+   - What the feature is about (from plan or branch name)
+   - What has been done so far (from git diff)
+   - Git branch state (diverged? behind main?)
+3. Read and understand the full development workflow:
+   - Read the file `~/.claude/skills/feature-loop-scheme/SKILL.md` to understand how we work
+   - Based on current progress, tell the user where we are in that workflow
+4. Suggest next steps:
+   - If behind main or diverged → suggest running `/sync` first
+   - Tell the user what the next step in the workflow would be
+
+**STOP HERE.** Do NOT proceed to implementation. Wait for user instructions on what to do next.
