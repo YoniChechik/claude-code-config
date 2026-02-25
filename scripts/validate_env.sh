@@ -28,13 +28,18 @@ if [ -n "$CURRENT_BRANCH" ] && ! git -C "$CLAUDE_DIR" merge-base --is-ancestor o
     ISSUES+=("Behind origin/main. Run: cd ~/.claude && git pull")
 fi
 
-if [ ${#ISSUES[@]} -gt 0 ]; then
+_print_output() {
     printf '\033[33m════════════════════════════════════════\033[0m\n'
     printf '\033[1;33m  Environment Issues\033[0m\n'
     for issue in "${ISSUES[@]}"; do
         printf '\033[31m  ✗ %s\033[0m\n' "$issue"
     done
     printf '\033[33m════════════════════════════════════════\033[0m\n'
+}
+
+if [ ${#ISSUES[@]} -gt 0 ]; then
+    _print_output
+    _print_output >&2
 fi
 
 exit 0

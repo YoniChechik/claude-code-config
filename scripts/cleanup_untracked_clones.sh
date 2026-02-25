@@ -70,20 +70,25 @@ BOLD_CYAN='\033[1;36m'
 RESET='\033[0m'
 SEP="════════════════════════════════════════"
 
-printf "${CYAN}${SEP}${RESET}\n"
-printf "${BOLD_CYAN}  Clone Cleanup${RESET}\n"
+_print_output() {
+    printf "${CYAN}${SEP}${RESET}\n"
+    printf "${BOLD_CYAN}  Clone Cleanup${RESET}\n"
 
-for c in "${existing_clones[@]}"; do
-    printf "  Existing: %s\n" "$c"
-done
+    for c in "${existing_clones[@]}"; do
+        printf "  Existing: %s\n" "$c"
+    done
 
-for c in "${removed_clones[@]}"; do
-    printf "  Removed clone: %s\n" "$c"
-done
+    for c in "${removed_clones[@]}"; do
+        printf "  Removed clone: %s\n" "$c"
+    done
 
-for b in "${removed_branches[@]}"; do
-    printf "  Removed branch: %s\n" "$b"
-done
+    for b in "${removed_branches[@]}"; do
+        printf "  Removed branch: %s\n" "$b"
+    done
 
-printf "${CYAN}${SEP}${RESET}\n"
+    printf "${CYAN}${SEP}${RESET}\n"
+}
+
+_print_output
+_print_output >&2
 exit 0
