@@ -9,8 +9,6 @@ branch=$(echo "$state" | jq -r '.branch')
 diverged=$(echo "$state" | jq -r '.diverged')
 behind_main=$(echo "$state" | jq -r '.behind_main')
 
-[ "$diverged" = "false" ] && [ "$behind_main" = "0" ] && exit 0
-
 GREEN='\033[32m'
 BOLD_GREEN='\033[1;32m'
 YELLOW='\033[33m'
@@ -26,6 +24,9 @@ _print_output() {
     fi
     if [ "$behind_main" != "0" ]; then
         printf "${YELLOW}  ⚠ %s commit(s) behind main. Run: /sync${RESET}\n" "$behind_main"
+    fi
+    if [ "$diverged" = "false" ] && [ "$behind_main" = "0" ]; then
+        printf "  ✓ Up to date\n"
     fi
     printf "${GREEN}${SEP}${RESET}\n"
 }

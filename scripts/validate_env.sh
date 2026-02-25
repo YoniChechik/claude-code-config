@@ -29,17 +29,22 @@ if [ -n "$CURRENT_BRANCH" ] && ! git -C "$CLAUDE_DIR" merge-base --is-ancestor o
 fi
 
 _print_output() {
-    printf '\033[33m════════════════════════════════════════\033[0m\n'
-    printf '\033[1;33m  Environment Issues\033[0m\n'
-    for issue in "${ISSUES[@]}"; do
-        printf '\033[31m  ✗ %s\033[0m\n' "$issue"
-    done
-    printf '\033[33m════════════════════════════════════════\033[0m\n'
+    if [ ${#ISSUES[@]} -gt 0 ]; then
+        printf '\033[33m════════════════════════════════════════\033[0m\n'
+        printf '\033[1;33m  Environment Issues\033[0m\n'
+        for issue in "${ISSUES[@]}"; do
+            printf '\033[31m  ✗ %s\033[0m\n' "$issue"
+        done
+        printf '\033[33m════════════════════════════════════════\033[0m\n'
+    else
+        printf '\033[32m════════════════════════════════════════\033[0m\n'
+        printf '\033[1;32m  Environment Check\033[0m\n'
+        printf '  ✓ All checks passed\n'
+        printf '\033[32m════════════════════════════════════════\033[0m\n'
+    fi
 }
 
-if [ ${#ISSUES[@]} -gt 0 ]; then
-    _print_output
-    _print_output >&2
-fi
+_print_output
+_print_output >&2
 
 exit 0
