@@ -67,7 +67,7 @@ if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]
     if [ -n "$ALL_FAILED_JOBS" ]; then
         MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
     fi
-    MSG="${MSG} You MUST fix this now: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, then use debugger-agent to fix the issue, commit, and push."
+    MSG="${MSG} You MUST fix this now: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, then use coder-agent to fix the issue, commit, and push."
     echo "$MSG"
     exit 1
 fi

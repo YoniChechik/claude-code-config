@@ -35,8 +35,9 @@ Create a structured task list based on the plan or next steps:
 - Mark the first task as "in_progress" to begin work
 
 ### Step 4: Implement
-- Code, commit, push with coder-agent
-- If problems occur, fix, commit, push with debugger-agent
+- Use coder-agent to write code
+- If problems occur, use coder-agent to fix them
+- After each significant change, commit and push (main agent does this directly)
 
 ### Step 5: Quality
 Run quality skill to fix code style, types, and remove AI slop.
