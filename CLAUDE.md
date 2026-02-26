@@ -18,6 +18,7 @@ The main agent is an ORCHESTRATOR. It delegates ALL execution to subagents via t
 - Task tool (to spawn subagents)
 - ToolSearch (to discover tools for subagents)
 - Bash tool for git and gh commands ONLY (main agent is the sole owner of version control)
+- Subagents MUST NOT use `git` or `gh` CLI commands — only the main agent runs version control
 
 ### When tempted to run Bash or Edit directly:
 STOP. Wrap it in a Task call instead. Exception: git and gh commands run directly from main agent.
