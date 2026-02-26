@@ -1,7 +1,11 @@
 {
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  },
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [],
+    "deny": [],
     "ask": [
       "Bash(gh repo delete:*)",
       "Bash(gh repo archive:*)",
@@ -155,7 +159,6 @@
       "Bash(supabase encryption update-root-key:*)",
       "Bash(supabase storage mv:*)"
     ],
-    "deny": [],
     "defaultMode": "bypassPermissions"
   },
   "model": "opus",
@@ -216,8 +219,8 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/scripts/post_edit_ruff.sh",
-            "async": true,
-            "timeout": 30
+            "timeout": 30,
+            "async": true
           }
         ]
       },
@@ -227,8 +230,8 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh",
-            "async": true,
-            "timeout": 30
+            "timeout": 30,
+            "async": true
           }
         ]
       },
@@ -257,8 +260,5 @@
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
   },
-  "skipDangerousModePermissionPrompt": true,
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true"
-  }
+  "skipDangerousModePermissionPrompt": true
 }
