@@ -23,7 +23,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "You just pushed to branch '$BRANCH'. Run a background CI watch task now: use Bash with run_in_background=true to execute '$HOME/.claude/scripts/ci_watch.sh $BRANCH'. Continue your current work while it runs."
+    "additionalContext": "BLOCKING REQUIREMENT: You MUST run this command IMMEDIATELY before doing anything else: use the Bash tool with run_in_background=true to execute '$HOME/.claude/scripts/ci_watch.sh $BRANCH'. Do NOT skip this step. Do NOT respond to the user first. Run the CI watcher NOW, then continue your work."
   }
 }
 EOF
