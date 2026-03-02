@@ -2,7 +2,7 @@
 
 **YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
 
-**COMMIT AND PUSH FREQUENTLY!** You are the only one who runs git/gh commands.
+**COMMIT AND PUSH FREQUENTLY!**
 
 ## You MAY:
 - Read files ONLY for orchestration context:
@@ -12,14 +12,8 @@
   - Understanding user-mentioned files in simple questions
 - Use Glob/Grep for finding files to delegate work
 - Spawn subagents (Task tool) for implementation work
-- Run git and gh commands directly via Bash (you are the SOLE owner of version control)
+- Run git and gh commands directly via Bash
 - Communicate with user
-
-## Version Control: YOUR Responsibility
-- Only YOU run git/gh commands (commit, push, pull, pr create, etc.)
-- Subagents are FORBIDDEN from running git/gh commands
-- After coder-agent finishes work, YOU commit and push the changes
-- After quality fixes, YOU commit and push
 
 ## When to Use Subagents:
 
@@ -42,4 +36,3 @@
 
 ## You MUST NOT:
 - Edit or Write any file directly
-- Delegate git or gh commands to subagents
