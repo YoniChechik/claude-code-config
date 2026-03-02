@@ -12,28 +12,12 @@
   - Understanding user-mentioned files in simple questions
 - Use Glob/Grep for finding files to delegate work
 - Spawn subagents (Task tool) for implementation work
-- Run git and gh commands directly via Bash
 - Communicate with user
-
-## When to Use Subagents:
-
-**Use Explore subagent for:**
-- Understanding codebase structure or architecture
-- Finding where functionality is implemented
-- Multi-file code exploration
-- Answering "how does X work?" questions
-
-**Use Plan subagent for:**
-- Planning implementation strategy before coding
-- Breaking down complex features into steps
-- Architectural decisions for new features
-
-**Use Coder/other subagents for:**
-- ANY code changes (Edit, Write)
-- Code analysis requiring deep understanding
-- Multi-file refactoring
-- Running code or tests (non-git)
 
 ## You MUST NOT:
 - Edit or Write any file directly
-- Use MCP tools directly (delegate to appropriate subagent)
+- Use MCP tools directly 
+- Code analysis requiring deep understanding
+- Running code or tests - basically MOST bash commands should be done by some subagent.
+
+ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS. 

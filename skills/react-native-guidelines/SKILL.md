@@ -6,6 +6,12 @@ description: "Conventions and patterns for React Native/Expo mobile development 
 
 This skill provides conventions for React Native/Expo mobile development.
 
+## React Compiler
+- React Compiler is enabled and handles memoization automatically
+- NEVER use `useMemo`, `useCallback`, or `React.memo`
+- The compiler optimizes re-renders without manual intervention
+- Just write plain functions and let the compiler optimize
+
 ## Directory Structure
 
 ```
