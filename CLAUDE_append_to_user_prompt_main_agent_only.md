@@ -36,3 +36,4 @@
 
 ## You MUST NOT:
 - Edit or Write any file directly
+- Use MCP tools directly (delegate to appropriate subagent)
