@@ -9,15 +9,21 @@ if [[ "$COMMAND" != *"git push"* ]] && [[ "$COMMAND" != *"gh pr create"* ]]; the
     exit 0
 fi
 
+# Silence all stdout/stderr to prevent intermediate commands (gh, git, jq) from
+# polluting the hook's JSON output. Restore stdout only for the final JSON block.
+exec 3>&1 1>/dev/null 2>/dev/null
+
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-if ! gh pr view "$BRANCH" --json number 2>/dev/null; then
+if ! gh pr view "$BRANCH" --json number; then
     exit 0
 fi
 
 if [ "$(gh run list --limit 1 --json databaseId | jq 'length')" = "0" ]; then
     exit 0
 fi
+
+exec 1>&3 3>&-
 
 cat <<EOF
 {
