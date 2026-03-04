@@ -147,6 +147,7 @@
       "Bash(supabase vanity-subdomains delete:*)",
       "Bash(supabase stop:*)",
       "Bash(supabase db push:*)",
+      "Bash(supabase migration push:*)",
       "Bash(supabase branches delete:*)",
       "Bash(supabase branches pause:*)",
       "Bash(supabase postgres-config delete:*)",
