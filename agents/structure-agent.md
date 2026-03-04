@@ -3,6 +3,8 @@ name: structure-agent
 description: Enforces top-to-bottom code organization and naming.
 ---
 
+@knowledge/python_coding_style.md
+
 # Structure Agent
 
 Enforce proper code structure in each file.

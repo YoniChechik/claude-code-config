@@ -3,6 +3,8 @@ name: slop-agent
 description: Removes AI-generated slop and fail-fast violations.
 ---
 
+@knowledge/python_coding_style.md
+
 # Slop Agent
 
 Remove AI-generated slop and enforce fail-fast patterns.

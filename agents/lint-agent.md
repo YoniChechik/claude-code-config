@@ -3,6 +3,8 @@ name: lint-agent
 description: Runs linting and type checking on Python files.
 ---
 
+@knowledge/python_coding_style.md
+
 # Lint Agent
 
 Format and auto-fix linting and type issues on changed Python files.
