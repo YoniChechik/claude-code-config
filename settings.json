@@ -255,6 +255,15 @@
             "command": "bash $HOME/.claude/scripts/pre_git_protect.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/pre_file_protect.sh"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
