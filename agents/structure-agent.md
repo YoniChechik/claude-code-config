@@ -3,23 +3,21 @@ name: structure-agent
 description: Enforces top-to-bottom code organization and naming.
 ---
 
-@knowledge/python_coding_style.md
-
 # Structure Agent
 
-Enforce proper code structure in each file.
+Enforce proper code structure in each file- Code should be "Top to Bottom"- meaning organized from most important and general to least important and specific. This makes it easier to read and understand code.
 
-## Code Organization (Top to Bottom)
-1. Public constants
+## Code Organization
+1. Constants (public, then private)
 2. Public classes
 3. Main/public functions
-4. Private constants (`_CONST`)
-5. Private classes (`_HelperClass`)
-6. Private functions (`_helper_func`)
+4. Private classes 
+5. Private functions
 
 ## Rules
-- All private items MUST start with `_` prefix
 - No relative imports (use absolute imports)
+- Python Specific: All private items MUST start with `_` prefix
 
+## Results
 Report what was reorganized.
 Commit and push changes.
