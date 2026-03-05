@@ -50,19 +50,19 @@ if [[ -n "$current_branch" ]]; then
     if ! git rev-parse --verify "origin/$current_branch" &>/dev/null; then
         add_line "Git: up to date"
     else
-    merge_output=$(git merge --ff-only "origin/$current_branch" 2>&1)
-    merge_exit=$?
+        merge_output=$(git merge --ff-only "origin/$current_branch" 2>&1)
+        merge_exit=$?
 
-    if [[ $merge_exit -eq 0 ]]; then
-        if echo "$merge_output" | grep -q "Already up to date"; then
-            add_line "Git: up to date"
+        if [[ $merge_exit -eq 0 ]]; then
+            if echo "$merge_output" | grep -q "Already up to date"; then
+                add_line "Git: up to date"
+            else
+                add_line "Git: merged"
+            fi
         else
-            add_line "Git: merged"
+            error_msg=$(echo "$merge_output" | head -1)
+            add_line "Git: error: $error_msg"
         fi
-    else
-        error_msg=$(echo "$merge_output" | head -1)
-        add_line "Git: error: $error_msg"
-    fi
     fi
 else
     add_line "Git: no current branch (detached HEAD)"
