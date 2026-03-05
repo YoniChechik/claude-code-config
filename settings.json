@@ -170,25 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/cleanup_untracked_clones.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/validate_env.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/git_sync_on_start.sh"
+            "command": "bash $HOME/.claude/scripts/startup.sh"
           }
         ]
       }
