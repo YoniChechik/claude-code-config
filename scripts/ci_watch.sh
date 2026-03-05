@@ -33,7 +33,11 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         exit 0
     fi
 
-    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '[.[] | select(.headSha == $sha)]')
+    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '
+      [.[] | select(.headSha == $sha)]
+      | group_by(.name)
+      | map(sort_by(.databaseId) | last)
+    ')
 
     FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
     if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
