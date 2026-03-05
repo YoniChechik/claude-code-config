@@ -31,5 +31,6 @@ _print_output() {
     printf "${GREEN}${SEP}${RESET}\n"
 }
 
-_print_output
-if [ -w /dev/tty ] 2>/dev/null; then _print_output > /dev/tty 2>&1; fi
+_msg=$(_print_output | sed 's/\x1b\[[0-9;]*m//g')
+_json_msg=$(printf '%s' "$_msg" | jq -Rs '.')
+printf '{"systemMessage": %s}\n' "$_json_msg"
