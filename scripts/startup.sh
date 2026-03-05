@@ -84,17 +84,17 @@ if [[ -d "$clones_dir" ]]; then
         dir_name=$(basename "$clone_dir")
 
         if [[ $branch == "main" || $branch == "master" ]]; then
-            existing_clones+=("$dir_name (branch: $branch)")
+            existing_clones+=("$dir_name")
             continue
         fi
 
         if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "refs/heads/$branch"; then
-            existing_clones+=("$dir_name (branch: $branch)")
+            existing_clones+=("$dir_name")
             continue
         fi
 
         if rm -rf "$clone_dir" 2>/dev/null; then
-            removed_clones+=("$dir_name (remote deleted)")
+            removed_clones+=("$dir_name")
         fi
     done
 fi
