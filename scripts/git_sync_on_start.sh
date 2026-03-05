@@ -32,4 +32,4 @@ _print_output() {
 }
 
 _print_output
-_print_output >&2
+if [ -w /dev/tty ] 2>/dev/null; then _print_output > /dev/tty 2>&1; fi
