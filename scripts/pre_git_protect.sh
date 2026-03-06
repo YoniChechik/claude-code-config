@@ -2,7 +2,7 @@
 
 # PreToolUse hook: block git write operations outside _clones directories.
 # Receives tool input via stdin as JSON with session_id, cwd, tool_name, tool_input.
-# Exit 0 = allow, Exit 2 = block.
+# Exit 0 = allow. Outputs JSON with permissionDecision=ask to prompt user.
 
 INPUT=$(cat)
 
@@ -22,9 +22,10 @@ if echo "$command" | grep -qE "$GIT_WRITE_PATTERN"; then
     if echo "$cwd" | grep -q '_clones/'; then
         exit 0
     fi
-    echo "Git operation blocked: git commands (add/stage/commit/checkout/push/stash/reset/rebase/merge/cherry-pick) are not allowed outside _clones directories." >&2
-    echo "Use /create-clone to create an isolated clone for your changes." >&2
-    exit 2
+    cat <<'EOF'
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Git write operation outside _clones directory. Use /create-clone for isolated changes."}}
+EOF
+    exit 0
 fi
 
 exit 0
