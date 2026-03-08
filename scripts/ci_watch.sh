@@ -9,7 +9,7 @@ POLL_INTERVAL=5
 MAX_TIMEOUT=600
 MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 
-LATEST_SHA=""
+LATEST_SHA=$(git rev-parse "$BRANCH")
 
 for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
@@ -23,10 +23,6 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         continue
     fi
 
-    if [ -z "$LATEST_SHA" ]; then
-        LATEST_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
-    fi
-
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
         echo "Newer push detected on branch '$BRANCH'. Exiting — new watcher will handle it."
@@ -38,6 +34,11 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
       | group_by(.name)
       | map(sort_by(.databaseId) | last)
     ')
+
+    if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+        sleep $POLL_INTERVAL
+        continue
+    fi
 
     FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
     if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
