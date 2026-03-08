@@ -170,7 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/startup.sh"
+            "command": "bash $HOME/.claude/scripts/session_start.sh"
           }
         ]
       }
@@ -180,7 +180,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop_sound.sh"
+            "command": "bash $HOME/.claude/scripts/stop__sound.sh"
           }
         ]
       }
@@ -190,7 +190,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/notification_sound.sh"
+            "command": "bash $HOME/.claude/scripts/notification__sound.sh"
           }
         ]
       }
@@ -201,7 +201,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_edit_ruff.sh",
+            "command": "bash $HOME/.claude/scripts/post_tool_use__ruff.sh",
             "timeout": 30,
             "async": true
           }
@@ -212,7 +212,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_edit_eslint.sh",
+            "command": "bash $HOME/.claude/scripts/post_tool_use__eslint.sh",
             "timeout": 30,
             "async": true
           }
@@ -223,27 +223,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/ci_post_push_hook.sh"
+            "command": "bash $HOME/.claude/scripts/post_tool_use__ci_push.sh"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Edit|Write|NotebookEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_git_protect.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_file_protect.sh"
+            "command": "bash $HOME/.claude/scripts/pre_tool_use__base_dir_protect.sh"
           }
         ]
       }
@@ -253,7 +244,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/user_prompt_submit_hook.sh"
+            "command": "bash $HOME/.claude/scripts/user_prompt_submit.sh"
           }
         ]
       }
