@@ -9,12 +9,14 @@ POLL_INTERVAL=5
 MAX_TIMEOUT=600
 MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 
+# Resolve branch to SHA so concurrent watchers on different branches each track their own commit.
 LATEST_SHA=$(git rev-parse "$BRANCH")
 
 for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
+        # After 3 polls (~15s) with no workflows, assume the repo has none configured.
         if [ "$num_iter" -ge 3 ]; then
             echo "No CI workflows found for branch '$BRANCH'."
             exit 0
@@ -23,18 +25,22 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         continue
     fi
 
+    # If the latest run's SHA differs from ours, a newer push happened — let its watcher take over.
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
         echo "Newer push detected on branch '$BRANCH'. Exiting — new watcher will handle it."
         exit 0
     fi
 
+    # Filter to our commit's runs, then deduplicate: group by workflow name and keep only the
+    # latest run (highest databaseId) per workflow — re-runs shouldn't show stale results.
     SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '
       [.[] | select(.headSha == $sha)]
       | group_by(.name)
       | map(sort_by(.databaseId) | last)
     ')
 
+    # GitHub may not have registered runs for our commit yet — keep polling.
     if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
         sleep $POLL_INTERVAL
         continue
@@ -55,6 +61,8 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
 
 done
 
+# Post-loop: we get here on failure (break) or timeout (loop exhausted).
+# Report failed workflows with their job names and actionable log command.
 if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
     FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
     FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
