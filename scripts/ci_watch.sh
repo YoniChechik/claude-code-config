@@ -19,7 +19,7 @@ check_merge_conflicts() {
     local max_retries=5
     for ((retry = 0; retry < max_retries; retry++)); do
         local pr_json
-        pr_json=$(gh pr view "$BRANCH" --json mergeable,mergeStateStatus 2>/dev/null) || return 0
+        pr_json=$(gh pr view "$BRANCH" --json mergeable 2>&1) || return 0
         local mergeable
         mergeable=$(echo "$pr_json" | jq -r '.mergeable')
         if [ "$mergeable" = "CONFLICTING" ]; then
@@ -121,7 +121,7 @@ if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]
 fi
 
 if ! check_merge_conflicts; then
-    echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. ${CONFLICT_MSG}"
+    echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. ${CONFLICT_MSG} Check CI status manually with 'gh run list --branch $BRANCH'."
     exit 1
 fi
 echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."

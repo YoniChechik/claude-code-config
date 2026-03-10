@@ -74,7 +74,7 @@ if [[ "$1" == "pr" && "$2" == "view" ]]; then
         exit 1
     fi
 
-    echo "{\"mergeable\":\"$mergeable\",\"mergeStateStatus\":\"CLEAN\"}"
+    echo "{\"mergeable\":\"$mergeable\"}"
     exit 0
 fi
 
@@ -89,6 +89,9 @@ if [[ "$1" == "run" && "$2" == "list" ]]; then
             ;;
         none)
             echo '[]'
+            ;;
+        timeout)
+            echo '[{"databaseId":1,"status":"in_progress","conclusion":"","name":"CI","headSha":"abc123"}]'
             ;;
     esac
     exit 0
@@ -236,4 +239,17 @@ teardown() {
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
     [[ "$output" == *"CI passed"* ]]
+}
+
+@test "CI timeout + conflicts -> exit 1, output contains both 'timed out' and 'merge conflicts'" {
+    export MOCK_MERGEABLE="CONFLICTING"
+    export MOCK_CI_SCENARIO="timeout"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"timed out"* ]]
+    [[ "$output" == *"merge conflicts"* ]]
 }
