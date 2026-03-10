@@ -18,6 +18,12 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         # After 3 polls (~15s) with no workflows, assume the repo has none configured.
         if [ "$num_iter" -ge 3 ]; then
+            # Still check for merge conflicts even without CI workflows
+            MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
+            if [ "$MERGEABLE" = "CONFLICTING" ]; then
+                echo "PR on branch '$BRANCH' has merge conflicts. You MUST resolve the merge conflicts now before continuing."
+                exit 1
+            fi
             echo "No CI workflows found for branch '$BRANCH'."
             exit 0
         fi

@@ -158,7 +158,7 @@ teardown() {
     [[ "$output" == *"No CI workflows"* ]]
 }
 
-@test "No CI workflows + conflicts -> exit 0, no conflict check when no runs" {
+@test "No CI workflows + conflicts -> exit 1, output contains 'merge conflicts'" {
     export MOCK_CI_SCENARIO="none"
     export MOCK_MERGEABLE="CONFLICTING"
 
@@ -166,10 +166,8 @@ teardown() {
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    # Merge conflict check only runs when there ARE CI runs,
-    # so with no runs we just get "No CI workflows" exit 0
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"No CI workflows"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"merge conflicts"* ]]
 }
 
 @test "CI fails + conflicts -> exit 1, output contains 'merge conflicts'" {
