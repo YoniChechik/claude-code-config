@@ -12,45 +12,24 @@ MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 # Resolve branch to SHA so concurrent watchers on different branches each track their own commit.
 LATEST_SHA=$(git rev-parse "$BRANCH")
 
-# Check if PR has merge conflicts. Returns 1 if conflicts detected, 0 otherwise.
-# Sets CONFLICT_MSG variable if conflicts found.
-check_merge_conflicts() {
-    CONFLICT_MSG=""
-    local max_retries=5
-    for ((retry = 0; retry < max_retries; retry++)); do
-        local pr_json
-        pr_json=$(gh pr view "$BRANCH" --json mergeable 2>&1) || return 0
-        local mergeable
-        mergeable=$(echo "$pr_json" | jq -r '.mergeable')
-        if [ "$mergeable" = "CONFLICTING" ]; then
-            CONFLICT_MSG="PR on branch '$BRANCH' has merge conflicts. You MUST resolve the merge conflicts now before continuing."
-            return 1
-        elif [ "$mergeable" = "UNKNOWN" ]; then
-            sleep $POLL_INTERVAL
-            continue
-        else
-            return 0
-        fi
-    done
-    # After max retries with UNKNOWN, treat as no conflict
-    return 0
-}
-
 for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
 
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         # After 3 polls (~15s) with no workflows, assume the repo has none configured.
         if [ "$num_iter" -ge 3 ]; then
-            if ! check_merge_conflicts; then
-                echo "$CONFLICT_MSG"
-                exit 1
-            fi
             echo "No CI workflows found for branch '$BRANCH'."
             exit 0
         fi
         sleep $POLL_INTERVAL
         continue
+    fi
+
+    # Check for merge conflicts
+    MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
+    if [ "$MERGEABLE" = "CONFLICTING" ]; then
+        echo "PR on branch '$BRANCH' has merge conflicts. You MUST resolve the merge conflicts now before continuing."
+        exit 1
     fi
 
     # If the latest run's SHA differs from ours, a newer push happened — let its watcher take over.
@@ -80,10 +59,6 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     fi
 
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
-        if ! check_merge_conflicts; then
-            echo "$CONFLICT_MSG"
-            exit 1
-        fi
         echo "CI passed on branch '$BRANCH'. All workflows green."
         exit 0
     fi
@@ -113,16 +88,9 @@ if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]
         MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
     fi
     MSG="${MSG} You MUST fix this now: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, then use coder-agent to fix the issue, commit, and push."
-    if ! check_merge_conflicts; then
-        MSG="${MSG} Additionally, ${CONFLICT_MSG}"
-    fi
     echo "$MSG"
     exit 1
 fi
 
-if ! check_merge_conflicts; then
-    echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. ${CONFLICT_MSG} Check CI status manually with 'gh run list --branch $BRANCH'."
-    exit 1
-fi
 echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
 exit 1
