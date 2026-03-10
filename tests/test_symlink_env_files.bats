@@ -109,6 +109,19 @@ teardown() {
     [[ "$output" == *"No .env* files found"* ]]
 }
 
+@test "Source with .env in .venv/ -> NOT symlinked (pruned)" {
+    mkdir -p "$SOURCE_DIR/.venv"
+    echo "DOTVENV=1" > "$SOURCE_DIR/.venv/.env"
+
+    run bash "$SCRIPT" "$SOURCE_DIR" "$TARGET_DIR"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TARGET_DIR/.venv/.env" ]
+    [[ "$output" == *"No .env* files found"* ]]
+}
+
 @test "Source with .env in _clones/ -> NOT symlinked (pruned)" {
     mkdir -p "$SOURCE_DIR/_clones"
     echo "CLONES=1" > "$SOURCE_DIR/_clones/.env"

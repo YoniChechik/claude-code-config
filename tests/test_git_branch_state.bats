@@ -191,6 +191,17 @@ teardown() {
     [ "$(echo "$output" | jq '.diverged')" = "false" ]
 }
 
+@test "No origin/main -> behind_main defaults to 0" {
+    export MOCK_HAS_ORIGIN_MAIN="false"
+
+    run bash "$SCRIPT"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq '.behind_main')" = "0" ]
+}
+
 @test "Output is valid JSON" {
     run bash "$SCRIPT"
 

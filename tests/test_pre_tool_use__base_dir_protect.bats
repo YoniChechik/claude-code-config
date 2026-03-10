@@ -22,16 +22,14 @@ setup() {
         done
     fi
     ln -sf "$REAL_JQ" "$MOCK_BIN/jq"
+
+    # Shared temp dir for tests that need filesystem fixtures
+    TEST_TMPDIR="$(mktemp -d)"
 }
 
 teardown() {
     rm -rf "$MOCK_BIN"
-}
-
-# Helper: pipe JSON to the script and capture output
-run_script() {
-    local json="$1"
-    run bash -c 'echo '"'""$json"'"' | '"'""$SCRIPT"'"''
+    rm -rf "$TEST_TMPDIR"
 }
 
 # ---------- Bash tool tests ----------
@@ -117,63 +115,52 @@ run_script() {
 # ---------- Edit/Write tool tests ----------
 
 @test "Edit: file inside _clones/ with .git ancestor -> allowed (exit 0, no output)" {
-    # Create a temp dir structure simulating _clones/ with a git repo
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    mkdir -p "$tmpdir/_clones/repo"
-    mkdir "$tmpdir/_clones/repo/.git"
-    mkdir -p "$tmpdir/_clones/repo/src"
-    touch "$tmpdir/_clones/repo/src/file.py"
+    # Create a dir structure simulating _clones/ with a git repo
+    mkdir -p "$TEST_TMPDIR/_clones/repo/.git"
+    mkdir -p "$TEST_TMPDIR/_clones/repo/src"
+    touch "$TEST_TMPDIR/_clones/repo/src/file.py"
 
-    local file_path="$tmpdir/_clones/repo/src/file.py"
+    local file_path="$TEST_TMPDIR/_clones/repo/src/file.py"
     local json='{"tool_name":"Edit","tool_input":{"file_path":"'"$file_path"'"}}'
 
     run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    rm -rf "$tmpdir"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
 @test "Write: file outside _clones/ inside git repo -> blocked (permissionDecision=ask)" {
-    # Create a temp dir structure simulating a git repo outside _clones/
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    mkdir -p "$tmpdir/projects/repo"
-    mkdir "$tmpdir/projects/repo/.git"
-    mkdir -p "$tmpdir/projects/repo/src"
-    touch "$tmpdir/projects/repo/src/file.py"
+    # Create a dir structure simulating a git repo outside _clones/
+    mkdir -p "$TEST_TMPDIR/projects/repo/.git"
+    mkdir -p "$TEST_TMPDIR/projects/repo/src"
+    touch "$TEST_TMPDIR/projects/repo/src/file.py"
 
-    local file_path="$tmpdir/projects/repo/src/file.py"
+    local file_path="$TEST_TMPDIR/projects/repo/src/file.py"
     local json='{"tool_name":"Write","tool_input":{"file_path":"'"$file_path"'"}}'
 
     run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    rm -rf "$tmpdir"
     [ "$status" -eq 0 ]
     [[ "$output" == *'"permissionDecision":"ask"'* ]]
     [[ "$output" == *'File edit outside _clones directory'* ]]
 }
 
 @test "Edit: file outside any git repo -> allowed (exit 0, no output)" {
-    # Create a temp dir with no .git anywhere
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    mkdir -p "$tmpdir/notes"
-    touch "$tmpdir/notes/todo.txt"
+    # Dir with no .git anywhere
+    mkdir -p "$TEST_TMPDIR/notes"
+    touch "$TEST_TMPDIR/notes/todo.txt"
 
-    local file_path="$tmpdir/notes/todo.txt"
+    local file_path="$TEST_TMPDIR/notes/todo.txt"
     local json='{"tool_name":"Edit","tool_input":{"file_path":"'"$file_path"'"}}'
 
     run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    rm -rf "$tmpdir"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
