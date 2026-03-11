@@ -31,13 +31,16 @@ Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref H
 Run quality skill to fix code style, types, and remove AI slop.
 
 ### Step 5: Review
-Use Task tool with subagent_type="reviewer-agent" for final code review and validation.
+Use Task tool with subagent_type="reviewer-agent" for final code review and validation. 
 
-### Step 6: PR Creation
+### Step 6: Fix Issues
+Fix all issues found by reviewer-agent and commit/push changes.
+
+### Step 7: PR Creation
 create a pull request with "pr-create" skill
 
-### Step 7: Summary
+### Step 8: Summary
 Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
 
 ## How to start
-Add all plan tasks + steps 4-7 as steps to task list and start working.
+Add all plan tasks + steps 4-8 as steps to task list and start working.
