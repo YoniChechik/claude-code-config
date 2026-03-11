@@ -20,33 +20,24 @@ This context will inform the planning phase.
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 - **If plan_$FEATURE_NAME.md doesn't exist** → Create plan using planner subagent with opus model, ask questions if needed
 - **If plan_$FEATURE_NAME.md exists** → Analyze current progress compared to origin/main, examine plan_$FEATURE_NAME.md and documentation, identify next steps
+- commit and push plan/analysis results
 
-### Step 2.5: Commit Plan (if just created)
-If plan was just created in Step 2, commit and push it immediately so it survives session crashes:
-```bash
-git add plan_$FEATURE_NAME.md && git commit -m 'Add feature plan' && git push
-```
-
-### Step 3: Create Task List
-Create a structured task list based on the plan or next steps:
-- Break down into actionable tasks
-- Use the TaskCreate tool to create the task list
-- Each task should be specific and measurable
-- Mark the first task as "in_progress" to begin work
-
-### Step 4: Implement
+### Step 3: Implement
 - Use coder-agent to write code
 - If problems occur, use coder-agent to fix them
 - After each significant change, commit and push (main agent does this directly)
 
-### Step 5: Quality
+### Step 4: Quality
 Run quality skill to fix code style, types, and remove AI slop.
 
-### Step 6: Review
+### Step 5: Review
 Use Task tool with subagent_type="reviewer-agent" for final code review and validation.
 
-### Step 7: PR Creation
+### Step 6: PR Creation
 create a pull request with "pr-create" skill
 
-### Step 8: Summary
+### Step 7: Summary
 Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
+
+## How to start
+Add all plan tasks + steps 4-7 as steps to task list and start working.
