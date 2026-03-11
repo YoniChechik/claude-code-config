@@ -45,5 +45,8 @@ Run quality skill to fix code style, types, and remove AI slop.
 ### Step 6: Review
 Use Task tool with subagent_type="reviewer-agent" for final code review and validation.
 
-### Step 7: Summary
-Report findings and confirm ready for PR (or list remaining issues).
+### Step 7: PR Creation
+create a pull request with "pr-create" skill
+
+### Step 8: Summary
+Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
