@@ -24,6 +24,7 @@ tasks/
 image-cache/
 mcp-needs-auth-cache.json
 chrome/
+sessions/
 
 # Feature clones
 _clones/
