@@ -18,7 +18,7 @@ This context will inform the planning phase.
 
 ### Step 2: Plan or Analyze
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
-- **If plan_$FEATURE_NAME.md doesn't exist** → Create plan using planner subagent with opus model, ask questions if needed
+- **If plan_$FEATURE_NAME.md doesn't exist** → Run `/plan $FEATURE_DESCRIPTION` skill
 - **If plan_$FEATURE_NAME.md exists** → Analyze current progress compared to origin/main, examine plan_$FEATURE_NAME.md and documentation, identify next steps
 - commit and push plan/analysis results
 
