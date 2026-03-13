@@ -18,27 +18,23 @@ Call the `EnterPlanMode` tool to activate read-only plan mode.
 
 ### Step 2: Explore & Plan
 While in plan mode:
-- Explore existing code patterns and architecture
+- Explore existing code patterns and architecture - you can use the explorer subagent for this.
 - Identify related files and components
 - Understand dependencies and integration points
 - Use web search to find relevant information and examples
-
-### Step 3: Ask Questions
-
-**Ask the user (use AskUserQuestion):**
-- Unclear scope or boundaries
-- Multiple valid technical approaches
-- Breaking changes or migration needed
-- Concerns and tradeoffs
-
-**Decide yourself:**
-- Implementation details, file/function names, code organization, other obvious choices
+- **Ask the user multiple question multiple times throughout the process:**
+  - Unclear scope or boundaries
+  - Multiple valid technical approaches
+  - Breaking changes or migration needed
+  - Concerns and tradeoffs
+- **Decide yourself:**
+  - Implementation details, file/function names, code organization, other obvious choices
 
 ### Step 4: Write Plan File
 
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
-Create `plan_$FEATURE_NAME.md` with this structure:
+Create `plan-$FEATURE_NAME.md` with this structure:
 
 ````markdown
 # Feature: [Feature Name]
@@ -59,6 +55,16 @@ Create `plan_$FEATURE_NAME.md` with this structure:
 - Action 1
 - Action 2
 ````
+- Tasks should be as independent as possible, with minimal dependencies between them. This allows for more flexible implementation and easier parallelization if needed.
+- Tasks should be actionable and specific, not vague or high-level. They should clearly indicate what needs to be done.
+
+### Step 5: Exit Plan Mode
+Call the `ExitPlanMode` tool with the plan content. This triggers the interactive approval dialog where the user can choose to clear context before implementation.
+
+**Make sure to save all task list and add the plan tasks to the task list in the relevant position.**
+
+
+## Must Have:
 
 ### Testing Requirements - CRITICAL
 
@@ -69,8 +75,7 @@ Follow the testing goblet (inverted pyramid):
 - **Integration tests**: The bulk of tests - verify components work together, test real interactions between modules
 - **E2E tests**: Few but critical - verify complete user-facing workflows end to end
 
+tests should be added to the plan as tasks, and implemented as part of the feature development process.
+
 ### Build tasks as autonomous as possible
 No human in the loop. You can ask/search for relevant CLIs or MCPs.
-
-### Step 5: Exit Plan Mode
-Call the `ExitPlanMode` tool with the plan content. This triggers the interactive approval dialog where the user can choose to clear context before implementation.

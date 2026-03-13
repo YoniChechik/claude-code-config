@@ -7,39 +7,28 @@ description: "Full feature development workflow (called by new-feature/continue-
 
 ## Process
 
-### Step 1: Gather Context
-Use the explorer subagent to gather context about the codebase relevant to the feature:
-- Explore existing code patterns and architecture
-- Identify related files and components
-- Understand dependencies and integration points
-- Set thoroughness level to "medium" for balance between speed and depth
+### Step 1: Plan
+Run `/plan $FEATURE_DESCRIPTION` skill
 
-This context will inform the planning phase.
-
-### Step 2: Plan or Analyze
-Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
-- **If plan_$FEATURE_NAME.md doesn't exist** → Run `/plan $FEATURE_DESCRIPTION` skill
-- **If plan_$FEATURE_NAME.md exists** → Analyze current progress compared to origin/main, examine plan_$FEATURE_NAME.md and documentation, identify next steps
-- commit and push plan/analysis results
-
-### Step 3: Implement
+### Step 2: Implement
 - Use coder-agent to write code
 - If problems occur, use coder-agent to fix them
 - After each significant change, commit and push (main agent does this directly)
+- this will be populated with more fine grained tasks after the plan will be written.
 
-### Step 4: Quality
+### Step 3: Quality
 Run quality skill to fix code style, types, and remove AI slop.
 
-### Step 5: Review
+### Step 4: Review
 Use Task tool with subagent_type="reviewer-agent" for final code review and validation. 
 
-### Step 6: Fix Issues
+### Step 5: Fix Issues
 Fix all issues found by reviewer-agent and commit/push changes.
 
-### Step 7: PR Creation
+### Step 6: PR Creation
 create a pull request with "pr-create" skill
 
-### Step 8: Summary
+### Step 7: Summary
 Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
 
 ## How to start
