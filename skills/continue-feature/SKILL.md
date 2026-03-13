@@ -1,5 +1,5 @@
 ---
-name: "feature-continue"
+name: "continue-feature"
 description: "Resume work on existing feature clone"
 argument-hint: "[feature-description]"
 ---

@@ -1,5 +1,5 @@
 ---
-name: "feature-new"
+name: "new-feature"
 description: "Start new feature with full planning"
 argument-hint: "[feature-description]"
 ---

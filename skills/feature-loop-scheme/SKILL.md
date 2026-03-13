@@ -1,6 +1,6 @@
 ---
 name: "feature-loop-scheme"
-description: "Full feature development workflow (called by feature-new/feature-continue)"
+description: "Full feature development workflow (called by new-feature/continue-feature)"
 ---
 
 **Prerequisites:** Must be in a feature clone directory.
@@ -43,4 +43,4 @@ create a pull request with "pr-create" skill
 Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
 
 ## How to start
-Add all plan tasks + steps 4-8 as steps to task list and start working.
+ADD ALL ABOVE STEPS as steps to task list and start working.
