@@ -10,8 +10,8 @@ Review all changed files for quality issues. Fix any issues found.
 ## Phase 1: Identify Changes
 Run `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.
 
-## Phase 2: Launch Five Review Agents in Parallel
-Use the Agent tool to launch all five agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
+## Phase 2: Launch Six Review Agents in Parallel
+Use the Agent tool to launch all six agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
 
 ### Agent 1: Code Reuse Review
 For each change:
@@ -79,8 +79,32 @@ Review the same changes for proper code organization:
 - No relative imports (use absolute imports)
 - Python: All private items MUST start with `_` prefix
 
+### Agent 6: Test Integrity Review
+Review the diff for test-related regressions and silent failures:
+
+**Deleted Tests:**
+1. Check if any test functions/methods were deleted in the diff
+2. A deleted test is ONLY acceptable if the code it tested was also changed/deleted — meaning the test is no longer relevant
+3. A deleted test is NOT acceptable if it was removed because it was failing — failing tests must be fixed, not deleted
+4. Flag any suspicious test deletions for the user to confirm
+
+**Silent Test Failures:**
+1. Tests must fail loudly — no test should be silently skipped or produce false passes because of missing dependencies, fixtures, data, or configuration
+2. Flag any pattern where a test would silently pass or be skipped when something is missing:
+   - `pytest.importorskip()` without justification
+   - `@pytest.mark.skip` / `@unittest.skip` added in this diff
+   - `try/except` inside tests that catches and suppresses assertion errors
+   - Tests that return early with a pass when a precondition isn't met instead of failing
+   - `if not X: return` or `if not X: pytest.skip()` patterns that silently skip
+3. All test dependencies must be explicitly required — if a fixture, data file, or service is needed, the test must fail clearly when it's absent
+
+**Test Configuration & Markers:**
+1. Flag any changes to test configuration files (pytest.ini, setup.cfg, pyproject.toml test sections, conftest.py) that could silence or skip tests — these require explicit user consent
+2. Flag any new test markers (e.g., `@pytest.mark.slow`, `filterwarnings`, `xfail`) added in this diff — markers must not be added without user approval
+3. Flag changes to CI test commands that reduce test scope (e.g., adding `--ignore`, `-k "not ..."`, `--deselect`)
+
 ## Phase 3: Fix Issues
-Wait for all five agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.
+Wait for all six agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.
 
 ## Phase 4: Lint & Format
 After all code fixes are applied, run the quality check script to auto-format and lint:
