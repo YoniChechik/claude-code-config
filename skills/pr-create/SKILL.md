@@ -18,6 +18,7 @@ git log origin/main..HEAD --oneline
 git diff origin/main...HEAD --stat
 ```
 - Erase `plan_*.md` and any other dev/workflow related files and commit. If not sure, ask user for directions.
+- **IMPORTANT:** Only erase files that were created by this branch. Never delete files that existed before the branch was created. When in doubt, check `git log origin/main..HEAD -- <file>` to verify the file was added in this branch.
 
 ### Step 2: Generate PR Title and Body
 Create professional PR content:

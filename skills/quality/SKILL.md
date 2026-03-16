@@ -13,6 +13,8 @@ Run `git diff` (or `git diff HEAD` if there are staged changes) to see what chan
 ## Phase 2: Launch Six Review Agents in Parallel
 Use the Agent tool to launch all six agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
 
+**CRITICAL SCOPE RULE:** All review agents must ONLY flag issues in code that was added or modified compared to what we branched out from. Never flag, remove, or suggest changes to pre-existing code that was not touched by the current changes. If pre-existing code has issues, it is out of scope. This applies to ALL agents below — code reuse, quality, efficiency, slop removal, structure, and test integrity reviews.
+
 ### Agent 1: Code Reuse Review
 For each change:
 1. **Search for existing utilities and helpers** that could replace newly written code. Look for similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.
@@ -41,6 +43,7 @@ Review the same changes for efficiency:
 Review the same changes for AI-generated slop and fail-fast violations:
 
 **AI Slop to remove:**
+**Scope reminder:** Only remove slop that was introduced in the current branch compared to what we branched out from. Do not touch pre-existing comments, docstrings, or patterns.
 - Self-explanatory comments
 - Commented-out code
 - Debug prints
