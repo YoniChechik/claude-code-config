@@ -13,7 +13,7 @@ Plan, build, and review tests for the current feature branch.
 
 ## Process
 
-Use a subagent to carry out the following 3 phases sequentially:
+Use a subagent with subagent_type="coder-agent" to carry out the following 3 phases sequentially:
 
 ### Phase 1: Test Planning
 

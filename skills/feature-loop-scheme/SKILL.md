@@ -14,7 +14,6 @@ Run `/plan $FEATURE_DESCRIPTION` skill
 - Use coder-agent to write code
 - If problems occur, use coder-agent to fix them
 - After each significant change, commit and push (main agent does this directly)
-- this will be populated with more fine grained tasks after the plan will be written.
 
 ### Step 3: Test
 Run `/test` skill for test planning, building, and review.
