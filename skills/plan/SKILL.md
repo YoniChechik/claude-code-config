@@ -1,6 +1,6 @@
 ---
 name: "plan"
-description: "Enter plan mode, explore codebase, create structured plan, then exit with clear-context dialog"
+description: "Explore codebase and create structured implementation plan"
 argument-hint: "[feature-description]"
 ---
 
