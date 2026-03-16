@@ -46,7 +46,7 @@ cd _clones/FEATURE_NAME
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
 1. Use explorer subagent to understand the codebase relevant to the feature
-2. Check if `plan_$FEATURE_NAME.md` exists — if yes, read it
+2. Check if `plan-$FEATURE_NAME.md` exists — if yes, read it
 3. Run `git diff origin/main...HEAD` to see what's been done so far
 4. Compare progress against the plan (if exists)
 

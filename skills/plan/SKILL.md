@@ -34,7 +34,7 @@ While in plan mode:
 
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
-Create `plan-$FEATURE_NAME.md` with this structure:
+Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature clone directory) with this structure:
 
 ````markdown
 # Feature: [Feature Name]
@@ -60,6 +60,8 @@ Create `plan-$FEATURE_NAME.md` with this structure:
 
 ### Step 5: Exit Plan Mode
 Call the `ExitPlanMode` tool with the plan content. This triggers the interactive approval dialog where the user can choose to clear context before implementation.
+
+**IMPORTANT: After exiting plan mode, write the plan file (`plan-$FEATURE_NAME.md`) in the current working directory (the feature clone directory). Do NOT write it to `~/.claude/plans/` or any other global directory.**
 
 **Make sure to save all task list and add the plan tasks to the task list in the relevant position.**
 
