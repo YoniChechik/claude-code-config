@@ -59,8 +59,8 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - No human in the loop. You can ask/search for relevant CLIs or MCPs.
 - Testing Requirements - CRITICAL:
   - **EVERY FEATURE MUST INCLUDE TESTS. Features must be verified, not assumed to work.**
-  - **Tests are written and reviewed in a separate /test phase after implementation. The plan should describe WHAT to test per task, but the /test skill handles HOW.**
-  - Each task in the plan should consider what needs testing -- include a brief note on what to test for that task (behaviors, edge cases, integration points). Do NOT include a full testing strategy; that is the /test skill's responsibility.
+  - **Tests are planned and built in a separate /build-tests phase after implementation, then reviewed by /review-tests. The plan should describe WHAT to test per task, but the /build-tests skill handles HOW.**
+  - Each task in the plan should consider what needs testing -- include a brief note on what to test for that task (behaviors, edge cases, integration points). Do NOT include a full testing strategy; that is the /build-tests skill's responsibility.
   - **Testing philosophy -- integration-first, anti-mocking:**
     - **Integration tests** are the bulk -- wire real components together and verify they work as a system
     - **Unit tests** should be mock-free where possible -- call real code, use real data structures

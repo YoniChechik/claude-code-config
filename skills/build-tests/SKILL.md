@@ -1,19 +1,19 @@
 ---
-name: "test"
-description: "Plan, build, and review tests for the current feature"
+name: "build-tests"
+description: "Plan and build tests for the current feature"
 argument-hint: "[context or focus area]"
 ---
 
-# Test Mode
+# Build Tests Mode
 
-Plan, build, and review tests for the current feature branch.
+Plan and build tests for the current feature branch.
 
 ## Feature description from user input
 "$ARGUMENTS"
 
 ## Process
 
-Use a subagent with subagent_type="coder-agent" to carry out the following 3 phases sequentially:
+Use a subagent with `subagent_type="coder-agent"` to carry out the following 2 phases sequentially:
 
 ### Phase 1: Test Planning
 
@@ -29,7 +29,7 @@ Use a subagent with subagent_type="coder-agent" to carry out the following 3 pha
 
 ### Phase 2: Test Building
 
-Write tests following the test plan from Phase 1. Run all tests and fix any failures before moving on.
+Write tests following the test plan from Phase 1. Run all tests and fix any failures before finishing.
 
 #### Anti-Mocking Rules — CRITICAL
 
@@ -50,17 +50,3 @@ These rules are non-negotiable. Violating them produces tests that verify nothin
 - Prefer integration tests that wire real components together over unit tests with mocks
 - If you need more than 2 mocks in a test, the test design is wrong — rethink the approach
 - Tests must exercise real code paths, not mock shadows of them
-
-### Phase 3: Test Review
-
-Review ALL written tests for quality issues:
-
-- **Mock abuse**: tests that mock so much they're testing mock behavior, not real code
-- **Shallow coverage**: tests that only check happy paths
-- **Missing edge cases**: empty inputs, None values, boundary conditions, error scenarios
-- **Tautological tests**: tests that assert the mock returns what you told it to return
-- **Test isolation**: each test must be independent, no shared mutable state
-- **Meaningful assertions**: no `assert True`, no asserting only that no exception was thrown
-- **Test names**: should describe the behavior being tested, not the implementation
-
-Fix any issues found, then run tests one final time to confirm everything passes.
