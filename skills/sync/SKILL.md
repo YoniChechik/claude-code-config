@@ -70,7 +70,7 @@ Do this using git diff. Stage all unstaged changes.
 **Important**: If changes exist, committing them (Step 6) will make the current branch ahead of origin/main. If no changes exist, skip to Step 8 - we're already synced.
 
 ### Step 3: Check Plan Progress
-If `plan_*.md` exists, review current phase status:
+If `plan-*.md` exists, review current phase status:
 - Identify which phase is being completed
 - Check if this represents a major milestone
 - Note any phase transitions
@@ -88,7 +88,7 @@ Brief description (50 chars max)
 ```
 
 ### Step 5: Update Plan Status (if applicable)
-If `plan_*.md` exists and phase completed:
+If `plan-*.md` exists and phase completed:
 - Mark completed phase with ✓
 - Update status documentation
 

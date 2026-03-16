@@ -6,23 +6,21 @@ argument-hint: "[feature-description]"
 
 # Plan Mode
 
-Use the built-in `EnterPlanMode` tool to enter plan mode, then explore and plan.
+Explore the codebase and create a structured implementation plan.
 
 ## Feature description from user input
 "$ARGUMENTS"
 
 ## Process
 
-### Step 1: Enter Plan Mode
-Call the `EnterPlanMode` tool to activate read-only plan mode.
+Use a subagent to carry out the following steps:
 
-### Step 2: Explore & Plan
-While in plan mode:
-- Explore existing code patterns and architecture - you can use the explorer subagent for this.
+### Step 1: Explore & Plan
+- Explore existing code patterns and architecture
 - Identify related files and components
 - Understand dependencies and integration points
 - Use web search to find relevant information and examples
-- **Ask the user multiple question multiple times throughout the process:**
+- **Ask the user multiple questions throughout the process:**
   - Unclear scope or boundaries
   - Multiple valid technical approaches
   - Breaking changes or migration needed
@@ -30,7 +28,7 @@ While in plan mode:
 - **Decide yourself:**
   - Implementation details, file/function names, code organization, other obvious choices
 
-### Step 4: Write Plan File
+### Step 2: Write Plan File
 
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
@@ -55,13 +53,8 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - Action 1
 - Action 2
 ````
-- Tasks should be as independent as possible, with minimal dependencies between them. This allows for more flexible implementation and easier parallelization if needed.
-- Tasks should be actionable and specific, not vague or high-level. They should clearly indicate what needs to be done.
-
-### Step 5: Exit Plan Mode
-Call the `ExitPlanMode` tool with the plan content. This triggers the interactive approval dialog where the user can choose to clear context before implementation.
-
-**IMPORTANT: After exiting plan mode, write the plan file (`plan-$FEATURE_NAME.md`) in the current working directory (the feature clone directory). Do NOT write it to `~/.claude/plans/` or any other global directory.**
+- Tasks should be as independent as possible, with minimal dependencies between them.
+- Tasks should be actionable and specific, not vague or high-level.
 
 **Make sure to save all task list and add the plan tasks to the task list in the relevant position.**
 
