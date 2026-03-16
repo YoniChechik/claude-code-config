@@ -10,10 +10,10 @@ Review all changed files for quality issues. Fix any issues found.
 ## Phase 1: Identify Changes
 Run `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.
 
-## Phase 2: Launch Six Review Agents in Parallel
-Use the Agent tool to launch all six agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
+## Phase 2: Launch Review Agents in Parallel
+Use the Agent tool to launch all agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
 
-**CRITICAL SCOPE RULE:** All review agents must ONLY flag issues in code that was added or modified compared to what we branched out from. Never flag, remove, or suggest changes to pre-existing code that was not touched by the current changes. If pre-existing code has issues, it is out of scope. This applies to ALL agents below — code reuse, quality, efficiency, slop removal, structure, and test integrity reviews.
+**CRITICAL SCOPE RULE:** All review agents must ONLY flag issues in code that was added or modified compared to what we branched out from. Never flag, remove, or suggest changes to pre-existing code that was not touched by the current changes. If pre-existing code has issues, it is out of scope.
 
 ### Agent 1: Code Reuse Review
 For each change:
@@ -107,7 +107,7 @@ Review the diff for test-related regressions and silent failures:
 3. Flag changes to CI test commands that reduce test scope (e.g., adding `--ignore`, `-k "not ..."`, `--deselect`)
 
 ## Phase 3: Fix Issues
-Wait for all six agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.
+Wait for all six agents to complete. Aggregate their findings and fix each issue directly. 
 
 ## Phase 4: Lint & Format
 After all code fixes are applied, run the quality check script to auto-format and lint:
@@ -120,4 +120,4 @@ Then verify no errors remain:
 ```
 If errors remain, read the files and fix manually, then re-run until clean.
 
-When done, briefly summarize what was fixed (or confirm the code was already clean).
+When done, summarize ALL that was fixed.
