@@ -14,22 +14,21 @@ Run `/plan $FEATURE_DESCRIPTION` skill
 - Use coder-agent to write code
 - If problems occur, use coder-agent to fix them
 - After each significant change, commit and push (main agent does this directly)
-- this will be populated with more fine grained tasks after the plan will be written.
 
-### Step 3: Quality
-Run quality skill to fix code style, types, and remove AI slop.
+### Step 3: Build Tests
+Run `/build-tests` skill for test planning and building.
 
-### Step 4: Review
-Use Task tool with subagent_type="reviewer-agent" for final code review and validation. 
+### Step 4: Quality + Review + Review Tests (parallel)
+Run `/quality` skill, `/review` skill, AND `/review-tests` skill simultaneously — they are independent checks (quality is code style/types/slop, review is deep code review, review-tests is test quality) and can execute in parallel.
 
 ### Step 5: Fix Issues
-Fix all issues found by reviewer-agent and commit/push changes.
+Fix all issues found by quality, review, and review-tests, then commit/push changes.
 
 ### Step 6: PR Creation
-create a pull request with "pr-create" skill
+Run `/pr-create` skill to create a pull request.
 
 ### Step 7: Summary
-Report summary of what the feature is, how we implemented it and what happend at all post implementation steps 
+Report summary of what the feature is, how we implemented it and what happened at all post implementation steps.
 
 ## How to start
-ADD ALL ABOVE STEPS as steps to task list and start working.
+ADD ALL ABOVE STEPS (Plan, Implement, Build Tests, Quality+Review+Review Tests, Fix Issues, PR Creation, Summary) as steps to task list and start working.

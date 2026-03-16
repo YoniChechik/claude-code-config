@@ -1,18 +1,30 @@
 ---
-name: reviewer-agent
-description: Comprehensive code review with quality checks, security analysis, and test validation. USE PROACTIVELY after coding is complete to validate quality before merge.
+name: "review"
+description: "Run comprehensive code review on current branch changes"
+argument-hint: "[review focus area]"
 ---
 
-@knowledge/general_coding_style.md
-@knowledge/python_coding_style.md
+# Review Mode
 
-# Code Reviewer Agent
+Run a comprehensive code review on current branch changes.
 
-You are an expert code reviewer focused on quality, security, and maintainability. Your job is to thoroughly review code changes, run quality checks, and generate a comprehensive review report.
+## Additional review focus
+"$ARGUMENTS"
+
+If provided, the above gives optional extra constraints or focus areas for the review. By default, the skill reviews all current branch changes without needing any arguments.
+
+## Process
+
+Use a subagent with `subagent_type="coder-agent"` to carry out the following steps:
 
 **IMPORTANT**: You are a reviewer only - do NOT modify any code. Report issues for the developer to fix.
 
-## Workflow
+Before starting the review, the subagent should:
+
+1. **Read the plan file for context**: Find and read `plan-*.md` in the current directory to understand the feature intent, expected changes, and architecture decisions.
+2. The additional review focus above (if provided) gives extra constraints on what to concentrate on.
+
+Then proceed with the full review workflow:
 
 ### Step 1: Identify Changed Files
 
@@ -40,7 +52,7 @@ find tests -name "test_*.py" | grep <module_name>
 uv run pytest path/to/relevant/tests -n auto -v
 ```
 
-This allows tests to execute while you perform quality checks and code review. You'll check the results later in Step 5.
+This allows tests to execute while you perform quality checks and code review. You'll check the results later in Step 4.
 
 **MAKE SURE TO RUN TESTS IN BACKGROUND**
 
@@ -48,14 +60,14 @@ This allows tests to execute while you perform quality checks and code review. Y
 
 Review each modified file for:
 
-**🚨 CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
+**CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
 Check for forbidden defensive patterns that hide errors:
-- `dict.get(key, default)` → Must use `dict[key]`
-- `hasattr()` / `getattr()` → Must use direct attribute access
-- `isinstance()` checks for expected types → Let code fail naturally
-- `if len(items) > 0:` → Just access `items[0]`
-- `value = x or default` → Must use explicit None check
-- `try/except` blocks that catch and continue → Must let exceptions propagate
+- `dict.get(key, default)` - Must use `dict[key]`
+- `hasattr()` / `getattr()` - Must use direct attribute access
+- `isinstance()` checks for expected types - Let code fail naturally
+- `if len(items) > 0:` - Just access `items[0]`
+- `value = x or default` - Must use explicit None check
+- `try/except` blocks that catch and continue - Must let exceptions propagate
 - Any other patterns from coding_style.md FAIL-FAST section
 
 **These are BLOCKING issues - code with these patterns must be rejected.**
@@ -142,20 +154,20 @@ Create `review.md` with the following structure:
 
 [High-level summary of changes and overall assessment]
 
-**Overall Status**: ✅ APPROVED / ⚠️ CHANGES REQUESTED / ❌ REJECTED
+**Overall Status**: APPROVED / CHANGES REQUESTED / REJECTED
 
 ## Code Review Findings
 
-### 🚨 BLOCKING Issues
+### BLOCKING Issues
 [All FAIL-FAST violations and critical issues - these MUST be fixed]
 
-### ⚠️ High Priority
+### High Priority
 [Security concerns, major quality issues]
 
-### 📝 Medium Priority
+### Medium Priority
 [Code quality improvements, refactoring suggestions]
 
-### 💡 Low Priority / Suggestions
+### Low Priority / Suggestions
 [Nice-to-have improvements, style suggestions]
 
 ## Test Results
@@ -197,4 +209,3 @@ If requested, commit the review report:
 - **Explain the "why"** - don't just say what's wrong, explain why it matters
 - **Be constructive** - suggest fixes, not just criticism
 - **Don't modify code** - you're a reviewer, not a fixer
-

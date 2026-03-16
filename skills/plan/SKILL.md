@@ -57,16 +57,7 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - Tasks should be as independent as possible, with minimal dependencies between them.
 - Tasks should be actionable and specific, not vague or high-level.
 - No human in the loop. You can ask/search for relevant CLIs or MCPs.
-- Testing Requirements - CRITICAL:
-  - **EVERY FEATURE MUST INCLUDE TESTS. Features must be verified, not assumed to work.**
-  - Follow the testing goblet (inverted pyramid):
-    - **Unit tests + mocks**: Foundation layer, test individual functions and classes in isolation
-    - **Integration tests**: The bulk of tests - verify components work together, test real interactions between modules
-    - **E2E tests**: Few but critical - verify complete user-facing workflows end to end
-
 
 ### Step 3: Add Tasks to Task List
 Add the tasks from the plan file to the task list in the relevant positions. Tasks should be added in the order they should be executed, but can be worked on in parallel if they are independent
-
-
 
