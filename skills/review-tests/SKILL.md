@@ -8,8 +8,10 @@ argument-hint: "[context or focus area]"
 
 Review all tests for quality issues and fix any problems found.
 
-## Feature description from user input
+## Additional review focus
 "$ARGUMENTS"
+
+If provided, the above gives optional extra constraints or focus areas for the test review. By default, the skill reviews all tests for quality issues without needing any arguments.
 
 ## Process
 

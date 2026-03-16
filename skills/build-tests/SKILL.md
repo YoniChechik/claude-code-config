@@ -8,8 +8,10 @@ argument-hint: "[context or focus area]"
 
 Plan and build tests for the current feature branch.
 
-## Feature description from user input
+## Additional test focus
 "$ARGUMENTS"
+
+If provided, the above gives optional extra constraints or focus areas for test planning. By default, the skill plans and builds tests for all current branch changes without needing any arguments.
 
 ## Process
 

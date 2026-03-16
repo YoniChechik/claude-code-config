@@ -1,15 +1,17 @@
 ---
 name: "review"
 description: "Run comprehensive code review on current branch changes"
-argument-hint: "[feature-description]"
+argument-hint: "[review focus area]"
 ---
 
 # Review Mode
 
 Run a comprehensive code review on current branch changes.
 
-## Feature description from user input
+## Additional review focus
 "$ARGUMENTS"
+
+If provided, the above gives optional extra constraints or focus areas for the review. By default, the skill reviews all current branch changes without needing any arguments.
 
 ## Process
 
@@ -20,7 +22,7 @@ Use a subagent with `subagent_type="coder-agent"` to carry out the following ste
 Before starting the review, the subagent should:
 
 1. **Read the plan file for context**: Find and read `plan-*.md` in the current directory to understand the feature intent, expected changes, and architecture decisions.
-2. The feature description above (if provided) gives additional context about what was built and why.
+2. The additional review focus above (if provided) gives extra constraints on what to concentrate on.
 
 Then proceed with the full review workflow:
 
