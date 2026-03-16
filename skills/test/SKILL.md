@@ -8,7 +8,7 @@ argument-hint: "[context or focus area]"
 
 Plan, build, and review tests for the current feature branch.
 
-## Context from user input
+## Feature description from user input
 "$ARGUMENTS"
 
 ## Process

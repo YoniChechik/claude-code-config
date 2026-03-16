@@ -73,9 +73,6 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
     - ONLY mock: external services (APIs, databases, network), time/randomness, slow/flaky third-party libs
     - If you need more than 2 mocks in a test, rethink the test design
 
-
 ### Step 3: Add Tasks to Task List
 Add the tasks from the plan file to the task list in the relevant positions. Tasks should be added in the order they should be executed, but can be worked on in parallel if they are independent
-
-
 
