@@ -57,21 +57,10 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - Tasks should be as independent as possible, with minimal dependencies between them.
 - Tasks should be actionable and specific, not vague or high-level.
 - No human in the loop. You can ask/search for relevant CLIs or MCPs.
-- Testing Requirements - CRITICAL:
-  - **EVERY FEATURE MUST INCLUDE TESTS. Features must be verified, not assumed to work.**
-  - **Tests are planned and built in a separate /build-tests phase after implementation, then reviewed by /review-tests. The plan should describe WHAT to test per task, but the /build-tests skill handles HOW.**
-  - Each task in the plan should consider what needs testing -- include a brief note on what to test for that task (behaviors, edge cases, integration points). Do NOT include a full testing strategy; that is the /build-tests skill's responsibility.
-  - **Testing philosophy -- integration-first, anti-mocking:**
-    - **Integration tests** are the bulk -- wire real components together and verify they work as a system
-    - **Unit tests** should be mock-free where possible -- call real code, use real data structures
-    - **E2E tests**: Few but critical -- verify complete user-facing workflows end to end
-  - **Anti-mocking rules:**
-    - NEVER mock the code under test
-    - NEVER mock simple/pure functions -- just call them
-    - NEVER mock data structures, models, or value objects
-    - NEVER mock to avoid setup -- invest in proper test fixtures and factories instead
-    - ONLY mock: external services (APIs, databases, network), time/randomness, slow/flaky third-party libs
-    - If you need more than 2 mocks in a test, rethink the test design
+- Testing Requirements:
+  - **Every feature must include tests.** Features must be verified, not assumed to work.
+  - Each task should include a brief note on what to test (behaviors, edge cases, integration points).
+  - Tests are planned and built by `/build-tests` after implementation, then reviewed by `/review-tests`. The plan describes WHAT to test; those skills handle HOW.
 
 ### Step 3: Add Tasks to Task List
 Add the tasks from the plan file to the task list in the relevant positions. Tasks should be added in the order they should be executed, but can be worked on in parallel if they are independent
