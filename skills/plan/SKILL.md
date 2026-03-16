@@ -59,10 +59,19 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - No human in the loop. You can ask/search for relevant CLIs or MCPs.
 - Testing Requirements - CRITICAL:
   - **EVERY FEATURE MUST INCLUDE TESTS. Features must be verified, not assumed to work.**
-  - Follow the testing goblet (inverted pyramid):
-    - **Unit tests + mocks**: Foundation layer, test individual functions and classes in isolation
-    - **Integration tests**: The bulk of tests - verify components work together, test real interactions between modules
-    - **E2E tests**: Few but critical - verify complete user-facing workflows end to end
+  - **Tests are written and reviewed in a separate /test phase after implementation. The plan should describe WHAT to test per task, but the /test skill handles HOW.**
+  - Each task in the plan should consider what needs testing -- include a brief note on what to test for that task (behaviors, edge cases, integration points). Do NOT include a full testing strategy; that is the /test skill's responsibility.
+  - **Testing philosophy -- integration-first, anti-mocking:**
+    - **Integration tests** are the bulk -- wire real components together and verify they work as a system
+    - **Unit tests** should be mock-free where possible -- call real code, use real data structures
+    - **E2E tests**: Few but critical -- verify complete user-facing workflows end to end
+  - **Anti-mocking rules:**
+    - NEVER mock the code under test
+    - NEVER mock simple/pure functions -- just call them
+    - NEVER mock data structures, models, or value objects
+    - NEVER mock to avoid setup -- invest in proper test fixtures and factories instead
+    - ONLY mock: external services (APIs, databases, network), time/randomness, slow/flaky third-party libs
+    - If you need more than 2 mocks in a test, rethink the test design
 
 
 ### Step 3: Add Tasks to Task List
