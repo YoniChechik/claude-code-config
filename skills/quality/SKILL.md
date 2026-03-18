@@ -141,8 +141,10 @@ Wait for all six agents to complete, then fix issues from the results files one 
 3. For each file that contains issues (not just "No issues found"):
    - Parse each issue
    - Fix it directly in the codebase
+   - If a fix changes code referenced by a later issue, re-read the affected file to find the updated location. Skip issues already resolved by an earlier fix.
    - Move to the next issue
-4. After processing all files, briefly summarize what was fixed
+4. If any expected result file is missing, note it and proceed with available files
+5. After processing all files, briefly summarize what was fixed
 
 ## Phase 4: Lint & Format
 After all code fixes are applied, run the quality check script to auto-format and lint:
@@ -156,3 +158,8 @@ Then verify no errors remain:
 If errors remain, read the files and fix manually, then re-run until clean.
 
 When done, summarize ALL that was fixed.
+
+Finally, clean up the results directory:
+```bash
+rm -rf quality-results
+```
