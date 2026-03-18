@@ -26,6 +26,9 @@ mcp-needs-auth-cache.json
 chrome/
 sessions/
 
+# Quality skill results
+quality-results/
+
 # Feature clones
 _clones/
 
