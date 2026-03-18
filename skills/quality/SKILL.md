@@ -134,17 +134,16 @@ Review the diff for test-related regressions and silent failures:
 3. Flag changes to CI test commands that reduce test scope (e.g., adding `--ignore`, `-k "not ..."`, `--deselect`)
 
 ## Phase 3: Fix Issues
-Wait for all six agents to complete, then fix issues from the results files one by one:
+Wait for all six agents to complete, then aggregate and fix all issues:
 
-1. List all files in `quality-results/` directory
-2. Read each file in order (`1-code-reuse.md` through `6-test-integrity.md`)
-3. For each file that contains issues (not just "No issues found"):
-   - Parse each issue
-   - Fix it directly in the codebase
+1. Read ALL result files from `quality-results/` directory (`1-code-reuse.md` through `6-test-integrity.md`). If any expected file is missing, note it and proceed with available files.
+2. **Aggregate & deduplicate**: Collect all issues from all files into a single list. Remove duplicates — if multiple agents flagged the same code location or the same problem, keep only one entry.
+3. **Print the consolidated list**: Output the full deduplicated issue list so the user can see everything that was found before fixes begin.
+4. **Fix each issue one by one**:
+   - Work through the list sequentially
+   - Fix each issue directly in the codebase
    - If a fix changes code referenced by a later issue, re-read the affected file to find the updated location. Skip issues already resolved by an earlier fix.
-   - Move to the next issue
-4. If any expected result file is missing, note it and proceed with available files
-5. After processing all files, briefly summarize what was fixed
+5. After all issues are fixed, briefly summarize what was fixed
 
 ## Phase 4: Lint & Format
 After all code fixes are applied, run the quality check script to auto-format and lint:
