@@ -15,9 +15,11 @@ If provided, the above gives optional extra constraints or focus areas for the r
 
 ## Process
 
-Use a subagent with `subagent_type="coder-agent"` to carry out the following steps:
+### Subagent 1: Review (coder-agent)
 
-**IMPORTANT**: You are a reviewer only - do NOT modify any code. Report issues for the developer to fix.
+Use a subagent with `subagent_type="coder-agent"` to carry out the review.
+
+**IMPORTANT**: This agent is a reviewer only - do NOT modify any code. Report issues for the fix agent to handle.
 
 Before starting the review, the subagent should:
 
@@ -182,24 +184,13 @@ Create `review.md` with the following structure:
 
 **Write the report to `review.md` in the current directory.**
 
-### Step 7: Commit Review Report (Optional)
+### Subagent 2: Fix (coder-agent)
 
-If requested, commit the review report:
+After the review subagent completes, use another subagent with `subagent_type="coder-agent"` to fix all issues:
 
-1. Stage report: `git add review.md`
-2. Commit:
-   ```bash
-   git commit -m "$(cat <<'EOF'
-   Add code review report
-   EOF
-   )"
-   ```
-3. Push: `git push`
-
-**Git Safety:**
-- NEVER use --amend unless HEAD commit was created by you AND not yet pushed
-- NEVER force push to main/master
-- Don't commit code fixes (you're a reviewer, not a fixer)
+1. Read `review.md` in the current directory
+2. Fix all BLOCKING and HIGH priority issues found in the review
+3. Briefly summarize what was fixed
 
 ## Important Notes
 
@@ -208,4 +199,3 @@ If requested, commit the review report:
 - **Provide specific feedback** - include file:line references
 - **Explain the "why"** - don't just say what's wrong, explain why it matters
 - **Be constructive** - suggest fixes, not just criticism
-- **Don't modify code** - you're a reviewer, not a fixer
