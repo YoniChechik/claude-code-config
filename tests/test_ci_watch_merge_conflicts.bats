@@ -1,11 +1,12 @@
 #!/usr/bin/env bats
 
 # Tests for ci_watch_persistent.sh (CI watcher).
-# Mocks all external commands (gh, git, jq, sleep, date) via a temp PATH dir.
+# Mocks all external commands (gh, git, jq, sleep) via a temp PATH dir.
 #
 # Exit behavior:
-#   - CI passed: does NOT exit immediately, enters wait-for-new-SHA loop.
-#     Tests use the date mock inactivity timeout to eventually cause exit 0.
+#   - CI passed: does NOT exit, enters wait-for-new-SHA loop (runs forever).
+#     Tests use a stateful gh mock that returns a new SHA after N wait-loop
+#     calls, then triggers a CI failure on the next cycle to terminate.
 #   - CI failed/timeout/conflict: exits immediately with code 1.
 
 SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -16,11 +17,15 @@ setup() {
     MOCK_BIN="$(mktemp -d)"
     export PATH="$MOCK_BIN:$PATH"
 
-    # State file: date mock uses this to know when to return future time
-    export DATE_CALL_COUNT_FILE="$MOCK_BIN/.date_call_count"
-    echo "0" > "$DATE_CALL_COUNT_FILE"
-    # After this many date calls, return a time far in the future to trigger inactivity timeout
-    export DATE_FUTURE_AFTER="${DATE_FUTURE_AFTER:-6}"
+    # State file: tracks how many times the wait-loop gh --jq call has been made
+    export WAIT_LOOP_CALL_COUNT_FILE="$MOCK_BIN/.wait_loop_calls"
+    echo "0" > "$WAIT_LOOP_CALL_COUNT_FILE"
+    # After this many wait-loop --jq calls, return a new SHA to break the wait loop
+    export WAIT_LOOP_BREAK_AFTER="${WAIT_LOOP_BREAK_AFTER:-2}"
+
+    # State file: tracks which outer-loop cycle we're on (incremented when CI passes)
+    export OUTER_CYCLE_FILE="$MOCK_BIN/.outer_cycle"
+    echo "0" > "$OUTER_CYCLE_FILE"
 
     # --- Default mock config via env vars ---
     # MOCK_MERGEABLE controls gh pr view response: MERGEABLE, CONFLICTING, or NO_PR
@@ -31,6 +36,10 @@ setup() {
     #   "none"       - no CI workflows (empty array)
     #   "superseded" - latest run has a different SHA (newer push)
     export MOCK_CI_SCENARIO="pass"
+    # MOCK_SECOND_CYCLE_SCENARIO: what to return on the 2nd outer-loop cycle
+    # (after the wait loop detects a new SHA and restarts). Defaults to "fail"
+    # so the script exits with code 1 after demonstrating the wait loop works.
+    export MOCK_SECOND_CYCLE_SCENARIO="fail"
 
     # --- Mock: sleep (no-op) ---
     cat > "$MOCK_BIN/sleep" <<'MOCK_SLEEP'
@@ -38,28 +47,6 @@ setup() {
 exit 0
 MOCK_SLEEP
     chmod +x "$MOCK_BIN/sleep"
-
-    # --- Mock: date ---
-    # Returns real time for the first N calls, then returns a time 2 hours in the future
-    # to trigger the inactivity timeout.
-    cat > "$MOCK_BIN/date" <<'MOCK_DATE'
-#!/usr/bin/env bash
-if [[ "${1:-}" == "+%s" ]]; then
-    COUNT=$(cat "$DATE_CALL_COUNT_FILE" 2>/dev/null || echo 0)
-    COUNT=$((COUNT + 1))
-    echo "$COUNT" > "$DATE_CALL_COUNT_FILE"
-    if [ "$COUNT" -gt "$DATE_FUTURE_AFTER" ]; then
-        # Return a time 2 hours in the future from a base time
-        echo "9999999999"
-    else
-        # Return a normal base time
-        echo "1000000"
-    fi
-else
-    command date "$@"
-fi
-MOCK_DATE
-    chmod +x "$MOCK_BIN/date"
 
     # --- Mock: git ---
     cat > "$MOCK_BIN/git" <<'MOCK_GIT'
@@ -75,6 +62,10 @@ MOCK_GIT
     chmod +x "$MOCK_BIN/git"
 
     # --- Mock: gh ---
+    # This is a stateful mock. For the wait-for-new-SHA loop (gh run list --jq),
+    # it returns the same SHA for WAIT_LOOP_BREAK_AFTER calls, then returns a
+    # new SHA to break the loop. On the 2nd outer-loop cycle, it uses
+    # MOCK_SECOND_CYCLE_SCENARIO to determine behavior.
     cat > "$MOCK_BIN/gh" <<'MOCK_GH'
 #!/usr/bin/env bash
 
@@ -102,20 +93,44 @@ fi
 
 # --- gh run list ---
 if [[ "$1" == "run" && "$2" == "list" ]]; then
+    # Determine which cycle we're in
+    CYCLE=$(cat "$OUTER_CYCLE_FILE" 2>/dev/null || echo 0)
+
+    # Pick scenario based on cycle
+    if [ "$CYCLE" -ge 1 ]; then
+        SCENARIO="$MOCK_SECOND_CYCLE_SCENARIO"
+    else
+        SCENARIO="$MOCK_CI_SCENARIO"
+    fi
+
     # Check for --jq flag (used in wait-for-new-SHA loop)
     for arg in "$@"; do
         if [[ "$arg" == "--jq" ]]; then
-            case "$MOCK_CI_SCENARIO" in
-                pass)       echo "abc123" ;;
-                fail)       echo "abc123" ;;
-                none)       echo "" ;;
-                superseded) echo "def456" ;;
-            esac
+            # Stateful: count wait-loop calls and return new SHA after threshold
+            COUNT=$(cat "$WAIT_LOOP_CALL_COUNT_FILE" 2>/dev/null || echo 0)
+            COUNT=$((COUNT + 1))
+            echo "$COUNT" > "$WAIT_LOOP_CALL_COUNT_FILE"
+
+            if [ "$COUNT" -gt "$WAIT_LOOP_BREAK_AFTER" ]; then
+                # Return a new SHA to break the wait loop
+                # Also increment the outer cycle counter
+                NEW_CYCLE=$((CYCLE + 1))
+                echo "$NEW_CYCLE" > "$OUTER_CYCLE_FILE"
+                echo "newsha_cycle${NEW_CYCLE}"
+            else
+                # Return same SHA (no new push yet)
+                case "$SCENARIO" in
+                    pass)       echo "abc123" ;;
+                    fail)       echo "abc123" ;;
+                    none)       echo "" ;;
+                    superseded) echo "def456" ;;
+                esac
+            fi
             exit 0
         fi
     done
 
-    case "$MOCK_CI_SCENARIO" in
+    case "$SCENARIO" in
         pass)
             echo '[{"databaseId":100,"status":"completed","conclusion":"success","name":"CI","headSha":"abc123"}]'
             ;;
@@ -169,13 +184,12 @@ MOCK_GH
         ln -sf "$REAL_PASTE" "$MOCK_BIN/paste"
     fi
 
-    # --- Patch the script: set small CI_RUN_MAX_ITERATIONS, POLL_INTERVAL=0, INACTIVITY_TIMEOUT=1 ---
+    # --- Patch the script: set small CI_RUN_MAX_ITERATIONS, POLL_INTERVAL=0 ---
     PATCHED_SCRIPT="$MOCK_BIN/ci_watch_patched.sh"
     sed \
         -e 's/^POLL_INTERVAL=.*/POLL_INTERVAL=0/' \
         -e 's/^CI_RUN_TIMEOUT=.*/CI_RUN_TIMEOUT=0/' \
         -e 's|^CI_RUN_MAX_ITERATIONS=.*|CI_RUN_MAX_ITERATIONS=4|' \
-        -e 's/^INACTIVITY_TIMEOUT=.*/INACTIVITY_TIMEOUT=1/' \
         "$CI_WATCH" > "$PATCHED_SCRIPT"
     chmod +x "$PATCHED_SCRIPT"
 }
@@ -191,7 +205,6 @@ _setup_ci_run_timeout_test() {
         -e 's/^POLL_INTERVAL=.*/POLL_INTERVAL=0/' \
         -e 's/^CI_RUN_TIMEOUT=.*/CI_RUN_TIMEOUT=0/' \
         -e 's|^CI_RUN_MAX_ITERATIONS=.*|CI_RUN_MAX_ITERATIONS=1|' \
-        -e 's/^INACTIVITY_TIMEOUT=.*/INACTIVITY_TIMEOUT=1/' \
         "$CI_WATCH" > "$PATCHED_TIMEOUT"
     chmod +x "$PATCHED_TIMEOUT"
 
@@ -237,32 +250,36 @@ MOCK_GH
 
 # ---------- CI Pass (watcher continues) ----------
 
-@test "CI passes -> exit 0 (inactivity), output contains 'CI passed' and 'Waiting for new push'" {
+@test "CI passes -> enters wait loop, detects new push, then exits on 2nd cycle failure" {
     export MOCK_CI_SCENARIO="pass"
     export MOCK_MERGEABLE="MERGEABLE"
+    export MOCK_SECOND_CYCLE_SCENARIO="fail"
 
     run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"CI passed"* ]]
     [[ "$output" == *"All workflows green"* ]]
     [[ "$output" == *"Waiting for new push"* ]]
-    [[ "$output" == *"Exiting watcher"* ]]
+    [[ "$output" == *"New push detected"* ]]
+    [[ "$output" == *"CI failed"* ]]
 }
 
-@test "No PR exists -> CI passes, watcher continues" {
+@test "No PR exists -> CI passes, enters wait loop, detects new push" {
     export MOCK_CI_SCENARIO="pass"
     export MOCK_MERGEABLE="NO_PR"
+    export MOCK_SECOND_CYCLE_SCENARIO="fail"
 
     run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"CI passed"* ]]
     [[ "$output" == *"Waiting for new push"* ]]
+    [[ "$output" == *"New push detected"* ]]
 }
 
 @test "No CI workflows + no conflicts -> exit 0, output contains 'No CI workflows'" {
@@ -444,32 +461,75 @@ MOCK_GH
 
 # ---------- Newer Push (SHA Update) ----------
 
-@test "Newer push detected -> updates tracked SHA, continues polling, and CI passes" {
+@test "Newer push detected mid-poll -> updates tracked SHA, continues polling, and CI passes" {
     export MOCK_CI_SCENARIO="superseded"
     export MOCK_MERGEABLE="MERGEABLE"
+    export MOCK_SECOND_CYCLE_SCENARIO="fail"
 
     run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
+    # The superseded scenario detects a new SHA mid-poll, CI passes on that SHA,
+    # then enters wait loop -> detects another new SHA -> 2nd cycle fails -> exit 1
+    [ "$status" -eq 1 ]
     [[ "$output" == *"New push detected"* ]]
     [[ "$output" == *"new SHA: def456"* ]]
     [[ "$output" == *"Now tracking new CI run"* ]]
     [[ "$output" == *"CI passed"* ]]
 }
 
-# ---------- Inactivity Timeout ----------
+# ---------- Inactivity timeout removed (regression guard) ----------
 
-@test "Inactivity timeout -> exit 0, output contains 'No new pushes detected' and 'Exiting'" {
+@test "script does NOT contain INACTIVITY_TIMEOUT" {
+    run grep -c 'INACTIVITY_TIMEOUT' "$CI_WATCH"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    # grep -c returns 0 if matches found, 1 if no matches
+    [ "$status" -eq 1 ]
+}
+
+@test "script does NOT contain LAST_ACTIVITY_TIME" {
+    run grep -c 'LAST_ACTIVITY_TIME' "$CI_WATCH"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+}
+
+@test "script does NOT use date +%s for timestamp tracking" {
+    run grep -c 'date +%s' "$CI_WATCH"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+}
+
+@test "CI_RUN_TIMEOUT is still present (intentionally kept)" {
+    run grep -c 'CI_RUN_TIMEOUT' "$CI_WATCH"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 0 ]
+    # Should appear at least twice (definition + usage)
+    [ "$output" -ge 2 ]
+}
+
+# ---------- Wait loop runs indefinitely until new push ----------
+
+@test "wait loop polls multiple times before detecting new push" {
     export MOCK_CI_SCENARIO="pass"
     export MOCK_MERGEABLE="MERGEABLE"
+    export MOCK_SECOND_CYCLE_SCENARIO="fail"
+    export WAIT_LOOP_BREAK_AFTER=3
 
     run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"No new pushes detected"* ]]
-    [[ "$output" == *"Exiting watcher"* ]]
+    [ "$status" -eq 1 ]
+    # Verify it went through the wait loop
+    [[ "$output" == *"Waiting for new push"* ]]
+    [[ "$output" == *"New push detected"* ]]
 }
