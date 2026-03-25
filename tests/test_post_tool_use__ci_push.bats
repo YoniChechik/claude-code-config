@@ -73,7 +73,7 @@ teardown() {
     rm -rf "$MOCK_BIN"
 }
 
-# ---------- Test Cases ----------
+# ---------- Trigger Detection ----------
 
 @test "git push + PR exists + CI runs -> outputs hookSpecificOutput JSON" {
     local json='{"tool_input":{"command":"git push origin main"}}'
@@ -132,7 +132,9 @@ teardown() {
     [ -z "$output" ]
 }
 
-@test "output contains ci_watch.sh path" {
+# ---------- Updated Hook Behavior ----------
+
+@test "output references ci_watch_persistent.sh (not ci_watch.sh)" {
     local json='{"tool_input":{"command":"git push origin main"}}'
 
     run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
@@ -140,7 +142,21 @@ teardown() {
     echo "OUTPUT: $output"
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"ci_watch.sh"* ]]
+    [[ "$output" == *"ci_watch_persistent.sh"* ]]
+}
+
+@test "output contains REMINDER (not BLOCKING REQUIREMENT)" {
+    local json='{"tool_input":{"command":"git push origin main"}}'
+
+    run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"REMINDER"* ]]
+    # Ensure it does NOT contain the old blocking language
+    [[ "$output" != *"BLOCKING REQUIREMENT"* ]]
+    [[ "$output" != *"You MUST"* ]]
 }
 
 @test "output contains branch name" {
