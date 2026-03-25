@@ -20,7 +20,6 @@
 #   - CI failed (exit 1) — prints failure details and relaunch instruction
 #   - CI run timed out (exit 1) — prints timeout message and relaunch instruction
 #   - Merge conflict detected (exit 1) — prints conflict message and relaunch instruction
-#   - Inactivity timeout: no new pushes for INACTIVITY_TIMEOUT seconds (exit 0)
 #
 # SHA tracking:
 #   The script tracks commits by SHA, not by branch name. It resolves the branch
@@ -40,14 +39,8 @@ BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
 POLL_INTERVAL=5
 CI_RUN_TIMEOUT=600
 CI_RUN_MAX_ITERATIONS=$((CI_RUN_TIMEOUT / POLL_INTERVAL))
-# If no new push happens within this window, the watcher exits cleanly.
-INACTIVITY_TIMEOUT=1800  # 30 minutes
-
 # Resolve branch to its current commit SHA.
 LATEST_SHA=$(git rev-parse "$BRANCH")
-# Timestamp of last meaningful activity (push detection or startup).
-# Used by the inactivity timeout mechanism.
-LAST_ACTIVITY_TIME=$(date +%s)
 
 # =============================================================================
 # OUTER LOOP: one iteration per push cycle (CI poll -> report -> wait for push)
@@ -93,12 +86,11 @@ while true; do
 
         # --- Detect new pushes mid-poll ---
         # If the latest run's SHA differs from ours, someone pushed a new commit.
-        # Update our tracked SHA and reset the inactivity timer.
+        # Update our tracked SHA.
         CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
         if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
             echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
             LATEST_SHA="$CURRENT_SHA"
-            LAST_ACTIVITY_TIME=$(date +%s)
         fi
 
         # --- Filter and deduplicate runs for our SHA ---
@@ -178,19 +170,10 @@ while true; do
     fi
 
     # =========================================================================
-    # Wait-for-new-SHA loop: idle until a new push is detected or timeout
+    # Wait-for-new-SHA loop: idle until a new push is detected
     # =========================================================================
     echo "Waiting for new push on branch '$BRANCH'..."
     while true; do
-        # --- Inactivity timeout check ---
-        # If no new push has been detected for INACTIVITY_TIMEOUT seconds, exit cleanly.
-        NOW=$(date +%s)
-        ELAPSED=$(( NOW - LAST_ACTIVITY_TIME ))
-        if [ "$ELAPSED" -ge "$INACTIVITY_TIMEOUT" ]; then
-            echo "No new pushes detected for $((INACTIVITY_TIMEOUT / 60)) minutes. Exiting watcher."
-            exit 0
-        fi
-
         # --- Poll for new SHA via GitHub API ---
         # We check GitHub's run list rather than `git rev-parse` because the local
         # repo may not have fetched the latest commits. GitHub's API is the
@@ -200,7 +183,6 @@ while true; do
         if [ "$NEW_SHA" != "$LATEST_SHA" ]; then
             echo "New push detected on branch '$BRANCH' (new SHA: $NEW_SHA). Now tracking new CI run."
             LATEST_SHA="$NEW_SHA"
-            LAST_ACTIVITY_TIME=$(date +%s)
             break  # Exit wait loop -> restart outer loop for new CI polling cycle
         fi
 
