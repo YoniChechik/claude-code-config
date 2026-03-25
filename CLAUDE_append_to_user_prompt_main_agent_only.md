@@ -22,18 +22,18 @@
 
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
 
-**Exception:** You MAY run `$HOME/.claude/scripts/ci_watch_persistent.sh <branch>` directly using the Bash tool with `run_in_background=true`. This is the CI watcher — it polls CI status and exits when done.
+**Exception:** You MAY run `$HOME/.claude/scripts/ci_watch_persistent.sh <branch>` directly using the Bash tool with `run_in_background=true`. This is the CI watcher — it runs persistently and reports CI results as they arrive.
 
 ## CI Watcher Lifecycle
 
-After a PR is created or code is pushed, launch the CI watcher:
+After a PR is created or code is pushed, launch the CI watcher once:
 - Run `$HOME/.claude/scripts/ci_watch_persistent.sh <branch>` with `run_in_background=true`
-- When the watcher exits and you receive notification:
+- The watcher runs persistently — no need to relaunch after CI results. It automatically tracks new pushes.
+- When the watcher reports:
   - **CI passed**: No action needed, proceed with your workflow.
-  - **CI failed**: Delegate the fix to coder-agent (the output includes the `gh run view --log-failed` command). After the fix is committed and pushed, relaunch the watcher.
-  - **Merge conflict**: Delegate conflict resolution to coder-agent. After resolved, committed, and pushed, relaunch the watcher.
-  - **Timeout**: Relaunch the watcher or check CI status manually.
-  - **Superseded (newer push)**: No action needed — a new watcher should already be running for the newer push.
+  - **CI failed**: Delegate the fix to coder-agent (the output includes the `gh run view --log-failed` command). After the fix is committed and pushed, the watcher automatically tracks the new CI run.
+  - **Merge conflict**: Delegate conflict resolution to coder-agent. After resolved, committed, and pushed, the watcher automatically tracks the new CI run.
+  - **Inactivity exit**: The watcher exits after 30 minutes with no new pushes. Relaunch if needed.
 
 ## Agent Preferences
 

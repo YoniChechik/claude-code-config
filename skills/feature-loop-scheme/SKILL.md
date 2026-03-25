@@ -33,9 +33,9 @@ Run `/pr-create` skill to create a pull request.
    ```
    Run this with `run_in_background=true`.
 
-2. When the watcher reports back:
+2. The watcher runs persistently and reports CI results as they arrive:
    - **CI passed**: Proceed to Step 7 (Summary).
-   - **CI failed or merge conflict**: Delegate the fix to coder-agent. After the fix, commit and push, then relaunch the watcher with the same command (`$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH` with `run_in_background=true`). Repeat until CI passes.
+   - **CI failed or merge conflict**: Delegate the fix to coder-agent. After the fix, commit and push — the watcher automatically tracks the new CI run. No need to relaunch.
 
 ### Step 7: Summary
 Report summary of what the feature is, how we implemented it and what happened at all post implementation steps.

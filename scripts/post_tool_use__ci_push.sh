@@ -32,7 +32,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "REMINDER: If you haven't already, launch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH"
+    "additionalContext": "REMINDER: If you haven't already, launch the persistent CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH — it runs persistently and tracks all new pushes automatically, no need to relaunch."
   }
 }
 EOF
