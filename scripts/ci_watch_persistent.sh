@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Polls GitHub Actions CI status after a push and reports results to Claude.
-# Exit code: 0 = CI passed or no workflows, 1 = CI failed or timed out.
+# Polls GitHub Actions CI status after a push and reports results to the orchestrator.
+# Designed for the exit-and-relaunch pattern: exits on every terminal event with
+# descriptive output telling the orchestrator what to do next.
+# Exit code: 0 = CI passed, newer push, or no workflows. 1 = CI failed, merge conflict, or timeout.
 set -euo pipefail
 
-BRANCH="${1:?Usage: ci_watch.sh <branch>}"
+BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
 
 POLL_INTERVAL=5
 MAX_TIMEOUT=600
@@ -11,6 +13,8 @@ MAX_ITERATIONS=$((MAX_TIMEOUT / POLL_INTERVAL))
 
 # Resolve branch to SHA so concurrent watchers on different branches each track their own commit.
 LATEST_SHA=$(git rev-parse "$BRANCH")
+
+RELAUNCH_CMD="\$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH"
 
 for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
@@ -21,7 +25,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
             # Still check for merge conflicts even without CI workflows
             MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
             if [ "$MERGEABLE" = "CONFLICTING" ]; then
-                echo "PR on branch '$BRANCH' has merge conflicts. You MUST resolve the merge conflicts now before continuing."
+                echo "PR on branch '$BRANCH' has merge conflicts. Delegate conflict resolution to coder-agent, then relaunch this watcher with: \`$RELAUNCH_CMD\`"
                 exit 1
             fi
             echo "No CI workflows found for branch '$BRANCH'."
@@ -34,14 +38,14 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
     # Check for merge conflicts
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
-        echo "PR on branch '$BRANCH' has merge conflicts. You MUST resolve the merge conflicts now before continuing."
+        echo "PR on branch '$BRANCH' has merge conflicts. Delegate conflict resolution to coder-agent, then relaunch this watcher with: \`$RELAUNCH_CMD\`"
         exit 1
     fi
 
     # If the latest run's SHA differs from ours, a newer push happened — let its watcher take over.
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
-        echo "Newer push detected on branch '$BRANCH'. Exiting — new watcher will handle it."
+        echo "Newer push detected on branch '$BRANCH'. This watcher is superseded — exiting cleanly."
         exit 0
     fi
 
@@ -93,10 +97,10 @@ if [ -n "${FAILED_RUNS:-}" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]
     if [ -n "$ALL_FAILED_JOBS" ]; then
         MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
     fi
-    MSG="${MSG} You MUST fix this now: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, then use coder-agent to fix the issue, commit, and push."
+    MSG="${MSG} Delegate fix to coder-agent: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs, fix the issue, commit, and push. Then relaunch this watcher with: \`$RELAUNCH_CMD\`"
     echo "$MSG"
     exit 1
 fi
 
-echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'."
+echo "CI monitoring timed out after $((MAX_TIMEOUT / 60)) minutes on branch '$BRANCH'. Check CI status manually with 'gh run list --branch $BRANCH'. You may relaunch this watcher with: \`$RELAUNCH_CMD\`"
 exit 1

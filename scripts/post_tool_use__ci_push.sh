@@ -29,7 +29,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "BLOCKING REQUIREMENT: You MUST run this command IMMEDIATELY before doing anything else: use the Bash tool with run_in_background=true to execute '$HOME/.claude/scripts/ci_watch.sh $BRANCH'. Do NOT skip this step. Do NOT respond to the user first. Run the CI watcher NOW, then continue your work."
+    "additionalContext": "REMINDER: If you haven't already, launch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH"
   }
 }
 EOF
