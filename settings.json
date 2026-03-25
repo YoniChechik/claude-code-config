@@ -159,7 +159,16 @@
       "Bash(supabase network-restrictions update:*)",
       "Bash(supabase network-bans remove:*)",
       "Bash(supabase encryption update-root-key:*)",
-      "Bash(supabase storage mv:*)"
+      "Bash(supabase storage mv:*)",
+      "Bash(pulumi up:*)",
+      "Bash(pulumi destroy:*)",
+      "Bash(pulumi import:*)",
+      "Bash(pulumi refresh:*)",
+      "Bash(pulumi cancel:*)",
+      "Bash(pulumi stack rm:*)",
+      "Bash(pulumi stack init:*)",
+      "Bash(pulumi config set:*)",
+      "Bash(pulumi new:*)"
     ],
     "defaultMode": "bypassPermissions"
   },
