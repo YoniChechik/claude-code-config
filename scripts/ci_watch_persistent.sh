@@ -5,20 +5,12 @@
 # Monitors GitHub Actions CI status for a branch and reports results.
 #
 # Architecture:
-#   The script uses a nested loop pattern:
-#   - OUTER LOOP: each iteration handles one push cycle.
-#     1. Inner CI-polling loop: polls CI status for the current commit SHA.
-#     2. Post-loop: reports the CI result.
-#        - On CI pass: continue outer loop (wait for next push).
-#        - On CI fail/timeout/merge conflict: EXIT with code 1.
-#     3. Wait-for-new-SHA loop: idles until a new push is detected (only
-#        reached after CI pass).
+#   Single flat while-true loop with function-based structure.
+#   No nested loops, no timeouts, no exit-on-inactivity.
 #
 # Exit conditions:
 #   - No branch argument provided (exit 1)
-#   - No CI workflows found for the branch after several polls (exit 0)
 #   - CI failed (exit 1) — prints failure details and relaunch instruction
-#   - CI run timed out (exit 1) — prints timeout message and relaunch instruction
 #   - Merge conflict detected (exit 1) — prints conflict message and relaunch instruction
 #
 # SHA tracking:
@@ -35,111 +27,49 @@ set -euo pipefail
 
 # --- Configuration ---
 BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
-
 POLL_INTERVAL=5
-CI_RUN_TIMEOUT=600
-CI_RUN_MAX_ITERATIONS=$((CI_RUN_TIMEOUT / POLL_INTERVAL))
-# Resolve branch to its current commit SHA.
 LATEST_SHA=$(git rev-parse "$BRANCH")
+REPORTED_PASS=""
+RUNS_JSON=""
+SHA_RUNS=""
 
-# =============================================================================
-# OUTER LOOP: one iteration per push cycle (CI poll -> report -> wait for push)
-# The loop only continues after CI passes. Failures/timeouts/conflicts exit.
-# =============================================================================
-while true; do
-    # ---- Inner loop: poll CI status for the current SHA ----
-    # Tracks whether any workflow failed and which ones.
-    FOUND_FAILURE=""
-    FAILED_RUNS=""
-    TIMED_OUT=""
+# --- Functions ---
 
-    # Poll up to CI_RUN_MAX_ITERATIONS times, sleeping POLL_INTERVAL between polls.
-    for ((num_iter = 0; num_iter < CI_RUN_MAX_ITERATIONS; num_iter++)); do
-        # Fetch all CI runs for this branch (any SHA) as JSON.
-        RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
+fetch_runs() {
+    RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
+}
 
-        # --- Handle "no workflows" edge case ---
-        if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
-            # After 3 polls (~15s) with zero runs, assume the repo has no CI configured.
-            # We wait a few polls because GitHub may take a moment to register new runs.
-            if [ "$num_iter" -ge 3 ]; then
-                # Even without CI, check for merge conflicts on the PR.
-                MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
-                if [ "$MERGEABLE" = "CONFLICTING" ]; then
-                    echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
-                    exit 1
-                fi
-                echo "No CI workflows found for branch '$BRANCH'."
-                exit 0
-            fi
-            sleep "$POLL_INTERVAL"
-            continue
-        fi
-
-        # --- Check for merge conflicts on the PR ---
-        # Uses `|| MERGEABLE=""` so a missing PR (gh exits non-zero) doesn't abort the script.
-        MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
-        if [ "$MERGEABLE" = "CONFLICTING" ]; then
-            echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
-            exit 1
-        fi
-
-        # --- Detect new pushes mid-poll ---
-        # If the latest run's SHA differs from ours, someone pushed a new commit.
-        # Update our tracked SHA.
-        CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
-        if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
-            echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
-            LATEST_SHA="$CURRENT_SHA"
-        fi
-
-        # --- Filter and deduplicate runs for our SHA ---
-        # 1. Select only runs matching our tracked SHA.
-        # 2. Group by workflow name and keep only the run with the highest databaseId
-        #    per group. This ensures re-runs of the same workflow don't show stale results.
-        SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '
-          [.[] | select(.headSha == $sha)]
-          | group_by(.name)
-          | map(sort_by(.databaseId) | last)
-        ')
-
-        # GitHub may not have registered runs for our SHA yet -- keep polling.
-        if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
-            sleep "$POLL_INTERVAL"
-            continue
-        fi
-
-        # --- Check for failures ---
-        FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
-        if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
-            FOUND_FAILURE=1
-            break
-        fi
-
-        # --- Check if all runs completed successfully ---
-        # If no runs are still in progress/queued, everything passed.
-        if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
-            echo "CI passed on branch '$BRANCH'. All workflows green."
-            break  # Exit inner loop -> go to wait-for-new-SHA
-        fi
-
-        sleep "$POLL_INTERVAL"
-    done
-
-    # Check if the inner loop exhausted all iterations (timeout).
-    if [ "$num_iter" -ge "$CI_RUN_MAX_ITERATIONS" ]; then
-        TIMED_OUT=1
+check_merge_conflict() {
+    MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
+    if [ "$MERGEABLE" = "CONFLICTING" ]; then
+        echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
+        exit 1
     fi
+}
 
-    # =========================================================================
-    # Post-inner-loop: report CI failure or timeout
-    # =========================================================================
-    if [ -n "$FOUND_FAILURE" ] && [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
-        # Build a human-readable failure report with workflow names and failed job names.
+detect_new_sha() {
+    CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
+    if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
+        echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
+        LATEST_SHA="$CURRENT_SHA"
+        REPORTED_PASS=""
+    fi
+}
+
+get_sha_runs() {
+    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '
+      [.[] | select(.headSha == $sha)]
+      | group_by(.name)
+      | map(sort_by(.databaseId) | last)
+    ')
+}
+
+check_failures() {
+    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
+    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
         FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
         FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
 
-        # For each failed run, query GitHub for the specific failed job names.
         ALL_FAILED_JOBS=""
         while IFS= read -r RUN_ID; do
             FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
@@ -157,35 +87,49 @@ while true; do
         MSG="${MSG} IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
         echo "$MSG"
         exit 1
-    elif [ -n "$TIMED_OUT" ]; then
-        # Inner loop exhausted all iterations without all runs completing.
-        LATEST_RUN_ID=$(echo "${SHA_RUNS:-[]}" | jq -r '.[0].databaseId // empty' 2>/dev/null || true)
-        MSG="CI run timed out after $((CI_RUN_TIMEOUT / 60)) minutes on branch '$BRANCH'."
-        if [ -n "$LATEST_RUN_ID" ]; then
-            MSG="${MSG} Run 'gh run view $LATEST_RUN_ID --log-failed' to check logs."
+    fi
+}
+
+check_all_passed() {
+    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
+        if [ -z "$REPORTED_PASS" ]; then
+            echo "CI passed on branch '$BRANCH'. All workflows green."
+            REPORTED_PASS=1
         fi
-        MSG="${MSG} IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
-        echo "$MSG"
-        exit 1
+    fi
+}
+
+# --- Main loop ---
+
+while true; do
+    fetch_runs
+
+    check_merge_conflict
+
+    # If no runs yet, just keep polling
+    if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
+        sleep "$POLL_INTERVAL"
+        continue
     fi
 
-    # =========================================================================
-    # Wait-for-new-SHA loop: idle until a new push is detected
-    # =========================================================================
-    echo "Waiting for new push on branch '$BRANCH'..."
-    while true; do
-        # --- Poll for new SHA via GitHub API ---
-        # We check GitHub's run list rather than `git rev-parse` because the local
-        # repo may not have fetched the latest commits. GitHub's API is the
-        # authoritative source for what SHA is being built.
-        NEW_SHA=$(gh run list --branch "$BRANCH" --json headSha --jq '.[0].headSha' 2>/dev/null || echo "$LATEST_SHA")
+    detect_new_sha
 
-        if [ "$NEW_SHA" != "$LATEST_SHA" ]; then
-            echo "New push detected on branch '$BRANCH' (new SHA: $NEW_SHA). Now tracking new CI run."
-            LATEST_SHA="$NEW_SHA"
-            break  # Exit wait loop -> restart outer loop for new CI polling cycle
-        fi
-
+    # Already reported pass for this SHA — just wait for new push
+    if [ -n "$REPORTED_PASS" ]; then
         sleep "$POLL_INTERVAL"
-    done
+        continue
+    fi
+
+    get_sha_runs
+
+    # No runs for our SHA yet
+    if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+        sleep "$POLL_INTERVAL"
+        continue
+    fi
+
+    check_failures
+    check_all_passed
+
+    sleep "$POLL_INTERVAL"
 done
