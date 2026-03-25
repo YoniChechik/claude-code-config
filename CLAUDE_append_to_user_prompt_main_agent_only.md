@@ -21,9 +21,3 @@
 - Running code or tests - basically MOST bash commands should be done by some subagent.
 
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
-
-## Agent Preferences
-
-When spawning subagents via the Task/Agent tool, always prefer our custom agents over the built-in default types:
-- Use `coder-agent` instead of the built-in `general-purpose` (Code) subagent type
-- The built-in `Explore` type is acceptable for quick read-only codebase searches

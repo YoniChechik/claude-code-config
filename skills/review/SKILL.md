@@ -15,9 +15,9 @@ If provided, the above gives optional extra constraints or focus areas for the r
 
 ## Process
 
-### Subagent 1: Review (coder-agent)
+### Subagent 1: Review
 
-Use a subagent with `subagent_type="coder-agent"` to carry out the review.
+Use a subagent to carry out the review.
 
 **IMPORTANT**: This agent is a reviewer only - do NOT modify any code. Report issues for the fix agent to handle.
 
@@ -61,16 +61,6 @@ This allows tests to execute while you perform quality checks and code review. Y
 ### Step 3: Deep Code Review
 
 Review each modified file for:
-
-**CRITICAL: FAIL-FAST VIOLATIONS (BLOCKING)**
-Check for forbidden defensive patterns that hide errors:
-- `dict.get(key, default)` - Must use `dict[key]`
-- `hasattr()` / `getattr()` - Must use direct attribute access
-- `isinstance()` checks for expected types - Let code fail naturally
-- `if len(items) > 0:` - Just access `items[0]`
-- `value = x or default` - Must use explicit None check
-- `try/except` blocks that catch and continue - Must let exceptions propagate
-- Any other patterns from coding_style.md FAIL-FAST section
 
 **These are BLOCKING issues - code with these patterns must be rejected.**
 
@@ -128,18 +118,6 @@ Report:
 
 If tests are still running, wait for them to complete before proceeding to the report.
 
-### Step 5: Review Git Diff
-
-Get the actual changes:
-```bash
-git diff
-```
-
-Review the diff to ensure:
-- Changes match intended purpose
-- No debug code left in
-- No commented-out code
-- Clean commit hygiene
 
 ### Step 6: Generate Review Report
 
@@ -161,7 +139,7 @@ Create `review.md` with the following structure:
 ## Code Review Findings
 
 ### BLOCKING Issues
-[All FAIL-FAST violations and critical issues - these MUST be fixed]
+[Critical issues - these MUST be fixed]
 
 ### High Priority
 [Security concerns, major quality issues]
@@ -184,18 +162,17 @@ Create `review.md` with the following structure:
 
 **Write the report to `review.md` in the current directory.**
 
-### Subagent 2: Fix (coder-agent)
+### Subagent 2: Fix
 
-After the review subagent completes, use another subagent with `subagent_type="coder-agent"` to fix all issues:
+After the review subagent completes, use another subagent to fix all issues:
 
 1. Read `review.md` in the current directory
-2. Fix all BLOCKING and HIGH priority issues found in the review
+2. Fix all issues found in the review
 3. Briefly summarize what was fixed
 
 ## Important Notes
 
 - **Be thorough and skeptical** - better to catch issues now than in production
-- **FAIL-FAST violations are non-negotiable** - always mark as BLOCKING
 - **Provide specific feedback** - include file:line references
 - **Explain the "why"** - don't just say what's wrong, explain why it matters
 - **Be constructive** - suggest fixes, not just criticism

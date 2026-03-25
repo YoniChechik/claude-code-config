@@ -15,7 +15,7 @@ If provided, the above gives optional extra constraints or focus areas for test 
 
 ## Process
 
-Use a subagent with `subagent_type="coder-agent"` to carry out the following 2 phases sequentially:
+Use a subagent to carry out the following 2 phases sequentially:
 
 ### Phase 1: Test Planning
 

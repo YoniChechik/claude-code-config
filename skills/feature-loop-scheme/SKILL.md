@@ -11,8 +11,8 @@ description: "Full feature development workflow (called by new-feature/continue-
 Run `/plan $FEATURE_DESCRIPTION` skill
 
 ### Step 2: Implement
-- Use coder-agent to write code
-- If problems occur, use coder-agent to fix them
+- Use subagent to write code
+- If problems occur, use `/debug` skill to fix them
 - After each significant change, commit and push (main agent does this directly)
 
 ### Step 3: Build Tests

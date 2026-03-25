@@ -15,7 +15,7 @@ If provided, the above gives optional extra constraints or focus areas for the t
 
 ## Process
 
-Use a subagent with `subagent_type="coder-agent"` to carry out the following:
+Use a subagent to carry out the following:
 
 ### Test Review
 
