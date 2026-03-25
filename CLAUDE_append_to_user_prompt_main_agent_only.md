@@ -22,25 +22,6 @@
 
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
 
-**Exception:** You MAY run `$HOME/.claude/scripts/ci_watch_persistent.sh <branch>` directly using the Bash tool with `run_in_background=true`. This is the CI watcher — it runs persistently and reports CI results as they arrive.
-
-## CI Watcher Lifecycle
-
-After a PR is created or code is pushed, launch the CI watcher:
-- Run `$HOME/.claude/scripts/ci_watch_persistent.sh <branch>` with `run_in_background=true`
-- When the watcher reports:
-  - **CI passed**: No action needed, proceed with your workflow. The watcher keeps running and will track new pushes automatically.
-  - **CI failed/timeout**: The watcher exits. To handle:
-    1. **FIRST** relaunch the CI watcher with `run_in_background=true` (so it starts monitoring immediately)
-    2. **THEN** delegate the fix to coder-agent (the output includes the `gh run view --log-failed` command)
-    3. The watcher will automatically pick up the new push after the fix
-    4. On timeout: also look at the CI logs (use `gh run view --log-failed`), fix what's needed
-  - **Merge conflict**: The watcher exits. To handle:
-    1. **FIRST** relaunch the CI watcher with `run_in_background=true`
-    2. **THEN** delegate conflict resolution to coder-agent
-    3. The watcher will automatically pick up the new push after the fix
-  - **Inactivity exit**: The watcher exits after 30 minutes with no new pushes. Relaunch if needed.
-
 ## Agent Preferences
 
 When spawning subagents via the Task/Agent tool, always prefer our custom agents over the built-in default types:
