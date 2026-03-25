@@ -16,11 +16,11 @@
 
 ## You MUST NOT:
 - Edit or Write any file directly
-- Use MCP tools directly 
+- Use MCP tools directly
 - Code analysis requiring deep understanding
 - Running code or tests - basically MOST bash commands should be done by some subagent.
 
-ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS. 
+ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
 
 ## Agent Preferences
 
