@@ -2,7 +2,7 @@
 # Polls GitHub Actions CI status after a push and reports results to the orchestrator.
 # Designed for the exit-and-relaunch pattern: exits on every terminal event with
 # descriptive output telling the orchestrator what to do next.
-# Exit code: 0 = CI passed, newer push, or no workflows. 1 = CI failed, merge conflict, or timeout.
+# Exit code: 0 = CI passed or no workflows. 1 = CI failed, merge conflict, or timeout.
 set -euo pipefail
 
 BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
@@ -42,11 +42,11 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         exit 1
     fi
 
-    # If the latest run's SHA differs from ours, a newer push happened — let its watcher take over.
+    # If the latest run's SHA differs from ours, a newer push happened — update tracked SHA and continue.
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
-        echo "Newer push detected on branch '$BRANCH'. This watcher is superseded — exiting cleanly."
-        exit 0
+        echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
+        LATEST_SHA="$CURRENT_SHA"
     fi
 
     # Filter to our commit's runs, then deduplicate: group by workflow name and keep only the

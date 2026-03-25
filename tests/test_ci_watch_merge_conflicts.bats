@@ -306,9 +306,9 @@ MOCK_GH
     [[ "$output" == *"Failed jobs:"*"build"* ]]
 }
 
-# ---------- Newer Push (Superseded) ----------
+# ---------- Newer Push (SHA Update) ----------
 
-@test "Newer push detected -> exit 0, output contains 'superseded'" {
+@test "Newer push detected -> updates tracked SHA, continues polling, and CI passes" {
     export MOCK_CI_SCENARIO="superseded"
     export MOCK_MERGEABLE="MERGEABLE"
 
@@ -317,7 +317,10 @@ MOCK_GH
     echo "OUTPUT: $output"
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"superseded"* ]]
+    [[ "$output" == *"New push detected"* ]]
+    [[ "$output" == *"new SHA: def456"* ]]
+    [[ "$output" == *"Now tracking new CI run"* ]]
+    [[ "$output" == *"CI passed"* ]]
 }
 
 # ---------- Timeout ----------
