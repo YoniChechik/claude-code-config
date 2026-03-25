@@ -482,7 +482,7 @@ MOCK_GH
 # ---------- Inactivity timeout removed (regression guard) ----------
 
 @test "script does NOT contain INACTIVITY_TIMEOUT" {
-    run grep -c 'INACTIVITY_TIMEOUT' "$CI_WATCH"
+    run grep -Fc 'INACTIVITY_TIMEOUT' "$CI_WATCH"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
@@ -491,7 +491,7 @@ MOCK_GH
 }
 
 @test "script does NOT contain LAST_ACTIVITY_TIME" {
-    run grep -c 'LAST_ACTIVITY_TIME' "$CI_WATCH"
+    run grep -Fc 'LAST_ACTIVITY_TIME' "$CI_WATCH"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
@@ -499,7 +499,7 @@ MOCK_GH
 }
 
 @test "script does NOT use date +%s for timestamp tracking" {
-    run grep -c 'date +%s' "$CI_WATCH"
+    run grep -Fc 'date +%s' "$CI_WATCH"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
@@ -507,7 +507,7 @@ MOCK_GH
 }
 
 @test "CI_RUN_TIMEOUT is still present (intentionally kept)" {
-    run grep -c 'CI_RUN_TIMEOUT' "$CI_WATCH"
+    run grep -Fc 'CI_RUN_TIMEOUT' "$CI_WATCH"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
