@@ -1,11 +1,12 @@
 #!/usr/bin/env bats
 
-# Tests for ci_watch_persistent.sh (persistent CI watcher).
+# Tests for ci_watch_persistent.sh (CI watcher).
 # Mocks all external commands (gh, git, jq, sleep, date) via a temp PATH dir.
 #
-# Since the watcher never exits on CI results, tests use a date mock that
-# triggers the inactivity timeout after the CI result is reported, causing
-# a clean exit (code 0) so we can inspect the output.
+# Exit behavior:
+#   - CI passed: does NOT exit immediately, enters wait-for-new-SHA loop.
+#     Tests use the date mock inactivity timeout to eventually cause exit 0.
+#   - CI failed/timeout/conflict: exits immediately with code 1.
 
 SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 CI_WATCH="$SCRIPT_DIR/scripts/ci_watch_persistent.sh"
@@ -234,9 +235,9 @@ MOCK_GH
     [[ "$output" == *"Usage:"* ]]
 }
 
-# ---------- Core Scenarios ----------
+# ---------- CI Pass (watcher continues) ----------
 
-@test "CI passes -> exit 0, output contains 'CI passed', watcher continues then exits on inactivity" {
+@test "CI passes -> exit 0 (inactivity), output contains 'CI passed' and 'Waiting for new push'" {
     export MOCK_CI_SCENARIO="pass"
     export MOCK_MERGEABLE="MERGEABLE"
 
@@ -246,20 +247,21 @@ MOCK_GH
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
     [[ "$output" == *"CI passed"* ]]
+    [[ "$output" == *"All workflows green"* ]]
     [[ "$output" == *"Waiting for new push"* ]]
     [[ "$output" == *"Exiting watcher"* ]]
 }
 
-@test "CI passes + conflicts -> output contains 'merge conflicts' and watcher continues" {
+@test "No PR exists -> CI passes, watcher continues" {
     export MOCK_CI_SCENARIO="pass"
-    export MOCK_MERGEABLE="CONFLICTING"
+    export MOCK_MERGEABLE="NO_PR"
 
     run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"merge conflicts"* ]]
+    [[ "$output" == *"CI passed"* ]]
     [[ "$output" == *"Waiting for new push"* ]]
 }
 
@@ -275,7 +277,111 @@ MOCK_GH
     [[ "$output" == *"No CI workflows"* ]]
 }
 
-@test "No CI workflows + conflicts -> output contains 'merge conflicts' and watcher continues" {
+# ---------- CI Failure (watcher exits 1) ----------
+
+@test "CI fails -> exit 1, output contains 'CI failed' and workflow name" {
+    export MOCK_CI_SCENARIO="fail"
+    export MOCK_MERGEABLE="MERGEABLE"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"CI failed"* ]]
+    [[ "$output" == *"workflows: CI"* ]]
+}
+
+@test "CI fails -> output contains 'gh run view' and '--log-failed'" {
+    export MOCK_CI_SCENARIO="fail"
+    export MOCK_MERGEABLE="MERGEABLE"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"gh run view"* ]]
+    [[ "$output" == *"--log-failed"* ]]
+}
+
+@test "CI fails -> output contains failed job name 'build'" {
+    export MOCK_CI_SCENARIO="fail"
+    export MOCK_MERGEABLE="MERGEABLE"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Failed jobs:"*"build"* ]]
+}
+
+@test "CI fails -> output contains 'First relaunch' instruction" {
+    export MOCK_CI_SCENARIO="fail"
+    export MOCK_MERGEABLE="MERGEABLE"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"First relaunch the CI watcher"* ]]
+    [[ "$output" == *"then delegate the fix to coder-agent"* ]]
+}
+
+@test "CI fails -> does NOT enter wait-for-new-SHA loop" {
+    export MOCK_CI_SCENARIO="fail"
+    export MOCK_MERGEABLE="MERGEABLE"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"Waiting for new push"* ]]
+}
+
+# ---------- Merge Conflicts (watcher exits 1) ----------
+
+@test "Merge conflict (with CI runs) -> exit 1, output contains 'merge conflicts'" {
+    export MOCK_CI_SCENARIO="pass"
+    export MOCK_MERGEABLE="CONFLICTING"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"merge conflicts"* ]]
+}
+
+@test "Merge conflict -> output contains 'First relaunch' instruction" {
+    export MOCK_CI_SCENARIO="pass"
+    export MOCK_MERGEABLE="CONFLICTING"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"First relaunch the CI watcher"* ]]
+    [[ "$output" == *"then delegate the fix to coder-agent"* ]]
+}
+
+@test "Merge conflict -> does NOT enter wait-for-new-SHA loop" {
+    export MOCK_CI_SCENARIO="pass"
+    export MOCK_MERGEABLE="CONFLICTING"
+
+    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"Waiting for new push"* ]]
+}
+
+@test "Merge conflict (no CI workflows) -> exit 1" {
     export MOCK_CI_SCENARIO="none"
     export MOCK_MERGEABLE="CONFLICTING"
 
@@ -283,12 +389,12 @@ MOCK_GH
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"merge conflicts"* ]]
-    [[ "$output" == *"Waiting for new push"* ]]
+    [[ "$output" == *"First relaunch"* ]]
 }
 
-@test "CI fails + conflicts -> output contains 'merge conflicts' and watcher continues" {
+@test "CI fails + conflicts -> conflict takes precedence, exit 1" {
     export MOCK_CI_SCENARIO="fail"
     export MOCK_MERGEABLE="CONFLICTING"
 
@@ -296,88 +402,44 @@ MOCK_GH
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"merge conflicts"* ]]
-    [[ "$output" == *"Waiting for new push"* ]]
 }
 
-@test "No PR exists (gh pr view fails) -> skip conflict check, CI passes, watcher continues" {
-    export MOCK_CI_SCENARIO="pass"
-    export MOCK_MERGEABLE="NO_PR"
+# ---------- CI Run Timeout (watcher exits 1) ----------
 
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+@test "CI run timeout -> exit 1, output contains 'timed out'" {
+    _setup_ci_run_timeout_test
+
+    run "$PATCHED_TIMEOUT" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"CI passed"* ]]
-    [[ "$output" == *"Waiting for new push"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"timed out"* ]]
 }
 
-# ---------- CI Failure Reporting ----------
+@test "CI run timeout -> output contains 'First relaunch' instruction" {
+    _setup_ci_run_timeout_test
 
-@test "CI fails -> output contains 'CI failed' and workflow name, watcher continues" {
-    export MOCK_CI_SCENARIO="fail"
-    export MOCK_MERGEABLE="MERGEABLE"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+    run "$PATCHED_TIMEOUT" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"CI failed"* ]]
-    [[ "$output" == *"workflows: CI"* ]]
-    [[ "$output" == *"Waiting for new push"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"First relaunch the CI watcher"* ]]
+    [[ "$output" == *"then delegate the fix to coder-agent"* ]]
 }
 
-@test "CI fails -> output contains 'Delegate fix to coder-agent'" {
-    export MOCK_CI_SCENARIO="fail"
-    export MOCK_MERGEABLE="MERGEABLE"
+@test "CI run timeout -> does NOT enter wait-for-new-SHA loop" {
+    _setup_ci_run_timeout_test
 
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
+    run "$PATCHED_TIMEOUT" "test-branch"
 
     echo "OUTPUT: $output"
     echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Delegate fix to coder-agent"* ]]
-}
-
-@test "CI fails -> output contains 'gh run view' log command" {
-    export MOCK_CI_SCENARIO="fail"
-    export MOCK_MERGEABLE="MERGEABLE"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"gh run view"* ]]
-    [[ "$output" == *"--log-failed"* ]]
-}
-
-@test "CI fails -> output contains failed job name 'build' in 'Failed jobs' section" {
-    export MOCK_CI_SCENARIO="fail"
-    export MOCK_MERGEABLE="MERGEABLE"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Failed jobs:"*"build"* ]]
-}
-
-@test "CI fails -> output says 'This watcher will automatically track' instead of relaunch" {
-    export MOCK_CI_SCENARIO="fail"
-    export MOCK_MERGEABLE="MERGEABLE"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"This watcher will automatically track the new CI run"* ]]
-    [[ "$output" != *"relaunch"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"Waiting for new push"* ]]
 }
 
 # ---------- Newer Push (SHA Update) ----------
@@ -397,32 +459,6 @@ MOCK_GH
     [[ "$output" == *"CI passed"* ]]
 }
 
-# ---------- CI Run Timeout ----------
-
-@test "CI run timeout (no completed runs) -> reports timeout, watcher continues" {
-    _setup_ci_run_timeout_test
-
-    run "$PATCHED_TIMEOUT" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"timed out"* ]]
-    [[ "$output" == *"Waiting for new push"* ]]
-}
-
-@test "CI run timeout -> output says 'automatically track' instead of relaunch" {
-    _setup_ci_run_timeout_test
-
-    run "$PATCHED_TIMEOUT" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"This watcher will automatically track"* ]]
-    [[ "$output" != *"relaunch"* ]]
-}
-
 # ---------- Inactivity Timeout ----------
 
 @test "Inactivity timeout -> exit 0, output contains 'No new pushes detected' and 'Exiting'" {
@@ -436,31 +472,4 @@ MOCK_GH
     [ "$status" -eq 0 ]
     [[ "$output" == *"No new pushes detected"* ]]
     [[ "$output" == *"Exiting watcher"* ]]
-}
-
-# ---------- Persistence (no relaunch instructions) ----------
-
-@test "Conflict message does NOT contain relaunch instruction" {
-    export MOCK_CI_SCENARIO="pass"
-    export MOCK_MERGEABLE="CONFLICTING"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"relaunch"* ]]
-    [[ "$output" == *"This watcher will automatically track"* ]]
-}
-
-@test "Conflict message says to fix and push" {
-    export MOCK_CI_SCENARIO="pass"
-    export MOCK_MERGEABLE="CONFLICTING"
-
-    run "$MOCK_BIN/ci_watch_patched.sh" "test-branch"
-
-    echo "OUTPUT: $output"
-    echo "STATUS: $status"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Fix the conflicts, commit, and push"* ]]
 }

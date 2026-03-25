@@ -32,7 +32,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "REMINDER: If you haven't already, launch the persistent CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH — it runs persistently and tracks all new pushes automatically, no need to relaunch."
+    "additionalContext": "REMINDER: Launch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH — it keeps running after CI passes and tracks new pushes. On CI failure/timeout/conflict it exits and must be relaunched."
   }
 }
 EOF

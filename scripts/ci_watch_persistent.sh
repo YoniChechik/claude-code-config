@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 #
-# Persistent CI Watcher
-# =====================
+# CI Watcher
+# ==========
 # Monitors GitHub Actions CI status for a branch and reports results.
 #
 # Architecture:
 #   The script uses a nested loop pattern:
-#   - OUTER LOOP (while true): each iteration handles one push cycle.
+#   - OUTER LOOP: each iteration handles one push cycle.
 #     1. Inner CI-polling loop: polls CI status for the current commit SHA.
-#     2. Post-loop: reports the CI result (pass/fail/timeout/conflict).
-#     3. Wait-for-new-SHA loop: idles until a new push is detected.
+#     2. Post-loop: reports the CI result.
+#        - On CI pass: continue outer loop (wait for next push).
+#        - On CI fail/timeout/merge conflict: EXIT with code 1.
+#     3. Wait-for-new-SHA loop: idles until a new push is detected (only
+#        reached after CI pass).
 #
-#   The watcher is "persistent" -- it never exits after reporting a CI result.
-#   Instead, it resets and waits for the next push. This means the caller only
-#   needs to launch it once and it will track all subsequent pushes.
-#
-# Exit conditions (the ONLY ways the script terminates):
+# Exit conditions:
 #   - No branch argument provided (exit 1)
 #   - No CI workflows found for the branch after several polls (exit 0)
+#   - CI failed (exit 1) — prints failure details and relaunch instruction
+#   - CI run timed out (exit 1) — prints timeout message and relaunch instruction
+#   - Merge conflict detected (exit 1) — prints conflict message and relaunch instruction
 #   - Inactivity timeout: no new pushes for INACTIVITY_TIMEOUT seconds (exit 0)
 #
 # SHA tracking:
@@ -49,6 +51,7 @@ LAST_ACTIVITY_TIME=$(date +%s)
 
 # =============================================================================
 # OUTER LOOP: one iteration per push cycle (CI poll -> report -> wait for push)
+# The loop only continues after CI passes. Failures/timeouts/conflicts exit.
 # =============================================================================
 while true; do
     # ---- Inner loop: poll CI status for the current SHA ----
@@ -70,9 +73,8 @@ while true; do
                 # Even without CI, check for merge conflicts on the PR.
                 MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
                 if [ "$MERGEABLE" = "CONFLICTING" ]; then
-                    echo "PR on branch '$BRANCH' has merge conflicts. Fix the conflicts, commit, and push. This watcher will automatically track the new CI run."
-                    LAST_ACTIVITY_TIME=$(date +%s)
-                    break  # Exit inner loop -> go to wait-for-new-SHA
+                    echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
+                    exit 1
                 fi
                 echo "No CI workflows found for branch '$BRANCH'."
                 exit 0
@@ -85,9 +87,8 @@ while true; do
         # Uses `|| MERGEABLE=""` so a missing PR (gh exits non-zero) doesn't abort the script.
         MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
         if [ "$MERGEABLE" = "CONFLICTING" ]; then
-            echo "PR on branch '$BRANCH' has merge conflicts. Fix the conflicts, commit, and push. This watcher will automatically track the new CI run."
-            LAST_ACTIVITY_TIME=$(date +%s)
-            break  # Exit inner loop -> go to wait-for-new-SHA
+            echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
+            exit 1
         fi
 
         # --- Detect new pushes mid-poll ---
@@ -160,11 +161,20 @@ while true; do
         if [ -n "$ALL_FAILED_JOBS" ]; then
             MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
         fi
-        MSG="${MSG} Delegate fix to coder-agent: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs. Fix the issues and push. This watcher will automatically track the new CI run."
+        MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
+        MSG="${MSG} IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
         echo "$MSG"
+        exit 1
     elif [ -n "$TIMED_OUT" ]; then
         # Inner loop exhausted all iterations without all runs completing.
-        echo "CI run timed out after $((CI_RUN_TIMEOUT / 60)) minutes on branch '$BRANCH'. This watcher will automatically track the next CI run when you push."
+        LATEST_RUN_ID=$(echo "${SHA_RUNS:-[]}" | jq -r '.[0].databaseId // empty' 2>/dev/null || true)
+        MSG="CI run timed out after $((CI_RUN_TIMEOUT / 60)) minutes on branch '$BRANCH'."
+        if [ -n "$LATEST_RUN_ID" ]; then
+            MSG="${MSG} Run 'gh run view $LATEST_RUN_ID --log-failed' to check logs."
+        fi
+        MSG="${MSG} IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
+        echo "$MSG"
+        exit 1
     fi
 
     # =========================================================================
