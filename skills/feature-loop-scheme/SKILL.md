@@ -27,15 +27,13 @@ Run `/pr-create` skill to create a pull request.
 ### Step 6: CI Watcher
 **This step is run directly by the orchestrator (exception to orchestration-only rule).**
 
-1. Launch the CI watcher in background:
-   ```
-   $HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH
-   ```
-   Run this with `run_in_background=true`.
+Launch the CI watcher in background and immediately proceed to Step 7 (don't wait for results):
+```
+$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH
+```
+Run this with `run_in_background=true`.
 
-2. The watcher reports CI results as they arrive:
-   - **CI passed**: The watcher keeps running. Proceed to Step 7 (Summary).
-   - **CI failed, timeout, or merge conflict**: The watcher exits. First relaunch the CI watcher with `run_in_background=true`, then delegate the fix to coder-agent. The relaunched watcher will automatically pick up the new push after the fix.
+The watcher runs silently on CI pass. It only interrupts when something needs attention (fail/timeout/conflict). When a watcher notification arrives: first relaunch the watcher with `run_in_background=true`, then delegate the fix to coder-agent.
 
 ### Step 7: Summary
 Report summary of what the feature is, how we implemented it and what happened at all post implementation steps.
