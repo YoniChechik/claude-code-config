@@ -71,6 +71,7 @@ while true; do
                 MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
                 if [ "$MERGEABLE" = "CONFLICTING" ]; then
                     echo "PR on branch '$BRANCH' has merge conflicts. Fix the conflicts, commit, and push. This watcher will automatically track the new CI run."
+                    LAST_ACTIVITY_TIME=$(date +%s)
                     break  # Exit inner loop -> go to wait-for-new-SHA
                 fi
                 echo "No CI workflows found for branch '$BRANCH'."
@@ -85,6 +86,7 @@ while true; do
         MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
         if [ "$MERGEABLE" = "CONFLICTING" ]; then
             echo "PR on branch '$BRANCH' has merge conflicts. Fix the conflicts, commit, and push. This watcher will automatically track the new CI run."
+            LAST_ACTIVITY_TIME=$(date +%s)
             break  # Exit inner loop -> go to wait-for-new-SHA
         fi
 
@@ -160,7 +162,7 @@ while true; do
         fi
         MSG="${MSG} Delegate fix to coder-agent: run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs. Fix the issues and push. This watcher will automatically track the new CI run."
         echo "$MSG"
-    elif [ "$num_iter" -ge "$CI_RUN_MAX_ITERATIONS" ]; then
+    elif [ -n "$TIMED_OUT" ]; then
         # Inner loop exhausted all iterations without all runs completing.
         echo "CI run timed out after $((CI_RUN_TIMEOUT / 60)) minutes on branch '$BRANCH'. This watcher will automatically track the next CI run when you push."
     fi
