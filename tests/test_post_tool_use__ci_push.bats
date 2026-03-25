@@ -134,7 +134,7 @@ teardown() {
 
 # ---------- Updated Hook Behavior ----------
 
-@test "output references ci_watch_persistent.sh (not ci_watch.sh)" {
+@test "output references ci_watch_persistent.sh (not old ci_watch.sh)" {
     local json='{"tool_input":{"command":"git push origin main"}}'
 
     run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
@@ -143,6 +143,9 @@ teardown() {
     echo "STATUS: $status"
     [ "$status" -eq 0 ]
     [[ "$output" == *"ci_watch_persistent.sh"* ]]
+    # Strip all occurrences of ci_watch_persistent.sh and verify no leftover ci_watch.sh reference
+    local stripped="${output//ci_watch_persistent.sh/}"
+    [[ "$stripped" != *"ci_watch.sh"* ]]
 }
 
 @test "output contains REMINDER (not BLOCKING REQUIREMENT)" {
@@ -157,6 +160,19 @@ teardown() {
     # Ensure it does NOT contain the old blocking language
     [[ "$output" != *"BLOCKING REQUIREMENT"* ]]
     [[ "$output" != *"You MUST"* ]]
+}
+
+@test "output is valid JSON with expected structure" {
+    local json='{"tool_input":{"command":"git push origin main"}}'
+
+    run bash -c 'echo "$1" | "$2"' -- "$json" "$SCRIPT"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -eq 0 ]
+    # Verify output parses as JSON and has expected keys
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
 @test "output contains branch name" {

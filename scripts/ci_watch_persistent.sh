@@ -31,7 +31,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
             echo "No CI workflows found for branch '$BRANCH'."
             exit 0
         fi
-        sleep $POLL_INTERVAL
+        sleep "$POLL_INTERVAL"
         continue
     fi
 
@@ -59,7 +59,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
 
     # GitHub may not have registered runs for our commit yet — keep polling.
     if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
-        sleep $POLL_INTERVAL
+        sleep "$POLL_INTERVAL"
         continue
     fi
 
@@ -73,8 +73,7 @@ for ((num_iter = 0; num_iter < MAX_ITERATIONS; num_iter++)); do
         exit 0
     fi
 
-    sleep $POLL_INTERVAL
-    continue
+    sleep "$POLL_INTERVAL"
 
 done
 

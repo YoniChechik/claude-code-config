@@ -33,7 +33,7 @@ After a PR is created or code is pushed, launch the CI watcher:
   - **CI failed**: Delegate the fix to coder-agent (the output includes the `gh run view --log-failed` command). After the fix is committed and pushed, relaunch the watcher.
   - **Merge conflict**: Delegate conflict resolution to coder-agent. After resolved, committed, and pushed, relaunch the watcher.
   - **Timeout**: Relaunch the watcher or check CI status manually.
-  - **Superseded (newer push)**: No action needed — a new watcher should already be running for the newer push. 
+  - **Superseded (newer push)**: No action needed — a new watcher should already be running for the newer push.
 
 ## Agent Preferences
 

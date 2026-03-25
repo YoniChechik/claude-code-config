@@ -88,7 +88,14 @@ fi
 
 # --- gh run view ---
 if [[ "$1" == "run" && "$2" == "view" ]]; then
-    # Return a failed job for the failure scenario
+    # Check if -q flag is present (jq filter mode) — return filtered output
+    for arg in "$@"; do
+        if [[ "$arg" == "-q" || "$arg" == "--jq" ]]; then
+            echo "build"
+            exit 0
+        fi
+    done
+    # No -q flag: return raw JSON
     echo '{"jobs":[{"name":"build","conclusion":"failure"}]}'
     exit 0
 fi
@@ -128,6 +135,49 @@ MOCK_GH
 
 teardown() {
     rm -rf "$MOCK_BIN"
+}
+
+# Helper: set up a timeout scenario (patched script with MAX_ITERATIONS=1 + in-progress gh mock)
+_setup_timeout_test() {
+    PATCHED_TIMEOUT="$MOCK_BIN/ci_watch_timeout.sh"
+    sed \
+        -e 's/^POLL_INTERVAL=.*/POLL_INTERVAL=0/' \
+        -e 's/^MAX_TIMEOUT=.*/MAX_TIMEOUT=0/' \
+        -e 's|^MAX_ITERATIONS=.*|MAX_ITERATIONS=1|' \
+        "$CI_WATCH" > "$PATCHED_TIMEOUT"
+    chmod +x "$PATCHED_TIMEOUT"
+
+    cat > "$MOCK_BIN/gh" <<'MOCK_GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "view" ]]; then
+    for arg in "$@"; do
+        if [[ "$arg" == "--jq" ]]; then
+            echo "MERGEABLE"
+            exit 0
+        fi
+    done
+    echo '{"mergeable":"MERGEABLE"}'
+    exit 0
+fi
+if [[ "$1" == "run" && "$2" == "list" ]]; then
+    echo '[{"databaseId":100,"status":"in_progress","conclusion":"","name":"CI","headSha":"abc123"}]'
+    exit 0
+fi
+echo "gh mock: unhandled command: $*" >&2
+exit 1
+MOCK_GH
+    chmod +x "$MOCK_BIN/gh"
+}
+
+# ---------- Edge Cases ----------
+
+@test "no branch argument -> exit 1 with usage message" {
+    run "$MOCK_BIN/ci_watch_patched.sh"
+
+    echo "OUTPUT: $output"
+    echo "STATUS: $status"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Usage:"* ]]
 }
 
 # ---------- Core Scenarios ----------
@@ -216,7 +266,7 @@ teardown() {
     echo "STATUS: $status"
     [ "$status" -eq 1 ]
     [[ "$output" == *"CI failed"* ]]
-    [[ "$output" == *"CI"* ]]
+    [[ "$output" == *"workflows: CI"* ]]
 }
 
 @test "CI fails -> output contains 'Delegate fix to coder-agent'" {
@@ -244,7 +294,7 @@ teardown() {
     [[ "$output" == *"--log-failed"* ]]
 }
 
-@test "CI fails -> output contains failed job name 'build'" {
+@test "CI fails -> output contains failed job name 'build' in 'Failed jobs' section" {
     export MOCK_CI_SCENARIO="fail"
     export MOCK_MERGEABLE="MERGEABLE"
 
@@ -253,7 +303,7 @@ teardown() {
     echo "OUTPUT: $output"
     echo "STATUS: $status"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"build"* ]]
+    [[ "$output" == *"Failed jobs:"*"build"* ]]
 }
 
 # ---------- Newer Push (Superseded) ----------
@@ -273,37 +323,7 @@ teardown() {
 # ---------- Timeout ----------
 
 @test "Timeout (no completed runs) -> exit 1, output contains 'timed out'" {
-    # Patch script with MAX_ITERATIONS=1 so it times out immediately
-    # Use a scenario where runs exist but never complete
-    PATCHED_TIMEOUT="$MOCK_BIN/ci_watch_timeout.sh"
-    sed \
-        -e 's/^POLL_INTERVAL=.*/POLL_INTERVAL=0/' \
-        -e 's/^MAX_TIMEOUT=.*/MAX_TIMEOUT=0/' \
-        -e 's|^MAX_ITERATIONS=.*|MAX_ITERATIONS=1|' \
-        "$CI_WATCH" > "$PATCHED_TIMEOUT"
-    chmod +x "$PATCHED_TIMEOUT"
-
-    # Override gh mock to return in-progress runs
-    cat > "$MOCK_BIN/gh" <<'MOCK_GH'
-#!/usr/bin/env bash
-if [[ "$1" == "pr" && "$2" == "view" ]]; then
-    for arg in "$@"; do
-        if [[ "$arg" == "--jq" ]]; then
-            echo "MERGEABLE"
-            exit 0
-        fi
-    done
-    echo '{"mergeable":"MERGEABLE"}'
-    exit 0
-fi
-if [[ "$1" == "run" && "$2" == "list" ]]; then
-    echo '[{"databaseId":100,"status":"in_progress","conclusion":"","name":"CI","headSha":"abc123"}]'
-    exit 0
-fi
-echo "gh mock: unhandled command: $*" >&2
-exit 1
-MOCK_GH
-    chmod +x "$MOCK_BIN/gh"
+    _setup_timeout_test
 
     run "$PATCHED_TIMEOUT" "test-branch"
 
@@ -342,35 +362,7 @@ MOCK_GH
 }
 
 @test "Timeout message includes relaunch instruction with ci_watch_persistent.sh" {
-    PATCHED_TIMEOUT="$MOCK_BIN/ci_watch_timeout.sh"
-    sed \
-        -e 's/^POLL_INTERVAL=.*/POLL_INTERVAL=0/' \
-        -e 's/^MAX_TIMEOUT=.*/MAX_TIMEOUT=0/' \
-        -e 's|^MAX_ITERATIONS=.*|MAX_ITERATIONS=1|' \
-        "$CI_WATCH" > "$PATCHED_TIMEOUT"
-    chmod +x "$PATCHED_TIMEOUT"
-
-    # Override gh mock to return in-progress runs
-    cat > "$MOCK_BIN/gh" <<'MOCK_GH'
-#!/usr/bin/env bash
-if [[ "$1" == "pr" && "$2" == "view" ]]; then
-    for arg in "$@"; do
-        if [[ "$arg" == "--jq" ]]; then
-            echo "MERGEABLE"
-            exit 0
-        fi
-    done
-    echo '{"mergeable":"MERGEABLE"}'
-    exit 0
-fi
-if [[ "$1" == "run" && "$2" == "list" ]]; then
-    echo '[{"databaseId":100,"status":"in_progress","conclusion":"","name":"CI","headSha":"abc123"}]'
-    exit 0
-fi
-echo "gh mock: unhandled command: $*" >&2
-exit 1
-MOCK_GH
-    chmod +x "$MOCK_BIN/gh"
+    _setup_timeout_test
 
     run "$PATCHED_TIMEOUT" "test-branch"
 
