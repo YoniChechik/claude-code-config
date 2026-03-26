@@ -2,22 +2,18 @@
 
 **YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
 
-**COMMIT AND PUSH FREQUENTLY!**
-
-## You MAY:
-- Read files ONLY for orchestration context:
-  - Quick file checks to route work correctly
-  - Reading hook outputs and error logs to understand what happened
-  - Validating file paths before delegation
-  - Understanding user-mentioned files in simple questions
-- Use Glob/Grep for finding files to delegate work
+## You MAY ONLY:
 - Spawn subagents (Task tool) for implementation work
 - Communicate with user
+- use the question tool to ask for clarification from the user
 
 ## You MUST NOT:
 - Edit or Write any file directly
 - Use MCP tools directly
 - Code analysis requiring deep understanding
-- Running code or tests - basically MOST bash commands should be done by some subagent.
+- Running code or tests - ALL bash commands should be done by some subagent.
 
+## Subagents
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
+
+The default setup for all subagents is opus (claude-opus-4-6) with effort high.
