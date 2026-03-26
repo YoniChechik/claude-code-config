@@ -253,6 +253,6 @@
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
   },
-  "effortLevel": "low",
+  "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true
 }
