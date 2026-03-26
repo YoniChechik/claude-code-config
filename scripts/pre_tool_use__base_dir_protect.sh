@@ -8,6 +8,12 @@
 
 INPUT=$(cat)
 
+# Skip all protection when working inside ~/.claude config repo
+cwd_check=$(echo "$INPUT" | jq -r '.cwd // empty')
+if [[ "$cwd_check" == "$HOME/.claude"* ]]; then
+    exit 0
+fi
+
 tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
 if [ "$tool_name" = "Bash" ]; then
