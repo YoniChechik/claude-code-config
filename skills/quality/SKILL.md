@@ -16,7 +16,7 @@ rm -rf quality-results && mkdir quality-results
 ```
 
 ## Phase 2: Launch Review Agents in Parallel
-Use the Agent tool to launch all agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
+Use the Agent tool to launch all agents concurrently in a single message. For each Agent call, set `model: "claude-sonnet-4-6"` and `effort: "medium"`. Pass each agent the full diff so it has the complete context.
 
 **CRITICAL SCOPE RULE:** All review agents must ONLY flag issues in code that was added or modified compared to what we branched out from. Never flag, remove, or suggest changes to pre-existing code that was not touched by the current changes. If pre-existing code has issues, it is out of scope.
 
