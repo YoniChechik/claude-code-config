@@ -10,7 +10,8 @@ INPUT=$(cat)
 
 # Skip all protection when working inside ~/.claude config repo
 cwd_check=$(echo "$INPUT" | jq -r '.cwd // empty')
-if [[ "$cwd_check" == "$HOME/.claude"* ]]; then
+file_path_check=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+if [[ "$cwd_check" == "$HOME/.claude"* ]] || [[ "$file_path_check" == "$HOME/.claude"* ]]; then
     exit 0
 fi
 
