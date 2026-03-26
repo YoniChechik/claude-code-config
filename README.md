@@ -29,3 +29,4 @@ This makes your config trackable and syncable across machines while keeping Clau
 # Add to ~/.bashrc or ~/.zshrc
 alias cc="claude"
 ```
+
