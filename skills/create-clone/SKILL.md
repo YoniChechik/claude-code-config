@@ -68,6 +68,5 @@ Tell user:
 - The branch `$FEATURE_NAME` is tracking remote
 
 ### Step 8: Change to Feature Directory
-Change to the feature clone directory.
+Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME` skill.
 
-**FROM NOW ALL NEW WORK SHOULD ONLY BE DONE IN THIS FEATURE DIR**
