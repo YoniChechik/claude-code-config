@@ -1,5 +1,4 @@
 {
-  "model": "claude-opus-4-6",
   "env": {
     "ENABLE_TOOL_SEARCH": "true"
   },
@@ -171,6 +170,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -253,6 +253,6 @@
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
   },
-  "effortLevel": "high",
+  "effortLevel": "low",
   "skipDangerousModePermissionPrompt": true
 }
