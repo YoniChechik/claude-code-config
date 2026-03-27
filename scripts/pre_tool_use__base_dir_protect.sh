@@ -8,10 +8,13 @@
 
 INPUT=$(cat)
 
+# Resolve ~/.claude to absolute path (avoid relying on $HOME being set in hook env)
+CLAUDE_CONFIG_DIR="$(cd ~/.claude 2>/dev/null && pwd)"
+
 # Skip all protection when working inside ~/.claude config repo
 cwd_check=$(echo "$INPUT" | jq -r '.cwd // empty')
 file_path_check=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-if [[ "$cwd_check" == "$HOME/.claude"* ]] || [[ "$file_path_check" == "$HOME/.claude"* ]]; then
+if [[ -n "$CLAUDE_CONFIG_DIR" ]] && { [[ "$cwd_check" == "$CLAUDE_CONFIG_DIR"* ]] || [[ "$file_path_check" == "$CLAUDE_CONFIG_DIR"* ]]; }; then
     exit 0
 fi
 
