@@ -1,16 +1,22 @@
 ---
 name: "continue-feature"
 description: "Resume work on existing feature clone"
-argument-hint: "[feature-description]"
+argument-hint: "[feature description or branch name] [optional: what to do next]"
 ---
 
 Continues work on an existing feature clone with proper context analysis.
 
-## Feature description from user input
+## Input from user
 "$ARGUMENTS"
 
-### Feature Description Validation
-If empty or missing: "Error: Feature description is required. Please provide a detailed description of the feature you want to continue implementing."
+Parse this as natural language. Extract:
+1. **Feature identifier** — branch name, feature description, or PR reference that identifies which feature to continue
+2. **PR** (optional) — a PR URL or number if mentioned
+3. **Next action** (optional) — anything that sounds like instructions for what to work on next
+
+If no input at all: "Error: Please describe which feature you want to continue."
+
+If next action is not provided, gather context and state, then proceed based on the natural next step in the workflow.
 
 ## Process
 
@@ -35,7 +41,7 @@ Review the list of remote branches and match one to the user's feature descripti
 If found → Run `/create-clone` with the matched branch name, then continue to Step 4
 If not found → Exit with error:
 - Tell user: "Feature branch not found locally or remotely"
-- Suggest: "Use /create-clone <feature-description> to create a new feature clone"
+- Suggest: "Use /new-feature <feature-description> to start a new feature"
 
 ### Step 3: Navigate to Feature Clone
 ```bash
@@ -50,20 +56,33 @@ Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref H
 3. Run `git diff origin/main...HEAD` to see what's been done so far
 4. Compare progress against the plan (if exists)
 
-### Step 5: Check State & Report
+### Step 5: Check State
 1. Check git branch state:
 ```bash
 bash ~/.claude/scripts/git_branch_state.sh
 ```
-2. Report to the user:
-   - What the feature is about (from plan or branch name)
-   - What has been done so far (from git diff)
-   - Git branch state (diverged? behind main?)
-3. Read and understand the full development workflow:
-   - Read the file `~/.claude/skills/feature-loop-scheme/SKILL.md` to understand how we work
-   - Based on current progress, tell the user where we are in that workflow
-4. Suggest next steps:
-   - If behind main or diverged → suggest running `/sync` first
-   - Tell the user what the next step in the workflow would be
+2. Read the file `~/.claude/skills/feature-loop-scheme/SKILL.md` to understand the full workflow
 
-**STOP HERE.** Do NOT proceed to implementation. Wait for user instructions on what to do next.
+### Step 6: Check for PR & Launch CI Watcher
+Check if a PR exists for this branch. Use the PR from user input if provided, otherwise detect:
+```bash
+gh pr view --json number,url,state 2>/dev/null
+```
+
+If a PR exists (open state):
+- Note the PR number/URL
+- **Launch CI watcher immediately in background** (exception to orchestration-only rule):
+  ```
+  $HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH
+  ```
+  Run with `run_in_background=true`. Do NOT wait for results — proceed immediately.
+
+### Step 7: Execute Next Action
+**Proceed immediately without asking for approval.** Using all gathered context:
+- What the feature is about (from plan or branch name)
+- What has been done so far (from git diff)
+- Git branch state
+- Where we are in the feature-loop-scheme workflow
+- The user's requested next action (from input after `--`)
+
+Execute the next action now. If behind main or diverged, run `/sync` first, then proceed with the user's requested work.
