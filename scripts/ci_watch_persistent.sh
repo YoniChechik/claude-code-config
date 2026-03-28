@@ -47,6 +47,14 @@ check_merge_conflict() {
     fi
 }
 
+check_branch_behind() {
+    MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>&1) || MERGE_STATE=""
+    if [ "$MERGE_STATE" = "BEHIND" ]; then
+        echo "PR on branch '$BRANCH' is behind the base branch and needs to be updated. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then run /sync to update the branch."
+        exit 1
+    fi
+}
+
 detect_new_sha() {
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
@@ -105,6 +113,7 @@ while true; do
     fetch_runs
 
     check_merge_conflict
+    check_branch_behind
 
     # If no runs yet, just keep polling
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
