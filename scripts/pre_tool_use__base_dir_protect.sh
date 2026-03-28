@@ -14,6 +14,9 @@ CLAUDE_CONFIG_DIR="$(cd ~/.claude 2>/dev/null && pwd)"
 # Skip all protection when working inside ~/.claude config repo
 cwd_check=$(echo "$INPUT" | jq -r '.cwd // empty')
 file_path_check=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+# Expand leading tilde to actual home dir so paths like ~/.claude/... match the resolved CLAUDE_CONFIG_DIR
+cwd_check="${cwd_check/#\~/$HOME}"
+file_path_check="${file_path_check/#\~/$HOME}"
 if [[ -n "$CLAUDE_CONFIG_DIR" ]] && { [[ "$cwd_check" == "$CLAUDE_CONFIG_DIR"* ]] || [[ "$file_path_check" == "$CLAUDE_CONFIG_DIR"* ]]; }; then
     echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
     exit 0
@@ -46,6 +49,7 @@ EOF
 else
     # === File edit protection logic (Edit, Write, NotebookEdit) ===
     file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    file_path="${file_path/#\~/$HOME}"
 
     if [ -z "$file_path" ]; then
         exit 0
