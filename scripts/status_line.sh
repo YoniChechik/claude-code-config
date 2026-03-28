@@ -103,8 +103,24 @@ if [ -n "$branch" ]; then
   fi
 fi
 
+# Line 3: clickable PR link (if branch has an open PR)
+pr_line=""
+if [ -n "$branch" ] && [ "$branch" != "main" ]; then
+  pr_json=$(gh pr view --json url,number 2>/dev/null || echo "")
+  if [ -n "$pr_json" ]; then
+    pr_url=$(echo "$pr_json" | jq -r '.url // ""' 2>/dev/null)
+    pr_number=$(echo "$pr_json" | jq -r '.number // ""' 2>/dev/null)
+    if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+      pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
+    fi
+  fi
+fi
+
 output="${status}${warning}"
 if [ -n "$info_line" ]; then
   output="${output}\n${info_line}"
+fi
+if [ -n "$pr_line" ]; then
+  output="${output}\n${pr_line}"
 fi
 printf '%b' "$output"
