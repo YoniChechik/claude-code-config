@@ -28,7 +28,7 @@ Before starting the review, the subagent should:
 
 Then proceed with the full review workflow:
 
-### Step 1: Identify Changed Files
+#### Step 1: Identify Changed Files
 
 Check what files have been modified:
 ```bash
@@ -38,31 +38,10 @@ git diff --name-only
 
 Parse the output to get list of modified Python files.
 
-### Step 2: Start Tests in Background
 
-**IMPORTANT**: Immediately identify and start relevant tests running in the background in parallel, BEFORE proceeding with quality checks and code review.
-
-**Identify test files for changed modules:**
-```bash
-# Find test files matching modified modules
-find tests -name "test_*.py" | grep <module_name>
-```
-
-**Start all relevant test suites in background in parallel:**
-```bash
-# Example: Start pytest for each relevant test module in background
-uv run pytest path/to/relevant/tests -n auto -v
-```
-
-This allows tests to execute while you perform quality checks and code review. You'll check the results later in Step 4.
-
-**MAKE SURE TO RUN TESTS IN BACKGROUND**
-
-### Step 3: Deep Code Review
+#### Step 2: Deep Code Review
 
 Review each modified file for:
-
-**These are BLOCKING issues - code with these patterns must be rejected.**
 
 **Security Concerns:**
 - SQL injection vulnerabilities
@@ -83,12 +62,6 @@ Review each modified file for:
 - Race conditions
 - Resource leaks
 
-**Performance:**
-- Inefficient algorithms
-- Unnecessary computation
-- Memory leaks
-- N+1 query patterns
-
 **Edge Cases:**
 - Null/None handling
 - Empty collections
@@ -101,25 +74,8 @@ For each issue found, provide:
 - Detailed explanation
 - Suggested fix
 
-### Step 4: Check Test Results
 
-By now, the background tests from Step 2 should be complete or nearly complete.
-
-**Check the test output:**
-```bash
-# Check status of background tests or view their output
-```
-
-Report:
-- Tests run
-- Pass/fail status
-- Any failures or warnings
-- Coverage gaps
-
-If tests are still running, wait for them to complete before proceeding to the report.
-
-
-### Step 6: Generate Review Report
+#### Step 3: Generate Review Report
 
 Create `review.md` with the following structure:
 
@@ -164,7 +120,7 @@ Create `review.md` with the following structure:
 
 ### Subagent 2: Fix
 
-After the review subagent completes, use another subagent to fix all issues:
+After the review subagent completes, use another subagent (opus high effort) to fix all issues:
 
 1. Read `review.md` in the current directory
 2. Fix all issues found in the review

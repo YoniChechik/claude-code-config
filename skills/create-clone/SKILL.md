@@ -70,3 +70,5 @@ Tell user:
 ### Step 8: Change to Feature Directory
 Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME` skill.
 
+## IMPORTANT First Action
+Add all 8 steps to task list and start working on this skill's workflow.

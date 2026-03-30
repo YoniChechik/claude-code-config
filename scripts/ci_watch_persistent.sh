@@ -28,7 +28,7 @@ set -euo pipefail
 # --- Configuration ---
 BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
 POLL_INTERVAL=5
-LATEST_SHA=$(git rev-parse "$BRANCH")
+LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha')
 REPORTED_PASS=""
 RUNS_JSON=""
 SHA_RUNS=""
