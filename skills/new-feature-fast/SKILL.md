@@ -29,15 +29,7 @@ Run `/post` skill for quality checks, code review, and lint/format.
 Run `/pr-create` skill to create the pull request.
 
 ### Step 5: CI Watcher
-**This step is run directly by the orchestrator (exception to orchestration-only rule).**
-
-Launch the CI watcher in background and immediately proceed to Step 6 (don't wait for results):
-```
-$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH
-```
-Run this with `run_in_background=true`.
-
-The watcher runs silently on CI pass. It only interrupts when something needs attention (fail/timeout/conflict). When a watcher notification arrives: first relaunch the watcher with `run_in_background=true`, then delegate the fix to coder-agent.
+Run `/ci` skill to launch the CI watcher in the background for the current branch.
 
 ### Step 6: Summary
 Report what was built and the PR URL.

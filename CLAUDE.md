@@ -1,13 +1,10 @@
-Be concise. No unnecessary detail.
+# CORE GUIDELINES
 
-ALWAYS USE TASKS! EVEN FOR SIMPLE 1 BLOCK TASKS! ALWAYS SHOW TASK STATUS!
+- Be concise. No unnecessary detail.
+- ALWAYS USE TASKS! EVEN FOR SIMPLE 1 BLOCK TASKS! AFTER READING SKILL ADD ALL NEW TASKS TO TASK LIST IMMEDIATELY!
+- COMMIT AND PUSH FREQUENTLY!
+- NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
+- THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
+- NEVER use `EnterPlanMode`/`ExitPlanMode` tools. Use the `/plan` skill instead when planning is needed.
+- When working on feature- make sure you used `/create-clone` or `/cd-permanent` to work inside the clone. NEVER work directly in the base repo directory.
 
-COMMIT AND PUSH FREQUENTLY!
-
-NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
-
-## Feature Development Workflow
-
-We use isolated git clones (NOT worktrees) for feature development. Each feature gets its own clone under `<repo>/_clones/<feature-name>`, created from the remote origin with its own branch. NEVER edit code directly in the main project directory — always work inside a clone dir. After creating or resuming a clone, cd into it using `/cd-permanent` so all subsequent work happens in the clone directory. When starting new work, run `/new-feature` which creates the clone, sets up the branch, and runs the full planning/dev workflow. To resume existing feature work, use `/continue-feature`. This ensures clean separation between features and prevents accidental changes to main. We have base directory protection hooks that block edits in the main repo dir — if you encounter them, it means you're not working inside a clone and need to create/resume one first.
-
-NEVER use `EnterPlanMode`/`ExitPlanMode` tools. Use the `/plan` skill instead when planning is needed.

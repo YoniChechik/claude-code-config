@@ -5,7 +5,7 @@ description: "When you get a failed result/error/user says its wrong/its a bug, 
 
 # Debugging Workflow
 
-Always work based on data. Never guess.
+Always work based on data. Never guess. ALWAYS run as subagent (opus high effort).
 
 ### 1. Understand the Error
 - Identify the failing test or error scenario from trace or user report

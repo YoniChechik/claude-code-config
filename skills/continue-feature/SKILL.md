@@ -51,29 +51,26 @@ Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME
 ```bash
 bash ~/.claude/scripts/git_branch_state.sh
 ```
-2. Read the file `~/.claude/skills/feature-loop-scheme/SKILL.md` to understand the full workflow
+if not synced with main, add "run `/sync` skill" to task list
 
-### Step 4: Check for PR & Launch CI Watcher
-Check if a PR exists for this branch. If a PR exists (open state): **Launch CI watcher immediately in background** (exception to orchestration-only rule):
-  ```
-  $HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH
-  ```
-  Run with `run_in_background=true`. Do NOT wait for results — proceed immediately.
+### Step 4: Launch CI Watcher
+Run `/ci` skill to launch the CI watcher in the background for the current branch.
 
 ### Step 5: Gather Context & Analyze Status
-Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
-
 1. Use explorer subagent to understand the codebase relevant to the feature
 2. Check if `plan-$FEATURE_NAME.md` exists — if yes, read it
 3. Run `git diff origin/main...HEAD` to see what's been done so far
 4. Compare progress against the plan (if exists)
+5. Read the file `~/.claude/feature-workflow.md` to understand the full workflow when building features
 
 ### Step 6: Execute Next Action
 **Proceed immediately without asking for approval.** Using all gathered context:
 - What the feature is about (from plan or branch name)
 - What has been done so far (from git diff)
 - Git branch state
-- Where we are in the feature-loop-scheme workflow
-- The user's requested next action (from input after `--`)
+- Where we are in the feature-workflow
+- The user's requested next action
 
-Execute the next action now. If behind main or diverged, run `/sync` first, then proceed with the user's requested work.
+
+## How to start
+ADD ALL ABOVE STEPS as steps to task list and start working.

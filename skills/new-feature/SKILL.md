@@ -17,5 +17,5 @@ Creates a new feature branch using git clone for isolated development with full 
 ### Step 1: Create Clone
 Run `/create-clone $ARGUMENTS`.
 
-### Step 2: Run Feature Loop
-Run `/feature-loop-scheme` to execute the full development workflow.
+### Step 2: Run Feature workflow
+Read the file `~/.claude/feature-workflow.md` and work according to workflow.
