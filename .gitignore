@@ -25,6 +25,7 @@ image-cache/
 mcp-needs-auth-cache.json
 chrome/
 sessions/
+backups/
 
 # Quality skill results
 quality-results/
