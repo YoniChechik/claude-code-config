@@ -8,8 +8,9 @@
 
 INPUT=$(cat)
 
-# Resolve ~/.claude to absolute path (avoid relying on $HOME being set in hook env)
-CLAUDE_CONFIG_DIR="$(cd ~/.claude 2>/dev/null && pwd)"
+# Derive ~/.claude from the script's own location (robust: no HOME dependency, symlink-safe)
+# Script lives at ~/.claude/scripts/pre_tool_use__base_dir_protect.sh
+CLAUDE_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Skip all protection when working inside ~/.claude config repo
 cwd_check=$(echo "$INPUT" | jq -r '.cwd // empty')
