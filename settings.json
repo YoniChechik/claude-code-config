@@ -225,6 +225,17 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/post_tool_use__md_tables.sh",
+            "timeout": 30,
+            "async": true
+          }
+        ]
       }
     ],
     "PreToolUse": [
