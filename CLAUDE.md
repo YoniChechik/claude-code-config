@@ -8,4 +8,5 @@
 - NEVER use `EnterPlanMode`/`ExitPlanMode` tools. Use the `/plan` skill instead when planning is needed.
 - When working on feature- make sure you used `/create-clone` or `/cd-permanent` to work inside the clone. NEVER work directly in the base repo directory.
 - make sure each feature works according to the feature development workflow outlined in the `feature-workflow.md` document.
+- NEVER use `sleep` to wait for something to happen. Use a polling for-loop with short intervals instead for faster responses.
 
