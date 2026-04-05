@@ -10,8 +10,11 @@
 #
 # Exit conditions:
 #   - No branch argument provided (exit 1)
-#   - CI failed (exit 1) — prints failure details and relaunch instruction
-#   - Merge conflict detected (exit 1) — prints conflict message and relaunch instruction
+#
+# Notification (non-exit) conditions:
+#   - CI failed — notifies via webhook and keeps watching
+#   - Merge conflict detected — notifies via webhook and keeps watching
+#   - Branch behind — notifies via webhook and keeps watching
 #
 # SHA tracking:
 #   The script tracks commits by SHA, not by branch name. It resolves the branch
@@ -42,16 +45,14 @@ fetch_runs() {
 check_merge_conflict() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
-        echo "PR on branch '$BRANCH' has merge conflicts. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
-        exit 1
+        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
     fi
 }
 
 check_branch_behind() {
     MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>&1) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
-        echo "PR on branch '$BRANCH' is behind the base branch and needs to be updated. IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then run /sync to update the branch."
-        exit 1
+        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
     fi
 }
 
@@ -92,9 +93,8 @@ check_failures() {
             MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
         fi
         MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
-        MSG="${MSG} IMPORTANT: First relaunch the CI watcher with run_in_background=true: \$HOME/.claude/scripts/ci_watch_persistent.sh $BRANCH, then delegate the fix to coder-agent."
-        echo "$MSG"
-        exit 1
+        MSG="${MSG} Delegate the fix to coder-agent."
+        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: $MSG"
     fi
 }
 

@@ -1,6 +1,15 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+
+const PORT_START = 8788
+const PORT_END = 8797
+const SESSIONS_DIR = join(homedir(), '.claude', 'sessions')
+const PPID = process.ppid
+const PORT_FILE = join(SESSIONS_DIR, `${PPID}.port`)
 
 const mcp = new Server(
   { name: 'webhook', version: '1.0.0' },
@@ -62,15 +71,53 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   res.end('Method Not Allowed')
 })
 
-httpServer.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error('ERROR: Port 8788 is already in use. Is another instance running?')
-  } else {
-    console.error('HTTP server error:', err)
+function cleanup() {
+  try {
+    unlinkSync(PORT_FILE)
+  } catch {
+    // file may already be gone
   }
-  process.exit(1)
+}
+
+process.on('SIGTERM', () => {
+  cleanup()
+  process.exit(0)
 })
 
-httpServer.listen(8788, '127.0.0.1', () => {
-  console.error('Webhook channel listening on 127.0.0.1:8788')
+process.on('SIGINT', () => {
+  cleanup()
+  process.exit(0)
 })
+
+process.on('exit', () => {
+  cleanup()
+})
+
+async function findFreePort(start: number, end: number): Promise<number> {
+  for (let port = start; port <= end; port++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        httpServer.listen(port, '127.0.0.1', () => resolve())
+        httpServer.once('error', reject)
+      })
+      return port
+    } catch (err: unknown) {
+      const nodeErr = err as NodeJS.ErrnoException
+      if (nodeErr.code === 'EADDRINUSE') {
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error(`No free port found in range ${start}-${end}`)
+}
+
+try {
+  const port = await findFreePort(PORT_START, PORT_END)
+  mkdirSync(SESSIONS_DIR, { recursive: true })
+  writeFileSync(PORT_FILE, String(port))
+  console.error(`Webhook channel listening on 127.0.0.1:${port}`)
+} catch (err) {
+  console.error('Failed to start webhook server:', err)
+  process.exit(1)
+}
