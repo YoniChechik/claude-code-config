@@ -18,57 +18,19 @@ Creates a git clone for isolated feature development. Handles both new features 
 - Decide on feature name based on description
 - Convert feature name to kebab-case for branch naming
 
-### Step 2: Check for Existing Remote Branch
+### Step 2: Run the clone script
 ```bash
-git fetch --prune
-git branch -r | grep "$FEATURE_NAME" || true
+bash ~/.claude/skills/create-clone/create_clone.sh "$FEATURE_NAME"
 ```
+This handles: fetching, branch detection, cloning, env symlinking, and environment setup.
 
-- If a matching remote branch exists → **Existing branch mode**
-- If no match → **New branch mode**
-
-### Step 3: Create Git Clone
-
-```bash
-ORIGINAL_REPO_DIR=$(pwd)
-REPO_URL=$(git config --get remote.origin.url)
-mkdir -p _clones
-```
-
-**New branch mode:**
-```bash
-git clone -b main "$REPO_URL" _clones/$FEATURE_NAME
-cd _clones/$FEATURE_NAME
-git checkout -b $FEATURE_NAME
-git push -u origin $FEATURE_NAME
-```
-
-**Existing branch mode:**
-```bash
-git clone -b $FEATURE_NAME "$REPO_URL" _clones/$FEATURE_NAME
-cd _clones/$FEATURE_NAME
-```
-
-### Step 4: Sync with Main
-Run the sync skill to commit and push.
-
-### Step 5: Symlink Environment Files
-```bash
-bash ~/.claude/skills/create-clone/symlink_env_files.sh "$ORIGINAL_REPO_DIR" "_clones/$FEATURE_NAME"
-```
-
-### Step 6: Setup Environment
-```bash
-bash ~/.claude/skills/create-clone/setup_project_env.sh
-```
-
-### Step 7: Notify User
+### Step 3: Notify User
 Tell user:
 - The clone has been created at `_clones/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` is tracking remote
 
-### Step 8: Change to Feature Directory
+### Step 4: Change to Feature Directory
 Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME` skill.
 
 ## IMPORTANT First Action
-Add all 8 steps to task list and start working on this skill's workflow.
+Add all 4 steps to task list and start working on this skill's workflow.
