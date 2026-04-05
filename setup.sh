@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_URL="https://github.com/YoniChechik/claude-code-config.git"
+CLAUDE_DIR="$HOME/.claude"
+
+# --- Git-enable ~/.claude if not already a git repo ---
+if [ ! -d "$CLAUDE_DIR/.git" ]; then
+  echo "==> Git-enabling $CLAUDE_DIR"
+  TMP_DIR="$(mktemp -d)"
+  git clone "$REPO_URL" "$TMP_DIR"
+  mv "$TMP_DIR/.git" "$CLAUDE_DIR/"
+  rm -rf "$TMP_DIR"
+  cd "$CLAUDE_DIR"
+  git reset --hard HEAD
+  echo "    Done. Continuing setup from $CLAUDE_DIR"
+fi
+
+SCRIPT_DIR="$CLAUDE_DIR"
 CHANNEL_DIR="$SCRIPT_DIR/channel"
 MCP_TARGET="$HOME/.claude.json"
 MCP_SOURCE="$SCRIPT_DIR/.mcp.json"
