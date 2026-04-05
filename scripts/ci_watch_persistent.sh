@@ -10,10 +10,12 @@
 #
 # Exit conditions:
 #   - No branch argument provided (exit 1)
-#   - PR merged and main CI resolved for the merge commit (exit 0)
+#   - Branch does not exist on remote (exit 1)
+#   - PR merged and main CI resolved for the merge commit — pass or fail (exit 0)
+#   - Timeout waiting for main CI runs after merge (exit 0)
 #
 # Notification (non-exit) conditions:
-#   - CI failed — notifies via webhook and keeps watching
+#   - CI failed on branch — notifies via webhook and keeps watching
 #   - Merge conflict detected — notifies via webhook and keeps watching
 #   - Branch behind — notifies via webhook and keeps watching
 #
@@ -36,7 +38,10 @@ set -euo pipefail
 # --- Configuration ---
 BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
 POLL_INTERVAL=5
-LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha')
+LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/null) || {
+    echo "Error: could not resolve branch '$BRANCH' to a SHA. Does the branch exist on the remote?" >&2
+    exit 1
+}
 REPORTED_PASS=""
 REPORTED_FAIL=""
 REPORTED_CONFLICT=""
@@ -49,6 +54,8 @@ MERGE_COMMIT_SHA=""
 MAIN_RUNS_JSON=""
 REPORTED_MAIN_PASS=""
 REPORTED_MAIN_FAIL=""
+MAIN_WAIT_ITERATIONS=0
+MAIN_WAIT_MAX=60  # 60 * 5s = 5 minutes
 
 # --- Functions ---
 
@@ -81,7 +88,7 @@ check_branch_behind() {
 }
 
 detect_new_sha() {
-    CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r '.[0].headSha')
+    CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r 'max_by(.databaseId).headSha')
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
         echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
         LATEST_SHA="$CURRENT_SHA"
@@ -107,74 +114,66 @@ get_sha_runs() {
 }
 
 check_failures() {
-    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
-    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
-        FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
-        FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
+    local context="$1"  # "branch" or "main"
+    local reported_fail_var="$2"  # name of the reported-fail flag variable
 
-        ALL_FAILED_JOBS=""
+    local failed_runs failed_names failed_ids all_failed_jobs first_failed_id msg
+    failed_runs=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
+    if [ "$(echo "$failed_runs" | jq 'length')" -gt 0 ]; then
+        failed_names=$(echo "$failed_runs" | jq -r '.[].name' | paste -sd ', ' -)
+        failed_ids=$(echo "$failed_runs" | jq -r '.[].databaseId')
+
+        all_failed_jobs=""
         while IFS= read -r RUN_ID; do
-            FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
-            if [ -n "$FAILED_JOBS" ]; then
-                ALL_FAILED_JOBS="${ALL_FAILED_JOBS}${FAILED_JOBS}"$'\n'
+            local failed_jobs
+            failed_jobs=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
+            if [ -n "$failed_jobs" ]; then
+                all_failed_jobs="${all_failed_jobs}${failed_jobs}"$'\n'
             fi
-        done <<< "$FAILED_IDS"
+        done <<< "$failed_ids"
 
-        FIRST_FAILED_ID=$(echo "$FAILED_RUNS" | jq -r '.[0].databaseId')
-        MSG="CI failed on branch '$BRANCH' (workflows: $FAILED_NAMES)."
-        if [ -n "$ALL_FAILED_JOBS" ]; then
-            MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
+        first_failed_id=$(echo "$failed_runs" | jq -r '.[0].databaseId')
+
+        if [ "$context" = "main" ]; then
+            msg="CI on $DEFAULT_BRANCH failed for merge of '$BRANCH' (workflows: $failed_names)."
+        else
+            msg="CI failed on branch '$BRANCH' (workflows: $failed_names)."
         fi
-        MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
-        MSG="${MSG} Delegate the fix to coder-agent."
-        if [ -z "$REPORTED_FAIL" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $MSG" || true
-            REPORTED_FAIL=1
+        if [ -n "$all_failed_jobs" ]; then
+            msg="${msg} Failed jobs: ${all_failed_jobs}"
+        fi
+        msg="${msg} Run 'gh run view $first_failed_id --log-failed' to get the logs."
+        if [ "$context" = "branch" ]; then
+            msg="${msg} Delegate the fix to coder-agent."
+        fi
+
+        local current_val
+        current_val=$(eval echo "\$$reported_fail_var")
+        if [ -z "$current_val" ]; then
+            if [ "$context" = "main" ]; then
+                bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg" || true
+            else
+                bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $msg" || true
+            fi
+            eval "$reported_fail_var=1"
         fi
     fi
 }
 
 check_all_passed() {
-    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
-        if [ -z "$REPORTED_PASS" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "✅ CI passed on branch $BRANCH" || true
-            REPORTED_PASS=1
-        fi
-    fi
-}
+    local context="$1"  # "branch" or "main"
+    local reported_pass_var="$2"  # name of the reported-pass flag variable
 
-check_main_failures() {
-    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
-    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
-        FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
-        FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
-
-        ALL_FAILED_JOBS=""
-        while IFS= read -r RUN_ID; do
-            FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
-            if [ -n "$FAILED_JOBS" ]; then
-                ALL_FAILED_JOBS="${ALL_FAILED_JOBS}${FAILED_JOBS}"$'\n'
+    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed" or .conclusion != "success")] | length')" -eq 0 ]; then
+        local current_val
+        current_val=$(eval echo "\$$reported_pass_var")
+        if [ -z "$current_val" ]; then
+            if [ "$context" = "main" ]; then
+                bash "$HOME/.claude/channel/notify.sh" "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" || true
+            else
+                bash "$HOME/.claude/channel/notify.sh" "✅ CI passed on branch $BRANCH" || true
             fi
-        done <<< "$FAILED_IDS"
-
-        FIRST_FAILED_ID=$(echo "$FAILED_RUNS" | jq -r '.[0].databaseId')
-        MSG="CI on $DEFAULT_BRANCH failed for merge of '$BRANCH' (workflows: $FAILED_NAMES)."
-        if [ -n "$ALL_FAILED_JOBS" ]; then
-            MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
-        fi
-        MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
-        if [ -z "$REPORTED_MAIN_FAIL" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $MSG" || true
-            REPORTED_MAIN_FAIL=1
-        fi
-    fi
-}
-
-check_main_all_passed() {
-    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
-        if [ -z "$REPORTED_MAIN_PASS" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" || true
-            REPORTED_MAIN_PASS=1
+            eval "$reported_pass_var=1"
         fi
     fi
 }
@@ -209,12 +208,18 @@ while true; do
         get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA"
 
         if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+            MAIN_WAIT_ITERATIONS=$((MAIN_WAIT_ITERATIONS + 1))
+            if [ "$MAIN_WAIT_ITERATIONS" -ge "$MAIN_WAIT_MAX" ]; then
+                bash "$HOME/.claude/channel/notify.sh" "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." || true
+                echo "Timed out waiting for main CI runs. Exiting."
+                exit 0
+            fi
             sleep "$POLL_INTERVAL"
             continue
         fi
 
-        check_main_failures
-        check_main_all_passed
+        check_failures "main" REPORTED_MAIN_FAIL
+        check_all_passed "main" REPORTED_MAIN_PASS
 
         if [ -n "$REPORTED_MAIN_PASS" ] || [ -n "$REPORTED_MAIN_FAIL" ]; then
             echo "Main CI resolved for merge of '$BRANCH'. Exiting."
@@ -250,8 +255,8 @@ while true; do
         continue
     fi
 
-    check_failures
-    check_all_passed
+    check_failures "branch" REPORTED_FAIL
+    check_all_passed "branch" REPORTED_PASS
 
     sleep "$POLL_INTERVAL"
 done
