@@ -1,21 +1,45 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 const PORT_START = 8788
 const PORT_END = 8797
+const MAX_BODY_SIZE = 1024 * 1024 // 1MB
 const REGISTRY = join(homedir(), '.claude_session_id_to_port')
-const claudePid = String(process.ppid)
+
+function findClaudePid(): string {
+  let pid = process.ppid
+  while (pid > 1) {
+    try {
+      const env = execSync(`ps eww -p ${pid} 2>/dev/null`, { encoding: 'utf8' })
+      if (env.includes('CLAUDECODE=1')) {
+        return String(pid)
+      }
+      const ppidStr = execSync(`ps -p ${pid} -o ppid= 2>/dev/null`, { encoding: 'utf8' }).trim()
+      pid = parseInt(ppidStr, 10)
+      if (isNaN(pid)) break
+    } catch {
+      break
+    }
+  }
+  // Fallback to direct parent if no CLAUDECODE ancestor found
+  return String(process.ppid)
+}
+
+const claudePid = findClaudePid()
 
 function readRegistry(): Record<string, number> {
   try { return JSON.parse(readFileSync(REGISTRY, 'utf8')) }
   catch { return {} }
 }
 function writeRegistry(reg: Record<string, number>) {
-  writeFileSync(REGISTRY, JSON.stringify(reg, null, 2))
+  const tmp = REGISTRY + '.tmp.' + process.pid
+  writeFileSync(tmp, JSON.stringify(reg, null, 2))
+  renameSync(tmp, REGISTRY)
 }
 
 const mcp = new Server(
@@ -33,7 +57,16 @@ await mcp.connect(new StdioServerTransport())
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
+    let totalSize = 0
+    req.on('data', (c: Buffer) => {
+      totalSize += c.length
+      if (totalSize > MAX_BODY_SIZE) {
+        req.destroy(new Error('Body too large'))
+        reject(new Error('Body exceeds 1MB limit'))
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => resolve(Buffer.concat(chunks).toString()))
     req.on('error', reject)
   })
@@ -43,6 +76,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   req.setTimeout(5000, () => {
     res.writeHead(408, { 'Content-Type': 'text/plain' })
     res.end('timeout')
+    req.destroy()
   })
 
   const path = req.url ?? '/'
@@ -78,10 +112,28 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   res.end('Method Not Allowed')
 })
 
+let cleanedUp = false
+
 function cleanup() {
+  if (cleanedUp) return
+  cleanedUp = true
   const reg = readRegistry()
   delete reg[claudePid]
   writeRegistry(reg)
+}
+
+function pruneStaleEntries() {
+  const reg = readRegistry()
+  let changed = false
+  for (const pid of Object.keys(reg)) {
+    try {
+      process.kill(Number(pid), 0)
+    } catch {
+      delete reg[pid]
+      changed = true
+    }
+  }
+  if (changed) writeRegistry(reg)
 }
 
 process.on('SIGTERM', () => {
@@ -118,6 +170,7 @@ async function findFreePort(start: number, end: number): Promise<number> {
 }
 
 try {
+  pruneStaleEntries()
   const port = await findFreePort(PORT_START, PORT_END)
   const reg = readRegistry()
   reg[claudePid] = port

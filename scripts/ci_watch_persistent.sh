@@ -45,14 +45,14 @@ fetch_runs() {
 check_merge_conflict() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
-        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
+        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
     fi
 }
 
 check_branch_behind() {
     MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>&1) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
-        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
+        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
     fi
 }
 
@@ -94,7 +94,7 @@ check_failures() {
         fi
         MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
         MSG="${MSG} Delegate the fix to coder-agent."
-        bash ~/.claude/channel/notify.sh "CI FAILURE on branch $BRANCH: $MSG"
+        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $MSG"
     fi
 }
 
