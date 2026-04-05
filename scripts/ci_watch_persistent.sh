@@ -33,6 +33,9 @@ BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
 POLL_INTERVAL=5
 LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha')
 REPORTED_PASS=""
+REPORTED_FAIL=""
+REPORTED_CONFLICT=""
+REPORTED_BEHIND=""
 RUNS_JSON=""
 SHA_RUNS=""
 
@@ -45,14 +48,24 @@ fetch_runs() {
 check_merge_conflict() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
-        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
+        if [ -z "$REPORTED_CONFLICT" ]; then
+            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." || true
+            REPORTED_CONFLICT=1
+        fi
+    else
+        REPORTED_CONFLICT=""
     fi
 }
 
 check_branch_behind() {
     MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>&1) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
-        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
+        if [ -z "$REPORTED_BEHIND" ]; then
+            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." || true
+            REPORTED_BEHIND=1
+        fi
+    else
+        REPORTED_BEHIND=""
     fi
 }
 
@@ -62,6 +75,9 @@ detect_new_sha() {
         echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
         LATEST_SHA="$CURRENT_SHA"
         REPORTED_PASS=""
+        REPORTED_FAIL=""
+        REPORTED_CONFLICT=""
+        REPORTED_BEHIND=""
     fi
 }
 
@@ -94,7 +110,10 @@ check_failures() {
         fi
         MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
         MSG="${MSG} Delegate the fix to coder-agent."
-        bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $MSG"
+        if [ -z "$REPORTED_FAIL" ]; then
+            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $MSG" || true
+            REPORTED_FAIL=1
+        fi
     fi
 }
 

@@ -72,11 +72,7 @@ find_claude_port() {
 }
 
 MESSAGE="$*"
-PORT=$(find_claude_port)
-if [ -z "$PORT" ]; then
-  echo "notify.sh: no active Claude webhook session found" >&2
-  exit 1
-fi
+PORT=$(find_claude_port) || { echo "notify.sh: no active Claude webhook session found" >&2; exit 1; }
 RESPONSE=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "$MESSAGE")
 if [ "$RESPONSE" = "ok" ]; then
   echo "Notified Claude session on port $PORT"
