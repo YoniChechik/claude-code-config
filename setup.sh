@@ -30,7 +30,7 @@ else
 fi
 
 # --- Update cc alias ---
-NEW_ALIAS='alias cc='"'"'expect -c "set timeout 10; log_user 1; spawn claude --dangerously-load-development-channels server:webhook; expect -re confirm; send \"\r\"; interact"'"'"''
+NEW_ALIAS='alias cc='"'"'claude --dangerously-load-development-channels server:webhook'"'"''
 
 update_alias() {
   local rc_file="$1"
