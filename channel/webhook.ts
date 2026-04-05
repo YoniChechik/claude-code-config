@@ -1,15 +1,22 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 const PORT_START = 8788
 const PORT_END = 8797
-const SESSIONS_DIR = join(homedir(), '.claude', 'sessions')
-const PPID = process.ppid
-const PORT_FILE = join(SESSIONS_DIR, `${PPID}.port`)
+const REGISTRY = join(homedir(), '.claude_session_id_to_port')
+const claudePid = String(process.ppid)
+
+function readRegistry(): Record<string, number> {
+  try { return JSON.parse(readFileSync(REGISTRY, 'utf8')) }
+  catch { return {} }
+}
+function writeRegistry(reg: Record<string, number>) {
+  writeFileSync(REGISTRY, JSON.stringify(reg, null, 2))
+}
 
 const mcp = new Server(
   { name: 'webhook', version: '1.0.0' },
@@ -72,11 +79,9 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 })
 
 function cleanup() {
-  try {
-    unlinkSync(PORT_FILE)
-  } catch {
-    // file may already be gone
-  }
+  const reg = readRegistry()
+  delete reg[claudePid]
+  writeRegistry(reg)
 }
 
 process.on('SIGTERM', () => {
@@ -114,8 +119,9 @@ async function findFreePort(start: number, end: number): Promise<number> {
 
 try {
   const port = await findFreePort(PORT_START, PORT_END)
-  mkdirSync(SESSIONS_DIR, { recursive: true })
-  writeFileSync(PORT_FILE, String(port))
+  const reg = readRegistry()
+  reg[claudePid] = port
+  writeRegistry(reg)
   console.error(`Webhook channel listening on 127.0.0.1:${port}`)
 } catch (err) {
   console.error('Failed to start webhook server:', err)

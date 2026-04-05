@@ -8,16 +8,19 @@ set -euo pipefail
 
 find_claude_port() {
   local pid=$$
+  local registry="$HOME/.claude_session_id_to_port"
+
+  [ -f "$registry" ] || return 1
+
   while [ "$pid" -gt 1 ]; do
-    # Check if this process has CLAUDECODE=1 in its environment
     if ps eww -p "$pid" 2>/dev/null | grep -q 'CLAUDECODE=1'; then
-      local port_file="$HOME/.claude/sessions/${pid}.port"
-      if [ -f "$port_file" ]; then
-        cat "$port_file"
+      local port
+      port=$(node -e "const r=JSON.parse(require('fs').readFileSync('$registry','utf8')); process.stdout.write(String(r['$pid']||''))")
+      if [ -n "$port" ] && [ "$port" != "undefined" ]; then
+        echo "$port"
         return 0
       fi
     fi
-    # Walk up to parent
     pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
   done
   return 1
