@@ -64,7 +64,7 @@ fetch_runs() {
 }
 
 check_merge_conflict() {
-    MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>&1) || MERGEABLE=""
+    MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>/dev/null) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
         if [ -z "$REPORTED_CONFLICT" ]; then
             bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." || true
@@ -76,7 +76,7 @@ check_merge_conflict() {
 }
 
 check_branch_behind() {
-    MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>&1) || MERGE_STATE=""
+    MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
         if [ -z "$REPORTED_BEHIND" ]; then
             bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." || true
@@ -89,6 +89,7 @@ check_branch_behind() {
 
 detect_new_sha() {
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r 'max_by(.databaseId).headSha')
+    [ -z "$CURRENT_SHA" ] || [ "$CURRENT_SHA" = "null" ] && return
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
         echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
         LATEST_SHA="$CURRENT_SHA"
@@ -128,7 +129,7 @@ check_failures() {
             local failed_jobs
             failed_jobs=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
             if [ -n "$failed_jobs" ]; then
-                all_failed_jobs="${all_failed_jobs}${failed_jobs}"$'\n'
+                all_failed_jobs="${all_failed_jobs}${failed_jobs} "
             fi
         done <<< "$failed_ids"
 
@@ -164,6 +165,7 @@ check_all_passed() {
     local context="$1"  # "branch" or "main"
     local reported_pass_var="$2"  # name of the reported-pass flag variable
 
+    [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ] && return
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed" or .conclusion != "success")] | length')" -eq 0 ]; then
         local current_val
         current_val=$(eval echo "\$$reported_pass_var")
@@ -218,6 +220,7 @@ while true; do
             continue
         fi
 
+        MAIN_WAIT_ITERATIONS=0
         check_failures "main" REPORTED_MAIN_FAIL
         check_all_passed "main" REPORTED_MAIN_PASS
 
@@ -242,11 +245,6 @@ while true; do
     fi
 
     detect_new_sha
-
-    if [ -n "$REPORTED_PASS" ]; then
-        sleep "$POLL_INTERVAL"
-        continue
-    fi
 
     get_sha_runs
 
