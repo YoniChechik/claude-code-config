@@ -10,6 +10,7 @@
 #
 # Exit conditions:
 #   - No branch argument provided (exit 1)
+#   - PR merged and main CI resolved for the merge commit (exit 0)
 #
 # Notification (non-exit) conditions:
 #   - CI failed — notifies via webhook and keeps watching
@@ -26,6 +27,10 @@
 #   groups by workflow name and keeps only the latest run (highest databaseId) per
 #   workflow, so stale re-run results don't pollute the status.
 #
+# Merge tracking:
+#   When the PR is merged, the script switches to tracking CI on the default branch
+#   for the merge commit SHA. It exits cleanly once main CI passes or fails.
+#
 set -euo pipefail
 
 # --- Configuration ---
@@ -38,6 +43,12 @@ REPORTED_CONFLICT=""
 REPORTED_BEHIND=""
 RUNS_JSON=""
 SHA_RUNS=""
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+MERGED=""
+MERGE_COMMIT_SHA=""
+MAIN_RUNS_JSON=""
+REPORTED_MAIN_PASS=""
+REPORTED_MAIN_FAIL=""
 
 # --- Functions ---
 
@@ -81,12 +92,18 @@ detect_new_sha() {
     fi
 }
 
-get_sha_runs() {
-    SHA_RUNS=$(echo "$RUNS_JSON" | jq --arg sha "$LATEST_SHA" '
+get_sha_runs_for() {
+    local runs_json="$1"
+    local sha="$2"
+    SHA_RUNS=$(echo "$runs_json" | jq --arg sha "$sha" '
       [.[] | select(.headSha == $sha)]
       | group_by(.name)
       | map(sort_by(.databaseId) | last)
     ')
+}
+
+get_sha_runs() {
+    get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA"
 }
 
 check_failures() {
@@ -126,15 +143,94 @@ check_all_passed() {
     fi
 }
 
+check_main_failures() {
+    FAILED_RUNS=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
+    if [ "$(echo "$FAILED_RUNS" | jq 'length')" -gt 0 ]; then
+        FAILED_NAMES=$(echo "$FAILED_RUNS" | jq -r '.[].name' | paste -sd ', ' -)
+        FAILED_IDS=$(echo "$FAILED_RUNS" | jq -r '.[].databaseId')
+
+        ALL_FAILED_JOBS=""
+        while IFS= read -r RUN_ID; do
+            FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)
+            if [ -n "$FAILED_JOBS" ]; then
+                ALL_FAILED_JOBS="${ALL_FAILED_JOBS}${FAILED_JOBS}"$'\n'
+            fi
+        done <<< "$FAILED_IDS"
+
+        FIRST_FAILED_ID=$(echo "$FAILED_RUNS" | jq -r '.[0].databaseId')
+        MSG="CI on $DEFAULT_BRANCH failed for merge of '$BRANCH' (workflows: $FAILED_NAMES)."
+        if [ -n "$ALL_FAILED_JOBS" ]; then
+            MSG="${MSG} Failed jobs: ${ALL_FAILED_JOBS}"
+        fi
+        MSG="${MSG} Run 'gh run view $FIRST_FAILED_ID --log-failed' to get the logs."
+        if [ -z "$REPORTED_MAIN_FAIL" ]; then
+            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $MSG" || true
+            REPORTED_MAIN_FAIL=1
+        fi
+    fi
+}
+
+check_main_all_passed() {
+    if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
+        if [ -z "$REPORTED_MAIN_PASS" ]; then
+            bash "$HOME/.claude/channel/notify.sh" "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" || true
+            REPORTED_MAIN_PASS=1
+        fi
+    fi
+}
+
+check_merged() {
+    local result
+    result=$(gh pr view "$BRANCH" --json state,mergeCommit \
+        --jq 'select(.state == "MERGED") | .mergeCommit.oid' 2>/dev/null || true)
+    if [ -n "$result" ]; then
+        MERGED=1
+        MERGE_COMMIT_SHA="$result"
+        echo "PR for branch '$BRANCH' has been merged (merge commit: $MERGE_COMMIT_SHA). Now tracking CI on $DEFAULT_BRANCH."
+    fi
+}
+
+fetch_main_runs() {
+    MAIN_RUNS_JSON=$(gh run list --branch "$DEFAULT_BRANCH" --json databaseId,status,conclusion,name,headSha)
+}
+
 # --- Main loop ---
 
 while true; do
+
+    # --- Check if PR was merged ---
+    if [ -z "$MERGED" ]; then
+        check_merged
+    fi
+
+    # --- Merged path: track main CI for the merge commit ---
+    if [ -n "$MERGED" ]; then
+        fetch_main_runs
+        get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA"
+
+        if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+            sleep "$POLL_INTERVAL"
+            continue
+        fi
+
+        check_main_failures
+        check_main_all_passed
+
+        if [ -n "$REPORTED_MAIN_PASS" ] || [ -n "$REPORTED_MAIN_FAIL" ]; then
+            echo "Main CI resolved for merge of '$BRANCH'. Exiting."
+            exit 0
+        fi
+
+        sleep "$POLL_INTERVAL"
+        continue
+    fi
+
+    # --- Branch tracking path (existing logic) ---
     fetch_runs
 
     check_merge_conflict
     check_branch_behind
 
-    # If no runs yet, just keep polling
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep "$POLL_INTERVAL"
         continue
@@ -142,7 +238,6 @@ while true; do
 
     detect_new_sha
 
-    # Already reported pass for this SHA — just wait for new push
     if [ -n "$REPORTED_PASS" ]; then
         sleep "$POLL_INTERVAL"
         continue
@@ -150,7 +245,6 @@ while true; do
 
     get_sha_runs
 
-    # No runs for our SHA yet
     if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
         sleep "$POLL_INTERVAL"
         continue
