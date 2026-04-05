@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHANNEL_DIR="/Users/yonichechik/.claude/channel"
-MCP_TARGET="$HOME/.claude/.mcp.json"
+MCP_TARGET="$HOME/.claude.json"
 MCP_SOURCE="$SCRIPT_DIR/.mcp.json"
 
 echo "==> Installing npm dependencies in $CHANNEL_DIR"
@@ -27,7 +27,7 @@ else
 fi
 
 # --- Update cc alias ---
-NEW_ALIAS='alias cc="claude --dangerously-load-development-channels server:/Users/yonichechik/.claude/channel/webhook.ts"'
+NEW_ALIAS='alias cc="claude --dangerously-load-development-channels server:webhook"'
 
 update_alias() {
   local rc_file="$1"
