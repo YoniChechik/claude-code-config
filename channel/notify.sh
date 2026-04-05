@@ -9,52 +9,54 @@ set -euo pipefail
 NODE=$(which node 2>/dev/null || echo /usr/local/bin/node)
 
 find_claude_port() {
-  local pid=$$
   local registry="$HOME/.claude_session_id_to_port"
+  [ -f "$registry" ] || { echo "[notify.sh DEBUG] No registry file" >&2; return 1; }
 
-  echo "[notify.sh DEBUG] Starting find_claude_port: PID=$$, PPID=$PPID" >&2
+  # Get all registered Claude PIDs from registry
+  local claude_pids
+  claude_pids=$("$NODE" -e "
+    const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+    console.log(Object.keys(r).join('\n'));
+  " -- "$registry" 2>/dev/null)
 
-  if [ ! -f "$registry" ]; then
-    echo "[notify.sh DEBUG] Registry file not found: $registry — returning failure" >&2
-    return 1
-  fi
+  [ -z "$claude_pids" ] && { echo "[notify.sh DEBUG] Registry empty" >&2; return 1; }
 
-  echo "[notify.sh DEBUG] Registry file contents:" >&2
-  cat "$registry" >&2
-  echo "" >&2
+  echo "[notify.sh DEBUG] Registry: $(cat $registry)" >&2
+  echo "[notify.sh DEBUG] Registered Claude PIDs: $claude_pids" >&2
 
+  # Walk up from current shell
+  local pid=$$
   while [ "$pid" -gt 1 ]; do
-    echo "[notify.sh DEBUG] Checking PID=$pid for CLAUDECODE=1" >&2
-    if ps eww -p "$pid" 2>/dev/null | grep -q 'CLAUDECODE=1'; then
-      echo "[notify.sh DEBUG] CLAUDECODE=1 FOUND on PID=$pid" >&2
-      local ppid_of_match
-      ppid_of_match=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
-      echo "[notify.sh DEBUG] PPID of match: $ppid_of_match" >&2
-      local port
-      # Try the matched PID first (it may be Claude itself), then its PPID
-      # (in case this is a child shell that inherited CLAUDECODE=1).
-      for candidate in "$pid" "$ppid_of_match"; do
-        [ -n "$candidate" ] && [ "$candidate" -gt 0 ] 2>/dev/null || continue
-        echo "[notify.sh DEBUG] Looking up candidate PID=$candidate in registry" >&2
+    echo "[notify.sh DEBUG] Checking if any Claude PID has parent=$pid" >&2
+
+    for claude_pid in $claude_pids; do
+      # Get parent of this Claude PID
+      local claude_parent
+      claude_parent=$(ps -p "$claude_pid" -o ppid= 2>/dev/null | tr -d ' ')
+      [ -z "$claude_parent" ] && continue  # Claude PID no longer exists
+
+      echo "[notify.sh DEBUG]   Claude PID=$claude_pid has parent=$claude_parent" >&2
+
+      if [ "$claude_parent" = "$pid" ]; then
+        # Found! This Claude process is a sibling/cousin
+        local port
         port=$("$NODE" -e "
-          const [,, reg, pid] = process.argv;
-          try { const r=JSON.parse(require('fs').readFileSync(reg,'utf8')); process.stdout.write(String(r[pid]||'')); } catch{}
-        " -- "$registry" "$candidate")
-        echo "[notify.sh DEBUG] Registry lookup for PID=$candidate returned: '${port:-<empty>}'" >&2
+          const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+          process.stdout.write(String(r[process.argv[2]] || ''));
+        " -- "$registry" "$claude_pid" 2>/dev/null)
+
         if [ -n "$port" ] && [ "$port" != "undefined" ]; then
-          echo "[notify.sh DEBUG] Final port found: $port" >&2
+          echo "[notify.sh DEBUG] Found port=$port for Claude PID=$claude_pid (sibling of ancestor=$pid)" >&2
           echo "$port"
           return 0
         fi
-      done
-      echo "[notify.sh DEBUG] No port found in registry for PID=$pid or PPID=$ppid_of_match" >&2
-    else
-      echo "[notify.sh DEBUG] CLAUDECODE=1 not found on PID=$pid" >&2
-    fi
+      fi
+    done
+
     pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
-    echo "[notify.sh DEBUG] Walking to next PID=$pid" >&2
   done
-  echo "[notify.sh DEBUG] Exhausted process tree walk — no port found, returning failure" >&2
+
+  echo "[notify.sh DEBUG] No sibling Claude session found" >&2
   return 1
 }
 
