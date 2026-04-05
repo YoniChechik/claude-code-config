@@ -1,0 +1,12 @@
+{
+  "name": "claude-channel-webhook",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx webhook.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "tsx": "latest"
+  }
+}
