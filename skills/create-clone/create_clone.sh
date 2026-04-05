@@ -43,4 +43,3 @@ bash ~/.claude/skills/create-clone/setup_project_env.sh
 cd "$ORIGINAL_REPO_DIR"
 
 echo "_clones/$FEATURE_NAME"
-cd "_clones/$FEATURE_NAME"
