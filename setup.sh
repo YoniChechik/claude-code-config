@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CHANNEL_DIR="/Users/yonichechik/.claude/channel"
+CHANNEL_DIR="$SCRIPT_DIR/channel"
 MCP_TARGET="$HOME/.claude.json"
 MCP_SOURCE="$SCRIPT_DIR/.mcp.json"
 
@@ -13,13 +13,16 @@ npm install
 echo "==> Merging .mcp.json into $MCP_TARGET"
 if [ -f "$MCP_TARGET" ]; then
   # Merge: add webhook entry into existing mcpServers
-  node -e "
+  node -e "$(cat <<'NODEJS'
     const fs = require('fs');
-    const existing = JSON.parse(fs.readFileSync('$MCP_TARGET', 'utf8'));
-    const incoming = JSON.parse(fs.readFileSync('$MCP_SOURCE', 'utf8'));
+    const target = process.argv[2];
+    const source = process.argv[3];
+    const existing = JSON.parse(fs.readFileSync(target, 'utf8'));
+    const incoming = JSON.parse(fs.readFileSync(source, 'utf8'));
     existing.mcpServers = { ...existing.mcpServers, ...incoming.mcpServers };
-    fs.writeFileSync('$MCP_TARGET', JSON.stringify(existing, null, 2) + '\n');
-  "
+    fs.writeFileSync(target, JSON.stringify(existing, null, 2) + '\n');
+NODEJS
+  )" -- "$MCP_TARGET" "$MCP_SOURCE"
   echo "    Merged webhook entry into existing $MCP_TARGET"
 else
   cp "$MCP_SOURCE" "$MCP_TARGET"

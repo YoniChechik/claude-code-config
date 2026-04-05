@@ -16,17 +16,19 @@ echo "   Port 8788 is up."
 
 # Send test notification
 echo "2. Sending test CI failure notification..."
-RESPONSE=$(curl -s -X POST http://127.0.0.1:8788 \
+HTTP_CODE=$(curl -s -o /tmp/webhook_test_body.txt -w '%{http_code}' --max-time 5 -X POST http://127.0.0.1:8788 \
   -d "TEST: CI failed on branch main - build #123 failed: 2 tests failed")
+RESPONSE=$(cat /tmp/webhook_test_body.txt)
 
+echo "   HTTP status: $HTTP_CODE"
 echo "   Response: $RESPONSE"
 
-if [ "$RESPONSE" = "ok" ]; then
+if [ "$HTTP_CODE" = "200" ] && [ "$RESPONSE" = "ok" ]; then
   echo ""
   echo "PASS: Webhook accepted the message."
   echo "Note: Full autonomous response verification requires a live Claude session."
 else
   echo ""
-  echo "FAIL: Expected response 'ok', got '$RESPONSE'"
+  echo "FAIL: Expected HTTP 200 with body 'ok', got HTTP $HTTP_CODE with body '$RESPONSE'"
   exit 1
 fi
