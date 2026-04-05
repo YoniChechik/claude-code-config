@@ -23,9 +23,10 @@ This approach "git-enables" your existing Claude Code config directory instead o
 
 This makes your config trackable and syncable across machines while keeping Claude Code running smoothly.
 
-### Optional: Short alias
+### Setup
+
+After cloning, run `./setup.sh` to install dependencies, configure the MCP server, and set up the `cc` alias.
 
 ```bash
-# Add to ~/.bashrc or ~/.zshrc
-alias cc="claude"
+./setup.sh
 ```
