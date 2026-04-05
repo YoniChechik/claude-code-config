@@ -16,15 +16,22 @@ find_claude_port() {
 
   while [ "$pid" -gt 1 ]; do
     if ps eww -p "$pid" 2>/dev/null | grep -q 'CLAUDECODE=1'; then
+      local ppid_of_match
+      ppid_of_match=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
       local port
-      port=$("$NODE" -e "
-        const [,, reg, pid] = process.argv;
-        try { const r=JSON.parse(require('fs').readFileSync(reg,'utf8')); process.stdout.write(String(r[pid]||'')); } catch{}
-      " -- "$registry" "$pid")
-      if [ -n "$port" ] && [ "$port" != "undefined" ]; then
-        echo "$port"
-        return 0
-      fi
+      # Try the matched PID first (it may be Claude itself), then its PPID
+      # (in case this is a child shell that inherited CLAUDECODE=1).
+      for candidate in "$pid" "$ppid_of_match"; do
+        [ -n "$candidate" ] && [ "$candidate" -gt 0 ] 2>/dev/null || continue
+        port=$("$NODE" -e "
+          const [,, reg, pid] = process.argv;
+          try { const r=JSON.parse(require('fs').readFileSync(reg,'utf8')); process.stdout.write(String(r[pid]||'')); } catch{}
+        " -- "$registry" "$candidate")
+        if [ -n "$port" ] && [ "$port" != "undefined" ]; then
+          echo "$port"
+          return 0
+        fi
+      done
     fi
     pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
   done
