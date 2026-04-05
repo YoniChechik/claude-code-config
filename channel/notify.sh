@@ -19,9 +19,6 @@ find_claude_port() {
   " -- "$registry" 2>/dev/null)
   [ -z "$claude_pids" ] && return 1
 
-  echo "[notify.sh DEBUG] Registry: $(cat $registry)" >&2
-  echo "[notify.sh DEBUG] Registered Claude PIDs: $claude_pids" >&2
-
   # Build notify.sh's full ancestry set
   local my_ancestors=""
   local pid=$$
@@ -30,18 +27,14 @@ find_claude_port() {
     pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
     [ -z "$pid" ] && break
   done
-  echo "[notify.sh DEBUG] My ancestry: $my_ancestors" >&2
-
   # For each registered Claude PID, walk its ancestry until hitting one of our ancestors
   for claude_pid in $claude_pids; do
     # Verify Claude PID is still alive
     ps -p "$claude_pid" > /dev/null 2>&1 || continue
 
-    echo "[notify.sh DEBUG] Walking ancestry of Claude PID=$claude_pid" >&2
     local cpid="$claude_pid"
     while [ "$cpid" -gt 1 ]; do
       if echo "$my_ancestors" | grep -qw "$cpid"; then
-        echo "[notify.sh DEBUG] Common ancestor found: $cpid for Claude PID=$claude_pid" >&2
         # Get the port for this Claude PID
         local port
         port=$("$NODE" -e "
@@ -49,7 +42,6 @@ find_claude_port() {
           process.stdout.write(String(r[process.argv[2]] || ''));
         " -- "$registry" "$claude_pid" 2>/dev/null)
         if [ -n "$port" ] && [ "$port" != "undefined" ]; then
-          echo "[notify.sh DEBUG] Found port=$port" >&2
           echo "$port"
           return 0
         fi
@@ -59,7 +51,6 @@ find_claude_port() {
     done
   done
 
-  echo "[notify.sh DEBUG] No common ancestor found with any registered Claude session" >&2
   return 1
 }
 
