@@ -30,7 +30,7 @@ else
 fi
 
 # --- Update cc alias ---
-NEW_ALIAS='alias cc="claude --dangerously-load-development-channels server:webhook"'
+NEW_ALIAS='alias cc='"'"'expect -c "set timeout 10; log_user 1; spawn claude --dangerously-load-development-channels server:webhook; expect -re confirm; send \"\r\"; interact"'"'"''
 
 update_alias() {
   local rc_file="$1"
@@ -38,19 +38,16 @@ update_alias() {
     return
   fi
 
+  # Remove any existing cc alias line, then append the new one
   if grep -q 'alias cc=' "$rc_file"; then
-    # Replace existing alias line (macOS-safe sed)
     if [[ "$(uname)" == "Darwin" ]]; then
-      sed -i '' "s|^alias cc=.*|$NEW_ALIAS|" "$rc_file"
+      sed -i '' '/^alias cc=/d' "$rc_file"
     else
-      sed -i "s|^alias cc=.*|$NEW_ALIAS|" "$rc_file"
+      sed -i '/^alias cc=/d' "$rc_file"
     fi
-    echo "    Updated cc alias in $rc_file"
-  else
-    echo "" >> "$rc_file"
-    echo "$NEW_ALIAS" >> "$rc_file"
-    echo "    Appended cc alias to $rc_file"
   fi
+  printf '%s\n' "$NEW_ALIAS" >> "$rc_file"
+  echo "    Updated cc alias in $rc_file"
 }
 
 echo "==> Updating cc alias"
