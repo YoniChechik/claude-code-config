@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHANNEL_DIR="/Users/yonichechik/.claude/channel"
 MCP_TARGET="$HOME/.claude/.mcp.json"
-MCP_SOURCE="$CHANNEL_DIR/.mcp.json"
+MCP_SOURCE="$SCRIPT_DIR/.mcp.json"
 
 echo "==> Installing npm dependencies in $CHANNEL_DIR"
 cd "$CHANNEL_DIR"
