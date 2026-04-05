@@ -30,6 +30,9 @@ backups/
 # Quality skill results
 quality-results/
 
+# Node
+**/node_modules/
+
 # Feature clones
 _clones/
 
