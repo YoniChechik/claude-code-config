@@ -10,53 +10,56 @@ NODE=$(which node 2>/dev/null || echo /usr/local/bin/node)
 
 find_claude_port() {
   local registry="$HOME/.claude_session_id_to_port"
-  [ -f "$registry" ] || { echo "[notify.sh DEBUG] No registry file" >&2; return 1; }
+  [ -f "$registry" ] || return 1
 
-  # Get all registered Claude PIDs from registry
   local claude_pids
   claude_pids=$("$NODE" -e "
     const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
     console.log(Object.keys(r).join('\n'));
   " -- "$registry" 2>/dev/null)
-
-  [ -z "$claude_pids" ] && { echo "[notify.sh DEBUG] Registry empty" >&2; return 1; }
+  [ -z "$claude_pids" ] && return 1
 
   echo "[notify.sh DEBUG] Registry: $(cat $registry)" >&2
   echo "[notify.sh DEBUG] Registered Claude PIDs: $claude_pids" >&2
 
-  # Walk up from current shell
+  # Build notify.sh's full ancestry set
+  local my_ancestors=""
   local pid=$$
   while [ "$pid" -gt 1 ]; do
-    echo "[notify.sh DEBUG] Checking if any Claude PID has parent=$pid" >&2
+    my_ancestors="$my_ancestors $pid"
+    pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
+    [ -z "$pid" ] && break
+  done
+  echo "[notify.sh DEBUG] My ancestry: $my_ancestors" >&2
 
-    for claude_pid in $claude_pids; do
-      # Get parent of this Claude PID
-      local claude_parent
-      claude_parent=$(ps -p "$claude_pid" -o ppid= 2>/dev/null | tr -d ' ')
-      [ -z "$claude_parent" ] && continue  # Claude PID no longer exists
+  # For each registered Claude PID, walk its ancestry until hitting one of our ancestors
+  for claude_pid in $claude_pids; do
+    # Verify Claude PID is still alive
+    ps -p "$claude_pid" > /dev/null 2>&1 || continue
 
-      echo "[notify.sh DEBUG]   Claude PID=$claude_pid has parent=$claude_parent" >&2
-
-      if [ "$claude_parent" = "$pid" ]; then
-        # Found! This Claude process is a sibling/cousin
+    echo "[notify.sh DEBUG] Walking ancestry of Claude PID=$claude_pid" >&2
+    local cpid="$claude_pid"
+    while [ "$cpid" -gt 1 ]; do
+      if echo "$my_ancestors" | grep -qw "$cpid"; then
+        echo "[notify.sh DEBUG] Common ancestor found: $cpid for Claude PID=$claude_pid" >&2
+        # Get the port for this Claude PID
         local port
         port=$("$NODE" -e "
           const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
           process.stdout.write(String(r[process.argv[2]] || ''));
         " -- "$registry" "$claude_pid" 2>/dev/null)
-
         if [ -n "$port" ] && [ "$port" != "undefined" ]; then
-          echo "[notify.sh DEBUG] Found port=$port for Claude PID=$claude_pid (sibling of ancestor=$pid)" >&2
+          echo "[notify.sh DEBUG] Found port=$port" >&2
           echo "$port"
           return 0
         fi
       fi
+      cpid=$(ps -p "$cpid" -o ppid= 2>/dev/null | tr -d ' ')
+      [ -z "$cpid" ] && break
     done
-
-    pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
   done
 
-  echo "[notify.sh DEBUG] No sibling Claude session found" >&2
+  echo "[notify.sh DEBUG] No common ancestor found with any registered Claude session" >&2
   return 1
 }
 
