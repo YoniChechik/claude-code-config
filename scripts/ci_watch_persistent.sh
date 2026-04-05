@@ -120,7 +120,7 @@ check_failures() {
 check_all_passed() {
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed")] | length')" -eq 0 ]; then
         if [ -z "$REPORTED_PASS" ]; then
-            echo "CI passed on branch '$BRANCH'. All workflows green."
+            bash "$HOME/.claude/channel/notify.sh" "✅ CI passed on branch $BRANCH" || true
             REPORTED_PASS=1
         fi
     fi
