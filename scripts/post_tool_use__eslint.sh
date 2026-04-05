@@ -2,7 +2,7 @@
 set -euo pipefail
 
 input=$(cat)
-file_path=$(echo "$input" | jq -r '.arguments.file_path // empty')
+file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 
 if [ -z "$file_path" ]; then
     exit 0
