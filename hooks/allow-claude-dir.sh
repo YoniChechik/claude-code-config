@@ -25,7 +25,7 @@ INPUT=$(cat)
 # Different tools use different field names: file-based tools (Read, Write, Edit)
 # use "file_path", while some others (e.g. Glob) use "path". We try both with
 # jq's // (alternative operator) so we catch either variant.
-file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty')
+file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // .tool_input.command // empty')
 
 # Expand a leading ~ to the real $HOME path.
 # Bash does NOT expand ~ inside variable comparisons (e.g. [[ "$var" == "~/"* ]]
