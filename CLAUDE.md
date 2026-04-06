@@ -9,4 +9,4 @@
 - When working on feature- make sure you used `/create-clone` or `/cd-permanent` to work inside the clone. NEVER work directly in the base repo directory.
 - make sure each feature works according to the feature development workflow outlined in the `feature-workflow.md` document.
 - NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead. Each loop must complete in max 10 sec (target avg 3 sec); if the condition isn't met by then, let the loop iterate again — never extend a single loop's timeout.
-
+- If writing bash scripts- add much more comments to explain different steps since nobody really understands bash.
