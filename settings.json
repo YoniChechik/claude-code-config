@@ -1,15 +1,14 @@
 {
+  "model": "opus",
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true,
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "includeCoAuthoredBy": false,
   "env": {
     "ENABLE_TOOL_SEARCH": "true"
   },
-  "includeCoAuthoredBy": false,
-  "permissions": {
-    "allow": [],
-    "deny": [],
-    "ask": [],
-    "defaultMode": "bypassPermissions"
-  },
-  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -111,7 +110,5 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
-  },
-  "effortLevel": "medium",
-  "skipDangerousModePermissionPrompt": true
+  }
 }
