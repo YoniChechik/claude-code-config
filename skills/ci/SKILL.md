@@ -20,7 +20,7 @@ git branch --show-current
 
 # step 2: run the CI watcher script in the background for the specified branch
 
-Run this command in the background (start once, forget it):
-```
-bash ~/.claude/scripts/ci_watch_persistent.sh <branch>
+Launch with shell-level backgrounding (do NOT use run_in_background=true — the process dies when the subagent exits):
+```bash
+bash ~/.claude/scripts/ci_watch_persistent.sh <branch> </dev/null >/dev/null 2>&1 &
 ```
