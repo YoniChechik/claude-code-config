@@ -89,7 +89,9 @@ check_branch_behind() {
 
 detect_new_sha() {
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r 'max_by(.databaseId).headSha')
-    [ -z "$CURRENT_SHA" ] || [ "$CURRENT_SHA" = "null" ] && return
+    if [ -z "$CURRENT_SHA" ] || [ "$CURRENT_SHA" = "null" ]; then
+        return
+    fi
     if [ "$CURRENT_SHA" != "$LATEST_SHA" ]; then
         echo "New push detected on branch '$BRANCH' (new SHA: $CURRENT_SHA). Now tracking new CI run."
         LATEST_SHA="$CURRENT_SHA"
@@ -103,15 +105,15 @@ detect_new_sha() {
 get_sha_runs_for() {
     local runs_json="$1"
     local sha="$2"
-    SHA_RUNS=$(echo "$runs_json" | jq --arg sha "$sha" '
+    echo "$runs_json" | jq --arg sha "$sha" '
       [.[] | select(.headSha == $sha)]
       | group_by(.name)
       | map(sort_by(.databaseId) | last)
-    ')
+    '
 }
 
 get_sha_runs() {
-    get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA"
+    SHA_RUNS=$(get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA")
 }
 
 check_failures() {
@@ -207,14 +209,25 @@ while true; do
     # --- Merged path: track main CI for the merge commit ---
     if [ -n "$MERGED" ]; then
         fetch_main_runs
-        get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA"
+        SHA_RUNS=$(get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA")
 
         if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
-            MAIN_WAIT_ITERATIONS=$((MAIN_WAIT_ITERATIONS + 1))
-            if [ "$MAIN_WAIT_ITERATIONS" -ge "$MAIN_WAIT_MAX" ]; then
-                bash "$HOME/.claude/channel/notify.sh" "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." || true
-                echo "Timed out waiting for main CI runs. Exiting."
-                exit 0
+            # Only start counting the timeout after the merge commit is actually
+            # visible on the default branch. Until then, the commit may simply
+            # not have propagated yet (GitHub eventual consistency), so a
+            # counter increment here could cause a premature 5-min timeout.
+            # We check commit visibility via `gh api` — if it fails, reset the
+            # counter and keep polling.
+            if gh api "repos/{owner}/{repo}/commits/$MERGE_COMMIT_SHA" --jq '.sha' >/dev/null 2>&1; then
+                MAIN_WAIT_ITERATIONS=$((MAIN_WAIT_ITERATIONS + 1))
+                if [ "$MAIN_WAIT_ITERATIONS" -ge "$MAIN_WAIT_MAX" ]; then
+                    bash "$HOME/.claude/channel/notify.sh" "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." || true
+                    echo "Timed out waiting for main CI runs. Exiting."
+                    exit 0
+                fi
+            else
+                # Merge commit not yet visible on default branch — don't count.
+                MAIN_WAIT_ITERATIONS=0
             fi
             sleep "$POLL_INTERVAL"
             continue
