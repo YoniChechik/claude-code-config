@@ -42,11 +42,17 @@ find_claude_port() {
   local best_claude_pid=""
   local best_depth=99999
 
-  for claude_pid in $claude_pids; do
+  # Use while-read instead of `for x in $var` because zsh does not
+  # perform word-splitting on unquoted scalars by default — the for
+  # loop would iterate once with the entire multi-line string as a
+  # single value, breaking the ancestry walk.
+  while IFS= read -r claude_pid; do
+    [ -z "$claude_pid" ] && continue
     ps -p "$claude_pid" > /dev/null 2>&1 || continue
 
     # Walk Claude's ancestry, find first PID in our ordered list
     local cpid="$claude_pid"
+    local found_ancestor=0
     while [ "$cpid" -gt 1 ]; do
       # Find index of cpid in my_ancestors_ordered
       local idx=0
@@ -57,14 +63,17 @@ find_claude_port() {
             best_depth="$idx"
             best_claude_pid="$claude_pid"
           fi
-          break 2  # break inner while
+          found_ancestor=1
+          break  # break out of for-anc loop
         fi
         idx=$((idx + 1))
       done
+      # If we found a common ancestor, stop walking this claude_pid's ancestry
+      [ "$found_ancestor" -eq 1 ] && break
       cpid=$(ps -p "$cpid" -o ppid= 2>/dev/null | tr -d ' ')
       [ -z "$cpid" ] && break
     done
-  done
+  done <<< "$claude_pids"
 
   if [ -n "$best_claude_pid" ]; then
     local port
