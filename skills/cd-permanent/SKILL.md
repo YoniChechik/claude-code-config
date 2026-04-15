@@ -12,12 +12,16 @@ Parse `$ARGUMENTS` as the target path.
 
 If empty: exit with error and explain usage.
 
-
 ### Step 2: Change Directory
 
-NOTE: this must run as 2 different bash tool calls
 ```bash
-cd "$TARGET_PATH"
+cd TARGET_PATH
+```
+
+Make sure to not prepend or append any other commands- this MUST be the only command running in Bash tool.
+
+# step 3: Confirm Change
+```bash
 pwd
 ```
 
