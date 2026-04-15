@@ -22,5 +22,5 @@ git branch --show-current
 
 Launch with shell-level backgrounding (do NOT use run_in_background=true — the process dies when the subagent exits):
 ```bash
-bash ~/.claude/scripts/ci_watch_persistent.sh <branch> </dev/null >/dev/null 2>&1 &
+bash ~/.claude/scripts/ci_watch_persistent.sh "$BRANCH" </dev/null >/dev/null 2>&1 &
 ```
