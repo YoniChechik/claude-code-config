@@ -36,7 +36,10 @@
 set -euo pipefail
 
 # --- Configuration ---
-BRANCH="${1:?Usage: ci_watch_persistent.sh <branch>}"
+# First argument: webhook HTTP port (used to send notifications via curl)
+# Second argument: branch name to watch
+PORT="${1:?Usage: ci_watch_persistent.sh <port> <branch>}"
+BRANCH="${2:?Usage: ci_watch_persistent.sh <port> <branch>}"
 POLL_INTERVAL=5
 LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/null) || {
     echo "Error: could not resolve branch '$BRANCH' to a SHA. Does the branch exist on the remote?" >&2
@@ -67,7 +70,7 @@ check_merge_conflict() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>/dev/null) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
         if [ -z "$REPORTED_CONFLICT" ]; then
-            echo "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." >> "$HOME/.claude/channel/inbox"
+            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
             REPORTED_CONFLICT=1
         fi
     else
@@ -79,7 +82,7 @@ check_branch_behind() {
     MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
         if [ -z "$REPORTED_BEHIND" ]; then
-            echo "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." >> "$HOME/.claude/channel/inbox"
+            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
             REPORTED_BEHIND=1
         fi
     else
@@ -154,9 +157,9 @@ check_failures() {
         current_val=$(eval echo "\$$reported_fail_var")
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
-                echo "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg" >> "$HOME/.claude/channel/inbox"
+                curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg"
             else
-                echo "CI FAILURE on branch $BRANCH: $msg" >> "$HOME/.claude/channel/inbox"
+                curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: $msg"
             fi
             eval "$reported_fail_var=1"
         fi
@@ -173,9 +176,9 @@ check_all_passed() {
         current_val=$(eval echo "\$$reported_pass_var")
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
-                echo "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" >> "$HOME/.claude/channel/inbox"
+                curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH"
             else
-                echo "✅ CI passed on branch $BRANCH" >> "$HOME/.claude/channel/inbox"
+                curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
             fi
             eval "$reported_pass_var=1"
         fi
@@ -221,7 +224,7 @@ while true; do
             if gh api "repos/{owner}/{repo}/commits/$MERGE_COMMIT_SHA" --jq '.sha' >/dev/null 2>&1; then
                 MAIN_WAIT_ITERATIONS=$((MAIN_WAIT_ITERATIONS + 1))
                 if [ "$MAIN_WAIT_ITERATIONS" -ge "$MAIN_WAIT_MAX" ]; then
-                    echo "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." >> "$HOME/.claude/channel/inbox"
+                    curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually."
                     echo "Timed out waiting for main CI runs. Exiting."
                     exit 0
                 fi

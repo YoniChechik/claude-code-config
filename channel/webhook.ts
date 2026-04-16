@@ -1,14 +1,10 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
+import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 
-// External scripts (e.g. CI watcher) write messages here, one per line.
-// The MCP server watches the file and relays each line as a channel notification.
-const INBOX = join(homedir(), '.claude', 'channel', 'inbox')
-
+// --- MCP Server ---
+// Created first so it's available when the HTTP handler references it.
 const mcp = new Server(
   { name: 'webhook', version: '1.0.0' },
   {
@@ -21,10 +17,7 @@ const mcp = new Server(
 
 await mcp.connect(new StdioServerTransport())
 
-// --- MCP tool: notify ---
-// Exposes a "notify" tool so any Claude session with this MCP can send
-// a channel notification directly via tool call (no shell/curl needed).
-
+// --- MCP Tools ---
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
@@ -36,6 +29,15 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           message: { type: 'string', description: 'The message to send to the channel' },
         },
         required: ['message'],
+      },
+    },
+    {
+      name: 'get_port',
+      description:
+        'Returns the HTTP port this webhook session is listening on. Pass this to external scripts so they can curl messages to this session.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
       },
     },
   ],
@@ -53,47 +55,64 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     })
     return { content: [{ type: 'text', text: 'Notification sent.' }] }
   }
+
+  if (request.params.name === 'get_port') {
+    return { content: [{ type: 'text', text: String(httpPort) }] }
+  }
+
   throw new Error(`Unknown tool: ${request.params.name}`)
 })
 
-// --- Inbox file watcher ---
-// Ensure the inbox file and its parent directory exist.
-mkdirSync(dirname(INBOX), { recursive: true })
-if (!existsSync(INBOX)) {
-  writeFileSync(INBOX, '')
-}
+// --- HTTP Server ---
+// Minimal HTTP server on localhost for receiving webhook messages from external scripts.
+let httpPort = 0
 
-// Debounce guard: fs.watch can fire multiple times for a single write.
-// We use a flag to skip duplicate reads within a short window.
-let inboxProcessing = false
+const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200)
+    res.end('ok')
+    return
+  }
 
-watch(INBOX, async () => {
-  if (inboxProcessing) return
-  inboxProcessing = true
-  // Small delay to let the writer finish flushing
-  setTimeout(async () => {
-    try {
-      if (!existsSync(INBOX)) return
-      const content = readFileSync(INBOX, 'utf8')
-      if (!content.trim()) return
+  if (req.method === 'POST' && req.url === '/') {
+    const chunks: Buffer[] = []
+    let size = 0
+    const MAX_BODY = 1024 * 1024 // 1 MB
 
-      const lines = content.split('\n').filter((line) => line.trim() !== '')
-      for (const line of lines) {
-        await mcp.notification({
-          method: 'notifications/claude/channel',
-          params: {
-            content: line,
-            meta: { source: 'inbox' },
-          },
-        })
+    for await (const chunk of req) {
+      size += (chunk as Buffer).length
+      if (size > MAX_BODY) {
+        res.writeHead(413)
+        res.end('body too large')
+        return
       }
-
-      // Truncate the inbox after processing all lines
-      writeFileSync(INBOX, '')
-    } catch {
-      // File may have been deleted or is unreadable — ignore gracefully
-    } finally {
-      inboxProcessing = false
+      chunks.push(chunk as Buffer)
     }
-  }, 50)
+
+    const body = Buffer.concat(chunks).toString('utf8')
+
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: body,
+        meta: { source: 'http' },
+      },
+    })
+
+    res.writeHead(200)
+    res.end('ok')
+    return
+  }
+
+  res.writeHead(404)
+  res.end('not found')
+})
+
+// Listen on an OS-assigned free port on localhost
+httpServer.listen(0, '127.0.0.1', () => {
+  const addr = httpServer.address()
+  if (addr && typeof addr !== 'string') {
+    httpPort = addr.port
+  }
+  console.error(`Webhook HTTP listening on 127.0.0.1:${httpPort}`)
 })
