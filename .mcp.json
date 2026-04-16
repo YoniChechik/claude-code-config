@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "webhook": {
-      "command": "npx",
-      "args": ["tsx", "/Users/yonichechik/.claude/channel/webhook.ts"]
-    }
-  }
-}
