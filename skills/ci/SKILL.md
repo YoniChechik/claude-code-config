@@ -20,8 +20,8 @@ git branch --show-current
 
 # step 2: get the webhook HTTP port
 
-Call the `get_port` MCP tool (from the webhook server) to obtain the HTTP port for this session.
-Store the result in a variable `$PORT`.
+Call the `get_port` MCP tool (from the webhook server). It returns `PORT:TOKEN` format.
+Parse the result: everything before the first `:` is `$PORT`, everything after is `$SESSION_TOKEN`.
 
 # step 3: launch the CI watcher
 
@@ -31,6 +31,6 @@ Launch with shell-level backgrounding (do NOT use run_in_background=true — the
 ```bash
 # Launch watcher with logs going to a branch-keyed file
 # so failures are visible instead of silently swallowed.
-bash ~/.claude/scripts/ci_watch_persistent.sh "$PORT" "$BRANCH" </dev/null >>/tmp/ci_watch_${BRANCH}.log 2>&1 &
+bash ~/.claude/scripts/ci_watch_persistent.sh "$PORT" "$BRANCH" "$SESSION_TOKEN" </dev/null >>/tmp/ci_watch_${BRANCH}.log 2>&1 &
 echo "CI watcher launched for branch $BRANCH (PID $!, log: /tmp/ci_watch_${BRANCH}.log)"
 ```

@@ -38,8 +38,9 @@ set -euo pipefail
 # --- Configuration ---
 # First argument: webhook HTTP port (used to send notifications via curl)
 # Second argument: branch name to watch
-PORT="${1:?Usage: ci_watch_persistent.sh <port> <branch>}"
-BRANCH="${2:?Usage: ci_watch_persistent.sh <port> <branch>}"
+PORT="${1:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
+BRANCH="${2:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
+SESSION_TOKEN="${3:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
 POLL_INTERVAL=5
 LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/null) || {
     echo "Error: could not resolve branch '$BRANCH' to a SHA. Does the branch exist on the remote?" >&2
@@ -203,6 +204,13 @@ fetch_main_runs() {
 # --- Main loop ---
 
 while true; do
+
+    # --- Session health check ---
+    HEALTH=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/health" 2>/dev/null) || HEALTH=""
+    if [ "$HEALTH" != "ok:$SESSION_TOKEN" ]; then
+        echo "Session token mismatch or unreachable (expected ok:$SESSION_TOKEN, got '$HEALTH'). Exiting."
+        exit 0
+    fi
 
     # --- Check if PR was merged ---
     if [ -z "$MERGED" ]; then

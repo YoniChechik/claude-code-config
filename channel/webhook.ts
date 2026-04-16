@@ -2,6 +2,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
+import { randomUUID } from 'node:crypto'
+
+const sessionToken = randomUUID()
+process.stdin.on('end', () => process.exit(0))
+process.stdin.on('close', () => process.exit(0))
 
 // --- MCP Server ---
 // Created first so it's available when the HTTP handler references it.
@@ -57,7 +62,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (request.params.name === 'get_port') {
-    return { content: [{ type: 'text', text: String(httpPort) }] }
+    return { content: [{ type: 'text', text: `${httpPort}:${sessionToken}` }] }
   }
 
   throw new Error(`Unknown tool: ${request.params.name}`)
@@ -70,7 +75,7 @@ let httpPort = 0
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200)
-    res.end('ok')
+    res.end('ok:' + sessionToken)
     return
   }
 
