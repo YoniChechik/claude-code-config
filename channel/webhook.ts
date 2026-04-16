@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
@@ -32,7 +33,7 @@ function writeRegistry(reg: Record<string, number>) {
 const mcp = new Server(
   { name: 'webhook', version: '1.0.0' },
   {
-    capabilities: { experimental: { 'claude/channel': {} } },
+    capabilities: { tools: {}, experimental: { 'claude/channel': {} } },
     instructions:
       'Events from the webhook channel arrive as <channel source="webhook" ...>. ' +
       'They are one-way: read them and act, no reply expected.',
@@ -40,6 +41,41 @@ const mcp = new Server(
 )
 
 await mcp.connect(new StdioServerTransport())
+
+// --- MCP tool: notify ---
+// Exposes a "notify" tool so any Claude session with this MCP can send
+// a channel notification directly via tool call (no shell/curl needed).
+
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: 'notify',
+      description: 'Send a message to the webhook channel as a notification.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          message: { type: 'string', description: 'The message to send to the channel' },
+        },
+        required: ['message'],
+      },
+    },
+  ],
+}))
+
+mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === 'notify') {
+    const message = (request.params.arguments as { message: string })?.message ?? ''
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: message,
+        meta: { source: 'mcp-tool' },
+      },
+    })
+    return { content: [{ type: 'text', text: 'Notification sent.' }] }
+  }
+  throw new Error(`Unknown tool: ${request.params.name}`)
+})
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
