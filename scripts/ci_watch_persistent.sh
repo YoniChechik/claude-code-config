@@ -67,7 +67,7 @@ check_merge_conflict() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>/dev/null) || MERGEABLE=""
     if [ "$MERGEABLE" = "CONFLICTING" ]; then
         if [ -z "$REPORTED_CONFLICT" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." || true
+            echo "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." >> "$HOME/.claude/channel/inbox"
             REPORTED_CONFLICT=1
         fi
     else
@@ -79,7 +79,7 @@ check_branch_behind() {
     MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null) || MERGE_STATE=""
     if [ "$MERGE_STATE" = "BEHIND" ]; then
         if [ -z "$REPORTED_BEHIND" ]; then
-            bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." || true
+            echo "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." >> "$HOME/.claude/channel/inbox"
             REPORTED_BEHIND=1
         fi
     else
@@ -154,9 +154,9 @@ check_failures() {
         current_val=$(eval echo "\$$reported_fail_var")
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
-                bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg" || true
+                echo "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg" >> "$HOME/.claude/channel/inbox"
             else
-                bash "$HOME/.claude/channel/notify.sh" "CI FAILURE on branch $BRANCH: $msg" || true
+                echo "CI FAILURE on branch $BRANCH: $msg" >> "$HOME/.claude/channel/inbox"
             fi
             eval "$reported_fail_var=1"
         fi
@@ -173,9 +173,9 @@ check_all_passed() {
         current_val=$(eval echo "\$$reported_pass_var")
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
-                bash "$HOME/.claude/channel/notify.sh" "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" || true
+                echo "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH" >> "$HOME/.claude/channel/inbox"
             else
-                bash "$HOME/.claude/channel/notify.sh" "✅ CI passed on branch $BRANCH" || true
+                echo "✅ CI passed on branch $BRANCH" >> "$HOME/.claude/channel/inbox"
             fi
             eval "$reported_pass_var=1"
         fi
@@ -221,7 +221,7 @@ while true; do
             if gh api "repos/{owner}/{repo}/commits/$MERGE_COMMIT_SHA" --jq '.sha' >/dev/null 2>&1; then
                 MAIN_WAIT_ITERATIONS=$((MAIN_WAIT_ITERATIONS + 1))
                 if [ "$MAIN_WAIT_ITERATIONS" -ge "$MAIN_WAIT_MAX" ]; then
-                    bash "$HOME/.claude/channel/notify.sh" "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." || true
+                    echo "⚠️ No CI runs found on $DEFAULT_BRANCH for merge commit of $BRANCH after $((MAIN_WAIT_MAX * POLL_INTERVAL))s. Check manually." >> "$HOME/.claude/channel/inbox"
                     echo "Timed out waiting for main CI runs. Exiting."
                     exit 0
                 fi
