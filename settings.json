@@ -1,14 +1,12 @@
 {
-  "model": "sonnet",
-  "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true,
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "includeCoAuthoredBy": false,
   "env": {
     "ENABLE_TOOL_SEARCH": "true"
   },
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -17,16 +15,6 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/scripts/session_start.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop__sound.sh"
           }
         ]
       }
@@ -130,5 +118,7 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/scripts/status_line.sh"
-  }
+  },
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true
 }
