@@ -37,6 +37,9 @@ if [ "$tool_name" = "Bash" ]; then
         if echo "$cwd" | grep -q '_clones/'; then
             exit 0
         fi
+        if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
+            exit 0
+        fi
         cat <<'EOF'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Git write operation outside _clones directory. Use /create-clone for isolated changes."}}
 EOF
