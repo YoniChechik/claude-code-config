@@ -51,11 +51,6 @@ NODEJS
 )" -- "$MCP_TARGET" "$HOME"
 echo "    Registered webhook MCP server in $MCP_TARGET"
 
-# --- Set idle notification threshold (triggers idle_prompt Notification hook after 500ms) ---
-echo "==> Setting messageIdleNotifThresholdMs=500 in $MCP_TARGET"
-jq '. + {"messageIdleNotifThresholdMs": 500}' "$MCP_TARGET" > "${MCP_TARGET}.tmp" && mv "${MCP_TARGET}.tmp" "$MCP_TARGET"
-echo "    Done."
-
 # --- Update cc alias ---
 NEW_ALIAS='alias cc='"'"'claude --dangerously-load-development-channels server:webhook'"'"''
 
