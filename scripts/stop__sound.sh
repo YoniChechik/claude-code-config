@@ -12,7 +12,7 @@ TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/de
 # Fall through to notify_waiting on any parse error.
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
     ACTIVE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
-import sys, json
+import sys, json, re
 
 transcript_path = sys.argv[1]
 
@@ -20,6 +20,11 @@ transcript_path = sys.argv[1]
 launched = set()
 # Collect all task-ids that completed (from <status>completed</status> messages)
 completed = set()
+
+def extract_completed_ids(text):
+    if "<status>completed</status>" in text:
+        for task_id in re.findall(r"<task-id>(.*?)</task-id>", text):
+            completed.add(task_id.strip())
 
 try:
     with open(transcript_path, "r") as f:
@@ -39,21 +44,30 @@ try:
                 if agent_id:
                     launched.add(agent_id)
 
-            # Detect completed background agents by scanning message content
-            # for <status>completed</status> blocks which contain <task-id>...</task-id>
+            # Detect completed background agents by scanning all text fields
+            # for <status>completed</status> blocks containing <task-id>...</task-id>.
+            # The completion notification appears in two forms in the JSONL:
+            #   1. queue-operation entry: top-level "content" is a plain string
+            #   2. user-message entry: message.content is a plain string (not a list)
+
+            # Form 1: queue-operation has top-level "content" string
+            top_content = entry.get("content")
+            if isinstance(top_content, str):
+                extract_completed_ids(top_content)
+
+            # Form 2: message.content is either a plain string or a list of blocks
             message = entry.get("message", {})
             if isinstance(message, dict):
-                content = message.get("content", [])
-                if isinstance(content, list):
+                content = message.get("content")
+                if isinstance(content, str):
+                    # Plain-string content (task-notification delivery)
+                    extract_completed_ids(content)
+                elif isinstance(content, list):
                     for block in content:
                         if not isinstance(block, dict):
                             continue
                         text = block.get("text", "") or ""
-                        if "<status>completed</status>" in text:
-                            # Extract all <task-id>VALUE</task-id> occurrences
-                            import re
-                            for task_id in re.findall(r"<task-id>(.*?)</task-id>", text):
-                                completed.add(task_id.strip())
+                        extract_completed_ids(text)
 
     # Active = launched agents whose ID is not in the completed set
     active = launched - completed
