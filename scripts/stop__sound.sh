@@ -2,9 +2,6 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/notify_waiting.sh"
 
-# Turn iTerm2 tab green — Claude is now idle/waiting for user or subagent
-printf '\033]6;1;bg;red;brightness;0\a\033]6;1;bg;green;brightness;180\a\033]6;1;bg;blue;brightness;0\a' > /dev/tty 2>/dev/null || true
-
 # Read the Stop hook JSON payload from stdin
 INPUT=$(cat)
 
@@ -86,5 +83,8 @@ PYEOF
         exit 0
     fi
 fi
+
+# Turn iTerm2 tab green — Claude is now idle/waiting for user or subagent
+printf '\033]6;1;bg;red;brightness;0\a\033]6;1;bg;green;brightness;180\a\033]6;1;bg;blue;brightness;0\a' > /dev/tty 2>/dev/null || true
 
 notify_waiting
