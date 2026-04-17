@@ -26,6 +26,8 @@ mcp-needs-auth-cache.json
 chrome/
 sessions/
 backups/
+policy-limits.json
+remote-settings.json
 
 # Quality skill results
 quality-results/
