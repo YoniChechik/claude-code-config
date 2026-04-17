@@ -105,6 +105,26 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "in=$(cat); p=$(printf %s \"$in\" | jq -r '.tool_input.file_path // empty'); case \"$p\" in */.claude/*|*/.claude) printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}';; esac"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "in=$(cat); cmd=$(printf %s \"$in\" | jq -r '.tool_input.command // empty'); verb=$(printf %s \"$cmd\" | awk '{print $1}'); case \"$verb\" in rm|rmdir) rest=$(printf %s \"$cmd\" | awk '{$1=\"\"; print substr($0,2)}'); all=1; any=0; for tok in $rest; do case \"$tok\" in -*) continue ;; esac; any=1; case \"$tok\" in */.claude/*|*/.claude|'~/.claude'*|'$HOME/.claude'*|'$CLAUDE_CONFIG_DIR'*) : ;; *) all=0; break ;; esac; done; if [ \"$any\" = 1 ] && [ \"$all\" = 1 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}'; fi ;; cat|ls|head|tail|wc|stat|find|grep|rg|jq|tree|file|mkdir|touch|mv|cp|tee) if printf %s \"$cmd\" | grep -qE '(/\\.claude(/|$|[[:space:]])|~/\\.claude|\\$HOME/\\.claude|\\$CLAUDE_CONFIG_DIR)'; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}'; fi ;; esac"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
