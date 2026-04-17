@@ -17,6 +17,7 @@ Creates a git clone for isolated feature development. Handles both new features 
 ### Step 1: Parse Feature Description
 - Decide on feature name based on description
 - Convert feature name to kebab-case for branch naming
+- Feature name must NOT contain `/`. If the chosen name has a prefix like `feat/`, `fix/`, `chore/`, etc., strip everything up to and including the last `/` (e.g. `feat/add-login` → `add-login`). The final name must be a flat kebab-case string with no slashes.
 
 ### Step 2: Run the clone script
 ```bash

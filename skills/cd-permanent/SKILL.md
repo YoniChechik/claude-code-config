@@ -10,7 +10,7 @@ argument-hint: "[path]"
 
 Parse `$ARGUMENTS` as the target path.
 
-If empty: exit with error and explain usage.
+If empty: use `_clones/<current-branch>`.
 
 ### Step 2: Change Directory
 
