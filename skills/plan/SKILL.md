@@ -3,6 +3,7 @@ name: "plan"
 description: "Explore codebase and create structured implementation plan"
 argument-hint: "[feature-description]"
 ---
+Restate the question in fully concrete terms, making every implicit detail explicit. Then answer.
 
 # Plan Mode
 
