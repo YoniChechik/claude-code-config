@@ -16,6 +16,14 @@
             "command": "bash $HOME/.claude/scripts/stop__sound.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/stop__title.sh"
+          }
+        ]
       }
     ],
     "SessionStart": [
