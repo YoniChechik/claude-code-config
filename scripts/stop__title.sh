@@ -36,7 +36,7 @@ fi
 # ---------------------------------------------------------------------------
 # Set iTerm2 tab title to a visible done indicator.
 # \033]0;<title>\007 sets both the window title and the tab title in iTerm2.
-# Write to stdout (NOT /dev/tty) — Claude Code hooks attach stdout to the
-# terminal. Using /dev/tty fails with "Device not configured" in hook context.
+# Write to /dev/tty — the same method used by stop__sound.sh and
+# user_prompt_submit.sh, which both work correctly in hook context.
 # ---------------------------------------------------------------------------
-printf '\033]0;%s\007' "$TAB_TITLE"
+printf '\033]0;%s\007' "$TAB_TITLE" > /dev/tty 2>/dev/null || true
