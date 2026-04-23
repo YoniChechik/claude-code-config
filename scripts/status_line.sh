@@ -72,9 +72,9 @@ if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
   five_hr_remaining=$(printf "%.0f" "$(echo "100 - $five_hr_used" | bc)")
   five_hr_part="${yellow}5h: ${five_hr_remaining}%${reset}"
   if [ -n "$five_hr_resets_at" ] && [ "$five_hr_resets_at" != "null" ]; then
-    reset_hour=$(date -r "$five_hr_resets_at" "+%H" 2>/dev/null || date -d "@${five_hr_resets_at}" "+%H" 2>/dev/null || echo "")
-    if [ -n "$reset_hour" ]; then
-      five_hr_part="${five_hr_part} ${yellow}(resets ${reset_hour}h)${reset}"
+    reset_time=$(date -r "$five_hr_resets_at" "+%H:%M" 2>/dev/null || date -d "@${five_hr_resets_at}" "+%H:%M" 2>/dev/null || echo "")
+    if [ -n "$reset_time" ]; then
+      five_hr_part="${five_hr_part} ${yellow}(${reset_time})${reset}"
     fi
   fi
   if [ -n "$info_line" ]; then
