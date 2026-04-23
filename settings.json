@@ -113,6 +113,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "rate_limit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/stop_failure__rate_limit.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
