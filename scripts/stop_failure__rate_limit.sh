@@ -45,11 +45,10 @@ fi
 # ---------------------------------------------------------------------------
 # Set iTerm2 tab title to a visible rate-limit indicator.
 # \033]0;<title>\007 sets both the window title and the tab title in iTerm2.
-# Write to stdout (NOT /dev/tty) — Claude Code hooks attach stdout to the
-# terminal, so this is how the working notify_waiting.sh sets the title too.
-# Using /dev/tty here fails with "Device not configured" in the hook context.
+# Write to /dev/tty — Claude Code captures stdout from hooks, so escape
+# sequences must go directly to the terminal via /dev/tty instead.
 # ---------------------------------------------------------------------------
-printf '\033]0;%s\007' "$TAB_TITLE"
+printf '\033]0;%s\007' "$TAB_TITLE" > /dev/tty 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Also set the tab color to orange (high red + medium green, no blue)
