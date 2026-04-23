@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # StopFailure hook — triggered when Claude stops due to a rate_limit error.
-# 1. Sets the iTerm2 tab title to "⏳ RATE LIMITED (OrgName)" so the user
+# 1. Sets the iTerm2 tab BADGE to "⏳ RATE LIMITED (OrgName)" so the user
 #    notices at a glance which org/account is rate-limited.
+#    (Badge used instead of title because Claude Code overrides the title.)
 # 2. Logs the full hook JSON payload to ~/.claude/logs/rate_limit.log for inspection.
 
 # ---------------------------------------------------------------------------
@@ -43,12 +44,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Set iTerm2 tab title to a visible rate-limit indicator.
-# \033]0;<title>\007 sets both the window title and the tab title in iTerm2.
+# Set iTerm2 tab BADGE to a visible rate-limit indicator.
+# We use the badge instead of the tab title because Claude Code overrides
+# the tab title (\033]0;) after hooks run, so our title change disappears.
+# The badge (iTerm2 proprietary) is untouched by Claude Code and persists.
+# Escape sequence: \e]1337;SetBadgeFormat=<base64>\a
 # Write to /dev/tty — Claude Code captures stdout from hooks, so escape
 # sequences must go directly to the terminal via /dev/tty instead.
 # ---------------------------------------------------------------------------
-printf '\033]0;%s\007' "$TAB_TITLE" > /dev/tty 2>/dev/null || true
+printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > /dev/tty 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Also set the tab color to orange (high red + medium green, no blue)

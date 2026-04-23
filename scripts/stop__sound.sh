@@ -87,4 +87,10 @@ fi
 # Turn iTerm2 tab green — Claude is now idle/waiting for user or subagent
 printf '\033]6;1;bg;red;brightness;0\a\033]6;1;bg;green;brightness;180\a\033]6;1;bg;blue;brightness;0\a' > /dev/tty 2>/dev/null || true
 
+# Clear the iTerm2 tab badge — the stop__title.sh hook will set it to
+# "✅ Done (OrgName)" right after us, but if this hook runs without that
+# one (e.g. suppressed by active agents above) we still want a clean slate.
+# Passing an empty base64 payload clears any previously set badge text.
+printf '\e]1337;SetBadgeFormat=\a' > /dev/tty 2>/dev/null || true
+
 notify_waiting

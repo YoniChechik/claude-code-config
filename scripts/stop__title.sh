@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # Stop hook — triggered when Claude finishes a session/turn.
-# Sets the iTerm2 tab title to "✅ Done (OrgName)" so the user
+# Sets the iTerm2 tab BADGE to "✅ Done (OrgName)" so the user
 # can see at a glance that Claude is idle and which org is active.
+# (Badge used instead of title because Claude Code overrides the title.)
 
 # ---------------------------------------------------------------------------
 # Read the hook JSON payload from stdin (Claude Code passes it here)
@@ -34,9 +35,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Set iTerm2 tab title to a visible done indicator.
-# \033]0;<title>\007 sets both the window title and the tab title in iTerm2.
-# Write to /dev/tty — the same method used by stop__sound.sh and
-# user_prompt_submit.sh, which both work correctly in hook context.
+# Set iTerm2 tab BADGE to a visible done indicator.
+# We use the badge instead of the tab title because Claude Code overrides
+# the tab title (\033]0;) after hooks run, so our title change disappears.
+# The badge (iTerm2 proprietary) is untouched by Claude Code and persists.
+# Escape sequence: \e]1337;SetBadgeFormat=<base64>\a
+# Write to /dev/tty — same pattern as color sequences in other hooks.
 # ---------------------------------------------------------------------------
-printf '\033]0;%s\007' "$TAB_TITLE" > /dev/tty 2>/dev/null || true
+printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > /dev/tty 2>/dev/null || true
