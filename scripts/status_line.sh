@@ -7,6 +7,7 @@ blue="\033[38;2;30;102;245m"
 yellow="\033[38;2;223;142;29m"
 magenta="\033[38;2;136;57;239m"
 red="\033[38;2;214;40;40m"
+green="\033[38;2;64;160;43m"
 reset="\033[0m"
 
 input=$(cat)
@@ -18,7 +19,9 @@ done < <(echo "$input" | jq -r '
   (.workspace.git_dir // ""),
   (.context_window.remaining_percentage // ""),
   (.rate_limits.five_hour.used_percentage // ""),
-  (.rate_limits.five_hour.resets_at // "")
+  (.rate_limits.five_hour.resets_at // ""),
+  (.effort.level // ""),
+  (.thinking.enabled // "")
 ' 2>/dev/null)
 
 if [ $? -ne 0 ] || [ ${#fields[@]} -eq 0 ]; then
@@ -31,6 +34,8 @@ git_dir="${fields[1]}"
 remaining="${fields[2]}"
 five_hr_used="${fields[3]}"
 five_hr_resets_at="${fields[4]}"
+effort_level="${fields[5]:-}"
+thinking_enabled="${fields[6]:-}"
 
 if [ -z "$dir" ]; then
   printf '%b' "${red}(status_line.sh: incomplete status)${reset}"
@@ -116,9 +121,26 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   fi
 fi
 
+# Line 3: effort level + thinking state
+effort_line=""
+if [ -n "$effort_level" ] && [ "$effort_level" != "null" ]; then
+  effort_line="${green}effort: ${effort_level}${reset}"
+fi
+if [ -n "$thinking_enabled" ] && [ "$thinking_enabled" != "null" ]; then
+  thinking_part="${green}thinking: ${thinking_enabled}${reset}"
+  if [ -n "$effort_line" ]; then
+    effort_line="${effort_line} | ${thinking_part}"
+  else
+    effort_line="${thinking_part}"
+  fi
+fi
+
 output="${status}${warning}"
 if [ -n "$info_line" ]; then
   output="${output}\n${info_line}"
+fi
+if [ -n "$effort_line" ]; then
+  output="${output}\n${effort_line}"
 fi
 if [ -n "$pr_line" ]; then
   output="${output}\n${pr_line}"
