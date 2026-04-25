@@ -12,3 +12,5 @@
 - If writing bash scripts- add much more comments to explain different steps since nobody really understands bash.
 - For gcloud re-auth (token expired): just run `gcloud auth login` directly via a subagent Bash call (NOT `--no-launch-browser`, NOT named pipes, NOT capturing URLs). It opens Chrome automatically, user approves, done — valid for ~1 day. Never attempt manual PKCE/OAuth flows.
 - When launching long-running background processes from subagents, NEVER use `run_in_background=true` on the Bash tool — the process gets killed when the subagent exits. Instead, use shell-level backgrounding: `<command> </dev/null >/dev/null 2>&1 &` (or redirect to a log file instead of `/dev/null`).
+
+@RTK.md

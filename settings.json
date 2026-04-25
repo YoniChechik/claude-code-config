@@ -92,6 +92,15 @@
             "command": "bash $HOME/.claude/scripts/pre_tool_use__ask_guard.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
