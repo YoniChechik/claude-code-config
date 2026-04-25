@@ -39,3 +39,6 @@ quality-results/
 _clones/
 
 !skills/debug
+
+# Logs
+logs/

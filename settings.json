@@ -131,6 +131,7 @@
     "command": "bash ~/.claude/scripts/status_line.sh"
   },
   "effortLevel": "high",
+  "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
-  "showThinkingSummaries": true
+  "remoteControlAtStartup": true
 }
