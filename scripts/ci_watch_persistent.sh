@@ -47,8 +47,11 @@ LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/nu
     exit 1
 }
 
-# Clean up the state file on any exit (BRANCH is now defined).
-trap 'rm -f "/tmp/ci_watch_state_${BRANCH}"' EXIT
+# Clean up the state file on any exit (BRANCH is now defined),
+# unless KEEP_STATE_FILE=1 (set before intentional exits where we want to
+# preserve the final state for the statusline to display).
+KEEP_STATE_FILE=""
+trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}"' EXIT
 
 # Initial state: watcher started, CI in progress.
 printf "running" > "/tmp/ci_watch_state_${BRANCH}"
@@ -72,7 +75,10 @@ MAIN_WAIT_MAX=60  # 60 * 5s = 5 minutes
 
 fetch_runs_for() {
     local branch="$1"
-    gh run list --branch "$branch" --json databaseId,status,conclusion,name,headSha
+    # Fetch up to 100 runs to avoid missing workflows when a branch has many
+    # runs (re-runs, many workflows). The default of 20 can cause SHA_RUNS to
+    # appear complete when older runs for the current SHA are beyond the cutoff.
+    gh run list --branch "$branch" --limit 100 --json databaseId,status,conclusion,name,headSha
 }
 
 # Generic PR-condition checker: query a PR field, compare to a trigger value,
@@ -192,6 +198,19 @@ check_all_passed() {
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH"
                 printf -v "$reported_pass_var" "1"
             elif [ "$MERGEABLE" != "CONFLICTING" ]; then
+                # Guard against false-positive passes: gh run list only surfaces runs
+                # that have already been created on GitHub. Workflows that are still
+                # queued or haven't been dispatched yet won't appear in SHA_RUNS, so
+                # SHA_RUNS can look "all passed" while checks are still pending.
+                # Cross-check with gh pr checks, which includes every check suite
+                # entry (including queued ones), before firing the pass notification.
+                local pr_checks_json pending_count
+                pr_checks_json=$(gh pr checks "$BRANCH" --json bucket 2>/dev/null) || pr_checks_json="[]"
+                pending_count=$(echo "$pr_checks_json" | jq '[.[] | select(.bucket == "pending")] | length')
+                if [ "$pending_count" -gt 0 ]; then
+                    # Some checks are still pending — not all done yet, keep waiting.
+                    return
+                fi
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
                 printf -v "$reported_pass_var" "1"
                 printf "passed" > "/tmp/ci_watch_state_${BRANCH}"
@@ -207,6 +226,7 @@ check_merged() {
     if [ -n "$result" ]; then
         MERGED=1
         MERGE_COMMIT_SHA="$result"
+        printf "merging" > "/tmp/ci_watch_state_${BRANCH}"
         echo "PR for branch '$BRANCH' has been merged (merge commit: $MERGE_COMMIT_SHA). Now tracking CI on $DEFAULT_BRANCH."
     fi
 }
@@ -272,6 +292,7 @@ while true; do
 
         if [ -n "$REPORTED_MAIN_PASS" ] || [ -n "$REPORTED_MAIN_FAIL" ]; then
             echo "Main CI resolved for merge of '$BRANCH'. Exiting."
+            KEEP_STATE_FILE=1
             exit 0
         fi
 

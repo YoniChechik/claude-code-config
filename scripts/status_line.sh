@@ -107,11 +107,12 @@ fi
 # Line 3: clickable PR link (if branch has an open PR)
 pr_line=""
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
-  pr_json=$(gh pr view --json url,number 2>/dev/null || echo "")
+  pr_json=$(gh pr view --json url,number,state 2>/dev/null || echo "")
   if [ -n "$pr_json" ]; then
     pr_url=$(echo "$pr_json" | jq -r '.url // ""' 2>/dev/null)
     pr_number=$(echo "$pr_json" | jq -r '.number // ""' 2>/dev/null)
-    if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+    pr_state=$(echo "$pr_json" | jq -r '.state // ""' 2>/dev/null)
+    if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
       pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
     fi
   fi
@@ -127,6 +128,7 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
         failed)   ci_display="${red}ci: failed${reset}" ;;
         conflict) ci_display="${red}ci: conflict${reset}" ;;
         behind)   ci_display="${yellow}ci: behind${reset}" ;;
+        merging)  ci_display="${yellow}ci: merging to main...${reset}" ;;
         *)        ci_display="" ;;
       esac
       if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
