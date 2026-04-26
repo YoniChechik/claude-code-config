@@ -41,7 +41,7 @@ if [ "$tool_name" = "Bash" ]; then
             exit 0
         fi
         cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Git write operation outside _clones directory. Use /create-clone for isolated changes."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: Git write operation attempted outside a _clones/ directory. Direct writes to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that clone. Never commit, push, or stage directly in the base repo directory."}}
 EOF
         exit 0
     fi
@@ -78,7 +78,7 @@ else
     fi
 
     cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"File edit outside _clones directory. Use /create-clone for isolated changes."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: File edit/write attempted outside a _clones/ directory inside a git repo. Direct edits to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that clone. Never edit files directly in the base repo directory."}}
 EOF
     exit 0
 fi
