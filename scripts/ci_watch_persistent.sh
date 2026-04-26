@@ -206,9 +206,21 @@ check_merged() {
 while true; do
 
     # --- Session health check ---
-    HEALTH=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/health" 2>/dev/null) || HEALTH=""
-    if [ "$HEALTH" != "ok:$SESSION_TOKEN" ]; then
-        echo "Session token mismatch or unreachable (expected ok:$SESSION_TOKEN, got '$HEALTH'). Exiting."
+    # Retry up to 5 times with 2s sleep between attempts to handle post-sleep
+    # server hiccup: when the Mac wakes from sleep, the localhost webhook
+    # server may be unreachable for a few seconds while the process resumes.
+    # ~10s total recovery window is plenty for a localhost process.
+    health_ok=0
+    for _attempt in 1 2 3 4 5; do
+        HEALTH=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/health" 2>/dev/null) || HEALTH=""
+        if [ "$HEALTH" = "ok:$SESSION_TOKEN" ]; then
+            health_ok=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$health_ok" -eq 0 ]; then
+        echo "Health check failed after 5 attempts (expected ok:$SESSION_TOKEN, last got '$HEALTH'). Exiting."
         exit 0
     fi
 
