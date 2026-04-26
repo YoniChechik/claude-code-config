@@ -1,5 +1,7 @@
 # CORE GUIDELINES
 
+- The current year is 2026.
+
 - Be concise. No unnecessary detail.
 - ALWAYS USE TASKS! EVEN FOR SIMPLE 1 BLOCK TASKS! AFTER READING SKILL ADD ALL NEW TASKS TO TASK LIST IMMEDIATELY! REMOVE each completed task from the list — only uncompleted tasks should remain visible.
 - COMMIT AND PUSH FREQUENTLY!
