@@ -51,7 +51,7 @@ LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/nu
 # unless KEEP_STATE_FILE=1 (set before intentional exits where we want to
 # preserve the final state for the statusline to display).
 KEEP_STATE_FILE=""
-trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}"' EXIT
+trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}" "/tmp/ci_watch_pr_${BRANCH}"' EXIT
 
 # Initial state: watcher started, CI in progress.
 printf "running" > "/tmp/ci_watch_state_${BRANCH}"
@@ -81,18 +81,16 @@ fetch_runs_for() {
     gh run list --branch "$branch" --limit 100 --json databaseId,status,conclusion,name,headSha
 }
 
-# Generic PR-condition checker: query a PR field, compare to a trigger value,
+# Generic PR-condition checker: compare a pre-fetched PR field value to a trigger value,
 # fire a webhook notification once when the trigger first matches, and reset
 # the flag when the condition clears so a future re-trigger fires again.
 check_pr_condition() {
-    local field="$1"             # json field to query, e.g. "mergeable"
+    local current_val="$1"       # pre-fetched field value, e.g. "CONFLICTING"
     local trigger_val="$2"       # value that triggers alert, e.g. "CONFLICTING"
     local flag_var="$3"          # name of global flag variable, e.g. "REPORTED_CONFLICT"
     local message="$4"           # notification message to send
     local state_on_trigger="$5"  # state string to write on trigger, e.g. "conflict"
 
-    local current_val
-    current_val=$(gh pr view "$BRANCH" --json "$field" --jq ".$field" 2>/dev/null) || current_val=""
     if [ "$current_val" = "$trigger_val" ]; then
         local flag_state
         flag_state=${!flag_var}
@@ -104,12 +102,6 @@ check_pr_condition() {
     else
         printf -v "$flag_var" ""
     fi
-}
-
-# Refresh the MERGEABLE global so check_all_passed can suppress the success
-# notification while the PR is in a CONFLICTING state.
-update_mergeable() {
-    MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>/dev/null) || MERGEABLE=""
 }
 
 detect_new_sha() {
@@ -220,12 +212,11 @@ check_all_passed() {
 }
 
 check_merged() {
-    local result
-    result=$(gh pr view "$BRANCH" --json state,mergeCommit \
-        --jq 'select(.state == "MERGED") | .mergeCommit.oid' 2>/dev/null || true)
-    if [ -n "$result" ]; then
+    local pr_state="$1"
+    local merge_commit_oid="$2"
+    if [ "$pr_state" = "MERGED" ] && [ -n "$merge_commit_oid" ]; then
         MERGED=1
-        MERGE_COMMIT_SHA="$result"
+        MERGE_COMMIT_SHA="$merge_commit_oid"
         printf "merging" > "/tmp/ci_watch_state_${BRANCH}"
         echo "PR for branch '$BRANCH' has been merged (merge commit: $MERGE_COMMIT_SHA). Now tracking CI on $DEFAULT_BRANCH."
     fi
@@ -254,9 +245,23 @@ while true; do
         exit 0
     fi
 
+    # --- Single combined gh pr view fetch per loop iteration ---
+    # All PR field reads come from this one call; results are cached to a file
+    # so that status_line.sh can read them without making its own gh calls.
+    PR_JSON=$(gh pr view "$BRANCH" --json url,number,state,mergeable,mergeStateStatus,mergeCommit 2>/dev/null || echo "")
+    if [ -n "$PR_JSON" ]; then
+        printf '%s' "$PR_JSON" > "/tmp/ci_watch_pr_${BRANCH}"
+    fi
+
+    # Extract all needed field values from the cached JSON.
+    MERGEABLE=$(printf '%s' "$PR_JSON" | jq -r '.mergeable // ""')
+    merge_state_status=$(printf '%s' "$PR_JSON" | jq -r '.mergeStateStatus // ""')
+    pr_state=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
+    merge_commit_oid=$(printf '%s' "$PR_JSON" | jq -r 'if .mergeCommit then .mergeCommit.oid else "" end')
+
     # --- Check if PR was merged ---
     if [ -z "$MERGED" ]; then
-        check_merged
+        check_merged "$pr_state" "$merge_commit_oid"
     fi
 
     # --- Merged path: track main CI for the merge commit ---
@@ -300,12 +305,12 @@ while true; do
         continue
     fi
 
-    # --- Branch tracking path (existing logic) ---
+    # --- Branch tracking path ---
+    # MERGEABLE, merge_state_status already extracted from PR_JSON above.
     RUNS_JSON=$(fetch_runs_for "$BRANCH")
 
-    check_pr_condition "mergeable" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." "conflict"
-    update_mergeable
-    check_pr_condition "mergeStateStatus" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." "behind"
+    check_pr_condition "$MERGEABLE" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." "conflict"
+    check_pr_condition "$merge_state_status" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." "behind"
 
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep "$POLL_INTERVAL"

@@ -105,13 +105,15 @@ if [ -n "$branch" ]; then
 fi
 
 # Line 3: clickable PR link (if branch has an open PR)
+# Read from the cache file written by ci_watch_persistent.sh — no gh call here.
 pr_line=""
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
-  pr_json=$(gh pr view --json url,number,state 2>/dev/null || echo "")
-  if [ -n "$pr_json" ]; then
-    pr_url=$(echo "$pr_json" | jq -r '.url // ""' 2>/dev/null)
-    pr_number=$(echo "$pr_json" | jq -r '.number // ""' 2>/dev/null)
-    pr_state=$(echo "$pr_json" | jq -r '.state // ""' 2>/dev/null)
+  pr_cache_file="/tmp/ci_watch_pr_${branch}"
+  if [ -f "$pr_cache_file" ]; then
+    pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
+    pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
+    pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
+    pr_state=$(printf '%s' "$pr_json" | jq -r '.state // ""' 2>/dev/null)
     if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
       pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
     fi
