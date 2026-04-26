@@ -115,6 +115,27 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
       pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
     fi
   fi
+
+  # Append CI hook state if available
+  if [ -n "$branch" ]; then
+    ci_state_file="/tmp/ci_watch_state_${branch}"
+    if [ -f "$ci_state_file" ]; then
+      ci_state=$(cat "$ci_state_file" 2>/dev/null || echo "")
+      case "$ci_state" in
+        running)  ci_display="${yellow}ci: running${reset}" ;;
+        passed)   ci_display="${green}ci: passed${reset}" ;;
+        failed)   ci_display="${red}ci: failed${reset}" ;;
+        conflict) ci_display="${red}ci: conflict${reset}" ;;
+        behind)   ci_display="${yellow}ci: behind${reset}" ;;
+        *)        ci_display="" ;;
+      esac
+      if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
+        pr_line="${pr_line} | ${ci_display}"
+      elif [ -n "$ci_display" ]; then
+        pr_line="${ci_display}"
+      fi
+    fi
+  fi
 fi
 
 output="${status}${warning}"

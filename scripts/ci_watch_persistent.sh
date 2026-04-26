@@ -46,6 +46,12 @@ LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/nu
     echo "Error: could not resolve branch '$BRANCH' to a SHA. Does the branch exist on the remote?" >&2
     exit 1
 }
+
+# Clean up the state file on any exit (BRANCH is now defined).
+trap 'rm -f "/tmp/ci_watch_state_${BRANCH}"' EXIT
+
+# Initial state: watcher started, CI in progress.
+printf "running" > "/tmp/ci_watch_state_${BRANCH}"
 REPORTED_PASS=""
 REPORTED_FAIL=""
 REPORTED_CONFLICT=""
@@ -73,10 +79,11 @@ fetch_runs_for() {
 # fire a webhook notification once when the trigger first matches, and reset
 # the flag when the condition clears so a future re-trigger fires again.
 check_pr_condition() {
-    local field="$1"         # json field to query, e.g. "mergeable"
-    local trigger_val="$2"   # value that triggers alert, e.g. "CONFLICTING"
-    local flag_var="$3"      # name of global flag variable, e.g. "REPORTED_CONFLICT"
-    local message="$4"       # notification message to send
+    local field="$1"             # json field to query, e.g. "mergeable"
+    local trigger_val="$2"       # value that triggers alert, e.g. "CONFLICTING"
+    local flag_var="$3"          # name of global flag variable, e.g. "REPORTED_CONFLICT"
+    local message="$4"           # notification message to send
+    local state_on_trigger="$5"  # state string to write on trigger, e.g. "conflict"
 
     local current_val
     current_val=$(gh pr view "$BRANCH" --json "$field" --jq ".$field" 2>/dev/null) || current_val=""
@@ -86,6 +93,7 @@ check_pr_condition() {
         if [ -z "$flag_state" ]; then
             curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "$message"
             printf -v "$flag_var" "1"
+            printf "%s" "$state_on_trigger" > "/tmp/ci_watch_state_${BRANCH}"
         fi
     else
         printf -v "$flag_var" ""
@@ -164,6 +172,7 @@ check_failures() {
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg"
             else
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: $msg"
+                printf "failed" > "/tmp/ci_watch_state_${BRANCH}"
             fi
             printf -v "$reported_fail_var" "1"
         fi
@@ -185,6 +194,7 @@ check_all_passed() {
             elif [ "$MERGEABLE" != "CONFLICTING" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
                 printf -v "$reported_pass_var" "1"
+                printf "passed" > "/tmp/ci_watch_state_${BRANCH}"
             fi
         fi
     fi
@@ -272,9 +282,9 @@ while true; do
     # --- Branch tracking path (existing logic) ---
     RUNS_JSON=$(fetch_runs_for "$BRANCH")
 
-    check_pr_condition "mergeable" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
+    check_pr_condition "mergeable" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." "conflict"
     update_mergeable
-    check_pr_condition "mergeStateStatus" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
+    check_pr_condition "mergeStateStatus" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." "behind"
 
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep "$POLL_INTERVAL"
