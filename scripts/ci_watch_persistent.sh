@@ -178,10 +178,11 @@ check_all_passed() {
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH"
-            else
+                eval "$reported_pass_var=1"
+            elif [ "$MERGEABLE" != "CONFLICTING" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
+                eval "$reported_pass_var=1"
             fi
-            eval "$reported_pass_var=1"
         fi
     fi
 }
