@@ -56,6 +56,7 @@ DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.na
 MERGED=""
 MERGE_COMMIT_SHA=""
 MAIN_RUNS_JSON=""
+MERGEABLE=""
 REPORTED_MAIN_PASS=""
 REPORTED_MAIN_FAIL=""
 MAIN_WAIT_ITERATIONS=0
@@ -63,32 +64,38 @@ MAIN_WAIT_MAX=60  # 60 * 5s = 5 minutes
 
 # --- Functions ---
 
-fetch_runs() {
-    RUNS_JSON=$(gh run list --branch "$BRANCH" --json databaseId,status,conclusion,name,headSha)
+fetch_runs_for() {
+    local branch="$1"
+    gh run list --branch "$branch" --json databaseId,status,conclusion,name,headSha
 }
 
-check_merge_conflict() {
+# Generic PR-condition checker: query a PR field, compare to a trigger value,
+# fire a webhook notification once when the trigger first matches, and reset
+# the flag when the condition clears so a future re-trigger fires again.
+check_pr_condition() {
+    local field="$1"         # json field to query, e.g. "mergeable"
+    local trigger_val="$2"   # value that triggers alert, e.g. "CONFLICTING"
+    local flag_var="$3"      # name of global flag variable, e.g. "REPORTED_CONFLICT"
+    local message="$4"       # notification message to send
+
+    local current_val
+    current_val=$(gh pr view "$BRANCH" --json "$field" --jq ".$field" 2>/dev/null) || current_val=""
+    if [ "$current_val" = "$trigger_val" ]; then
+        local flag_state
+        flag_state=${!flag_var}
+        if [ -z "$flag_state" ]; then
+            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "$message"
+            printf -v "$flag_var" "1"
+        fi
+    else
+        printf -v "$flag_var" ""
+    fi
+}
+
+# Refresh the MERGEABLE global so check_all_passed can suppress the success
+# notification while the PR is in a CONFLICTING state.
+update_mergeable() {
     MERGEABLE=$(gh pr view "$BRANCH" --json mergeable --jq '.mergeable' 2>/dev/null) || MERGEABLE=""
-    if [ "$MERGEABLE" = "CONFLICTING" ]; then
-        if [ -z "$REPORTED_CONFLICT" ]; then
-            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
-            REPORTED_CONFLICT=1
-        fi
-    else
-        REPORTED_CONFLICT=""
-    fi
-}
-
-check_branch_behind() {
-    MERGE_STATE=$(gh pr view "$BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null) || MERGE_STATE=""
-    if [ "$MERGE_STATE" = "BEHIND" ]; then
-        if [ -z "$REPORTED_BEHIND" ]; then
-            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
-            REPORTED_BEHIND=1
-        fi
-    else
-        REPORTED_BEHIND=""
-    fi
 }
 
 detect_new_sha() {
@@ -114,10 +121,6 @@ get_sha_runs_for() {
       | group_by(.name)
       | map(sort_by(.databaseId) | last)
     '
-}
-
-get_sha_runs() {
-    SHA_RUNS=$(get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA")
 }
 
 check_failures() {
@@ -155,14 +158,14 @@ check_failures() {
         fi
 
         local current_val
-        current_val=$(eval echo "\$$reported_fail_var")
+        current_val=${!reported_fail_var}
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg"
             else
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: $msg"
             fi
-            eval "$reported_fail_var=1"
+            printf -v "$reported_fail_var" "1"
         fi
     fi
 }
@@ -174,14 +177,14 @@ check_all_passed() {
     [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ] && return
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed" or .conclusion != "success")] | length')" -eq 0 ]; then
         local current_val
-        current_val=$(eval echo "\$$reported_pass_var")
+        current_val=${!reported_pass_var}
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH"
-                eval "$reported_pass_var=1"
+                printf -v "$reported_pass_var" "1"
             elif [ "$MERGEABLE" != "CONFLICTING" ]; then
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
-                eval "$reported_pass_var=1"
+                printf -v "$reported_pass_var" "1"
             fi
         fi
     fi
@@ -196,10 +199,6 @@ check_merged() {
         MERGE_COMMIT_SHA="$result"
         echo "PR for branch '$BRANCH' has been merged (merge commit: $MERGE_COMMIT_SHA). Now tracking CI on $DEFAULT_BRANCH."
     fi
-}
-
-fetch_main_runs() {
-    MAIN_RUNS_JSON=$(gh run list --branch "$DEFAULT_BRANCH" --json databaseId,status,conclusion,name,headSha)
 }
 
 # --- Main loop ---
@@ -220,7 +219,7 @@ while true; do
 
     # --- Merged path: track main CI for the merge commit ---
     if [ -n "$MERGED" ]; then
-        fetch_main_runs
+        MAIN_RUNS_JSON=$(fetch_runs_for "$DEFAULT_BRANCH")
         SHA_RUNS=$(get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA")
 
         if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
@@ -259,10 +258,11 @@ while true; do
     fi
 
     # --- Branch tracking path (existing logic) ---
-    fetch_runs
+    RUNS_JSON=$(fetch_runs_for "$BRANCH")
 
-    check_merge_conflict
-    check_branch_behind
+    check_pr_condition "mergeable" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent."
+    update_mergeable
+    check_pr_condition "mergeStateStatus" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch."
 
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep "$POLL_INTERVAL"
@@ -271,7 +271,7 @@ while true; do
 
     detect_new_sha
 
-    get_sha_runs
+    SHA_RUNS=$(get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA")
 
     if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
         sleep "$POLL_INTERVAL"
