@@ -51,7 +51,19 @@ LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/nu
 # unless KEEP_STATE_FILE=1 (set before intentional exits where we want to
 # preserve the final state for the statusline to display).
 KEEP_STATE_FILE=""
-trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}" "/tmp/ci_watch_pr_${BRANCH}"' EXIT
+LOCK_FILE="/tmp/ci_watch_lock_${BRANCH}"
+trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}" "/tmp/ci_watch_pr_${BRANCH}"; rm -f "$LOCK_FILE"' EXIT
+
+# Prevent multiple watchers for the same branch — kill any stale predecessor.
+if [ -f "$LOCK_FILE" ]; then
+    OLD_PID=$(cat "$LOCK_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "Existing CI watcher found for '$BRANCH' (PID $OLD_PID). Killing it and taking over."
+        kill "$OLD_PID" 2>/dev/null || true
+        sleep 1
+    fi
+fi
+echo $$ > "$LOCK_FILE"
 
 # Initial state: watcher started, CI in progress.
 printf "running" > "/tmp/ci_watch_state_${BRANCH}"
@@ -100,7 +112,9 @@ check_pr_condition() {
             printf "%s" "$state_on_trigger" > "/tmp/ci_watch_state_${BRANCH}"
         fi
     else
-        printf -v "$flag_var" ""
+        if [ -n "$current_val" ]; then
+            printf -v "$flag_var" ""
+        fi
     fi
 }
 
