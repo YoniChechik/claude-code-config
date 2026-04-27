@@ -33,11 +33,44 @@ if [ "$tool_name" = "Bash" ]; then
 
     GIT_WRITE_PATTERN='^git[[:space:]]+(add|stage|commit|checkout|switch|push|stash|reset|rebase|merge|cherry-pick|mv|rm|clean|branch -[dD])([[:space:]]|$)'
 
-    if echo "$command" | grep -qE "$GIT_WRITE_PATTERN"; then
-        if echo "$cwd" | grep -q '_clones/'; then
+    # Split the compound command on separators (;, &&, ||, |, newlines) into individual segments,
+    # then track cd commands to compute effective_cwd and check if any segment is a git write op.
+    # This catches "cd /outside && git commit" even when session cwd is inside _clones/.
+    effective_cwd="$cwd"
+    has_git_write=0
+    while IFS= read -r segment; do
+        # Strip leading/trailing whitespace from segment
+        segment="${segment#"${segment%%[![:space:]]*}"}"
+        segment="${segment%"${segment##*[![:space:]]}"}"
+        [ -z "$segment" ] && continue
+
+        # Track cd commands to follow directory changes
+        if echo "$segment" | grep -qE '^\s*cd(\s|$)'; then
+            target=$(echo "$segment" | awk '{print $2}')
+            if [ -n "$target" ]; then
+                target="${target/#\~/$HOME}"
+                if [[ "$target" == /* ]]; then
+                    effective_cwd="$target"
+                else
+                    effective_cwd="${effective_cwd}/${target}"
+                fi
+                effective_cwd=$(cd "$effective_cwd" 2>/dev/null && pwd) || true
+            fi
+            continue
+        fi
+
+        # Check if this segment is a git write operation
+        if echo "$segment" | grep -qE "$GIT_WRITE_PATTERN"; then
+            has_git_write=1
+            break
+        fi
+    done < <(echo "$command" | tr ';&|' '\n')
+
+    if [ "$has_git_write" = "1" ]; then
+        if echo "$effective_cwd" | grep -q '_clones/'; then
             exit 0
         fi
-        if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
+        if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$effective_cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
             exit 0
         fi
         cat <<'EOF'
