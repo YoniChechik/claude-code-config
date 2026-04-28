@@ -24,6 +24,20 @@ ask() {
     exit 0
 }
 
+# Split the compound command on separators (;, &&, ||, |, newlines) into
+# individual segments. Each segment is matched independently against the
+# protected-pattern lists below — this closes the bypass where
+# `cd foo && gh pr merge ...` slipped through because the full command
+# string didn't start with `gh`.
+SEGMENTS=()
+while IFS= read -r seg; do
+    # Strip leading/trailing whitespace
+    seg="${seg#"${seg%%[![:space:]]*}"}"
+    seg="${seg%"${seg##*[![:space:]]}"}"
+    [ -z "$seg" ] && continue
+    SEGMENTS+=("$seg")
+done < <(echo "$COMMAND" | tr ';&|' '\n')
+
 # ---------------------------------------------------------------------------
 # gh
 # ---------------------------------------------------------------------------
@@ -67,9 +81,11 @@ GH_PATTERNS=(
 )
 
 for pattern in "${GH_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "^${pattern}(\s|$)"; then
-        ask "gh command requires confirmation."
-    fi
+    for segment in "${SEGMENTS[@]}"; do
+        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            ask "gh command requires confirmation."
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
@@ -168,9 +184,11 @@ GCLOUD_PATTERNS=(
 )
 
 for pattern in "${GCLOUD_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "^${pattern}(\s|$)"; then
-        ask "gcloud command requires confirmation."
-    fi
+    for segment in "${SEGMENTS[@]}"; do
+        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            ask "gcloud command requires confirmation."
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
@@ -182,9 +200,11 @@ BQ_PATTERNS=(
 )
 
 for pattern in "${BQ_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "^${pattern}(\s|$)"; then
-        ask "bq command requires confirmation."
-    fi
+    for segment in "${SEGMENTS[@]}"; do
+        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            ask "bq command requires confirmation."
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
@@ -218,9 +238,11 @@ SUPABASE_PATTERNS=(
 )
 
 for pattern in "${SUPABASE_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "^${pattern}(\s|$)"; then
-        ask "supabase command requires confirmation."
-    fi
+    for segment in "${SEGMENTS[@]}"; do
+        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            ask "supabase command requires confirmation."
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
@@ -246,29 +268,25 @@ PULUMI_PATTERNS=(
 )
 
 for pattern in "${PULUMI_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "^${pattern}(\s|$)"; then
-        ask "pulumi command requires confirmation."
-    fi
+    for segment in "${SEGMENTS[@]}"; do
+        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            ask "pulumi command requires confirmation."
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
 # pulumi — flag-prefixed variants (e.g. "pulumi -C infra up")
 # Strip -C / --cwd and other global flags, then match effective subcommand.
 # ---------------------------------------------------------------------------
-if echo "$COMMAND" | grep -qE '^\s*pulumi\s'; then
-    EFFECTIVE=$(echo "$COMMAND" \
-        | sed 's/^\s*pulumi\s\+//' \
-        | sed 's/-C\s\+[^ ]\+\s*//g' \
-        | sed 's/--cwd\s\+[^ ]\+\s*//g' \
-        | sed 's/-s\s\+[^ ]\+\s*//g' \
-        | sed 's/--stack\s\+[^ ]\+\s*//g' \
-        | sed 's/--color\s\+[^ ]\+\s*//g' \
-        | sed 's/-v\s\+[^ ]\+\s*//g' \
-        | sed 's/--verbose\s\+[^ ]\+\s*//g' \
-        | sed 's/--[a-z-]*\s*//g' \
-        | sed 's/\s\+/ /g' \
-        | sed 's/^\s*//')
-
+PULUMI_SEG_FOUND=0
+for segment in "${SEGMENTS[@]}"; do
+    if echo "$segment" | grep -qE '^\s*pulumi\s'; then
+        PULUMI_SEG_FOUND=1
+        break
+    fi
+done
+if [ "$PULUMI_SEG_FOUND" = "1" ]; then
     PULUMI_WRITE_SUBCMDS=(
         "up"
         "destroy"
@@ -319,10 +337,26 @@ if echo "$COMMAND" | grep -qE '^\s*pulumi\s'; then
         "plugin rm"
     )
 
-    for subcmd in "${PULUMI_WRITE_SUBCMDS[@]}"; do
-        if echo "$EFFECTIVE" | grep -qE "^${subcmd}(\s|$)"; then
-            ask "pulumi command requires confirmation."
-        fi
+    for segment in "${SEGMENTS[@]}"; do
+        # Only consider segments that begin with `pulumi`.
+        echo "$segment" | grep -qE '^\s*pulumi\s' || continue
+        EFFECTIVE=$(echo "$segment" \
+            | sed 's/^\s*pulumi\s\+//' \
+            | sed 's/-C\s\+[^ ]\+\s*//g' \
+            | sed 's/--cwd\s\+[^ ]\+\s*//g' \
+            | sed 's/-s\s\+[^ ]\+\s*//g' \
+            | sed 's/--stack\s\+[^ ]\+\s*//g' \
+            | sed 's/--color\s\+[^ ]\+\s*//g' \
+            | sed 's/-v\s\+[^ ]\+\s*//g' \
+            | sed 's/--verbose\s\+[^ ]\+\s*//g' \
+            | sed 's/--[a-z-]*\s*//g' \
+            | sed 's/\s\+/ /g' \
+            | sed 's/^\s*//')
+        for subcmd in "${PULUMI_WRITE_SUBCMDS[@]}"; do
+            if echo "$EFFECTIVE" | grep -qE "^${subcmd}(\s|$)"; then
+                ask "pulumi command requires confirmation."
+            fi
+        done
     done
 fi
 
