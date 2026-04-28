@@ -11,18 +11,21 @@ green="\033[38;2;64;160;43m"
 reset="\033[0m"
 
 input=$(cat)
-fields=()
-while IFS= read -r line; do
-  fields+=("$line")
-done < <(echo "$input" | jq -r '
+if ! parsed=$(printf '%s' "$input" | jq -r '
   .workspace.current_dir,
   (.workspace.git_dir // ""),
   (.context_window.remaining_percentage // ""),
   (.rate_limits.five_hour.used_percentage // ""),
   (.rate_limits.five_hour.resets_at // "")
-' 2>/dev/null)
+' 2>/dev/null); then
+  printf '%b' "${red}(status_line.sh: json parse error)${reset}"
+  exit 0
+fi
 
-if [ $? -ne 0 ] || [ ${#fields[@]} -eq 0 ]; then
+# Split parsed output into fields array.
+IFS=$'\n' read -r -d '' -a fields <<< "$parsed" || true
+
+if [ ${#fields[@]} -eq 0 ]; then
   printf '%b' "${red}(status_line.sh: json parse error)${reset}"
   exit 0
 fi
@@ -39,6 +42,23 @@ if [ -z "$dir" ]; then
 fi
 
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+# Sanitized branch name for /tmp file paths (matches ci_watch_persistent.sh).
+# Branches like "feature/foo" produce paths like /tmp/ci_watch_state_feature/foo
+# which fail because the parent dir doesn't exist. Replace "/" with "__".
+branch_key="${branch//\//__}"
+
+# Resolve session identity for state file lookup.
+_cwd=$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)
+[[ -z "$_cwd" ]] && _cwd="$PWD"
+_cwd_hash=$(printf '%s' "$_cwd" | shasum -a 1 | cut -c1-12)
+_sid8=$(cat "$HOME/.claude/cache/cwd-session/$_cwd_hash" 2>/dev/null || printf '')
+
+if [[ -n "$_sid8" ]]; then
+    slot="${branch_key}_${_sid8}"
+else
+    # Fallback: legacy filename (no SID8) for sessions started before this change.
+    slot="${branch_key}"
+fi
 
 dirty_marker=""
 if [ -n "$branch" ]; then
@@ -108,8 +128,21 @@ fi
 # Read from the cache file written by ci_watch_persistent.sh — no gh call here.
 pr_line=""
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
-  pr_cache_file="/tmp/ci_watch_pr_${branch}"
+  pr_cache_file="/tmp/ci_watch_pr_${slot}"
   if [ -f "$pr_cache_file" ]; then
+    # Freshness check: ignore PR cache files older than 10 minutes to avoid
+    # leaking stale state from previous sessions / dead watchers.
+    _now=$(date +%s)
+    # stat -f %m is macOS; stat -c %Y is Linux fallback.
+    _mtime=$(stat -f %m "$pr_cache_file" 2>/dev/null \
+             || stat -c %Y "$pr_cache_file" 2>/dev/null \
+             || printf '0')
+    _age=$(( _now - _mtime ))
+    if [ "$_age" -gt 600 ]; then
+      pr_cache_file=""
+    fi
+  fi
+  if [ -n "$pr_cache_file" ] && [ -f "$pr_cache_file" ]; then
     pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
     pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
     pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
@@ -121,8 +154,20 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
 
   # Append CI hook state if available
   if [ -n "$branch" ]; then
-    ci_state_file="/tmp/ci_watch_state_${branch}"
+    ci_state_file="/tmp/ci_watch_state_${slot}"
     if [ -f "$ci_state_file" ]; then
+      # Watcher updates this file every POLL_INTERVAL (~5s). If older than
+      # 120s (2x typical max wait), the watcher likely died — treat as orphan.
+      _now=$(date +%s)
+      _mtime=$(stat -f %m "$ci_state_file" 2>/dev/null \
+               || stat -c %Y "$ci_state_file" 2>/dev/null \
+               || printf '0')
+      _age=$(( _now - _mtime ))
+      if [ "$_age" -gt 120 ]; then
+        ci_state_file=""
+      fi
+    fi
+    if [ -n "$ci_state_file" ] && [ -f "$ci_state_file" ]; then
       ci_state=$(cat "$ci_state_file" 2>/dev/null || echo "")
       case "$ci_state" in
         running)  ci_display="${yellow}ci: running${reset}" ;;
@@ -142,11 +187,19 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   fi
 fi
 
+current_time=$(date +%H:%M:%S)
+time_part="${blue}${current_time}${reset}"
+
 output="${status}${warning}"
 if [ -n "$info_line" ]; then
   output="${output}\n${info_line}"
 fi
 if [ -n "$pr_line" ]; then
-  output="${output}\n${pr_line}"
+  output="${output}\n${pr_line} | ${time_part}"
+elif [ -n "$info_line" ]; then
+  # Time goes on the info_line (last line) — rebuild it with time appended
+  output="${status}${warning}\n${info_line} | ${time_part}"
+else
+  output="${status}${warning}\n${time_part}"
 fi
 printf '%b' "$output"

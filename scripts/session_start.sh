@@ -2,17 +2,43 @@
 # Unified startup hook: env validation, git sync, clone cleanup.
 # Outputs a single JSON systemMessage line. Always exits 0.
 
+# ── Session identity ──────────────────────────────────────────────────────────
+# Read the hook payload (session_start.sh receives JSON on stdin).
+# We must consume stdin exactly once, early, before anything else reads it.
+INPUT=$(cat)
+
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || true)
+SID8=""
+if [[ -n "$SESSION_ID" && "$SESSION_ID" != "null" ]]; then
+    SID8="${SESSION_ID:0:8}"
+fi
+
+if [[ -n "$SID8" ]]; then
+    CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true)
+    [[ -z "$CWD" ]] && CWD="$PWD"
+    CWD_HASH=$(printf '%s' "$CWD" | shasum -a 1 | cut -c1-12)
+
+    mkdir -p "$HOME/.claude/cache/cwd-session" "$HOME/.claude/session-env/$SESSION_ID"
+
+    # Atomic writes: mktemp + mv so readers never see partial content.
+    _tmp=$(mktemp "$HOME/.claude/cache/cwd-session/$CWD_HASH.XXXXXX")
+    printf '%s' "$SID8" > "$_tmp"
+    mv -f "$_tmp" "$HOME/.claude/cache/cwd-session/$CWD_HASH"
+
+    _tmp=$(mktemp "$HOME/.claude/session-env/$SESSION_ID/sid8.XXXXXX")
+    printf '%s' "$SID8" > "$_tmp"
+    mv -f "$_tmp" "$HOME/.claude/session-env/$SESSION_ID/sid8"
+else
+    # Log so we can detect harness changes.
+    mkdir -p "$HOME/.claude/logs"
+    printf '[%s] session_start.sh: no session_id in payload\n' "$(date -u +%FT%TZ)" >> "$HOME/.claude/logs/session_start.log"
+    INPUT_DBG=$(printf '%s' "$INPUT" | head -c 500)
+    printf '  payload preview: %s\n' "$INPUT_DBG" >> "$HOME/.claude/logs/session_start.log"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 output=""
 add_line() { output+="$1"$'\n'; }
-
-# Simple bash JSON escape: replace \ with \\, " with \", newlines with \n
-json_escape() {
-    local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//\"/\\\"}"
-    s="${s//$'\n'/\\n}"
-    printf '%s' "\"$s\""
-}
 
 # --- Environment validation ---
 env_issues=()
@@ -37,7 +63,7 @@ fi
 
 # If not a git repo or jq missing, skip git operations
 if [[ -z "$git_root" ]] || ! command -v jq &>/dev/null; then
-    printf '%s\n' "{\"systemMessage\": $(json_escape "$output")}"
+    printf '%s\n' "{\"systemMessage\": $(printf '%s' "$output" | jq -Rs .)}"
     exit 0
 fi
 
@@ -88,7 +114,7 @@ if [[ -d "$clones_dir" ]]; then
             continue
         fi
 
-        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "refs/heads/$branch"; then
+        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -qF "refs/heads/$branch"; then
             existing_clones+=("$dir_name")
             continue
         fi
@@ -102,7 +128,7 @@ fi
 # Clean local branches with gone tracking
 removed_branches=()
 while read -r line; do
-    [[ $line == \** ]] && continue
+    [[ $line =~ ^[*+] ]] && continue
     branch=$(echo "$line" | awk '{print $1}')
     [[ $branch == "main" || $branch == "master" ]] && continue
     echo "$line" | grep -q ': gone]' || continue

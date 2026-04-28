@@ -26,15 +26,18 @@ printf '%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $INPUT" >> "$LOG_DIR/rate_limit.
 # ---------------------------------------------------------------------------
 CLAUDE_JSON="$HOME/.claude.json"
 if command -v python3 &>/dev/null && [ -f "$CLAUDE_JSON" ]; then
-    ORG_NAME=$(python3 -c "
-import json, sys
+    ORG_NAME=$(CLAUDE_JSON="$CLAUDE_JSON" python3 - <<'PY' 2>/dev/null
+import json, os
 try:
-    d = json.load(open('$CLAUDE_JSON'))
-    print(d.get('oauthAccount', {}).get('organizationName', ''))
+    with open(os.environ["CLAUDE_JSON"]) as f:
+        d = json.load(f)
+    print(d.get("oauthAccount", {}).get("organizationName", ""))
 except Exception:
-    print('')
-" 2>/dev/null)
+    print("")
+PY
+)
 fi
+ORG_NAME="${ORG_NAME:-}"
 
 # Build the title: append the org name in parentheses only when it is non-empty.
 if [ -n "$ORG_NAME" ]; then

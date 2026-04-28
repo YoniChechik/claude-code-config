@@ -38,42 +38,72 @@ set -euo pipefail
 # --- Configuration ---
 # First argument: webhook HTTP port (used to send notifications via curl)
 # Second argument: branch name to watch
-PORT="${1:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
-BRANCH="${2:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
-SESSION_TOKEN="${3:?Usage: ci_watch_persistent.sh <port> <branch> <session_token>}"
+PORT="${1:?Usage: ci_watch_persistent.sh <port> <branch> <session_token> <sid8>}"
+BRANCH="${2:?Usage: ci_watch_persistent.sh <port> <branch> <session_token> <sid8>}"
+SESSION_TOKEN="${3:?Usage: ci_watch_persistent.sh <port> <branch> <session_token> <sid8>}"
+# Sanitize branch name for use in /tmp file paths: branches like "feature/foo"
+# would otherwise produce paths like /tmp/ci_watch_state_feature/foo which fail
+# because the parent dir doesn't exist. Replace "/" with "__".
+BRANCH_KEY="${BRANCH//\//__}"
+# 8-char session id (passed by /ci skill). Combined with BRANCH_KEY into SLOT
+# so each Claude Code window gets its own /tmp state files even when watching
+# the same branch from multiple windows.
+SID8="${4:-unknown}"
+SLOT="${BRANCH_KEY}_${SID8}"
 POLL_INTERVAL=5
 LATEST_SHA=$(gh api "repos/{owner}/{repo}/commits/$BRANCH" --jq '.sha' 2>/dev/null) || {
     echo "Error: could not resolve branch '$BRANCH' to a SHA. Does the branch exist on the remote?" >&2
     exit 1
 }
+# Validate we actually got a SHA (not an empty string from a silent gh failure)
+if [ -z "$LATEST_SHA" ]; then
+    echo "Error: resolved SHA is empty for branch '$BRANCH'. Does the branch exist on the remote?" >&2
+    exit 1
+fi
 
 # Clean up the state file on any exit (BRANCH is now defined),
 # unless KEEP_STATE_FILE=1 (set before intentional exits where we want to
 # preserve the final state for the statusline to display).
 KEEP_STATE_FILE=""
-LOCK_FILE="/tmp/ci_watch_lock_${BRANCH}"
-trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${BRANCH}" "/tmp/ci_watch_pr_${BRANCH}"; rm -f "$LOCK_FILE"' EXIT
+LOCK_FILE="/tmp/ci_watch_lock_${SLOT}"
+trap '[[ -z "$KEEP_STATE_FILE" ]] && rm -f "/tmp/ci_watch_state_${SLOT}" "/tmp/ci_watch_pr_${SLOT}"; rm -f "$LOCK_FILE"' EXIT
 
 # Prevent multiple watchers for the same branch — kill any stale predecessor.
-if [ -f "$LOCK_FILE" ]; then
-    OLD_PID=$(cat "$LOCK_FILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "Existing CI watcher found for '$BRANCH' (PID $OLD_PID). Killing it and taking over."
-        kill "$OLD_PID" 2>/dev/null || true
-        sleep 1
+if [[ -f "$LOCK_FILE" ]]; then
+    OLD_PID=$(cat "$LOCK_FILE" 2>/dev/null || true)
+    if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+        # Validate it's actually our watcher before killing.
+        if ps -p "$OLD_PID" -o args= 2>/dev/null | grep -q "ci_watch_persistent"; then
+            kill "$OLD_PID" 2>/dev/null || true
+            # Poll until it exits (max 10 x 1s ticks per CLAUDE.md rules).
+            for _i in 1 2 3 4 5 6 7 8 9 10; do
+                kill -0 "$OLD_PID" 2>/dev/null || break
+                sleep 1
+            done
+        fi
     fi
 fi
 echo $$ > "$LOCK_FILE"
 
+# Atomic state-file writer. Avoids partial reads by status_line.sh racing with us.
+write_state() {
+    local value="$1"
+    local _tmp
+    _tmp=$(mktemp "/tmp/ci_watch_state_${SLOT}.XXXXXX")
+    printf '%s' "$value" > "$_tmp"
+    mv -f "$_tmp" "/tmp/ci_watch_state_${SLOT}"
+}
+
 # Initial state: watcher started, CI in progress.
-printf "running" > "/tmp/ci_watch_state_${BRANCH}"
+write_state "running"
 REPORTED_PASS=""
 REPORTED_FAIL=""
 REPORTED_CONFLICT=""
 REPORTED_BEHIND=""
 RUNS_JSON=""
 SHA_RUNS=""
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null) || DEFAULT_BRANCH="main"
+if [ -z "$DEFAULT_BRANCH" ]; then DEFAULT_BRANCH="main"; fi
 MERGED=""
 MERGE_COMMIT_SHA=""
 MAIN_RUNS_JSON=""
@@ -82,15 +112,36 @@ REPORTED_MAIN_PASS=""
 REPORTED_MAIN_FAIL=""
 MAIN_WAIT_ITERATIONS=0
 MAIN_WAIT_MAX=60  # 60 * 5s = 5 minutes
+SHA_RUNS_EMPTY_COUNT=0
+SHA_RUNS_EMPTY_MAX=24   # ~2 min at 5s poll interval
+REPORTED_NO_RUNS=false
 
 # --- Functions ---
 
 fetch_runs_for() {
     local branch="$1"
+    local output
     # Fetch up to 100 runs to avoid missing workflows when a branch has many
     # runs (re-runs, many workflows). The default of 20 can cause SHA_RUNS to
     # appear complete when older runs for the current SHA are beyond the cutoff.
-    gh run list --branch "$branch" --limit 100 --json databaseId,status,conclusion,name,headSha
+    #
+    # IMPORTANT: under `set -e`, the pattern `output=$(cmd); exit_code=$?` is
+    # broken — set -e aborts the script on the failed assignment before $? can
+    # ever be captured. Wrapping in `if ! output=$(cmd); then ...` suppresses
+    # set -e for that one assignment AND keeps the exit code observable via $?.
+    # On failure, emit an empty JSON array and let the caller retry next iter.
+    if ! output=$(gh run list --branch "$branch" --limit 100 --json databaseId,status,conclusion,name,headSha 2>&1); then
+        printf '[warn] fetch_runs_for: gh run list failed (exit %d): %s\n' "$?" "$output" >&2
+        echo "[]"
+        return 0
+    fi
+    # Validate output is actually JSON (GitHub can return HTML during maintenance).
+    if ! printf '%s' "$output" | jq empty 2>/dev/null; then
+        printf '[warn] fetch_runs_for: gh returned non-JSON output\n' >&2
+        echo "[]"
+        return 0
+    fi
+    echo "$output"
 }
 
 # Generic PR-condition checker: compare a pre-fetched PR field value to a trigger value,
@@ -109,7 +160,7 @@ check_pr_condition() {
         if [ -z "$flag_state" ]; then
             curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "$message"
             printf -v "$flag_var" "1"
-            printf "%s" "$state_on_trigger" > "/tmp/ci_watch_state_${BRANCH}"
+            write_state "$state_on_trigger"
         fi
     else
         if [ -n "$current_val" ]; then
@@ -119,6 +170,7 @@ check_pr_condition() {
 }
 
 detect_new_sha() {
+    [[ -z "$RUNS_JSON" ]] && RUNS_JSON='[]'
     CURRENT_SHA=$(echo "$RUNS_JSON" | jq -r 'max_by(.databaseId).headSha')
     if [ -z "$CURRENT_SHA" ] || [ "$CURRENT_SHA" = "null" ]; then
         return
@@ -130,6 +182,8 @@ detect_new_sha() {
         REPORTED_FAIL=""
         REPORTED_CONFLICT=""
         REPORTED_BEHIND=""
+        SHA_RUNS_EMPTY_COUNT=0
+        REPORTED_NO_RUNS=false
     fi
 }
 
@@ -148,6 +202,7 @@ check_failures() {
     local reported_fail_var="$2"  # name of the reported-fail flag variable
 
     local failed_runs failed_names failed_ids all_failed_jobs first_failed_id msg
+    [[ -z "$SHA_RUNS" ]] && SHA_RUNS='[]'
     failed_runs=$(echo "$SHA_RUNS" | jq '[.[] | select(.status == "completed" and .conclusion == "failure")]')
     if [ "$(echo "$failed_runs" | jq 'length')" -gt 0 ]; then
         failed_names=$(echo "$failed_runs" | jq -r '.[].name' | paste -sd ', ' -)
@@ -184,7 +239,7 @@ check_failures() {
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg"
             else
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: $msg"
-                printf "failed" > "/tmp/ci_watch_state_${BRANCH}"
+                write_state "failed"
             fi
             printf -v "$reported_fail_var" "1"
         fi
@@ -195,6 +250,7 @@ check_all_passed() {
     local context="$1"  # "branch" or "main"
     local reported_pass_var="$2"  # name of the reported-pass flag variable
 
+    [[ -z "$SHA_RUNS" ]] && SHA_RUNS='[]'
     [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ] && return
     if [ "$(echo "$SHA_RUNS" | jq '[.[] | select(.status != "completed" or .conclusion != "success")] | length')" -eq 0 ]; then
         local current_val
@@ -219,7 +275,7 @@ check_all_passed() {
                 fi
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI passed on branch $BRANCH"
                 printf -v "$reported_pass_var" "1"
-                printf "passed" > "/tmp/ci_watch_state_${BRANCH}"
+                write_state "passed"
             fi
         fi
     fi
@@ -231,7 +287,7 @@ check_merged() {
     if [ "$pr_state" = "MERGED" ] && [ -n "$merge_commit_oid" ]; then
         MERGED=1
         MERGE_COMMIT_SHA="$merge_commit_oid"
-        printf "merging" > "/tmp/ci_watch_state_${BRANCH}"
+        write_state "merging"
         echo "PR for branch '$BRANCH' has been merged (merge commit: $MERGE_COMMIT_SHA). Now tracking CI on $DEFAULT_BRANCH."
     fi
 }
@@ -262,9 +318,15 @@ while true; do
     # --- Single combined gh pr view fetch per loop iteration ---
     # All PR field reads come from this one call; results are cached to a file
     # so that status_line.sh can read them without making its own gh calls.
-    PR_JSON=$(gh pr view "$BRANCH" --json url,number,state,mergeable,mergeStateStatus,mergeCommit 2>/dev/null || echo "")
+    # On rate-limit or network error, skip this iteration rather than crashing.
+    if ! PR_JSON=$(gh pr view "$BRANCH" --json url,number,state,mergeable,mergeStateStatus,mergeCommit 2>&1); then
+        echo "Warning: gh pr view failed: $PR_JSON — will retry next iteration" >&2
+        PR_JSON=""
+    fi
     if [ -n "$PR_JSON" ]; then
-        printf '%s' "$PR_JSON" > "/tmp/ci_watch_pr_${BRANCH}"
+        _pr_tmp=$(mktemp "/tmp/ci_watch_pr_${SLOT}.XXXXXX")
+        printf '%s' "$PR_JSON" > "$_pr_tmp"
+        mv -f "$_pr_tmp" "/tmp/ci_watch_pr_${SLOT}"
     fi
 
     # Extract all needed field values from the cached JSON.
@@ -280,9 +342,16 @@ while true; do
 
     # --- Merged path: track main CI for the merge commit ---
     if [ -n "$MERGED" ]; then
-        MAIN_RUNS_JSON=$(fetch_runs_for "$DEFAULT_BRANCH")
-        SHA_RUNS=$(get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA")
+        # Wrap in `if !` so set -e doesn't abort if the function ever returns
+        # non-zero in the future (e.g. an internal jq pipefail).
+        if ! MAIN_RUNS_JSON=$(fetch_runs_for "$DEFAULT_BRANCH"); then
+            MAIN_RUNS_JSON="[]"
+        fi
+        if ! SHA_RUNS=$(get_sha_runs_for "$MAIN_RUNS_JSON" "$MERGE_COMMIT_SHA"); then
+            SHA_RUNS="[]"
+        fi
 
+        [[ -z "$SHA_RUNS" ]] && SHA_RUNS='[]'
         if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
             # Only start counting the timeout after the merge commit is actually
             # visible on the default branch. Until then, the commit may simply
@@ -321,11 +390,17 @@ while true; do
 
     # --- Branch tracking path ---
     # MERGEABLE, merge_state_status already extracted from PR_JSON above.
-    RUNS_JSON=$(fetch_runs_for "$BRANCH")
+    # fetch_runs_for already handles gh failures internally and returns "[]"
+    # on transient errors, so RUNS_JSON is always valid JSON. Still wrap in
+    # `if !` to keep set -e from aborting on any unexpected non-zero return.
+    if ! RUNS_JSON=$(fetch_runs_for "$BRANCH"); then
+        RUNS_JSON="[]"
+    fi
 
     check_pr_condition "$MERGEABLE" "CONFLICTING" "REPORTED_CONFLICT" "CI FAILURE on branch $BRANCH: PR has merge conflicts. Delegate the fix to coder-agent." "conflict"
     check_pr_condition "$merge_state_status" "BEHIND" "REPORTED_BEHIND" "CI FAILURE on branch $BRANCH: PR is behind the base branch and needs to be updated. Run /sync to update the branch." "behind"
 
+    [[ -z "$RUNS_JSON" ]] && RUNS_JSON='[]'
     if [ "$(echo "$RUNS_JSON" | jq 'length')" = "0" ]; then
         sleep "$POLL_INTERVAL"
         continue
@@ -333,12 +408,26 @@ while true; do
 
     detect_new_sha
 
-    SHA_RUNS=$(get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA")
+    # Wrap in `if !` so set -e doesn't abort if get_sha_runs_for ever returns
+    # non-zero (e.g. jq pipefail on malformed RUNS_JSON).
+    if ! SHA_RUNS=$(get_sha_runs_for "$RUNS_JSON" "$LATEST_SHA"); then
+        SHA_RUNS="[]"
+    fi
 
-    if [ "$(echo "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+    [[ -z "$SHA_RUNS" ]] && SHA_RUNS='[]'
+    if [ "$(printf '%s' "$SHA_RUNS" | jq 'length')" -eq 0 ]; then
+        SHA_RUNS_EMPTY_COUNT=$((SHA_RUNS_EMPTY_COUNT + 1))
+        if [[ "$REPORTED_NO_RUNS" == "false" && "$SHA_RUNS_EMPTY_COUNT" -ge "$SHA_RUNS_EMPTY_MAX" ]]; then
+            REPORTED_NO_RUNS=true
+            # Fire webhook notification (same pattern used elsewhere in the script).
+            curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "⚠️ No CI runs visible for ${BRANCH} after 2 min — workflow may be missing or still queuing." || true
+        fi
         sleep "$POLL_INTERVAL"
         continue
     fi
+    # Reset on successful run detection.
+    SHA_RUNS_EMPTY_COUNT=0
+    REPORTED_NO_RUNS=false
 
     check_failures "branch" REPORTED_FAIL
     check_all_passed "branch" REPORTED_PASS

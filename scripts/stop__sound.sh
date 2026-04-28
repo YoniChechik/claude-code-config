@@ -12,19 +12,47 @@ TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/de
 # Fall through to notify_waiting on any parse error.
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
     ACTIVE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
-import sys, json, re
+import sys, json, re, os
 
 transcript_path = sys.argv[1]
+debug = os.environ.get("CLAUDE_DEBUG_STOP") == "1"
 
-# Collect all agent IDs that were async-launched
+# Any of these statuses in a <task-notification> means the agent is no longer
+# running. Treating only "completed" as terminal would leave failed/cancelled
+# agents pinned as "active" forever and silence the stop sound permanently.
+TERMINAL_STATUSES = {
+    "completed", "failed", "cancelled", "canceled",
+    "error", "errored", "timeout", "timed_out", "aborted",
+}
+
+# agent IDs that were async-launched (toolUseResult.agentId)
 launched = set()
-# Collect all task-ids that completed (from <status>completed</status> messages)
-completed = set()
+# task-ids that reached a terminal status (parsed from <task-notification> blocks).
+# These are the SAME identifier namespace as agentId — both sides use the
+# 17-char "a"-prefixed hex string, so direct set subtraction works.
+terminated = set()
 
-def extract_completed_ids(text):
-    if "<status>completed</status>" in text:
-        for task_id in re.findall(r"<task-id>(.*?)</task-id>", text):
-            completed.add(task_id.strip())
+# Match <task-notification> blocks and pull out their <task-id> + <status>.
+# DOTALL so .*? crosses the literal "\n" inside the JSON-encoded string.
+TASK_NOTIF_RE = re.compile(
+    r"<task-notification>(.*?)</task-notification>", re.DOTALL
+)
+TASK_ID_RE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
+STATUS_RE = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
+
+def scan_text_for_terminations(text):
+    if not text or "<task-notification>" not in text:
+        return
+    for block in TASK_NOTIF_RE.findall(text):
+        status_match = STATUS_RE.search(block)
+        if not status_match:
+            continue
+        status = status_match.group(1).strip().lower()
+        if status not in TERMINAL_STATUSES:
+            continue
+        task_id_match = TASK_ID_RE.search(block)
+        if task_id_match:
+            terminated.add(task_id_match.group(1).strip())
 
 try:
     with open(transcript_path, "r") as f:
@@ -37,42 +65,44 @@ try:
             except json.JSONDecodeError:
                 continue
 
-            # Detect async_launched tool-use results
+            # --- Launches: toolUseResult.status == "async_launched" carries agentId
             tool_result = entry.get("toolUseResult", {})
             if isinstance(tool_result, dict) and tool_result.get("status") == "async_launched":
                 agent_id = tool_result.get("agentId") or entry.get("agentId")
                 if agent_id:
                     launched.add(agent_id)
 
-            # Detect completed background agents by scanning all text fields
-            # for <status>completed</status> blocks containing <task-id>...</task-id>.
-            # The completion notification appears in two forms in the JSONL:
-            #   1. queue-operation entry: top-level "content" is a plain string
-            #   2. user-message entry: message.content is a plain string (not a list)
-
-            # Form 1: queue-operation has top-level "content" string
+            # --- Terminations: <task-notification> blocks appear in multiple forms.
+            # Form 1: queue-operation entry, top-level "content" is a plain string
             top_content = entry.get("content")
             if isinstance(top_content, str):
-                extract_completed_ids(top_content)
+                scan_text_for_terminations(top_content)
 
-            # Form 2: message.content is either a plain string or a list of blocks
+            # Form 2: user/assistant message.content as plain string or block list
             message = entry.get("message", {})
             if isinstance(message, dict):
                 content = message.get("content")
                 if isinstance(content, str):
-                    # Plain-string content (task-notification delivery)
-                    extract_completed_ids(content)
+                    scan_text_for_terminations(content)
                 elif isinstance(content, list):
                     for block in content:
                         if not isinstance(block, dict):
                             continue
                         text = block.get("text", "") or ""
-                        extract_completed_ids(text)
+                        scan_text_for_terminations(text)
 
-    # Active = launched agents whose ID is not in the completed set
-    active = launched - completed
+    # Active = launched agents whose ID we haven't seen reach a terminal status
+    active = launched - terminated
+    if debug:
+        print(
+            f"[stop__sound] launched={sorted(launched)} "
+            f"terminated={sorted(terminated)} active={sorted(active)}",
+            file=sys.stderr,
+        )
     print(len(active))
-except Exception:
+except Exception as e:
+    if debug:
+        print(f"[stop__sound] error: {e!r}", file=sys.stderr)
     # On any error, assume 0 active so sound plays
     print(0)
 PYEOF
