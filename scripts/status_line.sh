@@ -143,19 +143,6 @@ pr_line=""
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   pr_cache_file="/tmp/ci_watch_pr_${slot}"
   if [ -f "$pr_cache_file" ]; then
-    # Freshness check: ignore PR cache files older than 10 minutes to avoid
-    # leaking stale state from previous sessions / dead watchers.
-    _now=$(date +%s)
-    # stat -f %m is macOS; stat -c %Y is Linux fallback.
-    _mtime=$(stat -f %m "$pr_cache_file" 2>/dev/null \
-             || stat -c %Y "$pr_cache_file" 2>/dev/null \
-             || printf '0')
-    _age=$(( _now - _mtime ))
-    if [ "$_age" -gt 600 ]; then
-      pr_cache_file=""
-    fi
-  fi
-  if [ -n "$pr_cache_file" ] && [ -f "$pr_cache_file" ]; then
     pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
     pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
     pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
@@ -168,42 +155,44 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   # Append CI hook state if available
   if [ -n "$branch" ]; then
     ci_state_file="/tmp/ci_watch_state_${slot}"
-    _ci_state_raw=""
     if [ -f "$ci_state_file" ]; then
-      # Watcher updates this file every POLL_INTERVAL (~5s). If older than
-      # 120s (2x typical max wait), the watcher likely died — treat as orphan.
-      _now=$(date +%s)
-      _mtime=$(stat -f %m "$ci_state_file" 2>/dev/null \
-               || stat -c %Y "$ci_state_file" 2>/dev/null \
-               || printf '0')
-      _age=$(( _now - _mtime ))
       _ci_state_raw=$(cat "$ci_state_file" 2>/dev/null || true)
+
+      # For terminal states, no watcher is expected — show result forever.
+      # For active states, verify the watcher process is still alive.
+      _watcher_alive=false
       case "$_ci_state_raw" in
         passed|failed|merged-passed|merged-failed)
-          # Terminal state: never expire — user always wants to see the result.
-          : # keep ci_state_file as-is
+          _watcher_alive=true  # terminal: watcher already exited cleanly, result is valid
           ;;
         *)
-          # Active state (running/merging): drop after 120s if watcher appears dead.
-          if [[ "$_age" -gt 120 ]]; then
-            ci_state_file=""
+          # Active state: check the lock file for the watcher's PID.
+          _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
+          _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
+          if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
+             && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch_persistent"; then
+            _watcher_alive=true
           fi
           ;;
       esac
-    fi
-    if [ -n "$ci_state_file" ] && [ -f "$ci_state_file" ]; then
-      ci_state="$_ci_state_raw"
-      case "$ci_state" in
-        running)       ci_display="${yellow}ci: running${reset}" ;;
-        passed)        ci_display="${green}ci: passed${reset}" ;;
-        failed)        ci_display="${red}ci: failed${reset}" ;;
-        conflict)      ci_display="${red}ci: conflict${reset}" ;;
-        behind)        ci_display="${yellow}ci: behind${reset}" ;;
-        merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
-        merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
-        merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
-        *)             ci_display="" ;;
-      esac
+
+      if [[ "$_watcher_alive" == false && -n "$_ci_state_raw" ]]; then
+        # Show watcher-died warning alongside last known state.
+        ci_display="${red}⚠ ci watcher died${reset}"
+      else
+        ci_state="$_ci_state_raw"
+        case "$ci_state" in
+          running)       ci_display="${yellow}ci: running${reset}" ;;
+          passed)        ci_display="${green}ci: passed${reset}" ;;
+          failed)        ci_display="${red}ci: failed${reset}" ;;
+          conflict)      ci_display="${red}ci: conflict${reset}" ;;
+          behind)        ci_display="${yellow}ci: behind${reset}" ;;
+          merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
+          merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
+          merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
+          *)             ci_display="" ;;
+        esac
+      fi
       if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
         pr_line="${pr_line} | ${ci_display}"
       elif [ -n "$ci_display" ]; then
