@@ -16,13 +16,12 @@ if [ ! -f "$file_path" ]; then
     exit 0
 fi
 
-# Inline Python: format markdown tables and enforce a 240-char max width.
+# Inline Python: align markdown tables by padding each column to its max content width.
+# No width-capping, no wrapping — each data row is always a single output row.
 # stdlib-only; reads file in-place; only writes back if content changed.
 python3 - "$file_path" <<'PYEOF' || true
 import sys
 from pathlib import Path
-
-MAX_WIDTH = 240
 
 def is_table_line(line: str) -> bool:
     # A markdown table line starts with '|' (after optional whitespace stripped on the right).
@@ -51,20 +50,8 @@ def is_separator_cells(cells):
             return False
     return True
 
-def display_width(s: str) -> int:
-    # Treat each character as width 1 (good enough for ASCII markdown tables).
-    return len(s)
-
-def truncate(s: str, width: int) -> str:
-    # Truncate cell content to width, appending an ellipsis if shortened.
-    if display_width(s) <= width:
-        return s
-    if width <= 1:
-        return "…"[:width]
-    return s[: width - 1] + "…"
-
 def sep_cell(orig: str, width: int) -> str:
-    # Re-render a separator cell preserving alignment colons.
+    # Re-render a separator cell preserving alignment colons (:---, :---:, ---:).
     left = orig.startswith(":")
     right = orig.endswith(":")
     if width < 3:
@@ -77,6 +64,19 @@ def sep_cell(orig: str, width: int) -> str:
         return ("-" * (width - 1)) + ":"
     return "-" * width
 
+def compute_col_widths(rows, sep_idx, num_cols):
+    # Return the max content width per column across all non-separator rows.
+    col_widths = [0] * num_cols
+    for i, row in enumerate(rows):
+        if i == sep_idx:
+            continue
+        for j, cell in enumerate(row):
+            w = len(cell)
+            if w > col_widths[j]:
+                col_widths[j] = w
+    # Ensure each column is at least width 1.
+    return [max(1, w) for w in col_widths]
+
 def format_table(rows, sep_idx, sep_orig_cells):
     # Compute number of columns from the widest row (tables can be ragged).
     num_cols = max(len(r) for r in rows)
@@ -84,35 +84,15 @@ def format_table(rows, sep_idx, sep_orig_cells):
     rows = [r + [""] * (num_cols - len(r)) for r in rows]
     sep_orig_cells = sep_orig_cells + [""] * (num_cols - len(sep_orig_cells))
 
-    # Compute per-column max content width across all non-separator rows.
-    col_widths = [0] * num_cols
-    for i, row in enumerate(rows):
-        if i == sep_idx:
-            continue
-        for j, cell in enumerate(row):
-            w = display_width(cell)
-            if w > col_widths[j]:
-                col_widths[j] = w
+    col_widths = compute_col_widths(rows, sep_idx, num_cols)
 
-    # Each column contributes "| " + content + " ", trailing "|" once.
-    # Total = sum(col_widths) + 3 * num_cols + 1.
-    def total_width():
-        return sum(col_widths) + 3 * num_cols + 1
-
-    # Shrink the widest column by 1 until total fits MAX_WIDTH (or all cols at 1).
-    while total_width() > MAX_WIDTH:
-        widest = max(range(num_cols), key=lambda j: col_widths[j])
-        if col_widths[widest] <= 1:
-            break
-        col_widths[widest] -= 1
-
-    # Render each row.
+    # Render each row as a single line, padding cells to their column width.
     out_lines = []
     for i, row in enumerate(rows):
         if i == sep_idx:
             cells = [sep_cell(sep_orig_cells[j], col_widths[j]) for j in range(num_cols)]
         else:
-            cells = [truncate(row[j], col_widths[j]).ljust(col_widths[j]) for j in range(num_cols)]
+            cells = [row[j].ljust(col_widths[j]) for j in range(num_cols)]
         out_lines.append("| " + " | ".join(cells) + " |")
     return out_lines
 
