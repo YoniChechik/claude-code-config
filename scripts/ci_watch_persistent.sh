@@ -236,6 +236,7 @@ check_failures() {
         current_val=${!reported_fail_var}
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
+                write_state "merged-failed"
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on $DEFAULT_BRANCH for merge of $BRANCH: $msg"
             else
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "CI FAILURE on branch $BRANCH: $msg"
@@ -257,6 +258,7 @@ check_all_passed() {
         current_val=${!reported_pass_var}
         if [ -z "$current_val" ]; then
             if [ "$context" = "main" ]; then
+                write_state "merged-passed"
                 curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT" --data-raw "✅ CI on $DEFAULT_BRANCH passed for merge of $BRANCH"
                 printf -v "$reported_pass_var" "1"
             elif [ "$MERGEABLE" != "CONFLICTING" ]; then
@@ -342,6 +344,7 @@ while true; do
 
     # --- Merged path: track main CI for the merge commit ---
     if [ -n "$MERGED" ]; then
+        write_state "merging"   # refresh mtime so statusline freshness gate doesn't drop it
         # Wrap in `if !` so set -e doesn't abort if the function ever returns
         # non-zero in the future (e.g. an internal jq pipefail).
         if ! MAIN_RUNS_JSON=$(fetch_runs_for "$DEFAULT_BRANCH"); then

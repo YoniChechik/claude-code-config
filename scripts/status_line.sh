@@ -168,6 +168,7 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   # Append CI hook state if available
   if [ -n "$branch" ]; then
     ci_state_file="/tmp/ci_watch_state_${slot}"
+    _ci_state_raw=""
     if [ -f "$ci_state_file" ]; then
       # Watcher updates this file every POLL_INTERVAL (~5s). If older than
       # 120s (2x typical max wait), the watcher likely died — treat as orphan.
@@ -176,20 +177,32 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
                || stat -c %Y "$ci_state_file" 2>/dev/null \
                || printf '0')
       _age=$(( _now - _mtime ))
-      if [ "$_age" -gt 120 ]; then
-        ci_state_file=""
-      fi
+      _ci_state_raw=$(cat "$ci_state_file" 2>/dev/null || true)
+      case "$_ci_state_raw" in
+        passed|failed|merged-passed|merged-failed)
+          # Terminal state: never expire — user always wants to see the result.
+          : # keep ci_state_file as-is
+          ;;
+        *)
+          # Active state (running/merging): drop after 120s if watcher appears dead.
+          if [[ "$_age" -gt 120 ]]; then
+            ci_state_file=""
+          fi
+          ;;
+      esac
     fi
     if [ -n "$ci_state_file" ] && [ -f "$ci_state_file" ]; then
-      ci_state=$(cat "$ci_state_file" 2>/dev/null || echo "")
+      ci_state="$_ci_state_raw"
       case "$ci_state" in
-        running)  ci_display="${yellow}ci: running${reset}" ;;
-        passed)   ci_display="${green}ci: passed${reset}" ;;
-        failed)   ci_display="${red}ci: failed${reset}" ;;
-        conflict) ci_display="${red}ci: conflict${reset}" ;;
-        behind)   ci_display="${yellow}ci: behind${reset}" ;;
-        merging)  ci_display="${yellow}ci: merging to main...${reset}" ;;
-        *)        ci_display="" ;;
+        running)       ci_display="${yellow}ci: running${reset}" ;;
+        passed)        ci_display="${green}ci: passed${reset}" ;;
+        failed)        ci_display="${red}ci: failed${reset}" ;;
+        conflict)      ci_display="${red}ci: conflict${reset}" ;;
+        behind)        ci_display="${yellow}ci: behind${reset}" ;;
+        merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
+        merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
+        merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
+        *)             ci_display="" ;;
       esac
       if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
         pr_line="${pr_line} | ${ci_display}"
