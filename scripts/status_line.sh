@@ -23,22 +23,34 @@ if ! parsed=$(printf '%s' "$input" | jq -r '
 fi
 
 # Split parsed output into fields array.
-IFS=$'\n' read -r -d '' -a fields <<< "$parsed" || true
+# Note: we read line-by-line (rather than `read -d ''`) so each jq line
+# becomes its own array element, and we tolerate jq emitting fewer than 5
+# lines (e.g. when the payload is missing fields entirely).
+fields=()
+while IFS= read -r _line; do
+  fields+=("$_line")
+done <<< "$parsed"
 
-if [ ${#fields[@]} -eq 0 ]; then
-  printf '%b' "${red}(status_line.sh: json parse error)${reset}"
-  exit 0
-fi
+# Safe per-index extraction — missing indices default to empty so set -u
+# (nounset) doesn't kill the script.
+dir="${fields[0]-}"
+git_dir="${fields[1]-}"
+remaining="${fields[2]-}"
+five_hr_used="${fields[3]-}"
+five_hr_resets_at="${fields[4]-}"
 
-dir="${fields[0]}"
-git_dir="${fields[1]}"
-remaining="${fields[2]}"
-five_hr_used="${fields[3]}"
-five_hr_resets_at="${fields[4]}"
+# Treat literal "null" (jq's output for a missing top-level field with no
+# `// ""` fallback) the same as empty.
+[[ "$dir" == "null" ]] && dir=""
+[[ "$git_dir" == "null" ]] && git_dir=""
+[[ "$remaining" == "null" ]] && remaining=""
+[[ "$five_hr_used" == "null" ]] && five_hr_used=""
+[[ "$five_hr_resets_at" == "null" ]] && five_hr_resets_at=""
 
+# Fall back to PWD so we still render something useful when the harness
+# payload doesn't include workspace.current_dir.
 if [ -z "$dir" ]; then
-  printf '%b' "${red}(status_line.sh: incomplete status)${reset}"
-  exit 0
+  dir="$PWD"
 fi
 
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
