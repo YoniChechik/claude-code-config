@@ -47,11 +47,12 @@ branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 # which fail because the parent dir doesn't exist. Replace "/" with "__".
 branch_key="${branch//\//__}"
 
-# Resolve session identity for state file lookup.
-_cwd=$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)
-[[ -z "$_cwd" ]] && _cwd="$PWD"
-_cwd_hash=$(printf '%s' "$_cwd" | shasum -a 1 | cut -c1-12)
-_sid8=$(cat "$HOME/.claude/cache/cwd-session/$_cwd_hash" 2>/dev/null || printf '')
+# status_line payload includes session_id directly — no cache lookup needed.
+_session_id=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null || true)
+_sid8=""
+if [[ -n "$_session_id" && "$_session_id" != "null" ]]; then
+    _sid8="${_session_id:0:8}"
+fi
 
 if [[ -n "$_sid8" ]]; then
     slot="${branch_key}_${_sid8}"

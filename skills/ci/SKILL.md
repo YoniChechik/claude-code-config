@@ -29,11 +29,8 @@ The watcher sends notifications via curl to the webhook HTTP server on the port 
 
 Launch with shell-level backgrounding (do NOT use run_in_background=true — the process dies when the subagent exits):
 ```bash
-# Resolve SID8 (8-char session id) from the cwd-session cache written by
-# session_start.sh. Inlined (not sourced) so the skill stays self-contained.
-# Falls back to "unknown" if the cache file isn't present (e.g. hook didn't run).
-_cwd_hash=$(printf '%s' "$PWD" | shasum -a 1 | cut -c1-12)
-SID8=$(cat "$HOME/.claude/cache/cwd-session/$_cwd_hash" 2>/dev/null || printf 'unknown')
+# Resolve SID8 for this session via PPID (stable across cd operations).
+SID8=$(cat "$HOME/.claude/cache/ppid-session/$PPID" 2>/dev/null || printf 'unknown')
 
 # Sanitize branch name for use in /tmp file paths: branches like "feature/foo"
 # would otherwise produce paths like /tmp/ci_watch_feature/foo.log which fail
