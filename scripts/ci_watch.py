@@ -217,6 +217,7 @@ def _lock_path(branch_key: str) -> Path:
 
 def write_state(branch_key: str, value: str) -> None:
     """Atomic write — avoids partial reads by status_line.sh racing with us."""
+    print(f"[ci_watch] write_state -> {value!r}", flush=True)
     path = _state_path(branch_key)
     fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{branch_key}.", dir=TMP_DIR)
     try:
@@ -327,7 +328,8 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
     if current_sha != state.latest_sha:
         print(
             f"New push detected on branch '{state.branch}' "
-            f"(new SHA: {current_sha}). Now tracking new CI run."
+            f"(new SHA: {current_sha}). Now tracking new CI run.",
+            flush=True,
         )
         state.latest_sha = current_sha
         state.reported_pass = False
@@ -336,6 +338,10 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.reported_behind = False
         state.sha_runs_empty_count = 0
         state.reported_no_runs = False
+        # Reset state file to "running" so the statusline reflects the new
+        # in-progress run instead of remaining stuck on the previous
+        # terminal state (passed/failed).
+        write_state(state.branch_key, "running")
 
 
 def check_pr_condition(
@@ -356,6 +362,10 @@ def check_pr_condition(
     else:
         if flag:
             setattr(state, flag_name, False)
+            # Condition cleared — restore state to "running" so the statusline
+            # reflects the resolved state instead of staying stuck on the old
+            # state string (e.g. "conflict" or "behind").
+            write_state(state.branch_key, "running")
 
 
 def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -> None:
@@ -517,6 +527,12 @@ def watch(
         f"?head={owner}:{branch}&state=all&per_page=5"
     )
 
+    print(
+        f"[ci_watch] starting watch loop branch={branch} "
+        f"latest_sha={latest_sha[:8]} default_branch={default_branch} "
+        f"pid={os.getpid()}",
+        flush=True,
+    )
     write_state(branch_key, "running")
 
     def cleanup() -> None:
@@ -533,7 +549,10 @@ def watch(
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
+    iter_count = 0
+    last_heartbeat_iter = 0
     while True:
+        iter_count += 1
         # --- Session health check (5x retries with 2s sleep ~ 10s window) ---
         # On Mac wake-from-sleep, the localhost webhook server may briefly be
         # unreachable while its process resumes.
@@ -544,8 +563,24 @@ def watch(
                 break
             time.sleep(HEALTH_RETRY_SLEEP)
         if not ok:
-            print(f"Health check failed after {HEALTH_RETRY_MAX} attempts. Exiting.")
+            print(
+                f"Health check failed after {HEALTH_RETRY_MAX} attempts. Exiting.",
+                flush=True,
+            )
             return
+        # Heartbeat every 30 iterations (~30s of polling time, longer with
+        # API call latency) — proves the watcher is alive without flooding
+        # the log. Useful for diagnosing "is it running?" without per-iteration
+        # noise.
+        if iter_count - last_heartbeat_iter >= 30:
+            last_heartbeat_iter = iter_count
+            print(
+                f"[ci_watch] heartbeat iter={iter_count} merged={state.merged} "
+                f"latest_sha={state.latest_sha[:8] if state.latest_sha else 'None'} "
+                f"reported_fail={state.reported_fail} "
+                f"reported_pass={state.reported_pass}",
+                flush=True,
+            )
 
         # --- Single combined PR fetch per loop iteration ---
         # The list endpoint (/pulls?head=...) does NOT return mergeable_state.
@@ -709,6 +744,16 @@ def gh_token_value() -> str:
 
 
 def main() -> None:
+    # When stdout/stderr are redirected to a file (as in the SKILL launcher),
+    # Python defaults to block buffering — log lines can sit in the buffer for
+    # minutes before flushing, making the watcher look hung. Force line
+    # buffering so each print() reaches the log file immediately.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except (AttributeError, OSError):
+        pass
+
     if len(sys.argv) < 5:
         print(
             "Usage: ci_watch.py <branch> <sid8> <port> <session_token>",
