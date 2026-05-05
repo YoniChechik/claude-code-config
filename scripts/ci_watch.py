@@ -564,6 +564,8 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
                             f"{int(MAIN_WAIT_MAX * POLL_INTERVAL)}s. "
                             f"Check manually."
                         )
+                        write_state(branch_key, "timeout")
+                        state.keep_state_file = True
                         print("Timed out waiting for main CI runs. Exiting.")
                         return
                 else:
@@ -617,11 +619,14 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
                     f"⚠️ No CI runs visible for {branch} after 2 min "
                     f"— workflow may be missing or still queuing."
                 )
+                write_state(branch_key, "no-runs")
             time.sleep(POLL_INTERVAL)
             continue
 
         state.sha_runs_empty_count = 0
-        state.reported_no_runs = False
+        if state.reported_no_runs:
+            state.reported_no_runs = False
+            write_state(branch_key, "running")
 
         check_failures("branch", sha_runs, state, port)
         check_all_passed("branch", sha_runs, state, mergeable_state, port)

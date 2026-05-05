@@ -334,6 +334,61 @@ def test_health_check_failure_exits(tmp_path):
     assert sleep_state["n"] == ci_watch.HEALTH_RETRY_MAX
 
 
+def test_no_runs_state(tmp_path):
+    """After SHA_RUNS_EMPTY_MAX iterations of empty sha_runs, state becomes no-runs."""
+    # Run has no head_sha — detect_new_sha skips update, sha_runs stays empty.
+    runs = {"workflow_runs": [
+        {"id": 1, "name": "build", "head_sha": None,
+         "status": "in_progress", "conclusion": None},
+    ]}
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+        max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
+    )
+    assert out["state_value"] == "no-runs"
+    assert any("No CI runs visible" in m for _, m in out["notify_calls"])
+
+
+def test_timeout_state(tmp_path):
+    """After MAIN_WAIT_MAX iterations with commit visible but no runs, state=timeout."""
+    pr = [{
+        "html_url": "u", "number": 1, "state": "closed", "merged": True,
+        "mergeable_state": "clean", "merge_commit_sha": "merge-sha",
+    }]
+    # main_runs is empty — no runs match the merge SHA.
+    main_runs = {"workflow_runs": []}
+
+    fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
+    notify_calls: list[tuple[int, str]] = []
+    def fake_notify(p, m):
+        notify_calls.append((p, m))
+
+    branch = "feat"
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)), \
+         patch.object(ci_watch, "_GH_TOKEN", "tk-cached"), \
+         patch.object(ci_watch.time, "sleep", fake_sleep), \
+         patch.object(ci_watch, "api_get",
+                      side_effect=make_api_get(pr=pr, main_runs=main_runs)), \
+         patch.object(ci_watch, "notify", side_effect=fake_notify), \
+         patch.object(ci_watch, "health_check", return_value=True), \
+         patch.object(ci_watch, "has_pending_checks", return_value=False), \
+         patch.object(ci_watch, "get_failed_job_names", return_value=[]), \
+         patch.object(ci_watch.requests, "get") as commit_get:
+        # Commit is visible on main — drives main_wait_iterations toward timeout.
+        commit_get.return_value = MagicMock(status_code=200)
+        ci_watch.watch(
+            branch=branch, branch_key=branch, port=1, session_token="t",
+            owner="o", repo="r", default_branch="main", latest_sha="sha-old",
+        )
+
+    state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
+    # State file must persist (keep_state_file=True).
+    assert state_path.exists()
+    assert state_path.read_text() == "timeout"
+    assert any("No CI runs found on main" in m for _, m in notify_calls)
+
+
 def test_merge_tracking(tmp_path):
     """After PR merges and main CI passes, state becomes merged-passed."""
     pr = [{

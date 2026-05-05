@@ -150,7 +150,7 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
       # For active states, verify the watcher process is still alive.
       _watcher_alive=false
       case "$_ci_state_raw" in
-        passed|failed|merged-passed|merged-failed)
+        passed|failed|merged-passed|merged-failed|timeout)
           _watcher_alive=true  # terminal: watcher already exited cleanly, result is valid
           ;;
         *)
@@ -175,6 +175,8 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
           failed)        ci_display="${red}ci: failed${reset}" ;;
           conflict)      ci_display="${red}ci: conflict${reset}" ;;
           behind)        ci_display="${yellow}ci: behind${reset}" ;;
+          no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
+          timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
           merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
           merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
           merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
