@@ -48,9 +48,9 @@ import requests
 
 # --- Configuration constants ---
 POLL_INTERVAL = 1.0
-SHA_RUNS_EMPTY_MAX = 120     # 120 * 1s = 2 min
-MAIN_WAIT_MAX = 300          # 300 * 1s = 5 min
-HEALTH_RETRY_MAX = 5         # 5 attempts with 2s sleep between (~10s window)
+SHA_RUNS_EMPTY_MAX = 120  # 120 * 1s = 2 min
+MAIN_WAIT_MAX = 300  # 300 * 1s = 5 min
+HEALTH_RETRY_MAX = 5  # 5 attempts with 2s sleep between (~10s window)
 HEALTH_RETRY_SLEEP = 2.0
 
 # Module-level base dir for state files. Tests override this.
@@ -60,6 +60,7 @@ GITHUB_API = "https://api.github.com"
 
 
 # --- HTTP / API helpers ---
+
 
 @dataclass
 class ApiCache:
@@ -117,11 +118,13 @@ def health_check(port: int, token: str) -> bool:
 
 # --- gh CLI fallbacks (used only on rare events) ---
 
+
 def get_failed_job_names(run_id: int) -> list[str]:
     """Return job names with conclusion=='failure' for a single run."""
     result = subprocess.run(
         ["gh", "run", "view", str(run_id), "--json", "jobs"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -140,7 +143,8 @@ def has_pending_checks(branch: str) -> bool:
     """
     result = subprocess.run(
         ["gh", "pr", "checks", branch, "--json", "bucket"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return False
@@ -152,6 +156,7 @@ def has_pending_checks(branch: str) -> bool:
 
 
 # --- Pure helpers ---
+
 
 def is_conflicting(pr: dict) -> bool:
     return pr.get("mergeable_state") in ("dirty", "conflicting")
@@ -190,13 +195,13 @@ def make_pr_cache(pr: dict) -> dict:
         "mergeable": pr.get("mergeable"),
         "mergeStateStatus": pr.get("mergeable_state", "").upper(),
         "mergeCommit": (
-            {"oid": pr["merge_commit_sha"]}
-            if pr.get("merge_commit_sha") else None
+            {"oid": pr["merge_commit_sha"]} if pr.get("merge_commit_sha") else None
         ),
     }
 
 
 # --- File writers ---
+
 
 def _state_path(branch_key: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_state_{branch_key}"
@@ -243,6 +248,7 @@ def write_pr_cache(branch_key: str, data: dict) -> None:
 
 # --- Lock handling ---
 
+
 def acquire_lock(branch_key: str) -> None:
     """Kill any stale predecessor and take the lock for this branch."""
     lock_path = _lock_path(branch_key)
@@ -251,7 +257,8 @@ def acquire_lock(branch_key: str) -> None:
             old_pid = int(lock_path.read_text().strip())
             result = subprocess.run(
                 ["ps", "-p", str(old_pid), "-o", "args="],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if "ci_watch" in result.stdout:
                 try:
@@ -272,11 +279,13 @@ def acquire_lock(branch_key: str) -> None:
 
 # --- State container ---
 
+
 class WatchState:
     """All mutable state for a single watch() invocation."""
 
-    def __init__(self, branch: str, branch_key: str, latest_sha: str,
-                 default_branch: str) -> None:
+    def __init__(
+        self, branch: str, branch_key: str, latest_sha: str, default_branch: str
+    ) -> None:
         self.branch = branch
         self.branch_key = branch_key
         self.latest_sha = latest_sha
@@ -305,6 +314,7 @@ class WatchState:
 
 # --- Detection helpers ---
 
+
 def detect_new_sha(state: WatchState, all_runs: list) -> None:
     """If the most recent run reports a new SHA, reset per-SHA reporting flags."""
     if not all_runs:
@@ -327,8 +337,14 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.reported_no_runs = False
 
 
-def check_pr_condition(condition: bool, flag_name: str, state: WatchState,
-                       message: str, state_string: str, port: int) -> None:
+def check_pr_condition(
+    condition: bool,
+    flag_name: str,
+    state: WatchState,
+    message: str,
+    state_string: str,
+    port: int,
+) -> None:
     """Fire a webhook + write state once on rising edge; reset on falling edge."""
     flag = getattr(state, flag_name)
     if condition:
@@ -341,15 +357,15 @@ def check_pr_condition(condition: bool, flag_name: str, state: WatchState,
             setattr(state, flag_name, False)
 
 
-def check_failures(context: str, sha_runs: list, state: WatchState,
-                   port: int) -> None:
+def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -> None:
     """Fire CI-failure webhook once per failure streak.
 
     ``context`` is "branch" or "main" — controls message wording, state string,
     and which reported_* flag we toggle.
     """
     failed = [
-        r for r in sha_runs
+        r
+        for r in sha_runs
         if r.get("status") == "completed" and r.get("conclusion") == "failure"
     ]
     if not failed:
@@ -374,9 +390,7 @@ def check_failures(context: str, sha_runs: list, state: WatchState,
             f"'{state.branch}' (workflows: {failed_names})."
         )
     else:
-        msg = (
-            f"CI failed on branch '{state.branch}' (workflows: {failed_names})."
-        )
+        msg = f"CI failed on branch '{state.branch}' (workflows: {failed_names})."
     if all_failed_jobs:
         msg = f"{msg} Failed jobs: {' '.join(all_failed_jobs)} "
     msg = f"{msg} Run 'gh run view {first_failed_id} --log-failed' to get the logs."
@@ -385,8 +399,10 @@ def check_failures(context: str, sha_runs: list, state: WatchState,
 
     if context == "main":
         write_state(state.branch_key, "merged-failed")
-        notify(port,
-               f"CI FAILURE on {state.default_branch} for merge of {state.branch}: {msg}")
+        notify(
+            port,
+            f"CI FAILURE on {state.default_branch} for merge of {state.branch}: {msg}",
+        )
         state.reported_main_fail = True
     else:
         notify(port, f"CI FAILURE on branch {state.branch}: {msg}")
@@ -394,13 +410,16 @@ def check_failures(context: str, sha_runs: list, state: WatchState,
         state.reported_fail = True
 
 
-def check_all_passed(context: str, sha_runs: list, state: WatchState,
-                     mergeable_state: str, port: int) -> None:
+def check_all_passed(
+    context: str, sha_runs: list, state: WatchState, mergeable_state: str, port: int
+) -> None:
     """Fire CI-passed webhook once when every run is completed+success."""
     if not sha_runs:
         return
-    if any(r.get("status") != "completed" or r.get("conclusion") != "success"
-           for r in sha_runs):
+    if any(
+        r.get("status") != "completed" or r.get("conclusion") != "success"
+        for r in sha_runs
+    ):
         return
 
     flag_name = "reported_main_pass" if context == "main" else "reported_pass"
@@ -409,12 +428,13 @@ def check_all_passed(context: str, sha_runs: list, state: WatchState,
 
     if context == "main":
         write_state(state.branch_key, "merged-passed")
-        notify(port,
-               f"✅ CI on {state.default_branch} passed for merge of {state.branch}")
+        notify(
+            port, f"✅ CI on {state.default_branch} passed for merge of {state.branch}"
+        )
         state.reported_main_pass = True
         return
 
-    if mergeable_state == "CONFLICTING":
+    if mergeable_state in ("CONFLICTING", "DIRTY", "BEHIND"):
         return
     # Cross-check: gh run list only returns runs that have been created.
     # Workflows still queuing show up in `gh pr checks` as bucket=pending.
@@ -427,10 +447,13 @@ def check_all_passed(context: str, sha_runs: list, state: WatchState,
 
 # --- Authentication & startup ---
 
+
 def gh_token() -> str:
     return subprocess.run(
         ["gh", "auth", "token"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
@@ -438,7 +461,9 @@ def repo_info() -> tuple[str, str, str]:
     """Returns (owner, repo, default_branch)."""
     result = subprocess.run(
         ["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     data = json.loads(result.stdout)
     owner, repo = data["nameWithOwner"].split("/")
@@ -450,7 +475,8 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
     """Fetch the latest commit SHA for ``branch``. Exits on failure."""
     resp = requests.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/commits/{branch}",
-        headers=_gh_headers(token), timeout=10,
+        headers=_gh_headers(token),
+        timeout=10,
     )
     if resp.status_code != 200:
         print(f"Error: branch '{branch}' not found on remote", file=sys.stderr)
@@ -464,15 +490,22 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
 
 # --- Main loop ---
 
-def watch(branch: str, branch_key: str, port: int, session_token: str,
-          owner: str, repo: str, default_branch: str,
-          latest_sha: str) -> None:
+
+def watch(
+    branch: str,
+    branch_key: str,
+    port: int,
+    session_token: str,
+    owner: str,
+    repo: str,
+    default_branch: str,
+    latest_sha: str,
+) -> None:
     """Run the CI watch loop until a terminal condition fires."""
     state = WatchState(branch, branch_key, latest_sha, default_branch)
 
     runs_url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs"
-        f"?branch={branch}&per_page=100"
+        f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs?branch={branch}&per_page=100"
     )
     main_runs_url = (
         f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs"
@@ -504,8 +537,7 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
                 break
             time.sleep(HEALTH_RETRY_SLEEP)
         if not ok:
-            print(
-                f"Health check failed after {HEALTH_RETRY_MAX} attempts. Exiting.")
+            print(f"Health check failed after {HEALTH_RETRY_MAX} attempts. Exiting.")
             return
 
         # --- Single combined PR fetch per loop iteration ---
@@ -534,7 +566,8 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
             write_state(branch_key, "merging")
 
             main_runs_data, _ = api_get(
-                main_runs_url, state.main_runs_cache, gh_token_value())
+                main_runs_url, state.main_runs_cache, gh_token_value()
+            )
             all_main_runs = (main_runs_data or {}).get("workflow_runs", [])
             sha_runs = get_sha_runs(all_main_runs, state.merge_commit_sha)
 
@@ -548,7 +581,8 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
                 )
                 try:
                     resp = requests.get(
-                        commit_url, headers=_gh_headers(gh_token_value()),
+                        commit_url,
+                        headers=_gh_headers(gh_token_value()),
                         timeout=10,
                     )
                     visible = resp.status_code == 200
@@ -562,7 +596,7 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
                             f"⚠️ No CI runs found on {default_branch} "
                             f"for merge commit of {branch} after "
                             f"{int(MAIN_WAIT_MAX * POLL_INTERVAL)}s. "
-                            f"Check manually."
+                            f"Check manually.",
                         )
                         write_state(branch_key, "timeout")
                         state.keep_state_file = True
@@ -590,16 +624,22 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
         all_runs = (runs_data or {}).get("workflow_runs", [])
 
         check_pr_condition(
-            is_conflicting(pr), "reported_conflict", state,
+            is_conflicting(pr),
+            "reported_conflict",
+            state,
             f"CI FAILURE on branch {branch}: PR has merge conflicts. "
             f"Delegate the fix to coder-agent.",
-            "conflict", port,
+            "conflict",
+            port,
         )
         check_pr_condition(
-            is_behind(pr), "reported_behind", state,
+            is_behind(pr),
+            "reported_behind",
+            state,
             f"CI FAILURE on branch {branch}: PR is behind the base branch "
             f"and needs to be updated. Run /sync to update the branch.",
-            "behind", port,
+            "behind",
+            port,
         )
 
         if not all_runs:
@@ -611,13 +651,15 @@ def watch(branch: str, branch_key: str, port: int, session_token: str,
 
         if not sha_runs:
             state.sha_runs_empty_count += 1
-            if (not state.reported_no_runs
-                    and state.sha_runs_empty_count >= SHA_RUNS_EMPTY_MAX):
+            if (
+                not state.reported_no_runs
+                and state.sha_runs_empty_count >= SHA_RUNS_EMPTY_MAX
+            ):
                 state.reported_no_runs = True
                 notify(
                     port,
                     f"⚠️ No CI runs visible for {branch} after 2 min "
-                    f"— workflow may be missing or still queuing."
+                    f"— workflow may be missing or still queuing.",
                 )
                 write_state(branch_key, "no-runs")
             time.sleep(POLL_INTERVAL)
@@ -666,8 +708,9 @@ def main() -> None:
     owner, repo, default_branch = repo_info()
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(branch, branch_key, port, session_token,
-          owner, repo, default_branch, latest_sha)
+    watch(
+        branch, branch_key, port, session_token, owner, repo, default_branch, latest_sha
+    )
 
 
 if __name__ == "__main__":
