@@ -8,6 +8,7 @@
 INPUT=$(cat)
 
 SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || true)
+SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // ""' 2>/dev/null || true)
 SID8=""
 if [[ -n "$SESSION_ID" && "$SESSION_ID" != "null" ]]; then
     SID8="${SESSION_ID:0:8}"
@@ -152,6 +153,12 @@ if [[ ${#existing_clones[@]} -gt 0 || ${#removed_clones[@]} -gt 0 || ${#removed_
     for branch in "${removed_branches[@]}"; do
         add_line "  Removed branch: $branch"
     done
+fi
+
+# --- Resume detection ---
+if [[ "$SOURCE" == "resume" ]]; then
+    add_line ""
+    add_line "RESUME DETECTED: Immediately invoke /continue-feature to restore working context for the active feature branch."
 fi
 
 # --- Output JSON systemMessage ---
