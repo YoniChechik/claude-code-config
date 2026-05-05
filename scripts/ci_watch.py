@@ -307,6 +307,7 @@ class WatchState:
         self.runs_cache = ApiCache()
         self.main_runs_cache = ApiCache()
         self.pr_cache_obj = ApiCache()
+        self.single_pr_cache = ApiCache()
         self.commit_cache = ApiCache()
 
         self.keep_state_file = False
@@ -434,7 +435,7 @@ def check_all_passed(
         state.reported_main_pass = True
         return
 
-    if mergeable_state in ("CONFLICTING", "DIRTY", "BEHIND"):
+    if mergeable_state in ("CONFLICTING", "DIRTY", "BEHIND", "UNKNOWN", ""):
         return
     # Cross-check: gh run list only returns runs that have been created.
     # Workflows still queuing show up in `gh pr checks` as bucket=pending.
@@ -541,13 +542,26 @@ def watch(
             return
 
         # --- Single combined PR fetch per loop iteration ---
+        # The list endpoint (/pulls?head=...) does NOT return mergeable_state.
+        # We fetch the single-PR endpoint (/pulls/{number}) for that field.
         pr_data, _ = api_get(pr_url, state.pr_cache_obj, gh_token_value())
         pr = pr_data[0] if pr_data else {}
-        if pr:
-            write_pr_cache(branch_key, make_pr_cache(pr))
 
-        merge_commit_oid = get_merge_commit_sha(pr)
-        mergeable_state = pr.get("mergeable_state", "").upper()
+        pr_number = pr.get("number")
+        if pr_number:
+            single_pr_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+            single_pr_data, _ = api_get(
+                single_pr_url, state.single_pr_cache, gh_token_value()
+            )
+            pr_detail = single_pr_data if isinstance(single_pr_data, dict) else {}
+        else:
+            pr_detail = pr
+
+        if pr:
+            write_pr_cache(branch_key, make_pr_cache(pr_detail or pr))
+
+        merge_commit_oid = get_merge_commit_sha(pr_detail or pr)
+        mergeable_state = (pr_detail or pr).get("mergeable_state", "").upper()
 
         # --- Detect merged ---
         if not state.merged and is_merged(pr) and merge_commit_oid:
@@ -624,7 +638,7 @@ def watch(
         all_runs = (runs_data or {}).get("workflow_runs", [])
 
         check_pr_condition(
-            is_conflicting(pr),
+            is_conflicting(pr_detail or pr),
             "reported_conflict",
             state,
             f"CI FAILURE on branch {branch}: PR has merge conflicts. "
@@ -633,7 +647,7 @@ def watch(
             port,
         )
         check_pr_condition(
-            is_behind(pr),
+            is_behind(pr_detail or pr),
             "reported_behind",
             state,
             f"CI FAILURE on branch {branch}: PR is behind the base branch "

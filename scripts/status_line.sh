@@ -169,6 +169,17 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
         ci_display="${red}⚠ ci watcher died${reset}"
       else
         ci_state="$_ci_state_raw"
+        # When state is "passed", peek at the PR cache to detect whether the
+        # PR's mergeStateStatus has since degraded (DIRTY/BEHIND/CONFLICTING).
+        # If so, override the display to reflect the degraded state instead
+        # of stale "ci: passed".
+        if [ "$ci_state" = "passed" ] && [ -f "$pr_cache_file" ]; then
+          _merge_state=$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+          case "$_merge_state" in
+            BEHIND)              ci_state="behind" ;;
+            DIRTY|CONFLICTING)   ci_state="conflict" ;;
+          esac
+        fi
         case "$ci_state" in
           running)       ci_display="${yellow}ci: running${reset}" ;;
           passed)        ci_display="${green}ci: passed${reset}" ;;
