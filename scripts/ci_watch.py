@@ -527,6 +527,12 @@ def watch(
 
     atexit.register(cleanup)
 
+    def _signal_handler(signum: int, frame: object) -> None:
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
     while True:
         # --- Session health check (5x retries with 2s sleep ~ 10s window) ---
         # On Mac wake-from-sleep, the localhost webhook server may briefly be
