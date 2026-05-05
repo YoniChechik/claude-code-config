@@ -151,7 +151,7 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
       _watcher_alive=false
       case "$_ci_state_raw" in
         passed|failed|merged-passed|merged-failed|timeout)
-          _watcher_alive=true  # terminal: watcher already exited cleanly, result is valid
+          _watcher_alive=true  # terminal: watcher already exited cleanly
           ;;
         *)
           # Active state: check the lock file for the watcher's PID.
