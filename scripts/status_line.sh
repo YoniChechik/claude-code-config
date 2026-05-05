@@ -54,24 +54,12 @@ if [ -z "$dir" ]; then
 fi
 
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-# Sanitized branch name for /tmp file paths (matches ci_watch_persistent.sh).
+# Sanitized branch name for /tmp file paths (matches ci_watch.py).
 # Branches like "feature/foo" produce paths like /tmp/ci_watch_state_feature/foo
 # which fail because the parent dir doesn't exist. Replace "/" with "__".
 branch_key="${branch//\//__}"
 
-# status_line payload includes session_id directly — no cache lookup needed.
-_session_id=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null || true)
-_sid8=""
-if [[ -n "$_session_id" && "$_session_id" != "null" ]]; then
-    _sid8="${_session_id:0:8}"
-fi
-
-if [[ -n "$_sid8" ]]; then
-    slot="${branch_key}_${_sid8}"
-else
-    # Fallback: legacy filename (no SID8) for sessions started before this change.
-    slot="${branch_key}"
-fi
+slot="${branch_key}"
 
 dirty_marker=""
 if [ -n "$branch" ]; then
@@ -138,7 +126,7 @@ if [ -n "$branch" ]; then
 fi
 
 # Line 3: clickable PR link (if branch has an open PR)
-# Read from the cache file written by ci_watch_persistent.sh — no gh call here.
+# Read from the cache file written by ci_watch.py — no gh call here.
 pr_line=""
 if [ -n "$branch" ] && [ "$branch" != "main" ]; then
   pr_cache_file="/tmp/ci_watch_pr_${slot}"
@@ -170,7 +158,7 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
           _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
           _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
           if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
-             && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch_persistent"; then
+             && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
             _watcher_alive=true
           fi
           ;;

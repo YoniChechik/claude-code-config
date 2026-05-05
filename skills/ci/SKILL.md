@@ -41,7 +41,7 @@ BRANCH_KEY="${BRANCH//\//__}"
 # Launch watcher with logs going to a branch-keyed file
 # so failures are visible instead of silently swallowed.
 # 4th arg SID8 distinguishes multiple Claude Code windows on the same branch.
-bash ~/.claude/scripts/ci_watch_persistent.sh "$PORT" "$BRANCH" "$SESSION_TOKEN" "${SID8:-unknown}" </dev/null >>/tmp/ci_watch_${BRANCH_KEY}.log 2>&1 &
+uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "${SID8:-unknown}" "$PORT" "$SESSION_TOKEN" </dev/null >>/tmp/ci_watch_${BRANCH_KEY}.log 2>&1 &
 echo "CI watcher launched for branch $BRANCH (PID $!, log: /tmp/ci_watch_${BRANCH_KEY}.log)"
 ```
 
