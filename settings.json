@@ -6,7 +6,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet",
+  "model": "opus",
   "hooks": {
     "Stop": [
       {
@@ -151,12 +151,12 @@
     "refreshInterval": 1
   },
   "effortLevel": "high",
-  "showThinkingSummaries": true,
-  "skipDangerousModePermissionPrompt": true,
-  "remoteControlAtStartup": true,
-  "voiceEnabled": true,
   "voice": {
     "enabled": true,
     "mode": "hold"
-  }
+  },
+  "showThinkingSummaries": true,
+  "skipDangerousModePermissionPrompt": true,
+  "remoteControlAtStartup": true,
+  "voiceEnabled": true
 }
