@@ -2,44 +2,9 @@
 # Unified startup hook: env validation, git sync, clone cleanup.
 # Outputs a single JSON systemMessage line. Always exits 0.
 
-# ── Session identity ──────────────────────────────────────────────────────────
-# Read the hook payload (session_start.sh receives JSON on stdin).
-# We must consume stdin exactly once, early, before anything else reads it.
+# ── Stdin payload (consumed once, early, before anything else reads it) ──────
 INPUT=$(cat)
-
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || true)
 SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // ""' 2>/dev/null || true)
-SID8=""
-if [[ -n "$SESSION_ID" && "$SESSION_ID" != "null" ]]; then
-    SID8="${SESSION_ID:0:8}"
-fi
-
-if [[ -n "$SID8" ]]; then
-    mkdir -p "$HOME/.claude/session-env/$SESSION_ID" "$HOME/.claude/cache/ppid-session"
-
-    # Atomic writes: mktemp + mv so readers never see partial content.
-
-    # session-env: keyed by full session_id (debugging / future hooks).
-    _tmp=$(mktemp "$HOME/.claude/session-env/$SESSION_ID/sid8.XXXXXX")
-    printf '%s' "$SID8" > "$_tmp"
-    mv -f "$_tmp" "$HOME/.claude/session-env/$SESSION_ID/sid8"
-
-    # ppid-session: keyed by Claude Code's PID. $PPID inside a hook = the
-    # Claude process that spawned the hook. This is stable across all `cd`
-    # operations (e.g. /new-feature cd'ing into a clone), so it's the
-    # canonical lookup path for any consumer that doesn't have the hook
-    # payload itself (the /ci skill, sid8_from_ppid() helpers).
-    _ppid_tmp=$(mktemp "$HOME/.claude/cache/ppid-session/$PPID.XXXXXX")
-    printf '%s' "$SID8" > "$_ppid_tmp"
-    mv -f "$_ppid_tmp" "$HOME/.claude/cache/ppid-session/$PPID"
-else
-    # Log so we can detect harness changes.
-    mkdir -p "$HOME/.claude/logs"
-    printf '[%s] session_start.sh: no session_id in payload\n' "$(date -u +%FT%TZ)" >> "$HOME/.claude/logs/session_start.log"
-    INPUT_DBG=$(printf '%s' "$INPUT" | head -c 500)
-    printf '  payload preview: %s\n' "$INPUT_DBG" >> "$HOME/.claude/logs/session_start.log"
-fi
-# ─────────────────────────────────────────────────────────────────────────────
 
 output=""
 add_line() { output+="$1"$'\n'; }

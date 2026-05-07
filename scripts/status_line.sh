@@ -16,7 +16,8 @@ if ! parsed=$(printf '%s' "$input" | jq -r '
   (.workspace.git_dir // ""),
   (.context_window.remaining_percentage // ""),
   (.rate_limits.five_hour.used_percentage // ""),
-  (.rate_limits.five_hour.resets_at // "")
+  (.rate_limits.five_hour.resets_at // ""),
+  (.session_id // "")
 ' 2>/dev/null); then
   printf '%b' "${red}(status_line.sh: json parse error)${reset}"
   exit 0
@@ -38,6 +39,7 @@ git_dir="${fields[1]-}"
 remaining="${fields[2]-}"
 five_hr_used="${fields[3]-}"
 five_hr_resets_at="${fields[4]-}"
+session_id="${fields[5]-}"
 
 # Treat literal "null" (jq's output for a missing top-level field with no
 # `// ""` fallback) the same as empty.
@@ -46,6 +48,7 @@ five_hr_resets_at="${fields[4]-}"
 [[ "$remaining" == "null" ]] && remaining=""
 [[ "$five_hr_used" == "null" ]] && five_hr_used=""
 [[ "$five_hr_resets_at" == "null" ]] && five_hr_resets_at=""
+[[ "$session_id" == "null" ]] && session_id=""
 
 # Fall back to PWD so we still render something useful when the harness
 # payload doesn't include workspace.current_dir.
@@ -54,12 +57,7 @@ if [ -z "$dir" ]; then
 fi
 
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-# Sanitized branch name for /tmp file paths (matches ci_watch.py).
-# Branches like "feature/foo" produce paths like /tmp/ci_watch_state_feature/foo
-# which fail because the parent dir doesn't exist. Replace "/" with "__".
-branch_key="${branch//\//__}"
-
-slot="${branch_key}"
+slot="$session_id"
 
 dirty_marker=""
 if [ -n "$branch" ]; then
@@ -128,9 +126,11 @@ fi
 # Line 3: clickable PR link (if branch has an open PR)
 # Read from the cache file written by ci_watch.py — no gh call here.
 pr_line=""
-if [ -n "$branch" ] && [ "$branch" != "main" ]; then
+pr_json=""
+pr_cache_file=""
+if [ -n "$slot" ]; then
   pr_cache_file="/tmp/ci_watch_pr_${slot}"
-  if [ -f "$pr_cache_file" ]; then
+  if [ -n "$branch" ] && [ "$branch" != "main" ] && [ -f "$pr_cache_file" ]; then
     pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
     pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
     pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
@@ -140,65 +140,68 @@ if [ -n "$branch" ] && [ "$branch" != "main" ]; then
     fi
   fi
 
-  # Append CI hook state if available
-  if [ -n "$branch" ]; then
-    ci_state_file="/tmp/ci_watch_state_${slot}"
-    if [ -f "$ci_state_file" ]; then
-      _ci_state_raw=$(cat "$ci_state_file" 2>/dev/null || true)
+  ci_state_file="/tmp/ci_watch_state_${slot}"
+  if [ -f "$ci_state_file" ]; then
+    _ci_state_raw=$(cat "$ci_state_file" 2>/dev/null || true)
+    ci_stored_branch="${_ci_state_raw%%:*}"
+    ci_state_only="${_ci_state_raw#*:}"
+    if [[ "$ci_stored_branch" == "$_ci_state_raw" ]]; then
+      ci_stored_branch=""
+      ci_state_only="$_ci_state_raw"
+    fi
 
-      # For terminal states, no watcher is expected — show result forever.
-      # For active states, verify the watcher process is still alive.
-      _watcher_alive=false
-      case "$_ci_state_raw" in
-        passed|failed|merged-passed|merged-failed|timeout)
-          _watcher_alive=true  # terminal: watcher already exited cleanly
-          ;;
-        *)
-          # Active state: check the lock file for the watcher's PID.
-          _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
-          _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
-          if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
-             && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
-            _watcher_alive=true
-          fi
-          ;;
-      esac
-
-      if [[ "$_watcher_alive" == false && -n "$_ci_state_raw" ]]; then
-        # Show watcher-died warning alongside last known state.
-        ci_display="${red}⚠ ci watcher died${reset}"
-      else
-        ci_state="$_ci_state_raw"
-        # When state is "passed", peek at the PR cache to detect whether the
-        # PR's mergeStateStatus has since degraded (DIRTY/BEHIND/CONFLICTING).
-        # If so, override the display to reflect the degraded state instead
-        # of stale "ci: passed".
-        if [ "$ci_state" = "passed" ] && [ -f "$pr_cache_file" ]; then
-          _merge_state=$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
-          case "$_merge_state" in
-            BEHIND)              ci_state="behind" ;;
-            DIRTY|CONFLICTING)   ci_state="conflict" ;;
-          esac
+    # For terminal states, no watcher is expected — show result forever.
+    # For active states, verify the watcher process is still alive.
+    _watcher_alive=false
+    case "$ci_state_only" in
+      passed|failed|merged-passed|merged-failed|timeout)
+        _watcher_alive=true
+        ;;
+      *)
+        _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
+        _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
+        if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
+           && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
+          _watcher_alive=true
         fi
-        case "$ci_state" in
-          running)       ci_display="${yellow}ci: running${reset}" ;;
-          passed)        ci_display="${green}ci: passed${reset}" ;;
-          failed)        ci_display="${red}ci: failed${reset}" ;;
-          conflict)      ci_display="${red}ci: conflict${reset}" ;;
-          behind)        ci_display="${yellow}ci: behind${reset}" ;;
-          no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
-          timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
-          merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
-          merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
-          merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
-          *)             ci_display="" ;;
+        ;;
+    esac
+
+    if [[ "$_watcher_alive" == false && -n "$ci_state_only" ]]; then
+      ci_display="${red}⚠ ci watcher died${reset}"
+    else
+      ci_state="$ci_state_only"
+      if [ "$ci_state" = "passed" ] && [ -f "$pr_cache_file" ]; then
+        _merge_state=$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+        case "$_merge_state" in
+          BEHIND)              ci_state="behind" ;;
+          DIRTY|CONFLICTING)   ci_state="conflict" ;;
         esac
       fi
-      if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
-        pr_line="${pr_line} | ${ci_display}"
-      elif [ -n "$ci_display" ]; then
-        pr_line="${ci_display}"
-      fi
+      case "$ci_state" in
+        running)       ci_display="${yellow}ci: running${reset}" ;;
+        passed)        ci_display="${green}ci: passed${reset}" ;;
+        failed)        ci_display="${red}ci: failed${reset}" ;;
+        conflict)      ci_display="${red}ci: conflict${reset}" ;;
+        behind)        ci_display="${yellow}ci: behind${reset}" ;;
+        no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
+        timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
+        merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
+        merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
+        merged-failed) ci_display="${red}✗ main CI failed${reset}" ;;
+        *)             ci_display="" ;;
+      esac
+    fi
+
+    if [[ -n "$ci_display" && -n "$ci_stored_branch" && -n "$branch" \
+          && "$ci_stored_branch" != "$branch" ]]; then
+      ci_display="${ci_display} ${magenta}(${ci_stored_branch})${reset}"
+    fi
+
+    if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
+      pr_line="${pr_line} | ${ci_display}"
+    elif [ -n "$ci_display" ]; then
+      pr_line="${ci_display}"
     fi
   fi
 fi

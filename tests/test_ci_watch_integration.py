@@ -11,13 +11,11 @@ Tests import the ci_watch module directly. The module's network calls
 (``api_get``, ``notify``, ``health_check``) are mocked, and ``time.sleep``
 is patched to break the watch loop after a controlled number of iterations.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import sys
-import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,12 +32,13 @@ import ci_watch  # noqa: E402
 # Pure helpers
 # ---------------------------------------------------------------------------
 
+
 def test_get_sha_runs_deduplication():
     runs = [
         {"id": 1, "name": "build", "head_sha": "abc"},
         {"id": 5, "name": "build", "head_sha": "abc"},
         {"id": 3, "name": "build", "head_sha": "abc"},
-        {"id": 2, "name": "test",  "head_sha": "abc"},
+        {"id": 2, "name": "test", "head_sha": "abc"},
     ]
     out = ci_watch.get_sha_runs(runs, "abc")
     out_by_name = {r["name"]: r for r in out}
@@ -104,13 +103,13 @@ def test_make_pr_cache_no_merge_commit():
 # ETag / api_get
 # ---------------------------------------------------------------------------
 
+
 def test_etag_304_uses_cache():
     cache = ci_watch.ApiCache(etag='"e1"', data={"prev": True})
 
     fake_resp = MagicMock(status_code=304, headers={})
     with patch.object(ci_watch.requests, "get", return_value=fake_resp) as g:
-        data, changed = ci_watch.api_get(
-            "https://api.github.com/x", cache, "tok")
+        data, changed = ci_watch.api_get("https://api.github.com/x", cache, "tok")
     assert data == {"prev": True}
     assert changed is False
     # And the conditional header was sent.
@@ -127,8 +126,7 @@ def test_api_get_200_updates_cache():
     fake_resp.json.return_value = {"hello": "world"}
     fake_resp.raise_for_status = lambda: None
     with patch.object(ci_watch.requests, "get", return_value=fake_resp):
-        data, changed = ci_watch.api_get(
-            "https://api.github.com/x", cache, "tok")
+        data, changed = ci_watch.api_get("https://api.github.com/x", cache, "tok")
     assert data == {"hello": "world"}
     assert changed is True
     assert cache.etag == '"new"'
@@ -138,8 +136,7 @@ def test_api_get_200_updates_cache():
 def test_api_get_error_returns_cached():
     cache = ci_watch.ApiCache(etag='"e1"', data={"prev": True})
     with patch.object(ci_watch.requests, "get", side_effect=Exception("boom")):
-        data, changed = ci_watch.api_get(
-            "https://api.github.com/x", cache, "tok")
+        data, changed = ci_watch.api_get("https://api.github.com/x", cache, "tok")
     assert data == {"prev": True}
     assert changed is False
 
@@ -148,28 +145,36 @@ def test_api_get_error_returns_cached():
 # Watch loop tests
 # ---------------------------------------------------------------------------
 
+
 class StopLoop(Exception):
     """Raised by mocked time.sleep to break the watch loop."""
 
 
 def make_sleep_breaker(max_calls: int):
     state = {"n": 0}
+
     def fake_sleep(_t):
         state["n"] += 1
         if state["n"] >= max_calls:
             raise StopLoop
+
     return fake_sleep, state
 
 
-def run_watch(tmp_dir: str, branch: str = "feat",
-              port: int = 12345, token: str = "tk",
-              owner: str = "o", repo: str = "r",
-              default_branch: str = "main",
-              latest_sha: str = "sha-old",
-              api_get_side_effect=None,
-              has_pending=False,
-              health_ok=True,
-              max_sleeps: int = 3) -> dict:
+def run_watch(
+    tmp_dir: str,
+    branch: str = "feat",
+    port: int = 12345,
+    token: str = "tk",
+    owner: str = "o",
+    repo: str = "r",
+    default_branch: str = "main",
+    latest_sha: str = "sha-old",
+    api_get_side_effect=None,
+    has_pending=False,
+    health_ok=True,
+    max_sleeps: int = 3,
+) -> dict:
     """Drive ``ci_watch.watch`` for ``max_sleeps`` iterations.
 
     Returns a dict with ``notify_calls``, ``state_file_path``, ``state_value``.
@@ -177,23 +182,26 @@ def run_watch(tmp_dir: str, branch: str = "feat",
     fake_sleep, _ = make_sleep_breaker(max_sleeps)
 
     notify_calls: list[tuple[int, str]] = []
+
     def fake_notify(p, m):
         notify_calls.append((p, m))
 
-    with patch.object(ci_watch, "TMP_DIR", tmp_dir), \
-         patch.object(ci_watch, "_GH_TOKEN", "tk-cached"), \
-         patch.object(ci_watch.time, "sleep", fake_sleep), \
-         patch.object(ci_watch, "api_get", side_effect=api_get_side_effect), \
-         patch.object(ci_watch, "notify", side_effect=fake_notify), \
-         patch.object(ci_watch, "health_check", return_value=health_ok), \
-         patch.object(ci_watch, "has_pending_checks", return_value=has_pending), \
-         patch.object(ci_watch, "get_failed_job_names", return_value=[]), \
-         patch.object(ci_watch.requests, "get") as commit_get:
+    with (
+        patch.object(ci_watch, "TMP_DIR", tmp_dir),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
+        patch.object(ci_watch, "notify", side_effect=fake_notify),
+        patch.object(ci_watch, "health_check", return_value=health_ok),
+        patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
         commit_get.return_value = MagicMock(status_code=200)
         try:
             ci_watch.watch(
                 branch=branch,
-                branch_key=branch,
+                slot=branch,
                 port=port,
                 session_token=token,
                 owner=owner,
@@ -205,7 +213,8 @@ def run_watch(tmp_dir: str, branch: str = "feat",
             pass
 
     state_path = Path(tmp_dir) / f"ci_watch_state_{branch}"
-    state_value = state_path.read_text() if state_path.exists() else None
+    raw = state_path.read_text() if state_path.exists() else None
+    state_value = raw.split(":", 1)[1] if raw and ":" in raw else raw
     return {
         "notify_calls": notify_calls,
         "state_value": state_value,
@@ -227,14 +236,22 @@ def make_api_get(pr=None, runs=None, main_runs=None):
                 return main_runs, True
             return runs, True
         return None, False
+
     return side_effect
 
 
 def test_ci_running_state(tmp_path):
-    runs = {"workflow_runs": [
-        {"id": 1, "name": "build", "head_sha": "sha-old",
-         "status": "in_progress", "conclusion": None},
-    ]}
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "in_progress",
+                "conclusion": None,
+            },
+        ]
+    }
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(runs=runs),
@@ -248,13 +265,31 @@ def test_ci_running_state(tmp_path):
 
 
 def test_ci_passes(tmp_path):
-    runs = {"workflow_runs": [
-        {"id": 1, "name": "build", "head_sha": "sha-old",
-         "status": "completed", "conclusion": "success"},
-    ]}
+    # check_all_passed only fires "passed" once a PR exists with a known-good
+    # mergeable_state, so the test must supply one alongside the success run.
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "clean",
+        }
+    ]
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+    }
     out = run_watch(
         str(tmp_path),
-        api_get_side_effect=make_api_get(runs=runs),
+        api_get_side_effect=make_api_get(pr=pr, runs=runs),
         has_pending=False,
     )
     assert out["state_value"] == "passed"
@@ -262,10 +297,17 @@ def test_ci_passes(tmp_path):
 
 
 def test_ci_fails(tmp_path):
-    runs = {"workflow_runs": [
-        {"id": 99, "name": "build", "head_sha": "sha-old",
-         "status": "completed", "conclusion": "failure"},
-    ]}
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 99,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "failure",
+            },
+        ]
+    }
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(runs=runs),
@@ -276,10 +318,15 @@ def test_ci_fails(tmp_path):
 
 
 def test_conflict_detection(tmp_path):
-    pr = [{
-        "html_url": "u", "number": 1, "state": "open", "merged": False,
-        "mergeable_state": "dirty",
-    }]
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "dirty",
+        }
+    ]
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(pr=pr),
@@ -289,10 +336,15 @@ def test_conflict_detection(tmp_path):
 
 
 def test_behind_detection(tmp_path):
-    pr = [{
-        "html_url": "u", "number": 1, "state": "open", "merged": False,
-        "mergeable_state": "behind",
-    }]
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "behind",
+        }
+    ]
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(pr=pr),
@@ -319,16 +371,24 @@ def test_health_check_failure_exits(tmp_path):
     """When health checks fail HEALTH_RETRY_MAX times, watch() returns."""
     fake_sleep, sleep_state = make_sleep_breaker(1000)
 
-    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)), \
-         patch.object(ci_watch, "_GH_TOKEN", "tk"), \
-         patch.object(ci_watch.time, "sleep", fake_sleep), \
-         patch.object(ci_watch, "health_check", return_value=False), \
-         patch.object(ci_watch, "api_get") as mock_api, \
-         patch.object(ci_watch, "notify"):
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "_GH_TOKEN", "tk"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(ci_watch, "health_check", return_value=False),
+        patch.object(ci_watch, "api_get") as mock_api,
+        patch.object(ci_watch, "notify"),
+    ):
         mock_api.return_value = (None, False)
         ci_watch.watch(
-            branch="b", branch_key="b", port=1, session_token="t",
-            owner="o", repo="r", default_branch="main", latest_sha="s",
+            branch="b",
+            slot="b",
+            port=1,
+            session_token="t",
+            owner="o",
+            repo="r",
+            default_branch="main",
+            latest_sha="s",
         )
     # Exactly HEALTH_RETRY_MAX sleeps (one per failed health attempt) before exit.
     assert sleep_state["n"] == ci_watch.HEALTH_RETRY_MAX
@@ -337,10 +397,17 @@ def test_health_check_failure_exits(tmp_path):
 def test_no_runs_state(tmp_path):
     """After SHA_RUNS_EMPTY_MAX iterations of empty sha_runs, state becomes no-runs."""
     # Run has no head_sha — detect_new_sha skips update, sha_runs stays empty.
-    runs = {"workflow_runs": [
-        {"id": 1, "name": "build", "head_sha": None,
-         "status": "in_progress", "conclusion": None},
-    ]}
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": None,
+                "status": "in_progress",
+                "conclusion": None,
+            },
+        ]
+    }
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(runs=runs),
@@ -352,53 +419,82 @@ def test_no_runs_state(tmp_path):
 
 def test_timeout_state(tmp_path):
     """After MAIN_WAIT_MAX iterations with commit visible but no runs, state=timeout."""
-    pr = [{
-        "html_url": "u", "number": 1, "state": "closed", "merged": True,
-        "mergeable_state": "clean", "merge_commit_sha": "merge-sha",
-    }]
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
     # main_runs is empty — no runs match the merge SHA.
     main_runs = {"workflow_runs": []}
 
     fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
     notify_calls: list[tuple[int, str]] = []
+
     def fake_notify(p, m):
         notify_calls.append((p, m))
 
     branch = "feat"
-    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)), \
-         patch.object(ci_watch, "_GH_TOKEN", "tk-cached"), \
-         patch.object(ci_watch.time, "sleep", fake_sleep), \
-         patch.object(ci_watch, "api_get",
-                      side_effect=make_api_get(pr=pr, main_runs=main_runs)), \
-         patch.object(ci_watch, "notify", side_effect=fake_notify), \
-         patch.object(ci_watch, "health_check", return_value=True), \
-         patch.object(ci_watch, "has_pending_checks", return_value=False), \
-         patch.object(ci_watch, "get_failed_job_names", return_value=[]), \
-         patch.object(ci_watch.requests, "get") as commit_get:
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(
+            ci_watch, "api_get", side_effect=make_api_get(pr=pr, main_runs=main_runs)
+        ),
+        patch.object(ci_watch, "notify", side_effect=fake_notify),
+        patch.object(ci_watch, "health_check", return_value=True),
+        patch.object(ci_watch, "has_pending_checks", return_value=False),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
         # Commit is visible on main — drives main_wait_iterations toward timeout.
         commit_get.return_value = MagicMock(status_code=200)
         ci_watch.watch(
-            branch=branch, branch_key=branch, port=1, session_token="t",
-            owner="o", repo="r", default_branch="main", latest_sha="sha-old",
+            branch=branch,
+            slot=branch,
+            port=1,
+            session_token="t",
+            owner="o",
+            repo="r",
+            default_branch="main",
+            latest_sha="sha-old",
         )
 
     state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
     # State file must persist (keep_state_file=True).
     assert state_path.exists()
-    assert state_path.read_text() == "timeout"
+    assert state_path.read_text() == f"{branch}:timeout"
     assert any("No CI runs found on main" in m for _, m in notify_calls)
 
 
 def test_merge_tracking(tmp_path):
     """After PR merges and main CI passes, state becomes merged-passed."""
-    pr = [{
-        "html_url": "u", "number": 1, "state": "closed", "merged": True,
-        "mergeable_state": "clean", "merge_commit_sha": "merge-sha",
-    }]
-    main_runs = {"workflow_runs": [
-        {"id": 50, "name": "build", "head_sha": "merge-sha",
-         "status": "completed", "conclusion": "success"},
-    ]}
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    main_runs = {
+        "workflow_runs": [
+            {
+                "id": 50,
+                "name": "build",
+                "head_sha": "merge-sha",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+    }
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(pr=pr, main_runs=main_runs),
@@ -412,12 +508,13 @@ def test_merge_tracking(tmp_path):
 # State writers
 # ---------------------------------------------------------------------------
 
+
 def test_write_state_atomic(tmp_path):
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
-        ci_watch.write_state("br", "running")
-        assert (tmp_path / "ci_watch_state_br").read_text() == "running"
-        ci_watch.write_state("br", "passed")
-        assert (tmp_path / "ci_watch_state_br").read_text() == "passed"
+        ci_watch.write_state("br", "br", "running")
+        assert (tmp_path / "ci_watch_state_br").read_text() == "br:running"
+        ci_watch.write_state("br", "br", "passed")
+        assert (tmp_path / "ci_watch_state_br").read_text() == "br:passed"
 
 
 def test_write_pr_cache(tmp_path):
@@ -425,3 +522,12 @@ def test_write_pr_cache(tmp_path):
         ci_watch.write_pr_cache("br", {"url": "u", "state": "OPEN"})
         data = json.loads((tmp_path / "ci_watch_pr_br").read_text())
         assert data == {"url": "u", "state": "OPEN"}
+
+
+def test_main_aborts_without_session_id(monkeypatch, capsys):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br", "1234", "tok"])
+    with pytest.raises(SystemExit) as exc:
+        ci_watch.main()
+    assert exc.value.code == 2
+    assert "CLAUDE_CODE_SESSION_ID" in capsys.readouterr().err

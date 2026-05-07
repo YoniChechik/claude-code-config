@@ -6,7 +6,7 @@
 # ]
 # ///
 """
-CI Watcher (Python rewrite of ci_watch_persistent.sh)
+CI Watcher
 
 Monitors GitHub Actions CI status for a branch and reports results via
 webhook. Uses GitHub REST API directly with ETag conditional requests so
@@ -14,14 +14,13 @@ we can poll at 1s without burning API quota.
 
 Args (positional, in this order to match SKILL.md):
     BRANCH         branch to watch
-    SID8           8-char session id (kept for log filename compat only)
     PORT           webhook HTTP port
     SESSION_TOKEN  expected health-check token
 
-State files (keyed by branch only — SID8 is no longer in the key):
-    /tmp/ci_watch_state_{branch_key}    CI state string
-    /tmp/ci_watch_pr_{branch_key}       PR JSON cache for status_line.sh
-    /tmp/ci_watch_lock_{branch_key}     PID lock
+State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
+    /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line)
+    /tmp/ci_watch_pr_{slot}       PR JSON cache for status_line.sh
+    /tmp/ci_watch_lock_{slot}     PID lock
 
 Exit conditions:
     - branch not found on remote (1)
@@ -203,26 +202,26 @@ def make_pr_cache(pr: dict) -> dict:
 # --- File writers ---
 
 
-def _state_path(branch_key: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_state_{branch_key}"
+def _state_path(slot: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_state_{slot}"
 
 
-def _pr_path(branch_key: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_pr_{branch_key}"
+def _pr_path(slot: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_pr_{slot}"
 
 
-def _lock_path(branch_key: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_lock_{branch_key}"
+def _lock_path(slot: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
 
 
-def write_state(branch_key: str, value: str) -> None:
-    """Atomic write — avoids partial reads by status_line.sh racing with us."""
+def write_state(slot: str, branch: str, value: str) -> None:
+    """Atomic write of '<branch>:<state>'."""
     print(f"[ci_watch] write_state -> {value!r}", flush=True)
-    path = _state_path(branch_key)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{branch_key}.", dir=TMP_DIR)
+    path = _state_path(slot)
+    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{slot}.", dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(value)
+            f.write(f"{branch}:{value}")
         os.replace(tmp, path)
     except Exception:
         try:
@@ -232,9 +231,9 @@ def write_state(branch_key: str, value: str) -> None:
         raise
 
 
-def write_pr_cache(branch_key: str, data: dict) -> None:
-    path = _pr_path(branch_key)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_pr_{branch_key}.", dir=TMP_DIR)
+def write_pr_cache(slot: str, data: dict) -> None:
+    path = _pr_path(slot)
+    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_pr_{slot}.", dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -250,9 +249,9 @@ def write_pr_cache(branch_key: str, data: dict) -> None:
 # --- Lock handling ---
 
 
-def acquire_lock(branch_key: str) -> None:
-    """Kill any stale predecessor and take the lock for this branch."""
-    lock_path = _lock_path(branch_key)
+def acquire_lock(slot: str) -> None:
+    """Kill any stale predecessor and take the lock for this slot."""
+    lock_path = _lock_path(slot)
     if lock_path.exists():
         try:
             old_pid = int(lock_path.read_text().strip())
@@ -285,10 +284,10 @@ class WatchState:
     """All mutable state for a single watch() invocation."""
 
     def __init__(
-        self, branch: str, branch_key: str, latest_sha: str, default_branch: str
+        self, branch: str, slot: str, latest_sha: str, default_branch: str
     ) -> None:
         self.branch = branch
-        self.branch_key = branch_key
+        self.slot = slot
         self.latest_sha = latest_sha
         self.default_branch = default_branch
 
@@ -341,7 +340,7 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         # Reset state file to "running" so the statusline reflects the new
         # in-progress run instead of remaining stuck on the previous
         # terminal state (passed/failed).
-        write_state(state.branch_key, "running")
+        write_state(state.slot, state.branch, "running")
 
 
 def check_pr_condition(
@@ -358,14 +357,14 @@ def check_pr_condition(
         if not flag:
             notify(port, message)
             setattr(state, flag_name, True)
-            write_state(state.branch_key, state_string)
+            write_state(state.slot, state.branch, state_string)
     else:
         if flag:
             setattr(state, flag_name, False)
             # Condition cleared — restore state to "running" so the statusline
             # reflects the resolved state instead of staying stuck on the old
             # state string (e.g. "conflict" or "behind").
-            write_state(state.branch_key, "running")
+            write_state(state.slot, state.branch, "running")
 
 
 def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -> None:
@@ -409,7 +408,7 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
         msg = f"{msg} Delegate the fix to coder-agent."
 
     if context == "main":
-        write_state(state.branch_key, "merged-failed")
+        write_state(state.slot, state.branch, "merged-failed")
         notify(
             port,
             f"CI FAILURE on {state.default_branch} for merge of {state.branch}: {msg}",
@@ -417,7 +416,7 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
         state.reported_main_fail = True
     else:
         notify(port, f"CI FAILURE on branch {state.branch}: {msg}")
-        write_state(state.branch_key, "failed")
+        write_state(state.slot, state.branch, "failed")
         state.reported_fail = True
 
 
@@ -438,7 +437,7 @@ def check_all_passed(
         return
 
     if context == "main":
-        write_state(state.branch_key, "merged-passed")
+        write_state(state.slot, state.branch, "merged-passed")
         notify(
             port, f"✅ CI on {state.default_branch} passed for merge of {state.branch}"
         )
@@ -453,7 +452,7 @@ def check_all_passed(
         return
     notify(port, f"✅ CI passed on branch {state.branch}")
     state.reported_pass = True
-    write_state(state.branch_key, "passed")
+    write_state(state.slot, state.branch, "passed")
 
 
 # --- Authentication & startup ---
@@ -504,7 +503,7 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
 
 def watch(
     branch: str,
-    branch_key: str,
+    slot: str,
     port: int,
     session_token: str,
     owner: str,
@@ -513,7 +512,7 @@ def watch(
     latest_sha: str,
 ) -> None:
     """Run the CI watch loop until a terminal condition fires."""
-    state = WatchState(branch, branch_key, latest_sha, default_branch)
+    state = WatchState(branch, slot, latest_sha, default_branch)
 
     runs_url = (
         f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs?branch={branch}&per_page=100"
@@ -533,13 +532,13 @@ def watch(
         f"pid={os.getpid()}",
         flush=True,
     )
-    write_state(branch_key, "running")
+    write_state(slot, branch, "running")
 
     def cleanup() -> None:
         if not state.keep_state_file:
-            _state_path(branch_key).unlink(missing_ok=True)
-            _pr_path(branch_key).unlink(missing_ok=True)
-        _lock_path(branch_key).unlink(missing_ok=True)
+            _state_path(slot).unlink(missing_ok=True)
+            _pr_path(slot).unlink(missing_ok=True)
+        _lock_path(slot).unlink(missing_ok=True)
 
     atexit.register(cleanup)
 
@@ -599,7 +598,7 @@ def watch(
             pr_detail = pr
 
         if pr:
-            write_pr_cache(branch_key, make_pr_cache(pr_detail or pr))
+            write_pr_cache(slot, make_pr_cache(pr_detail or pr))
 
         merge_commit_oid = get_merge_commit_sha(pr_detail or pr)
         mergeable_state = (pr_detail or pr).get("mergeable_state", "").upper()
@@ -608,7 +607,7 @@ def watch(
         if not state.merged and is_merged(pr) and merge_commit_oid:
             state.merged = True
             state.merge_commit_sha = merge_commit_oid
-            write_state(branch_key, "merging")
+            write_state(slot, branch, "merging")
             print(
                 f"PR for branch '{branch}' has been merged "
                 f"(merge commit: {state.merge_commit_sha}). "
@@ -618,7 +617,7 @@ def watch(
         # --- Merged path: track main CI for the merge commit ---
         if state.merged:
             # Refresh mtime so statusline freshness gate doesn't drop us.
-            write_state(branch_key, "merging")
+            write_state(slot, branch, "merging")
 
             main_runs_data, _ = api_get(
                 main_runs_url, state.main_runs_cache, gh_token_value()
@@ -653,7 +652,7 @@ def watch(
                             f"{int(MAIN_WAIT_MAX * POLL_INTERVAL)}s. "
                             f"Check manually.",
                         )
-                        write_state(branch_key, "timeout")
+                        write_state(slot, branch, "timeout")
                         state.keep_state_file = True
                         print("Timed out waiting for main CI runs. Exiting.")
                         return
@@ -716,14 +715,14 @@ def watch(
                     f"⚠️ No CI runs visible for {branch} after 2 min "
                     f"— workflow may be missing or still queuing.",
                 )
-                write_state(branch_key, "no-runs")
+                write_state(slot, branch, "no-runs")
             time.sleep(POLL_INTERVAL)
             continue
 
         state.sha_runs_empty_count = 0
         if state.reported_no_runs:
             state.reported_no_runs = False
-            write_state(branch_key, "running")
+            write_state(slot, branch, "running")
 
         check_failures("branch", sha_runs, state, port)
         check_all_passed("branch", sha_runs, state, mergeable_state, port)
@@ -754,28 +753,32 @@ def main() -> None:
     except (AttributeError, OSError):
         pass
 
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 4:
         print(
-            "Usage: ci_watch.py <branch> <sid8> <port> <session_token>",
+            "Usage: ci_watch.py <branch> <port> <session_token>",
             file=sys.stderr,
         )
         sys.exit(1)
     branch = sys.argv[1]
-    # sys.argv[2] is SID8 — kept for skill log filename compatibility, unused here.
-    port = int(sys.argv[3])
-    session_token = sys.argv[4]
+    port = int(sys.argv[2])
+    session_token = sys.argv[3]
 
-    branch_key = branch.replace("/", "__")
+    slot = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not slot:
+        print(
+            "Error: CLAUDE_CODE_SESSION_ID is unset. ci_watch must be launched "
+            "from a Claude Code Bash subshell so the harness injects it.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
-    acquire_lock(branch_key)
+    acquire_lock(slot)
 
     token = gh_token_value()
     owner, repo, default_branch = repo_info()
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(
-        branch, branch_key, port, session_token, owner, repo, default_branch, latest_sha
-    )
+    watch(branch, slot, port, session_token, owner, repo, default_branch, latest_sha)
 
 
 if __name__ == "__main__":

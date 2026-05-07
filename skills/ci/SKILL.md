@@ -29,23 +29,18 @@ The watcher sends notifications via curl to the webhook HTTP server on the port 
 
 Launch with shell-level backgrounding (do NOT use run_in_background=true — the process dies when the subagent exits):
 ```bash
-# Resolve SID8 for this session via PPID (stable across cd operations).
-SID8=$(cat "$HOME/.claude/cache/ppid-session/$PPID" 2>/dev/null || printf 'unknown')
+if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+    echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot launch ci watcher." >&2
+    exit 1
+fi
 
-# Sanitize branch name for use in /tmp file paths: branches like "feature/foo"
-# would otherwise produce paths like /tmp/ci_watch_feature/foo.log which fail
-# because the parent dir doesn't exist. Replace "/" with "__".
-# This matches the BRANCH_KEY logic inside ci_watch_persistent.sh.
-BRANCH_KEY="${BRANCH//\//__}"
-
-# Launch watcher with logs going to a branch-keyed file
-# so failures are visible instead of silently swallowed.
-# 4th arg SID8 distinguishes multiple Claude Code windows on the same branch.
-uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "${SID8:-unknown}" "$PORT" "$SESSION_TOKEN" </dev/null >>/tmp/ci_watch_${BRANCH_KEY}.log 2>&1 &
-echo "CI watcher launched for branch $BRANCH (PID $!, log: /tmp/ci_watch_${BRANCH_KEY}.log)"
+uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "$PORT" "$SESSION_TOKEN" \
+    </dev/null >>/tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}.log 2>&1 &
+echo "CI watcher launched for branch $BRANCH (PID $!, log: /tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}.log)"
 ```
 
-Note: `BRANCH_KEY` is the sanitized form of the branch name (slashes replaced
-with `__`) and is used in all `/tmp/ci_watch_*` filenames (state, pr cache,
-log, lock). The original `BRANCH` value is still used for git/gh commands and
-for human-readable notification messages.
+Note: state, PR-cache, lock, and log files in `/tmp/` are all keyed on
+`CLAUDE_CODE_SESSION_ID` (full UUID). The watched branch is recorded inside
+the state file as `<branch>:<state>`. Switching branches mid-feature re-launches
+`/ci`, which kills the old watcher via its PID lock and starts a new one with
+the new branch.
