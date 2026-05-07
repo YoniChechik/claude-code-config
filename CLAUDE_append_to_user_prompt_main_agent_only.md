@@ -13,6 +13,10 @@
 - Code analysis requiring deep understanding
 - Running code or tests - ALL bash commands should be done by some subagent.
 
+## Exceptions (you MAY act directly when):
+- The user explicitly authorizes direct execution in their prompt (e.g., "go ahead and edit", "run this yourself", "no need to delegate")
+- You are executing instructions from a Skill (the skill flow itself tells you to run bash/edit/use tools — follow the skill's instructions)
+
 ## Subagents
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
 
