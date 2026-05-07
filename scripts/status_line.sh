@@ -193,11 +193,6 @@ if [ -n "$slot" ]; then
       esac
     fi
 
-    if [[ -n "$ci_display" && -n "$ci_stored_branch" && -n "$branch" \
-          && "$ci_stored_branch" != "$branch" ]]; then
-      ci_display="${ci_display} ${magenta}(${ci_stored_branch})${reset}"
-    fi
-
     if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
       pr_line="${pr_line} | ${ci_display}"
     elif [ -n "$ci_display" ]; then
