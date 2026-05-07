@@ -130,7 +130,10 @@ pr_json=""
 pr_cache_file=""
 if [ -n "$slot" ]; then
   pr_cache_file="/tmp/ci_watch_pr_${slot}"
-  if [ -n "$branch" ] && [ "$branch" != "main" ] && [ -f "$pr_cache_file" ]; then
+  # Render PR link whenever the watcher cache has it, regardless of the
+  # shell's current branch — the user may be in main while the watcher
+  # tracks a feature branch in a clone.
+  if [ -f "$pr_cache_file" ]; then
     pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
     pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
     pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
