@@ -724,6 +724,16 @@ def watch(
             state.reported_no_runs = False
             write_state(slot, branch, "running")
 
+        # Detect rerun on same SHA: if any tracked run reverted to a non-completed
+        # status (in_progress / queued) while we previously reported a terminal
+        # state, clear the flags and revert the status line to 'running'.
+        if any(r.get("status") != "completed" for r in sha_runs) and (
+            state.reported_fail or state.reported_pass
+        ):
+            state.reported_fail = False
+            state.reported_pass = False
+            write_state(slot, branch, "running")
+
         check_failures("branch", sha_runs, state, port)
         check_all_passed("branch", sha_runs, state, mergeable_state, port)
 
