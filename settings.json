@@ -82,6 +82,15 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/reset__color.sh"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -128,6 +137,14 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/scripts/user_prompt_submit.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/reset__color.sh"
           }
         ]
       }
