@@ -293,6 +293,7 @@ class WatchState:
 
         self.reported_pass = False
         self.reported_fail = False
+        self.terminal_run_ids: set[int] = set()
         self.reported_conflict = False
         self.reported_behind = False
         self.reported_no_runs = False
@@ -333,6 +334,7 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.latest_sha = current_sha
         state.reported_pass = False
         state.reported_fail = False
+        state.terminal_run_ids = set()
         state.reported_conflict = False
         state.reported_behind = False
         state.sha_runs_empty_count = 0
@@ -418,6 +420,9 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
         notify(port, f"CI FAILURE on branch {state.branch}: {msg}")
         write_state(state.slot, state.branch, "failed")
         state.reported_fail = True
+        state.terminal_run_ids = {
+            r["id"] for r in sha_runs if r.get("status") == "completed"
+        }
 
 
 def check_all_passed(
@@ -452,6 +457,7 @@ def check_all_passed(
         return
     notify(port, f"✅ CI passed on branch {state.branch}")
     state.reported_pass = True
+    state.terminal_run_ids = {r["id"] for r in sha_runs}
     write_state(state.slot, state.branch, "passed")
 
 
@@ -604,7 +610,11 @@ def watch(
         mergeable_state = (pr_detail or pr).get("mergeable_state", "").upper()
 
         # --- Detect merged ---
-        if not state.merged and is_merged(pr) and merge_commit_oid:
+        # Use pr_detail (single-PR endpoint) — the list endpoint response is
+        # ETag-cached and returns 304 forever after merge, so its 'state' and
+        # 'merged' fields stay stale. The single-PR endpoint refetches.
+        fresh_pr = pr_detail or pr
+        if not state.merged and is_merged(fresh_pr) and merge_commit_oid:
             state.merged = True
             state.merge_commit_sha = merge_commit_oid
             write_state(slot, branch, "merging")
@@ -613,6 +623,20 @@ def watch(
                 f"(merge commit: {state.merge_commit_sha}). "
                 f"Now tracking CI on {default_branch}."
             )
+
+        # --- Detect closed without merge ---
+        # PR closed (state=closed) but not merged — user closed it manually.
+        # Notify, persist final state, and exit cleanly.
+        if (
+            not state.merged
+            and fresh_pr.get("state") == "closed"
+            and not fresh_pr.get("merged")
+        ):
+            notify(port, f"PR closed without merge on branch {branch}")
+            write_state(slot, branch, "closed")
+            state.keep_state_file = True
+            print(f"PR for branch '{branch}' closed without merge. Exiting.")
+            return
 
         # --- Merged path: track main CI for the merge commit ---
         if state.merged:
@@ -623,7 +647,18 @@ def watch(
                 main_runs_url, state.main_runs_cache, gh_token_value()
             )
             all_main_runs = (main_runs_data or {}).get("workflow_runs", [])
-            sha_runs = get_sha_runs(all_main_runs, state.merge_commit_sha)
+            # Filter out Dependabot's dependency-graph runs ("event":"dynamic",
+            # path "dynamic/dependabot/..."). They're triggered on every merge
+            # to main, can stay in_progress for a long time, and don't gate
+            # the merge — leaving them in the gating set means the watcher
+            # hangs in "merging" forever even though the real CI passed.
+            gating_main_runs = [
+                r
+                for r in all_main_runs
+                if r.get("event") != "dynamic"
+                and not (r.get("path", "").startswith("dynamic/"))
+            ]
+            sha_runs = get_sha_runs(gating_main_runs, state.merge_commit_sha)
 
             if not sha_runs:
                 # Only count toward timeout once the merge commit is visible
@@ -724,14 +759,20 @@ def watch(
             state.reported_no_runs = False
             write_state(slot, branch, "running")
 
-        # Detect rerun on same SHA: if any tracked run reverted to a non-completed
-        # status (in_progress / queued) while we previously reported a terminal
-        # state, clear the flags and revert the status line to 'running'.
-        if any(r.get("status") != "completed" for r in sha_runs) and (
-            state.reported_fail or state.reported_pass
-        ):
+        # Detect rerun on same SHA: a workflow we previously counted as terminal
+        # has been replaced by a non-completed run (different id, same name).
+        # Plain "any sibling not completed" was wrong — it re-fires every poll
+        # when a slow workflow is still queued alongside an already-failed one.
+        current_terminal_ids = {
+            r["id"] for r in sha_runs if r.get("status") == "completed"
+        }
+        rerun_detected = state.terminal_run_ids and not state.terminal_run_ids.issubset(
+            current_terminal_ids
+        )
+        if rerun_detected and (state.reported_fail or state.reported_pass):
             state.reported_fail = False
             state.reported_pass = False
+            state.terminal_run_ids = set()
             write_state(slot, branch, "running")
 
         check_failures("branch", sha_runs, state, port)

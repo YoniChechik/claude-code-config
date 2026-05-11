@@ -47,3 +47,4 @@ logs/
 __pycache__/
 *.pyc
 *.pyo
+.last-cleanup
