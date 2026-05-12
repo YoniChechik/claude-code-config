@@ -417,6 +417,14 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
         )
         state.reported_main_fail = True
     else:
+        remote_head = get_remote_head_sha(state.branch)
+        if remote_head is not None and remote_head != state.latest_sha:
+            print(
+                f"[ci_watch] skipping failure notification — "
+                f"latest_sha {state.latest_sha[:7]} != remote HEAD {remote_head[:7]}",
+                flush=True,
+            )
+            return
         notify(port, f"CI FAILURE on branch {state.branch}: {msg}")
         write_state(state.slot, state.branch, "failed")
         state.reported_fail = True
@@ -452,6 +460,14 @@ def check_all_passed(
     # Workflows still queuing show up in `gh pr checks` as bucket=pending.
     if has_pending_checks(state.branch):
         return
+    remote_head = get_remote_head_sha(state.branch)
+    if remote_head is not None and remote_head != state.latest_sha:
+        print(
+            f"[ci_watch] skipping pass notification — "
+            f"latest_sha {state.latest_sha[:7]} != remote HEAD {remote_head[:7]}",
+            flush=True,
+        )
+        return
     state.reported_pass = True
     state.terminal_run_ids = {r["id"] for r in sha_runs}
     write_state(state.slot, state.branch, "passed")
@@ -481,6 +497,30 @@ def repo_info() -> tuple[str, str, str]:
     owner, repo = data["nameWithOwner"].split("/")
     default_branch = data["defaultBranchRef"]["name"] or "main"
     return owner, repo, default_branch
+
+
+def get_remote_head_sha(branch: str) -> str | None:
+    """Return current SHA of origin/<branch> via ``git ls-remote``.
+
+    Returns ``None`` on any failure so callers can fail open (deliver the
+    notification) rather than silence the watcher.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "origin", branch],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        out = result.stdout.strip()
+        if not out:
+            return None
+        sha = out.split()[0].strip()
+        return sha or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
