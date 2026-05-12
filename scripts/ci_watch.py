@@ -443,9 +443,6 @@ def check_all_passed(
 
     if context == "main":
         write_state(state.slot, state.branch, "merged-passed")
-        notify(
-            port, f"✅ CI on {state.default_branch} passed for merge of {state.branch}"
-        )
         state.reported_main_pass = True
         return
 
@@ -455,7 +452,6 @@ def check_all_passed(
     # Workflows still queuing show up in `gh pr checks` as bucket=pending.
     if has_pending_checks(state.branch):
         return
-    notify(port, f"✅ CI passed on branch {state.branch}")
     state.reported_pass = True
     state.terminal_run_ids = {r["id"] for r in sha_runs}
     write_state(state.slot, state.branch, "passed")
