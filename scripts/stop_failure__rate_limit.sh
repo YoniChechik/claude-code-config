@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
 # StopFailure hook — triggered when Claude stops due to a rate_limit error.
-# 1. Sets the iTerm2 tab BADGE to "⏳ RATE LIMITED (OrgName)" so the user
-#    notices at a glance which org/account is rate-limited.
-#    (Badge used instead of title because Claude Code overrides the title.)
+# 1. Sets the iTerm2 tab BADGE so the user notices at a glance which
+#    org/account is rate-limited AND which variant of the limit message
+#    fired. Two variants are recognised (see VARIANT DETECTION below):
+#      - Team/Max account:   "You've hit your limit · resets …"
+#      - Personal Pro:       "You're out of extra usage · resets …"
+#                            (also covers "/extra-usage" upsell text)
+#    Badge used instead of title because Claude Code overrides the title.
 # 2. Logs the full hook JSON payload to ~/.claude/logs/rate_limit.log for inspection.
 
 # ---------------------------------------------------------------------------
@@ -39,11 +43,44 @@ PY
 fi
 ORG_NAME="${ORG_NAME:-}"
 
-# Build the title: append the org name in parentheses only when it is non-empty.
+# ---------------------------------------------------------------------------
+# VARIANT DETECTION
+# ---------------------------------------------------------------------------
+# Both the team/Max-account and personal-Pro-account 5h-window-exhausted
+# events arrive with the same top-level `error: "rate_limit"` field — the
+# Claude Code hook matcher fires on both. We additionally inspect the
+# `last_assistant_message` field (added to Stop/StopFailure hook payloads;
+# see changelog entry "Added last_assistant_message field to Stop and
+# SubagentStop hook inputs") to pick a more descriptive badge.
+#
+# Observed message variants (sample payloads in ~/.claude/logs/rate_limit.log):
+#   Team/Max:   "You've hit your limit · resets 2:20pm (Asia/Jerusalem)"
+#   Pro:        "You're out of extra usage · resets 2pm (Asia/Jerusalem)"
+#               (Pro accounts can also see "/extra-usage" upsell text.)
+#
+# We use a single grep -E alternation covering both wordings so adding a
+# new variant in the future is a one-line change.
+# ---------------------------------------------------------------------------
+LAST_MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null)
+LAST_MSG="${LAST_MSG:-}"
+
+# Default label — used when neither known variant matches (forward-compat
+# for any future rate-limit message Claude Code may introduce).
+VARIANT_LABEL="RATE LIMITED"
+
+# Match the team/Max wording first ("hit your limit").
+if printf '%s' "$LAST_MSG" | grep -qE "hit your limit"; then
+    VARIANT_LABEL="RATE LIMITED"
+# Match the personal-Pro wording ("out of extra usage" or "/extra-usage").
+elif printf '%s' "$LAST_MSG" | grep -qE "out of extra usage|/extra-usage"; then
+    VARIANT_LABEL="OUT OF EXTRA USAGE"
+fi
+
+# Build the badge: append the org name in parentheses only when non-empty.
 if [ -n "$ORG_NAME" ]; then
-    TAB_TITLE="⏳ RATE LIMITED ($ORG_NAME)"
+    TAB_TITLE="⏳ ${VARIANT_LABEL} (${ORG_NAME})"
 else
-    TAB_TITLE="⏳ RATE LIMITED"
+    TAB_TITLE="⏳ ${VARIANT_LABEL}"
 fi
 
 # ---------------------------------------------------------------------------
