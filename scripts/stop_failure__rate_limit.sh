@@ -1,14 +1,36 @@
 #!/usr/bin/env bash
 
 # StopFailure hook — triggered when Claude stops due to a rate_limit error.
+#
+# IMPORTANT (verified 2026-05-13): the matcher value `rate_limit` in
+# settings.json fires for BOTH variants of the rate-limit StopFailure event
+# (the docs at https://code.claude.com/docs/en/hooks list valid StopFailure
+# matchers as: rate_limit, authentication_failed, oauth_org_not_allowed,
+# billing_error, invalid_request, server_error, max_output_tokens, unknown —
+# there is NO separate matcher for "extra usage exhausted"). Empirical proof:
+# ~/.claude/logs/rate_limit.log contains many entries with
+#   "error":"rate_limit","last_assistant_message":"You're out of extra usage …"
+# alongside the team-account "You've hit your limit …" variant.
+#
 # 1. Sets the iTerm2 tab BADGE so the user notices at a glance which
 #    org/account is rate-limited AND which variant of the limit message
-#    fired. Two variants are recognised (see VARIANT DETECTION below):
+#    fired. Two wordings are recognised (see VARIANT DETECTION below):
 #      - Team/Max account:   "You've hit your limit · resets …"
 #      - Personal Pro:       "You're out of extra usage · resets …"
 #                            (also covers "/extra-usage" upsell text)
 #    Badge used instead of title because Claude Code overrides the title.
-# 2. Logs the full hook JSON payload to ~/.claude/logs/rate_limit.log for inspection.
+# 2. Plays an audible sound so the user notices even when the iTerm window
+#    is in the background. Without this the badge change is easy to miss
+#    (see PR fix: "the hook fires but the user said 'it didn't trigger' —
+#    that meant no audible signal").
+# 3. Logs the full hook JSON payload to ~/.claude/logs/rate_limit.log for inspection.
+
+# Source the shared notify helper so we can reuse find_user_tty() — the
+# helper walks the PPID chain to locate the user's real terminal device,
+# which is more reliable than /dev/tty when the hook is invoked from a
+# subagent context with a detached stdout.
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
 
 # ---------------------------------------------------------------------------
 # Read the hook JSON payload from stdin (Claude Code passes it here)
@@ -84,19 +106,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Resolve the user's real terminal device by walking the PPID chain.
+# When invoked from a subagent context Claude Code may capture /dev/tty,
+# so escape sequences need to be written to the user-facing tty directly.
+# Fall back to /dev/tty if the helper can't find one (interactive case).
+# ---------------------------------------------------------------------------
+TARGET_TTY=$(find_user_tty 2>/dev/null || true)
+if [ -z "$TARGET_TTY" ] || [ ! -w "$TARGET_TTY" ]; then
+    TARGET_TTY=/dev/tty
+fi
+
+# ---------------------------------------------------------------------------
 # Set iTerm2 tab BADGE to a visible rate-limit indicator.
 # We use the badge instead of the tab title because Claude Code overrides
 # the tab title (\033]0;) after hooks run, so our title change disappears.
 # The badge (iTerm2 proprietary) is untouched by Claude Code and persists.
 # Escape sequence: \e]1337;SetBadgeFormat=<base64>\a
-# Write to /dev/tty — Claude Code captures stdout from hooks, so escape
-# sequences must go directly to the terminal via /dev/tty instead.
 # ---------------------------------------------------------------------------
-printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > /dev/tty 2>/dev/null || true
+printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > "$TARGET_TTY" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Also set the tab color to orange (high red + medium green, no blue)
 # to visually distinguish it from the idle-green used by the Stop hook.
 # Escape sequence format: \033]6;1;bg;<channel>;brightness;<0-255>\a
 # ---------------------------------------------------------------------------
-printf '\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;140\a\033]6;1;bg;blue;brightness;0\a' > /dev/tty 2>/dev/null || true
+printf '\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;140\a\033]6;1;bg;blue;brightness;0\a' > "$TARGET_TTY" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# AUDIBLE NOTIFICATION
+# ---------------------------------------------------------------------------
+# Play a distinct system sound so the user notices the rate limit even when
+# the iTerm window is hidden / they've walked away. We deliberately use a
+# different sound than stop__sound.sh (which plays Glass.aiff on normal
+# completion) so the ear can tell them apart:
+#   - Glass.aiff  -> normal stop (everything OK)
+#   - Funk.aiff   -> StopFailure rate_limit (Pro extra-usage OR Team limit)
+# Background the playback and disown so the hook exits immediately and
+# doesn't block Claude Code's hook dispatcher.
+# ---------------------------------------------------------------------------
+if command -v afplay >/dev/null 2>&1; then
+    afplay /System/Library/Sounds/Funk.aiff </dev/null >/dev/null 2>&1 &
+    disown
+fi
