@@ -20,6 +20,14 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
 ask() {
     local reason="$1"
+    # Ping the user before emitting the "ask" decision: plays a chime, turns
+    # the iTerm2 tab green, and sets a "waiting..." terminal title so the user
+    # notices the pending confirmation prompt even if they're away from the
+    # screen. Sourced lazily (only on the ask path) so allow/deny paths stay
+    # silent. notify_user_attention writes to the user's tty (not stdout), so
+    # this is safe to call before the JSON decision is printed below.
+    source /Users/yonichechik/.claude/scripts/_notify.sh
+    notify_user_attention
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
     exit 0
 }
