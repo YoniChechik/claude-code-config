@@ -24,6 +24,14 @@ ask() {
     exit 0
 }
 
+# Hard-deny: blocks the LLM from running the command. Unlike `ask`, the user
+# is NOT prompted — the model is told to stop and ask the human to run it.
+deny() {
+    local reason="$1"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
+    exit 0
+}
+
 # Split the compound command on separators (;, &&, ||, |, newlines) into
 # individual segments. Each segment is matched independently against the
 # protected-pattern lists below — this closes the bypass where
@@ -37,6 +45,36 @@ while IFS= read -r seg; do
     [ -z "$seg" ] && continue
     SEGMENTS+=("$seg")
 done < <(echo "$COMMAND" | tr ';&|' '\n')
+
+# ---------------------------------------------------------------------------
+# gh — hard-deny for admin-gated commands. These bypass branch protections,
+# destroy repos, or otherwise require GitHub admin privileges; the LLM must
+# NOT run them. The user runs these manually.
+# ---------------------------------------------------------------------------
+GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, DELETE API calls, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
+
+for segment in "${SEGMENTS[@]}"; do
+    # Only inspect segments that invoke `gh`.
+    echo "$segment" | grep -qE '(^|\s)gh(\s|$)' || continue
+
+    # 1) Any `gh ...` invocation that carries the `--admin` flag token.
+    #    Matches `gh pr merge --admin 123`, `gh pr merge 123 --admin`, etc.
+    if echo "$segment" | grep -qE '(^|\s)gh\s.*(\s|=)--admin(\s|=|$)'; then
+        deny "$GH_DENY_MSG"
+    fi
+
+    # 2) Repository deletion — irreversible, requires admin.
+    if echo "$segment" | grep -qE '^\s*gh\s+repo\s+delete(\s|$)'; then
+        deny "$GH_DENY_MSG"
+    fi
+
+    # 3) Raw API DELETE calls via `gh api`: `-X DELETE` or `--method DELETE`
+    #    (case-insensitive on the verb).
+    if echo "$segment" | grep -qE '^\s*gh\s+api\s' \
+        && echo "$segment" | grep -qiE '(-X|--method)(\s+|=)DELETE(\s|$)'; then
+        deny "$GH_DENY_MSG"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # gh
