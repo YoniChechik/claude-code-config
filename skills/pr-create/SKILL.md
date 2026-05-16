@@ -55,4 +55,4 @@ EOF
 - Display created PR URL
 
 ### Step 5: Launch CI Watcher
-Invoke the `ci` skill for the current branch so the user is notified on CI pass/fail. Follow `skills/ci/SKILL.md` (steps 1-3): determine the branch via `git branch --show-current`, fetch the webhook port via the `get_port` MCP tool, then shell-background `uv run ~/.claude/scripts/ci_watch.py` exactly as documented there.
+Invoke the `ci-watcher` skill for the current branch so the user is notified on CI pass/fail. Follow `skills/ci-watcher/SKILL.md` (steps 1-3): determine the branch via `git branch --show-current`, fetch the webhook port via the `get_port` MCP tool, then shell-background `uv run ~/.claude/scripts/ci_watch.py` exactly as documented there.

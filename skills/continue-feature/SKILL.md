@@ -54,7 +54,7 @@ bash ~/.claude/scripts/git_branch_state.sh
 if not synced with main, add "run `/sync` skill" to task list
 
 ### Step 4: Launch CI Watcher
-Run `/ci` skill to launch the CI watcher in the background for the current branch.
+Run `/ci-watcher` skill to launch the CI watcher in the background for the current branch.
 
 ### Step 5: Gather Context & Analyze Status
 1. Use explorer subagent to understand the codebase relevant to the feature

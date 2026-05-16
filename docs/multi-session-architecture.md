@@ -4,7 +4,7 @@ How `~/.claude/` handles multiple Claude Code sessions running simultaneously
 across multiple terminal windows, multiple repos, and multiple feature clones.
 
 This is an internal design doc. It describes what the code actually does today,
-keyed off `session_start.sh`, `status_line.sh`, the `/ci` skill, and
+keyed off `session_start.sh`, `status_line.sh`, the `/ci-watcher` skill, and
 `ci_watch.py`.
 
 ---
@@ -41,7 +41,7 @@ different session_ids.
                       → claude `cd`s into the clone (mid-session)
                       → no new session_start fires; CLAUDE_CODE_SESSION_ID
                         is unchanged across `cd`.
-4. user runs /ci      → /ci skill (running inside the same Claude process):
+4. user runs /ci-watcher → /ci-watcher skill (running inside the same Claude process):
                           - calls mcp__webhook__get_port → "PORT:TOKEN"
                           - reads $CLAUDE_CODE_SESSION_ID from the env
                           - launches ci_watch.py detached with
@@ -63,7 +63,7 @@ ASCII view of two windows running at the same time:
 ┌─ Window A ────────────────────────────────────────────────────────────────┐
 │ cwd: ~/repo-a              session_id: aaaaaaaa-aaaa-aaaa-aaaa-…          │
 │ branch: main                                                              │
-│ /ci not running on main → no /tmp/ci_watch_*                              │
+│ /ci-watcher not running on main → no /tmp/ci_watch_*                      │
 └───────────────────────────────────────────────────────────────────────────┘
 
 ┌─ Window B ────────────────────────────────────────────────────────────────┐
@@ -87,12 +87,12 @@ script) see the same value with no inter-process bookkeeping.
 
 ### How each consumer gets the slot
 
-| Component          | How it gets the slot                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------------- |
-| `/ci` skill        | Reads `$CLAUDE_CODE_SESSION_ID` (env var injected into the Bash-tool subshell).                           |
-| `ci_watch.py`      | Reads `$CLAUDE_CODE_SESSION_ID` (inherited from the launching subshell). Fails loud and exits 2 if unset. |
-| `status_line.sh`   | Parses `.session_id` from the hook payload (env vars are not available in the status-line context).       |
-| `session_start.sh` | Does not need it — the SessionStart hook no longer writes any session-identity files.                     |
+| Component           | How it gets the slot                                                                                      |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| `/ci-watcher` skill | Reads `$CLAUDE_CODE_SESSION_ID` (env var injected into the Bash-tool subshell).                           |
+| `ci_watch.py`       | Reads `$CLAUDE_CODE_SESSION_ID` (inherited from the launching subshell). Fails loud and exits 2 if unset. |
+| `status_line.sh`    | Parses `.session_id` from the hook payload (env vars are not available in the status-line context).       |
+| `session_start.sh`  | Does not need it — the SessionStart hook no longer writes any session-identity files.                     |
 
 `status_line.sh` runs as a hook, not as a user-tool subshell, so the
 `CLAUDE_CODE_SESSION_ID` env var isn't injected. It receives `session_id` as a
@@ -100,7 +100,7 @@ top-level field of the JSON payload Claude Code passes on stdin, and slices it
 out with the same `jq` call that pulls `current_dir` and the rate-limit
 fields.
 
-The detached watcher inherits the env var because the `/ci` skill launches it
+The detached watcher inherits the env var because the `/ci-watcher` skill launches it
 from a Bash-tool subshell (with shell-level backgrounding `&`, not via the
 `run_in_background` parameter). Children of that subshell inherit its
 environment, including `CLAUDE_CODE_SESSION_ID`.
@@ -139,9 +139,9 @@ slow reader never observes partial content.
 
 ## CI Watcher Lifecycle
 
-### Startup (from `/ci`)
+### Startup (from `/ci-watcher`)
 
-1. `/ci` skill runs inside Claude. It calls `mcp__webhook__get_port`, gets
+1. `/ci-watcher` skill runs inside Claude. It calls `mcp__webhook__get_port`, gets
    `PORT:TOKEN`, and reads `$CLAUDE_CODE_SESSION_ID` from the env. If the var
    is unset, the skill fails loud and exits.
 2. Launches `uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "$PORT" "$SESSION_TOKEN"`
@@ -152,7 +152,7 @@ slow reader never observes partial content.
    stderr immediately.
 4. Watcher takes the lock at `/tmp/ci_watch_lock_<slot>`. If a stale
    predecessor with the same slot exists (i.e. the same session re-ran
-   `/ci`), it's SIGTERM'd and the new watcher claims the lock.
+   `/ci-watcher`), it's SIGTERM'd and the new watcher claims the lock.
 5. Watcher writes `<branch>:running` to the state file, registers an `atexit`
    cleanup that unlinks state/pr/lock, and enters its main loop.
 
@@ -223,7 +223,7 @@ Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-a:running"
 
 Each window's `status_line.sh` extracts its own `session_id` from its own
 payload, builds its own slot, and reads its own watcher's state. Each
-window's `/ci` reads its own `$CLAUDE_CODE_SESSION_ID` — different Claude
+window's `/ci-watcher` reads its own `$CLAUDE_CODE_SESSION_ID` — different Claude
 processes have different session_ids.
 
 ### Two windows, different repos
@@ -263,7 +263,7 @@ different webhook MCP servers (different ports + session tokens).
 | Question                                           | Answer                                                                                                                                |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Where does the slot come from?                     | The full `CLAUDE_CODE_SESSION_ID` env var (a UUID minted by the Claude Code harness per session).                                     |
-| How does `/ci` get it?                             | Reads `$CLAUDE_CODE_SESSION_ID` from the Bash-tool subshell environment.                                                              |
+| How does `/ci-watcher` get it?                     | Reads `$CLAUDE_CODE_SESSION_ID` from the Bash-tool subshell environment.                                                              |
 | How does the watcher get it?                       | Reads `$CLAUDE_CODE_SESSION_ID` (inherited from the launching subshell). Exits 2 if unset.                                            |
 | How does `status_line.sh` get it?                  | Parses `.session_id` from its hook payload — env vars are unavailable in the status-line context.                                     |
 | What's the state-file key?                         | `slot = $CLAUDE_CODE_SESSION_ID` (full UUID).                                                                                         |

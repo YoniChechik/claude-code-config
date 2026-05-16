@@ -26,7 +26,7 @@ Use a subagent to implement the feature directly based on the description.
 Run `/pr-create` skill to create the pull request.
 
 ### Step 4: CI Watcher
-Run `/ci` skill to launch the CI watcher in the background for the current branch.
+Run `/ci-watcher` skill to launch the CI watcher in the background for the current branch.
 
 ### Step 5: Summary
 Report what was built and the PR URL.

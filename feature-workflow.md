@@ -23,7 +23,7 @@ Run `/post` skill for quality checks, code review, test review, and lint/format.
 Run `/pr-create` skill to create a pull request.
 
 ### Step 6: CI Watcher
-Run `/ci` skill to launch the CI watcher in the background for the current branch.
+Run `/ci-watcher` skill to launch the CI watcher in the background for the current branch.
 
 ### Step 7: Summary
 Report summary of what the feature is, how we implemented it and what happened at all post implementation steps.
