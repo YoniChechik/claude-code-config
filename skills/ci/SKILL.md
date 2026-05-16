@@ -1,11 +1,24 @@
 ---
 name: "ci"
-description: "Run the CI watcher script for the current or specified branch"
-argument-hint: "[branch]"
+description: "Run the CI watcher script for the current or specified branch. Use `/ci stop` to kill the watcher for the current session."
+argument-hint: "[branch|stop]"
 ---
 
 CI watcher: always-on background process that monitors CI and notifies on both failure and pass via webhook channel.
 Launch once per feature — the watcher never exits, so no re-launch is needed.
+
+# step 0: handle `stop` subcommand
+
+If the first argument is `stop`, drop a per-session kill flag and exit — do NOT launch the watcher:
+```bash
+if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+    echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot stop ci watcher." >&2
+    exit 1
+fi
+touch "/tmp/ci_watch_kill_${CLAUDE_CODE_SESSION_ID}"
+echo "CI watcher stop flag set for session ${CLAUDE_CODE_SESSION_ID}"
+```
+The running watcher (if any) will detect the flag at its next poll iteration and exit cleanly.
 
 # step 1: parse branch name from user input
 

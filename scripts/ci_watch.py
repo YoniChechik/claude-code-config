@@ -214,6 +214,10 @@ def _lock_path(slot: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
 
 
+def _kill_path(slot: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_kill_{slot}"
+
+
 def write_state(slot: str, branch: str, value: str) -> None:
     """Atomic write of '<branch>:<state>'."""
     print(f"[ci_watch] write_state -> {value!r}", flush=True)
@@ -275,6 +279,10 @@ def acquire_lock(slot: str) -> None:
         except (ValueError, ProcessLookupError, PermissionError):
             pass
     lock_path.write_text(str(os.getpid()))
+    try:
+        os.unlink(_kill_path(slot))
+    except FileNotFoundError:
+        pass
 
 
 # --- State container ---
@@ -451,6 +459,10 @@ def check_all_passed(
 
     if context == "main":
         write_state(state.slot, state.branch, "merged-passed")
+        notify(
+            port,
+            f"CI PASSED on {state.default_branch} after merge of branch {state.branch}",
+        )
         state.reported_main_pass = True
         return
 
@@ -468,6 +480,7 @@ def check_all_passed(
             flush=True,
         )
         return
+    notify(port, f"CI PASSED on branch {state.branch}")
     state.reported_pass = True
     state.terminal_run_ids = {r["id"] for r in sha_runs}
     write_state(state.slot, state.branch, "passed")
@@ -594,6 +607,18 @@ def watch(
     last_heartbeat_iter = 0
     while True:
         iter_count += 1
+        # --- Kill flag check (per-session manual stop) ---
+        if _kill_path(slot).exists():
+            print(
+                f"[ci_watch] received kill signal for session {slot}; exiting",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                os.unlink(_kill_path(slot))
+            except FileNotFoundError:
+                pass
+            sys.exit(0)
         # --- Session health check (5x retries with 2s sleep ~ 10s window) ---
         # On Mac wake-from-sleep, the localhost webhook server may briefly be
         # unreachable while its process resumes.
@@ -654,6 +679,7 @@ def watch(
             state.merged = True
             state.merge_commit_sha = merge_commit_oid
             write_state(slot, branch, "merging")
+            notify(port, f"PR #{pr_number} merged to {default_branch}")
             print(
                 f"PR for branch '{branch}' has been merged "
                 f"(merge commit: {state.merge_commit_sha}). "
