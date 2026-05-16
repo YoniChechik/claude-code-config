@@ -117,6 +117,25 @@ if [ -z "$TARGET_TTY" ] || [ ! -w "$TARGET_TTY" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# AUDIBLE NOTIFICATION (shared helper)
+# ---------------------------------------------------------------------------
+# Previously this hook played a distinct sound (Funk.aiff) directly via
+# afplay. We've since standardized on the shared notify_user_attention()
+# helper from _notify.sh — the same one used by the permission_guard ask
+# path and notification__sound.sh — so every "user, please come back"
+# signal sounds the same. The helper plays Glass.aiff, sets the iTerm2
+# tab color (green) and writes a "waiting…" title.
+#
+# IMPORTANT ORDERING: we call the helper FIRST and then set the
+# rate-limit-specific orange tab color + badge below, so those override
+# the helper's green color. The badge is untouched by the helper. The
+# title written by the helper is overridden by Claude Code anyway (see
+# badge comment below), so it does not conflict.
+# _notify.sh is already sourced at the top of this script.
+# ---------------------------------------------------------------------------
+notify_user_attention
+
+# ---------------------------------------------------------------------------
 # Set iTerm2 tab BADGE to a visible rate-limit indicator.
 # We use the badge instead of the tab title because Claude Code overrides
 # the tab title (\033]0;) after hooks run, so our title change disappears.
@@ -128,23 +147,8 @@ printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > "$
 # ---------------------------------------------------------------------------
 # Also set the tab color to orange (high red + medium green, no blue)
 # to visually distinguish it from the idle-green used by the Stop hook.
+# This intentionally overrides the green color that notify_user_attention
+# just set, since rate-limit is a different state than "waiting for user".
 # Escape sequence format: \033]6;1;bg;<channel>;brightness;<0-255>\a
 # ---------------------------------------------------------------------------
 printf '\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;140\a\033]6;1;bg;blue;brightness;0\a' > "$TARGET_TTY" 2>/dev/null || true
-
-# ---------------------------------------------------------------------------
-# AUDIBLE NOTIFICATION
-# ---------------------------------------------------------------------------
-# Play a distinct system sound so the user notices the rate limit even when
-# the iTerm window is hidden / they've walked away. We deliberately use a
-# different sound than stop__sound.sh (which plays Glass.aiff on normal
-# completion) so the ear can tell them apart:
-#   - Glass.aiff  -> normal stop (everything OK)
-#   - Funk.aiff   -> StopFailure rate_limit (Pro extra-usage OR Team limit)
-# Background the playback and disown so the hook exits immediately and
-# doesn't block Claude Code's hook dispatcher.
-# ---------------------------------------------------------------------------
-if command -v afplay >/dev/null 2>&1; then
-    afplay /System/Library/Sounds/Funk.aiff </dev/null >/dev/null 2>&1 &
-    disown
-fi
