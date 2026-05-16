@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_tool_use__ask_guard.sh"
+            "command": "bash $HOME/.claude/scripts/pre_tool_use__permission_guard.sh"
           }
         ]
       },
