@@ -23,7 +23,7 @@ Creates a git clone for isolated feature development. Handles both new features 
 ```bash
 bash ~/.claude/skills/create-clone/create_clone.sh "$FEATURE_NAME"
 ```
-This handles: fetching, branch detection, cloning, env symlinking, and environment setup.
+This handles: fetching latest main from origin, branch detection, cloning, branching off `origin/main` (never a stale local main), env symlinking, and environment setup.
 
 ### Step 3: Notify User
 Tell user:

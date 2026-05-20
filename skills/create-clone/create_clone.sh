@@ -26,10 +26,14 @@ if [ -n "$EXISTING" ]; then
     echo "Existing branch detected: $FEATURE_NAME — cloning it."
     git clone -b "$FEATURE_NAME" "$REPO_URL" "_clones/$FEATURE_NAME"
 else
-    echo "New branch mode: cloning main then creating $FEATURE_NAME."
-    git clone -b main "$REPO_URL" "_clones/$FEATURE_NAME"
+    echo "New branch mode: fetching latest main from origin, then creating $FEATURE_NAME off origin/main."
+    # Clone from origin URL (always a fresh network fetch), then explicitly
+    # fetch origin and branch off origin/main to guarantee we start from the
+    # latest upstream main — never a stale local main.
+    git clone "$REPO_URL" "_clones/$FEATURE_NAME"
     cd "_clones/$FEATURE_NAME"
-    git checkout -b "$FEATURE_NAME"
+    git fetch origin main
+    git checkout -b "$FEATURE_NAME" origin/main
     git push -u origin "$FEATURE_NAME"
     cd "$ORIGINAL_REPO_DIR"
 fi
