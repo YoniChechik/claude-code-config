@@ -129,9 +129,28 @@ GH_PATTERNS=(
 for pattern in "${GH_PATTERNS[@]}"; do
     for segment in "${SEGMENTS[@]}"; do
         if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+            # Custom message for `gh pr merge` so the user is reminded that
+            # any prior in-session authorization may have gone stale.
+            if [ "$pattern" = "gh pr merge" ]; then
+                ask "gh pr merge — confirm authorization is fresh (do not assume prior approval still applies)."
+            fi
             ask "gh command requires confirmation."
         fi
     done
+done
+
+# ---------------------------------------------------------------------------
+# HTTP mutation against sunsay-ltd GitHub repos
+# Closes the bypass where curl/wget/http/xh with -X PUT/POST/PATCH/DELETE
+# was used to hit api.github.com/repos/sunsay-ltd/... directly (e.g.
+# merging a PR via the REST API when `gh pr merge` is gated).
+# ---------------------------------------------------------------------------
+for segment in "${SEGMENTS[@]}"; do
+    if [[ "$segment" =~ (^|[[:space:]])(curl|wget|http|xh)([[:space:]]) ]] && \
+       [[ "$segment" =~ (-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)) ]] && \
+       [[ "$segment" =~ api\.github\.com/repos/sunsay-ltd ]]; then
+        deny "Blocked: HTTP mutation (POST/PUT/PATCH/DELETE) against api.github.com/repos/sunsay-ltd. Use the gh CLI with explicit user approval — do not bypass via raw HTTP."
+    fi
 done
 
 # ---------------------------------------------------------------------------
@@ -238,6 +257,20 @@ for pattern in "${GCLOUD_PATTERNS[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# gcloud run — hard-deny revision-creating verbs against prod-like projects.
+# `gcloud run services update|replace|deploy|create` and bare `gcloud run
+# deploy` create a new active revision and can take down production traffic
+# (e.g. by pointing at a broken image or stale env). Must be run manually.
+# ---------------------------------------------------------------------------
+GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
+for segment in "${SEGMENTS[@]}"; do
+    if [[ "$segment" =~ gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
+       [[ "$segment" =~ --project[[:space:]]*=?[[:space:]]*${GCLOUD_RUN_PROTECTED_PROJECTS} ]]; then
+        deny "Blocked: gcloud run revision-creating verb (update/replace/deploy/create) against a protected project (production-490411 / staging-480220 / mirror-production-496017). Requires explicit user execution — do not retry."
+    fi
+done
+
+# ---------------------------------------------------------------------------
 # bq
 # ---------------------------------------------------------------------------
 BQ_PATTERNS=(
@@ -289,6 +322,114 @@ for pattern in "${SUPABASE_PATTERNS[@]}"; do
             ask "supabase command requires confirmation."
         fi
     done
+done
+
+# ---------------------------------------------------------------------------
+# pulumi — hard-deny prod-stack mutations without a tight, valid --target set.
+# Must run BEFORE the generic pulumi ask-loops below: those exit on `ask`,
+# which would short-circuit this stricter deny check.
+#
+# Applies to `pulumi up`, `pulumi destroy`, `pulumi cancel` against
+# --stack production / prod / mirror / main. The intent: a model can never
+# blast a full prod stack — it must enumerate specific resource URNs, and
+# only a few of them. Bypass shapes we explicitly reject:
+#   - No --target at all (would target the whole stack).
+#   - --target-dependents (walks the dependency graph; effectively whole-stack).
+#   - --target pointing at the Stack root URN (whole-stack via root).
+#   - More than 5 --target flags (heuristic: enumerate-everything bypass).
+#   - Any --target value that isn't shaped like a fully-qualified resource URN.
+# ---------------------------------------------------------------------------
+pulumi_target_guard() {
+    local seg="$1"
+
+    # Subcommand check. We strip the leading `pulumi` and any -C / --cwd
+    # global flags (so "pulumi -C infra/core up ..." still matches "up").
+    # Uses sed -E with POSIX character classes for BSD-sed (macOS) compat.
+    local stripped
+    stripped=$(echo "$seg" \
+        | sed -E 's/^[[:space:]]*pulumi[[:space:]]+//' \
+        | sed -E 's/-C[[:space:]]+[^ ]+[[:space:]]*//g' \
+        | sed -E 's/--cwd[[:space:]]+[^ ]+[[:space:]]*//g' \
+        | sed -E 's/^[[:space:]]+//')
+    [[ "$stripped" =~ ^(up|destroy|cancel)([[:space:]]|$) ]] || return 0
+
+    # Stack check — match both `--stack X`, `--stack=X`, `-s X`, `-s=X`.
+    local stack=""
+    if [[ "$seg" =~ (--stack|[[:space:]]-s)[[:space:]]*=?[[:space:]]*([A-Za-z0-9._/-]+) ]]; then
+        stack="${BASH_REMATCH[2]}"
+    fi
+    [[ -n "$stack" ]] || return 0
+    case "$stack" in
+        production|prod|mirror|main) ;;
+        *) return 0 ;;
+    esac
+
+    local block_prefix="Blocked: pulumi against --stack $stack without a tight --target set."
+
+    # Reject --target-dependents (graph-walk bypass).
+    if [[ "$seg" =~ (^|[[:space:]])--target-dependents([[:space:]]|=|$) ]]; then
+        deny "${block_prefix} --target-dependents walks the dependency graph and is effectively whole-stack. Run manually."
+    fi
+
+    # Collect every --target / -t value (both `--target X` and `--target=X`).
+    local -a targets=()
+    # shellcheck disable=SC2206
+    local tokens=( $seg )
+    local i=0
+    local n=${#tokens[@]}
+    while [ $i -lt $n ]; do
+        local tok="${tokens[$i]}"
+        case "$tok" in
+            --target|-t)
+                i=$((i+1))
+                [ $i -lt $n ] && targets+=("${tokens[$i]}")
+                ;;
+            --target=*)
+                targets+=("${tok#--target=}")
+                ;;
+            -t=*)
+                targets+=("${tok#-t=}")
+                ;;
+        esac
+        i=$((i+1))
+    done
+
+    # Reject if no --target flags at all.
+    if [ ${#targets[@]} -eq 0 ]; then
+        deny "${block_prefix} No --target specified — would mutate the entire stack. Pulumi against prod-like stacks must enumerate specific resource URNs."
+    fi
+
+    # Heuristic: >5 targets suggests enumerate-everything bypass.
+    if [ ${#targets[@]} -gt 5 ]; then
+        deny "${block_prefix} More than 5 --target flags (${#targets[@]}); this looks like enumerate-all-URNs. Split into smaller manual runs."
+    fi
+
+    # Per-target validation.
+    local t
+    for t in "${targets[@]}"; do
+        # Strip surrounding quotes if any.
+        t="${t%\"}"; t="${t#\"}"
+        t="${t%\'}"; t="${t#\'}"
+
+        # Reject Stack-root URN (whole-stack via root).
+        if [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::pulumi:pulumi:Stack:: ]]; then
+            deny "${block_prefix} --target points at the Stack root URN ($t) — equivalent to whole-stack. Target individual resources instead."
+        fi
+
+        # Must look like a fully-qualified resource URN:
+        #   urn:pulumi:<stack>::<project>::<type>::<name>
+        # Note: <type> itself contains colons (e.g.
+        # `gcp:cloudrunv2/service:Service`), so we allow `.+` for it and pin
+        # the tail with `::<no-colon-name>$`.
+        if ! [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::.+::[^:]+$ ]]; then
+            deny "${block_prefix} --target value '$t' is not a fully-qualified resource URN (urn:pulumi:<stack>::<project>::<type>::<name>). Refusing to guess."
+        fi
+    done
+}
+
+for segment in "${SEGMENTS[@]}"; do
+    echo "$segment" | grep -qE '^\s*pulumi\s' || continue
+    pulumi_target_guard "$segment"
 done
 
 # ---------------------------------------------------------------------------
