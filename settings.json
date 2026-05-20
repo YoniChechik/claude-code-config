@@ -95,6 +95,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "EnterPlanMode|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/pre_tool_use__block_plan_mode.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash|Edit|Write|NotebookEdit",
         "hooks": [
           {
