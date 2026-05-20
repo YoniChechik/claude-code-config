@@ -62,3 +62,13 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 ### Step 3: Add Tasks to Task List
 Add the tasks from the plan file to the task list in the relevant positions. Tasks should be added in the order they should be executed, but can be worked on in parallel if they are independent
 
+## Codex critique pass
+
+After the plan file is written, run a second-opinion pass before terminating:
+
+- **Critique**: Invoke the `/codex` skill on the just-written `plan-$FEATURE_NAME.md`. Ask Codex to flag weak spots, missing considerations, risky assumptions, bad task sequencing, and unclear acceptance criteria.
+- **Triage**: Separate valid points from noise; note any items that are open questions for the user rather than direct fixes.
+- **Propose**: Present a short bulleted list of proposed plan changes. Use AskUserQuestion for concrete accept/reject choices; otherwise plain text.
+- **Apply**: Make surgical edits to the plan `.md` for accepted changes — do not rewrite wholesale.
+- **Done**: Tell the user the plan was critiqued by Codex and updated, and point them to the final file.
+
