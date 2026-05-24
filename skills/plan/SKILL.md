@@ -9,6 +9,14 @@ Restate the question in fully concrete terms, making every implicit detail expli
 
 Explore the codebase and create a structured implementation plan.
 
+## HARD CONSTRAINT: ONE FEATURE = ONE PR
+
+**MUST** plan every feature to ship as a **single PR**. Never split into multiple PRs, never propose phased/follow-up PRs, never suggest "PR 1 / PR 2" sequencing.
+
+- All tasks in the plan land together in one branch, one PR.
+- If scope feels too big for one PR, ask the user to narrow the scope — do **not** silently split it.
+- Codex critique pass must respect this too: reject any suggestion that breaks the work into multiple PRs.
+
 ## Feature description from user input
 "$ARGUMENTS"
 
