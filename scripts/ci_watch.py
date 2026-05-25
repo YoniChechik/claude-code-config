@@ -603,10 +603,16 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
     ``context`` is "branch" or "main" — controls message wording, state string,
     and which reported_* flag we toggle.
     """
-    # Any terminal conclusion that is NOT a pass is a failure. "success" and
-    # "skipped" are passes; everything else (failure, startup_failure,
-    # cancelled, timed_out, action_required, stale, neutral) is a failure.
-    _pass_conclusions = {"success", "skipped"}
+    # Conclusions that do NOT represent a code failure. Only "failure",
+    # "timed_out", and "action_required" are treated as real CI failures.
+    _pass_conclusions = {
+        "success",  # code passed
+        "skipped",  # path-filter / conditional skip
+        "startup_failure",  # workflow never started (config/permission issue, zero jobs)
+        "cancelled",  # manually cancelled, not a code failure
+        "neutral",  # informational, not a failure
+        "stale",  # superseded by a newer run
+    }
     failed = [
         r
         for r in sha_runs
@@ -672,11 +678,18 @@ def check_all_passed(
     """Fire CI-passed webhook once when every run is completed+success/skipped."""
     if not sha_runs:
         return
-    # A run "passes" if it completed with success OR was skipped (path-filter
-    # skip, conditional skip, etc.).  Any other conclusion (failure,
-    # startup_failure, cancelled, timed_out, action_required, neutral, stale)
-    # means CI has NOT fully passed.
-    _pass_conclusions = {"success", "skipped"}
+    # A run "passes" if its conclusion is not a code failure. Conclusions like
+    # startup_failure (workflow never started), cancelled, neutral, and stale
+    # are non-blocking — only "failure", "timed_out", and "action_required"
+    # prevent the all-passed signal.
+    _pass_conclusions = {
+        "success",
+        "skipped",
+        "startup_failure",
+        "cancelled",
+        "neutral",
+        "stale",
+    }
     if any(
         r.get("status") != "completed" or r.get("conclusion") not in _pass_conclusions
         for r in sha_runs

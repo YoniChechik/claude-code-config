@@ -354,8 +354,21 @@ def test_ci_passes_with_skipped_run(tmp_path):
     assert out["state_value"] == "passed"
 
 
-def test_ci_startup_failure_is_failure(tmp_path):
-    """startup_failure conclusion should be treated as a CI failure, not leave state stuck."""
+def test_ci_startup_failure_is_not_failure(tmp_path):
+    """startup_failure conclusion should NOT trigger a CI failure notification.
+
+    startup_failure means GitHub couldn't start the workflow (config/permission
+    issue, zero jobs). It's not a code failure.
+    """
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "clean",
+        }
+    ]
     runs = {
         "workflow_runs": [
             {
@@ -376,15 +389,30 @@ def test_ci_startup_failure_is_failure(tmp_path):
     }
     out = run_watch(
         str(tmp_path),
-        api_get_side_effect=make_api_get(runs=runs),
+        api_get_side_effect=make_api_get(pr=pr, runs=runs),
+        has_pending=False,
     )
-    assert out["state_value"] == "failed"
+    # Should pass, not fail — startup_failure is non-blocking.
+    assert out["state_value"] == "passed"
     msgs = [m for _, m in out["notify_calls"]]
-    assert any("CI FAILURE" in m for m in msgs)
+    assert not any("CI FAILURE" in m for m in msgs)
+    assert any("CI PASSED" in m for m in msgs)
 
 
-def test_ci_cancelled_is_failure(tmp_path):
-    """cancelled conclusion should be treated as a CI failure."""
+def test_ci_cancelled_is_not_failure(tmp_path):
+    """cancelled conclusion should NOT trigger a CI failure notification.
+
+    Cancelled runs are manually stopped — not a code failure.
+    """
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "clean",
+        }
+    ]
     runs = {
         "workflow_runs": [
             {
@@ -398,9 +426,57 @@ def test_ci_cancelled_is_failure(tmp_path):
     }
     out = run_watch(
         str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr, runs=runs),
+        has_pending=False,
+    )
+    # Should pass, not fail — cancelled is non-blocking.
+    assert out["state_value"] == "passed"
+    msgs = [m for _, m in out["notify_calls"]]
+    assert not any("CI FAILURE" in m for m in msgs)
+
+
+def test_ci_real_failure(tmp_path):
+    """A run with conclusion='failure' should trigger a CI FAILURE notification."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 99,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "failure",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
+    msgs = [m for _, m in out["notify_calls"]]
+    assert any("CI FAILURE" in m and "99" in m for m in msgs)
+
+
+def test_ci_timed_out_is_failure(tmp_path):
+    """A run with conclusion='timed_out' should trigger a CI FAILURE notification."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 77,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "timed_out",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+    )
+    assert out["state_value"] == "failed"
+    msgs = [m for _, m in out["notify_calls"]]
+    assert any("CI FAILURE" in m and "77" in m for m in msgs)
 
 
 def test_conflict_detection(tmp_path):
