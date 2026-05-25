@@ -10,21 +10,58 @@ Delegate read-only review work to the `codex` CLI. Codex gets its own look at th
 
 ## Invocation Template (use verbatim)
 
+Every codex invocation MUST write output to a file and run in the background. Never run codex interactively or stream its stdout.
+
 ```bash
-codex exec \
+# 1. Generate a unique output file path
+CODEX_OUT="/tmp/codex-out-$(date +%s%N).md"
+CODEX_LOG="/tmp/codex-log-$(date +%s%N).log"
+
+# 2. Run codex in the background, writing output to file
+nohup codex exec \
   --sandbox read-only \
   -c approval_policy="never" \
   -C "<repo-or-dir>" \
   --skip-git-repo-check \
-  "<review prompt>"
+  -o "$CODEX_OUT" \
+  "<review prompt>" \
+  </dev/null >"$CODEX_LOG" 2>&1 &
+
+# 3. Capture the PID for polling
+CODEX_PID=$!
+echo "codex PID=$CODEX_PID, output=$CODEX_OUT"
 ```
 
-Optional: `-o <file>` writes the final message to a file. `-m <model>` overrides the default model — do NOT set unless the user asks.
+`-m <model>` overrides the default model -- do NOT set unless the user asks.
+
+## Polling for Completion
+
+After launching codex in the background, poll until the process finishes. Use a tight loop with 1-second sleeps (per global guidelines -- never use bare `sleep`).
+
+```bash
+# Poll until codex process completes (max iterations prevent infinite loop)
+for i in $(seq 1 300); do
+  if ! kill -0 "$CODEX_PID" 2>/dev/null; then
+    echo "codex finished after ~${i}s"
+    break
+  fi
+  sleep 1
+done
+
+# Check if process is still running (timed out)
+if kill -0 "$CODEX_PID" 2>/dev/null; then
+  echo "codex still running after 300s -- check $CODEX_LOG for details"
+fi
+```
+
+Then read the output file with the Read tool at `$CODEX_OUT`. If the file is empty or missing, check `$CODEX_LOG` for errors.
 
 ## Rules (non-negotiable)
 
+- **Always use `-o <file>`** to write output to a file. Never consume codex stdout directly.
+- **Always run in the background** using the nohup/backgrounding pattern above. Never run codex in the foreground or with `run_in_background=true` on the Bash tool (process gets killed when subagent exits).
 - Sandbox MUST be `read-only`. Never use `--full-auto` (implies workspace-write) or `--dangerously-bypass-approvals-and-sandbox`.
-- Approval policy goes via `-c approval_policy="never"` — `codex exec` has no `--ask-for-approval` flag.
+- Approval policy goes via `-c approval_policy="never"` -- `codex exec` has no `--ask-for-approval` flag.
 - `read-only` sandbox **blocks network egress**. Any `gh`/`git fetch`/`curl` must be run by Claude OUTSIDE codex and piped into codex via stdin (or written to a file codex reads).
 - `--skip-git-repo-check` is required when `-C` points at a non-git dir (e.g., a standalone plan.md).
 - Codex never writes. If codex suggests fixes, Claude applies them.
@@ -34,38 +71,98 @@ Optional: `-o <file>` writes the final message to a file. `-m <model>` overrides
 Claude has a question about unfamiliar code and wants a second pair of eyes.
 
 ```bash
-codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
-  "Explore this repo and explain <question>. List the key files involved."
+CODEX_OUT="/tmp/codex-out-$(date +%s%N).md"
+CODEX_LOG="/tmp/codex-log-$(date +%s%N).log"
+
+nohup codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
+  -o "$CODEX_OUT" \
+  "Explore this repo and explain <question>. List the key files involved." \
+  </dev/null >"$CODEX_LOG" 2>&1 &
+CODEX_PID=$!
+
+# Poll for completion
+for i in $(seq 1 300); do
+  if ! kill -0 "$CODEX_PID" 2>/dev/null; then echo "done after ~${i}s"; break; fi
+  sleep 1
+done
 ```
+
+Then read `$CODEX_OUT` with the Read tool.
 
 ## Recipe 2: Plan / Design .md Review
 
 Have codex stress-test a design doc for missing considerations.
 
 ```bash
-codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" --skip-git-repo-check \
-  "Review the plan at <path/to/plan.md>. Flag missing considerations, risks, or unclear steps."
+CODEX_OUT="/tmp/codex-out-$(date +%s%N).md"
+CODEX_LOG="/tmp/codex-log-$(date +%s%N).log"
+
+nohup codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" --skip-git-repo-check \
+  -o "$CODEX_OUT" \
+  "Review the plan at <path/to/plan.md>. Flag missing considerations, risks, or unclear steps." \
+  </dev/null >"$CODEX_LOG" 2>&1 &
+CODEX_PID=$!
+
+# Poll for completion
+for i in $(seq 1 300); do
+  if ! kill -0 "$CODEX_PID" 2>/dev/null; then echo "done after ~${i}s"; break; fi
+  sleep 1
+done
 ```
+
+Then read `$CODEX_OUT` with the Read tool.
 
 ## Recipe 3: PR Diff Review
 
-Codex cannot reach GitHub. Claude fetches the diff, pipes it in.
+Codex cannot reach GitHub. Claude fetches the diff first, writes it to a temp file, then codex reads it.
 
 ```bash
-gh pr diff <NUM> | codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
-  "Review this PR diff. Focus on correctness, edge cases, and security. Cite file:line."
+# Pre-fetch the diff outside codex (codex has no network)
+DIFF_FILE="/tmp/codex-diff-$(date +%s%N).txt"
+gh pr diff <NUM> > "$DIFF_FILE"
+
+CODEX_OUT="/tmp/codex-out-$(date +%s%N).md"
+CODEX_LOG="/tmp/codex-log-$(date +%s%N).log"
+
+nohup codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
+  -o "$CODEX_OUT" \
+  "Review the PR diff at $DIFF_FILE. Focus on correctness, edge cases, and security. Cite file:line." \
+  </dev/null >"$CODEX_LOG" 2>&1 &
+CODEX_PID=$!
+
+# Poll for completion
+for i in $(seq 1 300); do
+  if ! kill -0 "$CODEX_PID" 2>/dev/null; then echo "done after ~${i}s"; break; fi
+  sleep 1
+done
 ```
 
-For richer context, concatenate and pipe:
+For richer context, concatenate metadata and diff into one file:
 
 ```bash
-{ gh pr view <NUM> --json title,body,files; echo '---DIFF---'; gh pr diff <NUM>; } \
-  | codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
-    "Review this PR. Metadata then diff below. Cite file:line."
+DIFF_FILE="/tmp/codex-diff-$(date +%s%N).txt"
+{ gh pr view <NUM> --json title,body,files; echo '---DIFF---'; gh pr diff <NUM>; } > "$DIFF_FILE"
+
+CODEX_OUT="/tmp/codex-out-$(date +%s%N).md"
+CODEX_LOG="/tmp/codex-log-$(date +%s%N).log"
+
+nohup codex exec --sandbox read-only -c approval_policy="never" -C "$PWD" \
+  -o "$CODEX_OUT" \
+  "Review this PR. Metadata then diff in $DIFF_FILE. Cite file:line." \
+  </dev/null >"$CODEX_LOG" 2>&1 &
+CODEX_PID=$!
+
+# Poll for completion
+for i in $(seq 1 300); do
+  if ! kill -0 "$CODEX_PID" 2>/dev/null; then echo "done after ~${i}s"; break; fi
+  sleep 1
+done
 ```
 
-## After Codex Responds
+Then read `$CODEX_OUT` with the Read tool.
 
-- Summarize codex's findings back to the user.
-- Apply any fixes Claude agrees with — codex itself made no changes.
-- If codex output is long, re-run with `-o codex-out.md` and read the file.
+## After Codex Finishes
+
+1. **Read the output file** using the Read tool at the `$CODEX_OUT` path. If the file is missing or empty, check `$CODEX_LOG` for errors.
+2. **Summarize** codex's findings back to the user.
+3. **Apply any fixes** Claude agrees with -- codex itself made no changes.
