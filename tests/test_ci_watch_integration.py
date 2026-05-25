@@ -667,6 +667,149 @@ def test_merge_tracking(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Merge-race false-positive prevention
+# ---------------------------------------------------------------------------
+
+
+def test_merge_after_behind_supersedes_behind_alert(tmp_path):
+    """When 'behind' fires then merge is detected, merge notification
+    includes a 'disregard' note about the previous behind alert."""
+    call_count = {"n": 0}
+    # Iteration 1: PR is open + behind  →  fires "CI FAILURE: behind"
+    # Iteration 2: PR is merged          →  fires "PR merged (disregard)"
+    pr_open_behind = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "behind",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    pr_merged = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "behind",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    runs = {"workflow_runs": []}
+    main_runs = {
+        "workflow_runs": [
+            {
+                "id": 50,
+                "name": "build",
+                "head_sha": "merge-sha",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+    }
+
+    def side_effect(url, cache, token):
+        if "/pulls" in url:
+            call_count["n"] += 1
+            # First two PR calls (list + single) return open/behind,
+            # subsequent calls return merged.
+            if call_count["n"] <= 2:
+                if "/pulls/" in url:
+                    return pr_open_behind[0], True
+                return pr_open_behind, True
+            if "/pulls/" in url:
+                return pr_merged[0], True
+            return pr_merged, True
+        if "/actions/runs" in url:
+            if "branch=main" in url:
+                return main_runs, True
+            return runs, True
+        return None, False
+
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=side_effect,
+        max_sleeps=10,
+    )
+    msgs = [m for _, m in out["notify_calls"]]
+    # The merge notification should include the superseded note.
+    merge_msgs = [m for m in msgs if "merged" in m.lower()]
+    assert any("disregard" in m for m in merge_msgs), (
+        f"Expected 'disregard' in merge notification, got: {merge_msgs}"
+    )
+    assert any("behind" in m for m in merge_msgs), (
+        f"Expected 'behind' mentioned in merge notification, got: {merge_msgs}"
+    )
+
+
+def test_failure_suppressed_when_pr_fetch_fails(tmp_path):
+    """When the PR list endpoint returns None (API timeout with no cached
+    data), branch failure notifications are suppressed.
+
+    This simulates a scenario where a watcher starts, the PR endpoint
+    times out (returning None), runs show failures, but since we can't
+    confirm the PR is still open (it might already be merged), we
+    suppress the failure notification.
+    """
+    runs_with_failure = {
+        "workflow_runs": [
+            {
+                "id": 99,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "failure",
+            },
+        ]
+    }
+
+    def side_effect(url, cache, token):
+        if "/pulls" in url:
+            # PR endpoint always fails — returns None (no cached data).
+            return None, False
+        if "/actions/runs" in url:
+            return runs_with_failure, True
+        return None, False
+
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=side_effect,
+        max_sleeps=3,
+    )
+    msgs = [m for _, m in out["notify_calls"]]
+    # No CI FAILURE notification should fire — PR data is unavailable
+    # and we can't confirm the PR is still open.
+    fail_msgs = [m for m in msgs if "CI FAILURE" in m]
+    assert fail_msgs == [], (
+        f"Expected no CI FAILURE when PR fetch failed, got: {fail_msgs}"
+    )
+
+
+def test_failure_still_fires_without_pr(tmp_path):
+    """When no PR exists at all (branch without PR), failures still fire."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 99,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "failure",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+    )
+    assert out["state_value"] == "failed"
+    msgs = [m for _, m in out["notify_calls"]]
+    assert any("CI FAILURE" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
 # State writers
 # ---------------------------------------------------------------------------
 

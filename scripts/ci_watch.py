@@ -895,6 +895,9 @@ def watch(
         # The list endpoint (/pulls?head=...) does NOT return mergeable_state.
         # We fetch the single-PR endpoint (/pulls/{number}) for that field.
         pr_data, _ = api_get(pr_url, state.pr_cache_obj, gh_token_value())
+        # pr_data is None when the API call failed (timeout / error) and
+        # there was no cached data.  [] means "no PR exists".
+        pr_fetch_failed = pr_data is None
         pr = pr_data[0] if pr_data else {}
 
         pr_number = pr.get("number")
@@ -922,7 +925,26 @@ def watch(
             state.merged = True
             state.merge_commit_sha = merge_commit_oid
             write_state(slot, branch, "merging")
-            notify(port, f"PR #{pr_number} merged to {default_branch}")
+            # If behind/conflict/fail was reported in a previous iteration,
+            # the merge supersedes it — send a corrective note so the user
+            # knows the earlier alert was a transient race, not a real
+            # problem.  (GitHub can briefly show mergeable_state:"behind"
+            # while processing a squash-merge, causing a false-positive
+            # "CI FAILURE: behind" one poll before the merge is visible.)
+            superseded: list[str] = []
+            if state.reported_behind:
+                superseded.append("behind")
+            if state.reported_conflict:
+                superseded.append("conflict")
+            if state.reported_fail:
+                superseded.append("CI failure")
+            suffix = ""
+            if superseded:
+                suffix = (
+                    f" (previous {'/'.join(superseded)} alert was a transient"
+                    f" race condition — disregard)"
+                )
+            notify(port, f"PR #{pr_number} merged to {default_branch}{suffix}")
             print(
                 f"PR for branch '{branch}' has been merged "
                 f"(merge commit: {state.merge_commit_sha}). "
@@ -1014,27 +1036,39 @@ def watch(
             continue
 
         # --- Branch tracking path ---
+        # Guard: if the PR list endpoint failed (returned None — API
+        # timeout / network error with no cached data), we cannot tell
+        # whether the PR is still open or has been merged.  Skip
+        # conflict/behind/failure checks for this iteration — the merge
+        # detection above also couldn't run, so firing a failure now
+        # risks a false positive (the PR might already be merged but we
+        # just can't see it).
+        # When the endpoint returned [] (no PR exists) or a PR dict
+        # (PR fetched successfully), checks proceed normally.
+        pr_data_available = not pr_fetch_failed
+
         runs_data, _ = api_get(runs_url, state.runs_cache, gh_token_value())
         all_runs = (runs_data or {}).get("workflow_runs", [])
 
-        check_pr_condition(
-            is_conflicting(pr_detail or pr),
-            "reported_conflict",
-            state,
-            f"CI FAILURE on branch {branch}: PR has merge conflicts. "
-            f"Delegate the fix to coder-agent.",
-            "conflict",
-            port,
-        )
-        check_pr_condition(
-            is_behind(pr_detail or pr),
-            "reported_behind",
-            state,
-            f"CI FAILURE on branch {branch}: PR is behind the base branch "
-            f"and needs to be updated. Run /sync to update the branch.",
-            "behind",
-            port,
-        )
+        if pr_data_available:
+            check_pr_condition(
+                is_conflicting(pr_detail or pr),
+                "reported_conflict",
+                state,
+                f"CI FAILURE on branch {branch}: PR has merge conflicts. "
+                f"Delegate the fix to coder-agent.",
+                "conflict",
+                port,
+            )
+            check_pr_condition(
+                is_behind(pr_detail or pr),
+                "reported_behind",
+                state,
+                f"CI FAILURE on branch {branch}: PR is behind the base branch "
+                f"and needs to be updated. Run /sync to update the branch.",
+                "behind",
+                port,
+            )
 
         if not all_runs:
             time.sleep(POLL_INTERVAL)
@@ -1080,7 +1114,12 @@ def watch(
             state.terminal_run_ids = set()
             write_state(slot, branch, "running")
 
-        check_failures("branch", sha_runs, state, port)
+        # Only fire branch failure/pass notifications when we have fresh PR
+        # data confirming the PR is still open.  Without it, the PR might
+        # already be merged (API timeout) and firing a failure here would be
+        # a false positive.
+        if pr_data_available:
+            check_failures("branch", sha_runs, state, port)
         check_all_passed("branch", sha_runs, state, mergeable_state, port)
 
         # Stuck-pending required-checks detection. Only meaningful when the PR
