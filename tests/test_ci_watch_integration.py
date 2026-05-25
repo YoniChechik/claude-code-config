@@ -293,7 +293,7 @@ def test_ci_passes(tmp_path):
         has_pending=False,
     )
     assert out["state_value"] == "passed"
-    assert any("✅ CI passed" in m for _, m in out["notify_calls"])
+    assert any("CI PASSED" in m for _, m in out["notify_calls"])
 
 
 def test_ci_fails(tmp_path):
@@ -315,6 +315,92 @@ def test_ci_fails(tmp_path):
     assert out["state_value"] == "failed"
     msgs = [m for _, m in out["notify_calls"]]
     assert any("CI FAILURE" in m and "99" in m for m in msgs)
+
+
+def test_ci_passes_with_skipped_run(tmp_path):
+    """Skipped workflow runs (path-filter skip) should not block 'passed'."""
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "clean",
+        }
+    ]
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 2,
+                "name": "mobile-ci",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "skipped",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr, runs=runs),
+        has_pending=False,
+    )
+    assert out["state_value"] == "passed"
+
+
+def test_ci_startup_failure_is_failure(tmp_path):
+    """startup_failure conclusion should be treated as a CI failure, not leave state stuck."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 2,
+                "name": "migrations",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "startup_failure",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+    )
+    assert out["state_value"] == "failed"
+    msgs = [m for _, m in out["notify_calls"]]
+    assert any("CI FAILURE" in m for m in msgs)
+
+
+def test_ci_cancelled_is_failure(tmp_path):
+    """cancelled conclusion should be treated as a CI failure."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "completed",
+                "conclusion": "cancelled",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+    )
+    assert out["state_value"] == "failed"
 
 
 def test_conflict_detection(tmp_path):
@@ -501,7 +587,7 @@ def test_merge_tracking(tmp_path):
         max_sleeps=10,  # merge path may need a few extra ticks
     )
     assert out["state_value"] == "merged-passed"
-    assert any("CI on main passed for merge" in m for _, m in out["notify_calls"])
+    assert any("CI PASSED on main" in m for _, m in out["notify_calls"])
 
 
 # ---------------------------------------------------------------------------

@@ -51,6 +51,10 @@ SHA_RUNS_EMPTY_MAX = 120  # 120 * 1s = 2 min
 MAIN_WAIT_MAX = 300  # 300 * 1s = 5 min
 HEALTH_RETRY_MAX = 5  # 5 attempts with 2s sleep between (~10s window)
 HEALTH_RETRY_SLEEP = 2.0
+# Stuck-pending detection: number of consecutive iterations a required check
+# must remain un-emitted (with all emitted checks already completed) before we
+# fire the STUCK_PENDING_REQUIRED_CHECKS notification.
+STUCK_PENDING_MIN_ITERS = 60
 
 # Module-level base dir for state files. Tests override this.
 TMP_DIR = "/tmp"
@@ -152,6 +156,211 @@ def has_pending_checks(branch: str) -> bool:
     except json.JSONDecodeError:
         return False
     return any(c.get("bucket") == "pending" for c in checks)
+
+
+# --- Stuck-pending required-checks detection ---
+
+
+def get_required_contexts(
+    owner: str, repo: str, default_branch: str
+) -> tuple[list[str], int | None]:
+    """Return (required_check_contexts, ruleset_id) for the default branch.
+
+    Reads the active branch-protection ruleset via ``gh api``. Returns
+    ``([], None)`` on any error — callers MUST treat empty as "unknown, do
+    not trigger stuck-pending detection" rather than "no requirements".
+    Errors are logged to stderr; we never silently swallow.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"/repos/{owner}/{repo}/rules/branches/{default_branch}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"[warn] get_required_contexts gh api failed: {e}", file=sys.stderr)
+        return [], None
+    if result.returncode != 0:
+        print(
+            f"[warn] get_required_contexts gh api non-zero: {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return [], None
+    try:
+        rules = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        print(f"[warn] get_required_contexts JSON decode failed: {e}", file=sys.stderr)
+        return [], None
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters") or {}
+        contexts = [
+            c.get("context", "")
+            for c in (params.get("required_status_checks") or [])
+            if c.get("context")
+        ]
+        return contexts, rule.get("ruleset_id")
+    return [], None
+
+
+def get_emitted_check_names(pr_number: int) -> tuple[set[str], bool]:
+    """Return (emitted_check_name_set, all_emitted_complete).
+
+    Uses ``gh pr view --json statusCheckRollup``. ``all_emitted_complete`` is
+    True iff every entry's ``status``/``state`` is COMPLETED (CheckRun) or
+    has a non-PENDING ``state`` (StatusContext). Returns ``(set(), False)``
+    on error so callers don't trigger stuck-pending on a stale poll.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--json",
+                "statusCheckRollup",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"[warn] get_emitted_check_names gh failed: {e}", file=sys.stderr)
+        return set(), False
+    if result.returncode != 0:
+        print(
+            f"[warn] get_emitted_check_names gh non-zero: {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return set(), False
+    try:
+        rollup = json.loads(result.stdout).get("statusCheckRollup", [])
+    except json.JSONDecodeError as e:
+        print(f"[warn] get_emitted_check_names JSON decode: {e}", file=sys.stderr)
+        return set(), False
+    names: set[str] = set()
+    all_complete = True
+    for item in rollup:
+        # CheckRun uses .name + .status; StatusContext uses .context + .state.
+        name = item.get("name") or item.get("context") or ""
+        if name:
+            names.add(name)
+        status = (item.get("status") or "").upper()
+        state = (item.get("state") or "").upper()
+        if status:
+            if status != "COMPLETED":
+                all_complete = False
+        elif state in ("PENDING", "EXPECTED"):
+            all_complete = False
+    return names, all_complete
+
+
+def detect_stuck_pending(
+    owner: str,
+    repo: str,
+    default_branch: str,
+    pr_number: int,
+) -> tuple[frozenset[str], int | None, bool]:
+    """Compute (stuck_required_check_names, ruleset_id, emitted_all_complete).
+
+    ``stuck`` = required contexts from the ruleset that are NOT present in
+    the PR's emitted check rollup. Callers should additionally gate on
+    ``emitted_all_complete`` to avoid false positives while upstream jobs
+    are still running.
+    """
+    required, ruleset_id = get_required_contexts(owner, repo, default_branch)
+    if not required:
+        return frozenset(), ruleset_id, False
+    emitted, all_complete = get_emitted_check_names(pr_number)
+    if not emitted:
+        return frozenset(), ruleset_id, False
+    stuck = frozenset(r for r in required if r not in emitted)
+    return stuck, ruleset_id, all_complete
+
+
+def _stuck_pending_message(
+    branch: str,
+    owner: str,
+    repo: str,
+    stuck: frozenset[str],
+    ruleset_id: int | None,
+) -> str:
+    """Build the webhook payload for STUCK_PENDING_REQUIRED_CHECKS."""
+    names_block = "\n".join(f"  - {n}" for n in sorted(stuck))
+    ruleset_ref = str(ruleset_id) if ruleset_id is not None else "<RULESET_ID>"
+    return (
+        f"CI FAILURE on branch {branch}: STUCK_PENDING_REQUIRED_CHECKS\n"
+        f"Required status checks have been stuck in 'Expected — Waiting for "
+        f"status' state while all emitted checks are complete.\n\n"
+        f"Stuck checks ({len(stuck)}):\n"
+        f"{names_block}\n\n"
+        f"RECOMMENDATION:\n"
+        f"Required status checks stuck waiting (workflow/job display names "
+        f"likely changed but the branch protection ruleset still references "
+        f"old names). Two fixes:\n\n"
+        f"1. Admin-merge the PR — accept the stuck pending. After merge, the "
+        f"infra-github Pulumi stack will redeploy and update the ruleset to "
+        f"require the new names.\n\n"
+        f"2. Update the ruleset manually before merging:\n"
+        f"     gh api /repos/{owner}/{repo}/rulesets/{ruleset_ref} --jq "
+        f"'.rules[] |\n"
+        f'       select(.type == "required_status_checks") |\n'
+        f"       .parameters.required_status_checks'\n"
+        f"   then PATCH the contexts array to match the actual emitted check "
+        f"names.\n\n"
+        f"3. Restructure the workflow so the emitted names match the ruleset "
+        f"(e.g., remove reusable-workflow nesting that adds parent-job "
+        f"prefixes)."
+    )
+
+
+def check_stuck_pending(
+    state: WatchState,
+    owner: str,
+    repo: str,
+    default_branch: str,
+    pr_number: int | None,
+    port: int,
+) -> None:
+    """Fire STUCK_PENDING_REQUIRED_CHECKS notification on rising edge.
+
+    Trigger predicate (all must hold):
+      * PR exists and has a number.
+      * Ruleset is readable AND lists required contexts.
+      * Every emitted check is completed (no PENDING/EXPECTED) — guards
+        against an upstream still running.
+      * Stuck set is non-empty AND has been the same set for
+        ``STUCK_PENDING_MIN_ITERS`` consecutive iterations (~60s).
+      * We haven't already reported it for this SHA.
+    """
+    if state.reported_stuck_pending or pr_number is None:
+        return
+    stuck, ruleset_id, all_complete = detect_stuck_pending(
+        owner, repo, default_branch, pr_number
+    )
+    # Reset the streak whenever the set churns or emitted-set is incomplete.
+    if not stuck or not all_complete:
+        state.stuck_pending_iters = 0
+        state.stuck_pending_names = frozenset()
+        return
+    if stuck != state.stuck_pending_names:
+        state.stuck_pending_names = stuck
+        state.stuck_pending_iters = 1
+        return
+    state.stuck_pending_iters += 1
+    if state.stuck_pending_iters < STUCK_PENDING_MIN_ITERS:
+        return
+    msg = _stuck_pending_message(state.branch, owner, repo, stuck, ruleset_id)
+    notify(port, msg)
+    write_state(state.slot, state.branch, "stuck-pending")
+    state.reported_stuck_pending = True
 
 
 # --- Pure helpers ---
@@ -305,6 +514,14 @@ class WatchState:
         self.reported_conflict = False
         self.reported_behind = False
         self.reported_no_runs = False
+        # Stuck-pending tracking. Counts consecutive iterations where the same
+        # required-check name set has been un-emitted while all emitted checks
+        # are complete. Resets to 0 whenever the stuck set changes or any
+        # emitted check is still in-progress (so an upstream-still-running
+        # situation can't false-positive).
+        self.stuck_pending_iters = 0
+        self.stuck_pending_names: frozenset[str] = frozenset()
+        self.reported_stuck_pending = False
 
         self.merged = False
         self.merge_commit_sha = ""
@@ -347,6 +564,9 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.reported_behind = False
         state.sha_runs_empty_count = 0
         state.reported_no_runs = False
+        state.stuck_pending_iters = 0
+        state.stuck_pending_names = frozenset()
+        state.reported_stuck_pending = False
         # Reset state file to "running" so the statusline reflects the new
         # in-progress run instead of remaining stuck on the previous
         # terminal state (passed/failed).
@@ -383,10 +603,15 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
     ``context`` is "branch" or "main" — controls message wording, state string,
     and which reported_* flag we toggle.
     """
+    # Any terminal conclusion that is NOT a pass is a failure. "success" and
+    # "skipped" are passes; everything else (failure, startup_failure,
+    # cancelled, timed_out, action_required, stale, neutral) is a failure.
+    _pass_conclusions = {"success", "skipped"}
     failed = [
         r
         for r in sha_runs
-        if r.get("status") == "completed" and r.get("conclusion") == "failure"
+        if r.get("status") == "completed"
+        and r.get("conclusion") not in _pass_conclusions
     ]
     if not failed:
         return
@@ -444,11 +669,16 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
 def check_all_passed(
     context: str, sha_runs: list, state: WatchState, mergeable_state: str, port: int
 ) -> None:
-    """Fire CI-passed webhook once when every run is completed+success."""
+    """Fire CI-passed webhook once when every run is completed+success/skipped."""
     if not sha_runs:
         return
+    # A run "passes" if it completed with success OR was skipped (path-filter
+    # skip, conditional skip, etc.).  Any other conclusion (failure,
+    # startup_failure, cancelled, timed_out, action_required, neutral, stale)
+    # means CI has NOT fully passed.
+    _pass_conclusions = {"success", "skipped"}
     if any(
-        r.get("status") != "completed" or r.get("conclusion") != "success"
+        r.get("status") != "completed" or r.get("conclusion") not in _pass_conclusions
         for r in sha_runs
     ):
         return
@@ -839,6 +1069,16 @@ def watch(
 
         check_failures("branch", sha_runs, state, port)
         check_all_passed("branch", sha_runs, state, mergeable_state, port)
+
+        # Stuck-pending required-checks detection. Only meaningful when the PR
+        # is BLOCKED (so we know the merge gate is the cause) and we have a
+        # PR number. Skipping when BLOCKED is absent avoids false positives
+        # during normal in-progress windows.
+        if pr_number and mergeable_state == "BLOCKED":
+            check_stuck_pending(state, owner, repo, default_branch, pr_number, port)
+        else:
+            state.stuck_pending_iters = 0
+            state.stuck_pending_names = frozenset()
 
         time.sleep(POLL_INTERVAL)
 
