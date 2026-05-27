@@ -1,6 +1,6 @@
 ---
 name: "pr-create"
-description: "Create pull request from feature branch"
+description: "Create a pull request. MUST be invoked for ANY request that creates a PR — including 'create a PR', 'open a PR', 'gh pr create', 'submit for review', or any equivalent phrasing. Do NOT call `gh pr create` directly; always run this skill instead."
 argument-hint: "[title]"
 ---
 
