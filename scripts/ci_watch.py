@@ -72,10 +72,14 @@ class ApiCache:
 
 
 def _gh_headers(token: str) -> dict[str, str]:
+    # NOTE: intentionally omit "X-GitHub-Api-Version": "2022-11-28" — when sent
+    # with certain GitHub OAuth user-tokens (gho_*), the API silently drops the
+    # Authorization header and treats the request as anonymous, which returns
+    # 404 on private-repo endpoints. Without the version header the same token
+    # authenticates correctly.
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
@@ -780,20 +784,34 @@ def get_remote_head_sha(branch: str) -> str | None:
 
 
 def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
-    """Fetch the latest commit SHA for ``branch``. Exits on failure."""
-    resp = requests.get(
-        f"{GITHUB_API}/repos/{owner}/{repo}/commits/{branch}",
-        headers=_gh_headers(token),
-        timeout=10,
+    """Fetch the latest commit SHA for ``branch``. Exits on failure.
+
+    Retries on 404 — GitHub's API occasionally returns 404 from a cache layer
+    even for branches that exist (observed empirically: 200/404 alternating on
+    back-to-back calls). Retry up to 5 times with a 1s gap before giving up.
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/commits/{branch}"
+    headers = _gh_headers(token)
+    last_status = None
+    for attempt in range(5):
+        resp = requests.get(url, headers=headers, timeout=10)
+        last_status = resp.status_code
+        if resp.status_code == 200:
+            sha = resp.json().get("sha", "")
+            if not sha:
+                print(
+                    f"Error: resolved SHA is empty for branch '{branch}'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return sha
+        if attempt < 4:
+            time.sleep(1)
+    print(
+        f"Error: branch '{branch}' not found on remote (last status {last_status})",
+        file=sys.stderr,
     )
-    if resp.status_code != 200:
-        print(f"Error: branch '{branch}' not found on remote", file=sys.stderr)
-        sys.exit(1)
-    sha = resp.json().get("sha", "")
-    if not sha:
-        print(f"Error: resolved SHA is empty for branch '{branch}'", file=sys.stderr)
-        sys.exit(1)
-    return sha
+    sys.exit(1)
 
 
 # --- Main loop ---
