@@ -1,50 +1,37 @@
-# Existing local files - added during repo setup
-.env
-.credentials.json
-debug/
-downloads/
-file-history/
-history.jsonl
-projects/
-session-env/
-settings.json
-shell-snapshots/
-statsig/
-todos/
-.claude.json*
-.claude/
-ide/
-plans/
-plugins/
-cache/
-telemetry/
-stats-cache.json
-paste-cache/
-tasks/
-image-cache/
-mcp-needs-auth-cache.json
-chrome/
-sessions/
-backups/
-policy-limits.json
-remote-settings.json
+# WHITELIST layout.
+#
+# This repo lives inside ~/.claude, which Claude Code fills with runtime
+# clutter (sessions, caches, daemon state, logs, etc.). Rather than chase
+# every new noise file with a blacklist entry, we ignore EVERYTHING at the
+# repo root by default and then explicitly re-include only the paths we
+# actually track.
+#
+# To track a new top-level path, add a line:  !/<name>
+# (this works for both files and directories).
 
-# Quality skill results
-quality-results/
+# Ignore all top-level entries by default.
+/*
 
-# Node
+# Re-include tracked top-level entries.
+!/.gitignore
+!/channel
+!/CLAUDE_append_to_user_prompt_main_agent_only.md
+!/CLAUDE.md
+!/docs
+!/feature-workflow.md
+!/README.md
+!/RTK.md
+!/scripts
+!/settings.json
+!/setup.sh
+!/skills
+!/tests
+
+# Noise that can appear INSIDE re-included dirs, ignored everywhere.
+**/__pycache__/
 **/node_modules/
-
-# Feature clones
-_clones/
-
-!skills/debug
-
-# Logs
-logs/
-
-# Python
-__pycache__/
 *.pyc
 *.pyo
-.last-cleanup
+**/.pytest_cache/
+quality-results/
+_clones/
