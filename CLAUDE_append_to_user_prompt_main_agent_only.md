@@ -20,4 +20,7 @@
 ## Subagents
 ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
 
-The default setup for all subagents is opus (claude-opus-4-6) with effort high.
+The default setup for all subagents is opus (claude-opus) with effort high.
+
+## Workflow
+- When user request code changes - make sure to work according to the feature development workflow outlined in the `~/.claude/feature-workflow.md` document.
