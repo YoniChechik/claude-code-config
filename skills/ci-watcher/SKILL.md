@@ -73,3 +73,19 @@ Note: state, PR-cache, lock, and log files in `/tmp/` are all keyed on
 the state file as `<branch>:<state>`. Switching branches mid-feature re-launches
 `/ci-watcher`, which kills the old watcher via its PID lock and starts a new one with
 the new branch.
+
+# behavior notes
+
+## repeated sync is BY DESIGN
+
+The watcher will frequently surface "CI behind" / "branch behind" problems, and that means
+we will repeatedly need to sync. **This is intentional, not a bug.** Do NOT ignore any
+"CI behind" / branch-behind alert, and do NOT escalate it to the user. Just keep fixing and
+re-syncing every single time it comes up — however many times that is.
+
+## keep watching after merge
+
+After a PR is merged, **do NOT kill the watcher** (see the CRITICAL RULE above). It keeps
+watching the CI run triggered by the merge to `main` and will alert us if that post-merge
+run fails. If the post-merge `main` CI fails, fix it in a separate/new PR — never reopen or
+reuse the merged one.
