@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs linting, formatting, and type checks on changed files
-# Supports Python (ruff, ty) and JS/TS (eslint, prettier, tsc, or vp toolchain)
+# Supports Python (ruff, ty) and JS/TS (eslint, prettier, tsc)
 # Usage: ./quality_check.sh [--fix]
 
 set -euo pipefail
@@ -113,27 +113,11 @@ get_changed_files() {
 # tool not present locally — this can mismatch the repo's config
 # (e.g. eslint 10 against an eslint-8 config) and produce
 # confusing failures. We prefer, in order:
-#   1. `vp` (Vite+ unified toolchain) if the repo opts into it.
-#   2. Local node_modules/.bin (versions pinned by the repo).
-#   3. `npx --no-install` (use only what's already cached).
+#   1. Local node_modules/.bin (versions pinned by the repo).
+#   2. `npx --no-install` (use only what's already cached).
 # ============================================================
 JS_TOOLCHAIN="npx"
 detect_js_toolchain() {
-    # vp signal: pnpm-workspace.yaml + `vp` on PATH, OR vite-plus in package.json deps.
-    local has_vp_bin=false
-    if command -v vp &>/dev/null; then
-        has_vp_bin=true
-    fi
-
-    if $has_vp_bin && [ -f "pnpm-workspace.yaml" ]; then
-        JS_TOOLCHAIN="vp"
-        return
-    fi
-    if $has_vp_bin && [ -f "package.json" ] && grep -q '"vite-plus"' package.json 2>/dev/null; then
-        JS_TOOLCHAIN="vp"
-        return
-    fi
-
     # Prefer local node_modules/.bin if present — pins to the repo's versions.
     if [ -d "node_modules/.bin" ]; then
         JS_TOOLCHAIN="local"
@@ -145,7 +129,6 @@ detect_js_toolchain() {
 detect_js_toolchain
 
 case "$JS_TOOLCHAIN" in
-    vp)    echo "Using vp toolchain" ;;
     local) echo "Using local node_modules/.bin" ;;
     npx)   echo "Using npx (no local install detected)" ;;
 esac
@@ -166,6 +149,61 @@ resolve_js_tool() {
 # Python
 # ============================================================
 
+# Walk up from a file's directory to find the nearest ancestor that owns
+# a `pyproject.toml`. That directory is the file's "project root".
+#
+# WHY THIS MATTERS: monorepos can contain multiple *isolated* uv projects,
+# each with its own pyproject.toml + uv.lock + .venv (e.g. core/backend and
+# core/bot here). A subproject's dependencies (stripe, google-cloud-logging,
+# …) only resolve when `uv run` is executed from *inside* that subproject's
+# directory — uv resolves the venv relative to the cwd. Running
+# `uv run ty check backend/foo.py` from the repo root uses the *root* env
+# (or none), so ty can't see the subproject's deps and emits spurious
+# `unresolved-import` errors plus a cascade of bogus type errors. The fix is
+# to group changed files by their owning project root and run ruff/ty from
+# within each root, against paths made relative to that root.
+find_project_root() {
+    local dir
+    dir=$(dirname "$1")
+    while [ "$dir" != "/" ] && [ "$dir" != "." ]; do
+        if [ -f "$dir/pyproject.toml" ]; then
+            printf '%s' "$dir"
+            return
+        fi
+        dir=$(dirname "$dir")
+    done
+    # No owning pyproject.toml found anywhere up the tree — treat the repo
+    # root (".") as the project so behavior matches the old single-env path.
+    printf '.'
+}
+
+# Run a uv-backed command for every project root, with each root's files
+# passed as paths relative to that root and the command run from inside it.
+# Args: <label> <fail-on-error: true|false> <uv subcommand...>
+# Reads the newline-separated "<root>\t<relpath>" pairs from $PY_FILES_BY_ROOT.
+run_py_per_project() {
+    local label="$1"; shift
+    local fail_on_error="$1"; shift
+    # Remaining args are the command, e.g. `run ruff check` or `run ty check`.
+    local roots
+    roots=$(printf '%s\n' "$PY_FILES_BY_ROOT" | cut -f1 | sort -u)
+    local root
+    while IFS= read -r root; do
+        [ -z "$root" ] && continue
+        local rel_files
+        rel_files=$(printf '%s\n' "$PY_FILES_BY_ROOT" | awk -F'\t' -v r="$root" '$1==r{print $2}')
+        [ -z "$rel_files" ] && continue
+        echo "=== $label ($root) ==="
+        # Run uv from inside the project root so it picks up that project's
+        # isolated venv. Paths are already relative to $root.
+        if ! ( cd "$root" && printf '%s\n' "$rel_files" | xargs uv "$@" ); then
+            if [ "$fail_on_error" = "true" ]; then
+                EXIT_CODE=1
+            fi
+        fi
+    done <<< "$roots"
+}
+
 PY_FILES=$(get_changed_files "*.py")
 
 if [ -n "$PY_FILES" ]; then
@@ -173,28 +211,33 @@ if [ -n "$PY_FILES" ]; then
     echo "$PY_FILES"
     echo ""
 
+    # Build a "<project-root>\t<path-relative-to-root>" table so each isolated
+    # uv project's files are checked from within that project's directory.
+    PY_FILES_BY_ROOT=""
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        root=$(find_project_root "$f")
+        if [ "$root" = "." ]; then
+            rel="$f"
+        else
+            rel="${f#"$root"/}"
+        fi
+        PY_FILES_BY_ROOT+="${root}"$'\t'"${rel}"$'\n'
+    done <<< "$PY_FILES"
+
     if $FIX_MODE; then
         if check_tool "ruff" "uv"; then
-            echo "=== Running ruff format ==="
-            echo "$PY_FILES" | xargs uv run ruff format
-
-            echo "=== Running ruff check --fix ==="
-            echo "$PY_FILES" | xargs uv run ruff check --fix --unsafe-fixes || true
+            run_py_per_project "Running ruff format" false run ruff format
+            run_py_per_project "Running ruff check --fix" false run ruff check --fix --unsafe-fixes
         fi
     fi
 
     if check_tool "ruff" "uv"; then
-        echo "=== Running ruff check ==="
-        if ! echo "$PY_FILES" | xargs uv run ruff check; then
-            EXIT_CODE=1
-        fi
+        run_py_per_project "Running ruff check" true run ruff check
     fi
 
     if check_tool "ty" "uv"; then
-        echo "=== Running ty check ==="
-        if ! echo "$PY_FILES" | xargs uv run ty check; then
-            EXIT_CODE=1
-        fi
+        run_py_per_project "Running ty check" true run ty check
     fi
 else
     echo "No Python files changed"
@@ -213,52 +256,34 @@ if [ -n "$JS_FILES" ]; then
     echo "$JS_FILES"
     echo ""
 
-    if [ "$JS_TOOLCHAIN" = "vp" ]; then
-        # vp wraps fmt + lint + typecheck. `vp check` accepts file paths and
-        # runs the repo-pinned tools — no risk of pulling a newer major.
-        if $FIX_MODE; then
-            echo "=== Running vp check --fix ==="
-            # shellcheck disable=SC2086
-            if ! echo "$JS_FILES" | xargs vp check --fix; then
-                EXIT_CODE=1
-            fi
-        else
-            echo "=== Running vp check ==="
-            # shellcheck disable=SC2086
-            if ! echo "$JS_FILES" | xargs vp check; then
-                EXIT_CODE=1
-            fi
-        fi
-    else
-        # Non-vp path: use local node_modules first, fall back to npx --no-install.
-        # Word-splitting on the resolved command is intentional — it's either
-        # one path or `npx --no-install <tool>`, both safe to split.
-        PRETTIER_CMD=$(resolve_js_tool prettier)
-        ESLINT_CMD=$(resolve_js_tool eslint)
-        TSC_CMD=$(resolve_js_tool tsc)
+    # Use local node_modules first, fall back to npx --no-install.
+    # Word-splitting on the resolved command is intentional — it's either
+    # one path or `npx --no-install <tool>`, both safe to split.
+    PRETTIER_CMD=$(resolve_js_tool prettier)
+    ESLINT_CMD=$(resolve_js_tool eslint)
+    TSC_CMD=$(resolve_js_tool tsc)
 
-        if $FIX_MODE; then
-            echo "=== Running prettier --write ==="
-            # shellcheck disable=SC2086
-            echo "$JS_FILES" | xargs $PRETTIER_CMD --write || true
-
-            echo "=== Running eslint --fix ==="
-            # shellcheck disable=SC2086
-            echo "$JS_FILES" | xargs $ESLINT_CMD --fix || true
-        fi
-
-        echo "=== Running eslint ==="
+    if $FIX_MODE; then
+        echo "=== Running prettier --write ==="
         # shellcheck disable=SC2086
-        if ! echo "$JS_FILES" | xargs $ESLINT_CMD; then
-            EXIT_CODE=1
-        fi
+        echo "$JS_FILES" | xargs $PRETTIER_CMD --write || true
 
-        if [ -f "tsconfig.json" ]; then
-            echo "=== Running tsc --noEmit ==="
-            # shellcheck disable=SC2086
-            if ! $TSC_CMD --noEmit; then
-                EXIT_CODE=1
-            fi
+        echo "=== Running eslint --fix ==="
+        # shellcheck disable=SC2086
+        echo "$JS_FILES" | xargs $ESLINT_CMD --fix || true
+    fi
+
+    echo "=== Running eslint ==="
+    # shellcheck disable=SC2086
+    if ! echo "$JS_FILES" | xargs $ESLINT_CMD; then
+        EXIT_CODE=1
+    fi
+
+    if [ -f "tsconfig.json" ]; then
+        echo "=== Running tsc --noEmit ==="
+        # shellcheck disable=SC2086
+        if ! $TSC_CMD --noEmit; then
+            EXIT_CODE=1
         fi
     fi
 else
