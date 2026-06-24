@@ -193,5 +193,6 @@
   "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "tui": "fullscreen"
 }
