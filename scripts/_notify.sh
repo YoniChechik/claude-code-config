@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Base directory for the dedup lockdirs and CI watcher state/lock files.
+# Defaults to /tmp; overridable (mainly for tests) so the lockdir and CI
+# state/lock paths can be redirected without touching the real /tmp. Mirrors
+# ci_watch.py's TMP_DIR constant.
+: "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
+
 # Walk the PPID chain to find the user's real terminal device. Hooks invoked
 # from a subagent context may have a detached /dev/tty, so we climb parents
 # until we hit a process attached to a real tty.
@@ -62,7 +68,7 @@ _dedup_should_chime() {
     target_tty=$(_resolve_target_tty)
     # Sanitize the tty path into a filename-safe token (strip slashes).
     local tty_token="${target_tty//\//_}"
-    local lockdir="/tmp/notify_dedup_${event_type}_${session_id}_${tty_token}"
+    local lockdir="${CLAUDE_NOTIFY_TMP_DIR}/notify_dedup_${event_type}_${session_id}_${tty_token}"
 
     # Atomic claim: mkdir succeeds for exactly one racer. If it succeeds we are
     # the first chime in this burst — schedule the lock's removal after the
@@ -153,7 +159,7 @@ ci_is_active() {
     local slot="${CLAUDE_CODE_SESSION_ID:-}"
     [ -n "$slot" ] || return 1
 
-    local state_file="/tmp/ci_watch_state_${slot}"
+    local state_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${slot}"
     [ -f "$state_file" ] || return 1
 
     # Read the atomically-written "<branch>:<state>" line.
@@ -183,7 +189,7 @@ ci_is_active() {
     # (a) Watcher must be alive — reuse the status_line.sh liveness approach:
     # read the PID from the lockfile, kill -0 it, and confirm its args mention
     # ci_watch (so a recycled PID owned by an unrelated process can't pass).
-    local lock_file="/tmp/ci_watch_lock_${slot}"
+    local lock_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_lock_${slot}"
     local watcher_pid
     watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
     if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
