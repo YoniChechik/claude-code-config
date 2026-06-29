@@ -20,6 +20,14 @@ setup() {
     # Each test gets an isolated tmp dir; redirect all state/lock/lockdir paths.
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
     export CLAUDE_CODE_SESSION_ID="testsess"
+
+    # Silent afplay shim on PATH so the green/chime path never plays a real
+    # sound during the suite (notify_user_attention backgrounds `afplay`).
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nexit 0\n' > "$BATS_TEST_TMPDIR/bin/afplay"
+    chmod +x "$BATS_TEST_TMPDIR/bin/afplay"
+    export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+
     # Source the functions under test.
     source "$NOTIFY_SH"
     # Track spawned helper PIDs so teardown can reap them.
@@ -159,6 +167,16 @@ stub_branch() {
     [ "$status" -ne 0 ]
 }
 
+@test "ci_is_active: NON-active when lockfile is present but empty (truncated)" {
+    stub_branch "feat-x"
+    write_state "feat-x:running"
+    # A crashed/half-written watcher can leave an empty lockfile: no PID to
+    # kill -0, so liveness must fail rather than error out.
+    write_lock ""
+    run ci_is_active
+    [ "$status" -ne 0 ]
+}
+
 @test "ci_is_active: NON-active when PID alive but args don't mention ci_watch" {
     stub_branch "feat-x"
     write_state "feat-x:running"
@@ -179,10 +197,14 @@ stub_branch() {
 # _dedup_should_chime
 # ---------------------------------------------------------------------------
 
-@test "dedup: first call for a fresh event key chimes (returns 0)" {
+@test "dedup: first call for a fresh event key chimes (returns 0) and claims a lock" {
     redirect_tty_to_file
     run _dedup_should_chime "attention"
     [ "$status" -eq 0 ]
+    # The chime decision must be backed by a real atomic lock claim, not just a
+    # bare return code: exactly one dedup lockdir for this key must now exist.
+    run bash -c "ls -d '$CLAUDE_NOTIFY_TMP_DIR'/notify_dedup_attention_* 2>/dev/null | wc -l"
+    [ "$output" -eq 1 ]
 }
 
 @test "dedup: immediate second call with same key is suppressed (returns 1)" {

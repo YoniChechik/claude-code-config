@@ -50,15 +50,12 @@ cd "$ORIGINAL_REPO_DIR"
 # /rename is interactive-only and cannot be automated, so the tab title is the
 # achievable equivalent — it persists because CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 # stops Claude from overwriting it.
-# Resolve the user's real TTY by walking the PPID chain (mirrors _notify.sh's
-# find_user_tty), since this script may run from a subagent where stdout is not
-# the terminal. The escape sequence must go to the TTY, NEVER to stdout, because
-# the final stdout line below (the clone path) is consumed by the caller.
+# Resolve the user's real TTY via _notify.sh's helper, since this script may run
+# from a subagent where stdout is not the terminal. The escape sequence must go
+# to the TTY, NEVER to stdout, because the final stdout line below (the clone
+# path) is consumed by the caller.
 source ~/.claude/scripts/_notify.sh
-TITLE_TTY=$(find_user_tty)
-if [ -z "$TITLE_TTY" ] || [ ! -w "$TITLE_TTY" ]; then
-    TITLE_TTY=/dev/tty
-fi
+TITLE_TTY=$(_resolve_target_tty)
 # OSC 0 sets both icon+window title (respected by iTerm2 as the tab title),
 # matching the sequence used in _notify.sh for consistency.
 printf '\033]0;%s\007' "$FEATURE_NAME" > "$TITLE_TTY" 2>/dev/null || true

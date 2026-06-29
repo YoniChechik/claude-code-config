@@ -116,8 +116,10 @@ fi
 
 # Clear the iTerm2 tab badge regardless of which path we take below — we always
 # want a clean slate (the badge is set elsewhere for done/rate-limit states).
-# Passing an empty base64 payload clears any previously set badge text.
-printf '\e]1337;SetBadgeFormat=\a' > /dev/tty 2>/dev/null || true
+# Passing an empty base64 payload clears any previously set badge text. Resolve
+# the real tty (handles detached-tty subagent contexts) rather than hardcoding
+# /dev/tty, matching the other _notify.sh emitters.
+printf '\e]1337;SetBadgeFormat=\a' > "$(_resolve_target_tty)" 2>/dev/null || true
 
 # Decision (unified state model):
 #   - BLUE, NO chime  = main agent free but background work continues:
