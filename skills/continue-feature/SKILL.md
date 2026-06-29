@@ -1,10 +1,10 @@
 ---
 name: "continue-feature"
-description: "Resume work on existing feature clone"
+description: "Resume work on existing feature worktree"
 argument-hint: "[feature description or branch name] [optional: what to do next]"
 ---
 
-Continues work on an existing feature clone with proper context analysis.
+Continues work on an existing feature worktree with proper context analysis.
 
 ## Input from user
 "$ARGUMENTS"
@@ -20,10 +20,10 @@ If next action is not provided, gather context and state, then proceed based on 
 
 ## Process
 
-### Step 1a: Search for Existing Clone
-List existing clones in _clones/ directory and try to match the feature description:
+### Step 1a: Search for Existing Worktree
+List existing worktrees and try to match the feature description:
 ```bash
-ls -1 _clones/
+git worktree list
 ```
 
 If found → Continue to Step 2 (navigate)
@@ -38,13 +38,13 @@ git branch -r
 
 Review the list of remote branches and match one to the user's feature description.
 
-If found → Run `/create-clone` with the matched branch name, then continue to Step 4
+If found → Run `/create-worktree` with the matched branch name. After the missing local worktree is recreated from the remote branch, continue to Step 2 (navigate) and proceed through the normal git branch STATE CHECK (Step 3) — do NOT jump straight to launching CI. Only after the state check completes does CI launch (Step 4).
 If not found → Exit with error:
 - Tell user: "Feature branch not found locally or remotely"
 - Suggest: "Use /new-feature <feature-description> to start a new feature"
 
-### Step 2: Navigate to Feature Clone
-Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME` skill.
+### Step 2: Navigate to Feature Worktree
+Change to the feature worktree directory using `/cd-permanent _worktrees/$FEATURE_NAME` skill.
 
 ### Step 3: Check State
 1. Check git branch state:

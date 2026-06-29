@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unified startup hook: env validation, git sync, clone cleanup.
+# Unified startup hook: env validation, git sync, worktree cleanup.
 # Outputs a single JSON systemMessage line. Always exits 0.
 
 # ── Stdin payload (consumed once, early, before anything else reads it) ──────
@@ -37,7 +37,11 @@ if [[ -z "$git_root" ]] || ! command -v jq &>/dev/null; then
 fi
 
 # --- Single fetch with prune ---
-fetch_output=$(git fetch -p 2>&1) || true
+# Capture the fetch exit status: a NON-zero status means we are likely offline /
+# the remote is unreachable. Worktree cleanup below uses this to AVOID treating
+# "branch not found on origin" as "branch was deleted" when we never reached origin.
+fetch_output=$(git fetch -p 2>&1)
+fetch_exit=$?
 
 # --- Git merge --ff-only (using already-fetched data) ---
 current_branch=$(git branch --show-current 2>/dev/null)
@@ -63,57 +67,161 @@ else
     add_line "Git: no current branch (detached HEAD)"
 fi
 
-# --- Clone cleanup ---
-clones_dir="${git_root}/_clones"
-removed_clones=()
-existing_clones=()
+# --- Worktree cleanup ---
+# Safely remove feature worktrees whose branch has been deleted from origin.
+# Worktrees share the base repo's object store, so removal MUST go through
+# `git worktree remove` (never `rm -rf`) to also deregister the worktree.
+removed_worktrees=()
+existing_worktrees=()
+skipped_worktrees=()
 
-if [[ -d "$clones_dir" ]]; then
-    for clone_dir in "${clones_dir}"/*; do
-        [[ ! -d "$clone_dir" ]] && continue
-        [[ ! -d "$clone_dir/.git" ]] && continue
+# Prune stale registry entries FIRST: drops records whose on-disk path is gone,
+# so we never attempt to `remove` a path that no longer exists.
+git worktree prune 2>/dev/null || true
 
-        branch=$(git -C "$clone_dir" branch --show-current 2>/dev/null)
-        [[ -z "$branch" ]] && continue
+# Identify the MAIN worktree explicitly. We CANNOT trust $git_root here: if the
+# session started inside a linked worktree (e.g. _worktrees/foo), $git_root points
+# at that linked worktree, not the base repo. The first `worktree` record of
+# `git worktree list --porcelain` is always the main worktree.
+main_worktree=""
+while IFS= read -r line; do
+    if [[ $line == worktree\ * ]]; then
+        main_worktree="${line#worktree }"
+        break
+    fi
+done < <(git worktree list --porcelain 2>/dev/null)
 
-        dir_name=$(basename "$clone_dir")
+# Parse `git worktree list --porcelain`. Records are separated by blank lines and
+# contain a `worktree <path>` line, optionally a `branch refs/heads/<name>` line
+# (absent for detached HEAD), and optionally a `locked` line.
+wt_path=""
+wt_branch=""
+wt_locked=0
 
-        if [[ $branch == "main" || $branch == "master" ]]; then
-            existing_clones+=("$dir_name")
-            continue
-        fi
+# Flush one parsed worktree record through the cleanup decision logic.
+process_worktree() {
+    # Nothing to do if we never captured a path (e.g. leading blank line).
+    [[ -z "$wt_path" ]] && return
 
-        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -qF "refs/heads/$branch"; then
-            existing_clones+=("$dir_name")
-            continue
-        fi
+    local dir_name
+    dir_name=$(basename "$wt_path")
 
-        if rm -rf "$clone_dir" 2>/dev/null; then
-            removed_clones+=("$dir_name")
-        fi
-    done
-fi
+    # NEVER touch the main worktree.
+    if [[ "$wt_path" == "$main_worktree" ]]; then
+        return
+    fi
 
-# Clean local branches with gone tracking
+    # Skip & report locked worktrees: the user (or another process) pinned them.
+    if [[ $wt_locked -eq 1 ]]; then
+        skipped_worktrees+=("$dir_name (locked)")
+        return
+    fi
+
+    # Skip records with no branch (detached HEAD) — we can't reason about origin.
+    if [[ -z "$wt_branch" ]]; then
+        skipped_worktrees+=("$dir_name (detached HEAD)")
+        return
+    fi
+
+    # Keep main/master worktrees around.
+    if [[ "$wt_branch" == "main" || "$wt_branch" == "master" ]]; then
+        existing_worktrees+=("$dir_name")
+        return
+    fi
+
+    # Gate remote-gone deletions on a SUCCESSFUL fetch. If we were offline, an
+    # empty ls-remote result does NOT mean the branch was deleted, so keep it.
+    if [[ $fetch_exit -ne 0 ]]; then
+        skipped_worktrees+=("$dir_name (offline: fetch failed)")
+        return
+    fi
+
+    # If the branch still exists on origin, the worktree is in active use — keep it.
+    if git ls-remote --heads origin "$wt_branch" 2>/dev/null | grep -qF "refs/heads/$wt_branch"; then
+        existing_worktrees+=("$dir_name")
+        return
+    fi
+
+    # Branch is confirmed gone from origin. Check dirtiness BEFORE removing:
+    # any tracked change OR untracked file means we must NOT discard work.
+    if [[ -n "$(git -C "$wt_path" status --porcelain 2>/dev/null)" ]]; then
+        skipped_worktrees+=("$dir_name (dirty)")
+        return
+    fi
+
+    # Clean + branch gone: remove WITHOUT --force so git refuses if anything is
+    # unexpectedly amiss, and so the worktree is properly deregistered.
+    if git worktree remove "$wt_path" 2>/dev/null; then
+        removed_worktrees+=("$dir_name")
+    else
+        skipped_worktrees+=("$dir_name (remove failed)")
+    fi
+}
+
+while IFS= read -r line; do
+    case "$line" in
+        worktree\ *)
+            wt_path="${line#worktree }"
+            ;;
+        branch\ refs/heads/*)
+            wt_branch="${line#branch refs/heads/}"
+            ;;
+        locked*)
+            wt_locked=1
+            ;;
+        "")
+            # Blank line ends a record: process it and reset accumulators.
+            process_worktree
+            wt_path=""
+            wt_branch=""
+            wt_locked=0
+            ;;
+    esac
+done < <(git worktree list --porcelain 2>/dev/null)
+# Flush the final record (porcelain output may not end with a trailing blank line).
+process_worktree
+
+# Build the set of branches still attached to a SKIPPED worktree so the branch
+# prune loop below never deletes a branch we deliberately kept (dirty/locked/etc).
+# `git worktree list` already reflects removals done above (removed worktrees
+# free their branch, so those branches remain eligible for pruning).
+protected_branches=()
+while IFS= read -r line; do
+    [[ $line == branch\ refs/heads/* ]] && protected_branches+=("${line#branch refs/heads/}")
+done < <(git worktree list --porcelain 2>/dev/null)
+
+# Clean local branches whose upstream is gone, EXCEPT any branch still checked
+# out in a (skipped) worktree — those are protected.
 removed_branches=()
 while read -r line; do
     [[ $line =~ ^[*+] ]] && continue
     branch=$(echo "$line" | awk '{print $1}')
     [[ $branch == "main" || $branch == "master" ]] && continue
     echo "$line" | grep -q ': gone]' || continue
+
+    # Never delete a branch still attached to a worktree (the skipped ones).
+    is_protected=0
+    for protected in "${protected_branches[@]}"; do
+        [[ "$branch" == "$protected" ]] && is_protected=1 && break
+    done
+    [[ $is_protected -eq 1 ]] && continue
+
     if git branch -D "$branch" 2>/dev/null; then
         removed_branches+=("$branch")
     fi
 done < <(git branch -vv)
 
-# Output clones section only if there's something to report
-if [[ ${#existing_clones[@]} -gt 0 || ${#removed_clones[@]} -gt 0 || ${#removed_branches[@]} -gt 0 ]]; then
-    add_line "Clones:"
-    for clone in "${existing_clones[@]}"; do
-        add_line "  Existing: $clone"
+# Output worktrees section only if there's something to report.
+if [[ ${#existing_worktrees[@]} -gt 0 || ${#removed_worktrees[@]} -gt 0 || ${#skipped_worktrees[@]} -gt 0 || ${#removed_branches[@]} -gt 0 ]]; then
+    add_line "Worktrees:"
+    for worktree in "${existing_worktrees[@]}"; do
+        add_line "  Existing: $worktree"
     done
-    for clone in "${removed_clones[@]}"; do
-        add_line "  Removed: $clone"
+    for worktree in "${removed_worktrees[@]}"; do
+        add_line "  Removed: $worktree"
+    done
+    for worktree in "${skipped_worktrees[@]}"; do
+        add_line "  Skipped: $worktree"
     done
     for branch in "${removed_branches[@]}"; do
         add_line "  Removed branch: $branch"

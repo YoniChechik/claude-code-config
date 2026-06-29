@@ -1,7 +1,7 @@
 # Multi-Session Architecture
 
 How `~/.claude/` handles multiple Claude Code sessions running simultaneously
-across multiple terminal windows, multiple repos, and multiple feature clones.
+across multiple terminal windows, multiple repos, and multiple feature worktrees.
 
 This is an internal design doc. It describes what the code actually does today,
 keyed off `session_start.sh`, `status_line.sh`, the `/ci-watcher` skill, and
@@ -12,7 +12,7 @@ keyed off `session_start.sh`, `status_line.sh`, the `/ci-watcher` skill, and
 ## Overview
 
 The user runs many Claude Code windows at once: a window on `main` in repo-A,
-a window on `feat/auth` in a clone of repo-B, a second window on `main` in
+a window on `feat/auth` in a worktree of repo-B, a second window on `main` in
 repo-B, and so on. Each is an independent Claude process with its own
 `session_id`. The architecture's job is to make per-session state
 (CI watcher state files, status-line readouts, webhook routing) stay correctly
@@ -33,12 +33,12 @@ different session_ids.
 ```
 1. open terminal in   ~/repo-b/                       (base repo, branch=main)
 2. claude starts      → SessionStart hook fires
-                      → session_start.sh runs env validation, fetch, clone
+                      → session_start.sh runs env validation, fetch, worktree
                         cleanup. No session-identity bookkeeping.
 3. user runs /new-feature
-                      → claude creates ~/repo-b/_clones/feat-auth/
+                      → claude adds a worktree at ~/repo-b/_worktrees/feat-auth/
                         with branch feat-auth checked out
-                      → claude `cd`s into the clone (mid-session)
+                      → claude `cd`s into the worktree (mid-session)
                       → no new session_start fires; CLAUDE_CODE_SESSION_ID
                         is unchanged across `cd`.
 4. user runs /ci-watcher → /ci-watcher skill (running inside the same Claude process):
@@ -67,7 +67,7 @@ ASCII view of two windows running at the same time:
 └───────────────────────────────────────────────────────────────────────────┘
 
 ┌─ Window B ────────────────────────────────────────────────────────────────┐
-│ cwd: ~/repo-b/_clones/feat-auth   session_id: bbbbbbbb-bbbb-bbbb-bbbb-…   │
+│ cwd: ~/repo-b/_worktrees/feat-auth   session_id: bbbbbbbb-bbbb-bbbb-bbbb-…   │
 │ branch: feat/auth                                                         │
 │ /tmp/ci_watch_state_bbbbbbbb-bbbb-bbbb-bbbb-…  contents: "feat/auth:running" │
 │ /tmp/ci_watch_pr_bbbbbbbb-bbbb-bbbb-bbbb-…     ← watcher writes JSON      │
@@ -202,35 +202,53 @@ of spamming a stranger.
 ### Two windows, same repo, different branches
 
 ```
-Window 1: cwd=~/r/_clones/feat-a   session_id=11111111-…   slot=11111111-…
-Window 2: cwd=~/r/_clones/feat-b   session_id=22222222-…   slot=22222222-…
+Window 1: cwd=~/r/_worktrees/feat-a   session_id=11111111-…   slot=11111111-…
+Window 2: cwd=~/r/_worktrees/feat-b   session_id=22222222-…   slot=22222222-…
 
 Watcher 1: /tmp/ci_watch_state_11111111-…   contents: "feat-a:running"
 Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-b:running"
                                   ↑ disjoint, no contention
 ```
 
+Each feature gets its own worktree directory under `_worktrees/`, and because
+each worktree checks out a distinct branch this is the common case.
+
 ### Two windows, same repo, SAME branch (the previously-broken case)
 
+A branch can only be checked out in **one** worktree at a time — `git worktree
+add` refuses to put `feat-a` in a second directory while it is already checked
+out elsewhere. So two windows can NOT each have their own `_worktrees/feat-a`
+on `feat-a`. The two valid topologies are:
+
+- **Shared worktree path:** both windows `cd` into the SAME
+  `~/r/_worktrees/feat-a` directory. They share one working tree but remain
+  separate Claude processes with distinct session_ids.
+- **Detached checkout:** one window uses the `feat-a` worktree while the other
+  checks out the same commit in a separate detached-HEAD worktree (no branch
+  ref held), e.g. for read-only inspection.
+
 ```
-Window 1: cwd=~/r/_clones/feat-a   session_id=11111111-…   slot=11111111-…
-Window 2: cwd=~/r/_clones/feat-a   session_id=22222222-…   slot=22222222-…
+Window 1: cwd=~/r/_worktrees/feat-a   session_id=11111111-…   slot=11111111-…
+Window 2: cwd=~/r/_worktrees/feat-a   session_id=22222222-…   slot=22222222-…
+          ↑ SAME shared worktree path
 
 Watcher 1: /tmp/ci_watch_state_11111111-…   contents: "feat-a:running"
 Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-a:running"
                                   ↑ still disjoint thanks to session_id keying
 ```
 
-Each window's `status_line.sh` extracts its own `session_id` from its own
-payload, builds its own slot, and reads its own watcher's state. Each
-window's `/ci-watcher` reads its own `$CLAUDE_CODE_SESSION_ID` — different Claude
-processes have different session_ids.
+Even though the two windows share one worktree path, each window's
+`status_line.sh` extracts its own `session_id` from its own payload, builds its
+own slot, and reads its own watcher's state. Each window's `/ci-watcher` reads
+its own `$CLAUDE_CODE_SESSION_ID` — different Claude processes have different
+session_ids — so the session_id-keyed watcher slots keep their state disjoint
+within that shared path.
 
 ### Two windows, different repos
 
 ```
 Window 1: cwd=~/repo-a              session_id=aaaaaaaa-…
-Window 2: cwd=~/repo-b/_clones/x    session_id=bbbbbbbb-…
+Window 2: cwd=~/repo-b/_worktrees/x    session_id=bbbbbbbb-…
 
 Completely isolated — different session_ids, different slots,
 different webhook MCP servers (different ports + session tokens).

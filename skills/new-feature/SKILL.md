@@ -4,7 +4,7 @@ description: "Start new feature with full planning"
 argument-hint: "[feature-description]"
 ---
 
-Creates a new feature branch using git clone for isolated development with full planning.
+Creates a new feature branch using a git worktree for isolated development with full planning.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -14,8 +14,8 @@ Creates a new feature branch using git clone for isolated development with full 
 
 ## Process
 
-### Step 1: Create Clone
-Run `/create-clone $ARGUMENTS`.
+### Step 1: Create Worktree
+Run `/create-worktree $ARGUMENTS`.
 
 ### Step 2: Run Feature workflow
 Read the file `~/.claude/feature-workflow.md` and work according to workflow.

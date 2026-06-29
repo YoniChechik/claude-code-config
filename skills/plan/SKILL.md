@@ -41,7 +41,7 @@ Use a subagent to carry out the following steps:
 
 Determine feature name from branch: `FEATURE_NAME=$(git rev-parse --abbrev-ref HEAD)`
 
-Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature clone directory) with this structure:
+Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature worktree directory) with this structure:
 
 ````markdown
 # Feature: [Feature Name]

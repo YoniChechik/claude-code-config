@@ -34,4 +34,5 @@
 *.pyo
 **/.pytest_cache/
 quality-results/
+_worktrees/
 _clones/

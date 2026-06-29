@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# PreToolUse hook: block file edits and git write operations outside _clones directories.
-# For Edit/Write/NotebookEdit: checks file_path is inside _clones/ or outside any git repo.
-# For Bash: checks if command is a git write operation and cwd is inside _clones/.
+# PreToolUse hook: block file edits and git write operations outside _worktrees directories.
+# For Edit/Write/NotebookEdit: checks file_path is inside _worktrees/ or outside any git repo.
+# For Bash: checks if command is a git write operation and cwd is inside _worktrees/.
 # Receives tool input via stdin as JSON with session_id, cwd, tool_name, tool_input.
 # Exit 0 = allow. Outputs JSON with permissionDecision=ask to prompt user.
 
@@ -60,7 +60,7 @@ if [ "$tool_name" = "Bash" ]; then
 
     # Split the compound command on separators (;, &&, ||, |, newlines) into individual segments,
     # then track cd/pushd commands to compute effective_cwd and check if any segment is a git write op.
-    # This catches "cd /outside && git commit" even when session cwd is inside _clones/.
+    # This catches "cd /outside && git commit" even when session cwd is inside _worktrees/.
     effective_cwd="$cwd"
     has_git_write=0
     git_c_target=""
@@ -154,7 +154,7 @@ if [ "$tool_name" = "Bash" ]; then
 
     if [ "$has_git_write" = "1" ]; then
         # If `git -C <path>` was used, validate that path — it overrides cwd at runtime.
-        # Resolve to an absolute path, then require it to be inside _clones/ (or CLAUDE_CONFIG_DIR).
+        # Resolve to an absolute path, then require it to be inside _worktrees/ (or CLAUDE_CONFIG_DIR).
         if [ -n "$git_c_target" ]; then
             git_c_target="${git_c_target/#\~/$HOME}"
             if [[ "$git_c_target" != /* ]]; then
@@ -169,7 +169,10 @@ if [ "$tool_name" = "Bash" ]; then
             fi
         fi
         if [ "$has_bypass_shell" != "1" ] && [ "$has_eval" != "1" ] && [ "$has_subshell_git" != "1" ]; then
-            if echo "$effective_cwd" | grep -q '_clones/'; then
+            # Plain substring match (consistent with the file-edit branch below). Known
+            # limitation: any path containing the literal "_worktrees/" passes, even a
+            # contrived dir outside the real worktree root — accepted, not anchored.
+            if echo "$effective_cwd" | grep -q '_worktrees/'; then
                 exit 0
             fi
             if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$effective_cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
@@ -177,7 +180,7 @@ if [ "$tool_name" = "Bash" ]; then
             fi
         fi
         cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: Git write operation attempted outside a _clones/ directory. Direct writes to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that clone."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: Git write operation attempted outside a _worktrees/ directory. Direct writes to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) Run '/create-worktree <feature-description>' — this creates an isolated git worktree under _worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that worktree."}}
 EOF
         exit 0
     fi
@@ -208,13 +211,15 @@ else
         exit 0
     fi
 
-    # Inside a git repo: allow modifications inside _clones directories
-    if echo "$file_path" | grep -q '_clones/'; then
+    # Inside a git repo: allow modifications inside _worktrees directories.
+    # Plain substring match: a path containing the literal "_worktrees/" anywhere passes
+    # (known limitation, accepted — not anchored to the real worktree root).
+    if echo "$file_path" | grep -q '_worktrees/'; then
         exit 0
     fi
 
     cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: File edit/write attempted outside a _clones/ directory inside a git repo. Direct edits to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that clone. Never edit files directly in the base repo directory."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: File edit/write attempted outside a _worktrees/ directory inside a git repo. Direct edits to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) Run '/create-worktree <feature-description>' — this creates an isolated git worktree under _worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that worktree. Never edit files directly in the base repo directory."}}
 EOF
     exit 0
 fi

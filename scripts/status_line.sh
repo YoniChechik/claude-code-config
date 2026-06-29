@@ -66,11 +66,11 @@ if [ -n "$branch" ]; then
   fi
 fi
 
-# Build a short display: "repo-name / clone-name" or just "repo-name"
-if [[ "$dir" == *"/_clones/"* ]]; then
-  repo_name=$(echo "$dir" | sed 's|/_clones/.*||' | xargs basename)
-  clone_name=$(echo "$dir" | sed 's|.*/_clones/||' | cut -d'/' -f1)
-  display_dir="${repo_name} / ${clone_name}"
+# Build a short display: "repo-name / worktree-name" or just "repo-name"
+if [[ "$dir" == *"/_worktrees/"* ]]; then
+  repo_name=$(echo "$dir" | sed 's|/_worktrees/.*||' | xargs basename)
+  worktree_name=$(echo "$dir" | sed 's|.*/_worktrees/||' | cut -d'/' -f1)
+  display_dir="${repo_name} / ${worktree_name}"
 else
   # Try to get the git repo root name, fall back to basename of dir
   repo_root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")
@@ -107,18 +107,18 @@ fi
 # Line 2: warnings (only if in a git repo)
 warning=""
 if [ -n "$branch" ]; then
-  in_clones=false
-  if [[ "$dir" == *"_clones/"* ]]; then
-    in_clones=true
+  in_worktree=false
+  if [[ "$dir" == *"_worktrees/"* ]]; then
+    in_worktree=true
   fi
 
-  if [ "$in_clones" = false ] && [ "$branch" != "main" ]; then
-    warning="\n${red}⚠ Not in _clones but branch is \"${branch}\" (not main)${reset}"
-  elif [ "$in_clones" = true ]; then
-    # Extract clone dir name: the directory right after _clones/
-    clone_dir=$(echo "$dir" | sed 's|.*_clones/||' | cut -d'/' -f1)
-    if [ "$clone_dir" != "$branch" ]; then
-      warning="\n${red}⚠ Clone dir \"${clone_dir}\" but branch is \"${branch}\"${reset}"
+  if [ "$in_worktree" = false ] && [ "$branch" != "main" ]; then
+    warning="\n${red}⚠ Not in _worktrees but branch is \"${branch}\" (not main)${reset}"
+  elif [ "$in_worktree" = true ]; then
+    # Extract worktree dir name: the directory right after _worktrees/
+    worktree_dir=$(echo "$dir" | sed 's|.*_worktrees/||' | cut -d'/' -f1)
+    if [ "$worktree_dir" != "$branch" ]; then
+      warning="\n${red}⚠ Worktree dir \"${worktree_dir}\" but branch is \"${branch}\"${reset}"
     fi
   fi
 fi
@@ -132,7 +132,7 @@ if [ -n "$slot" ]; then
   pr_cache_file="/tmp/ci_watch_pr_${slot}"
   # Render PR link whenever the watcher cache has it, regardless of the
   # shell's current branch — the user may be in main while the watcher
-  # tracks a feature branch in a clone.
+  # tracks a feature branch in a worktree.
   if [ -f "$pr_cache_file" ]; then
     pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
     pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)

@@ -7,7 +7,7 @@ description: "Run quality, review, and review-tests checks in parallel, then lin
 
 Run all post-implementation checks and fixes.
 
-**Prerequisites:** Must be in a feature clone directory with code already implemented and tests built.
+**Prerequisites:** Must be in a feature worktree directory with code already implemented and tests built.
 
 ## Step 1: Quality + Review + Review Tests (parallel)
 Run `/quality` skill, `/review` skill, AND `/review-tests` skill simultaneously — they are independent checks (quality is code style/types/slop, review is deep code review, review-tests is test quality) and can execute in parallel.

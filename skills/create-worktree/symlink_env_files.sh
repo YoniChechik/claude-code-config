@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Symlink .env* files from source repo to target clone
-# Usage: symlink_env_files.sh <source_repo_dir> <target_clone_dir>
+# Symlink .env* files from source repo to target worktree
+# Usage: symlink_env_files.sh <source_repo_dir> <target_worktree_dir>
 
 set -e
 
@@ -8,8 +8,8 @@ SOURCE_DIR="$1"
 TARGET_DIR="$2"
 
 if [ -z "$SOURCE_DIR" ] || [ -z "$TARGET_DIR" ]; then
-    echo "Error: Both source_repo_dir and target_clone_dir are required"
-    echo "Usage: $0 <source_repo_dir> <target_clone_dir>"
+    echo "Error: Both source_repo_dir and target_worktree_dir are required"
+    echo "Usage: $0 <source_repo_dir> <target_worktree_dir>"
     exit 1
 fi
 
@@ -22,7 +22,7 @@ ENV_FILES=$(find "$SOURCE_DIR" \
     -path "*/venv" -prune -o \
     -path "*/.venv" -prune -o \
     -path "*/__pycache__" -prune -o \
-    -path "*/_clones" -prune -o \
+    -path "*/_worktrees" -prune -o \
     -name ".env*" ! -name "*.example" ! -name "*.tpl" ! -name "*.tpl.*" ! -name "*.keyshelf" ! -name "*.keyshelf.*" -type f -print 2>/dev/null)
 
 if [ -z "$ENV_FILES" ]; then
