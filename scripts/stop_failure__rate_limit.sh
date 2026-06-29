@@ -119,21 +119,15 @@ fi
 # ---------------------------------------------------------------------------
 # AUDIBLE NOTIFICATION (shared helper)
 # ---------------------------------------------------------------------------
-# Previously this hook played a distinct sound (Funk.aiff) directly via
-# afplay. We've since standardized on the shared notify_user_attention()
-# helper from _notify.sh — the same one used by the permission_guard ask
-# path and notification__sound.sh — so every "user, please come back"
-# signal sounds the same. The helper plays Glass.aiff, sets the iTerm2
-# tab color (green) and writes a "waiting…" title.
-#
-# IMPORTANT ORDERING: we call the helper FIRST and then set the
-# rate-limit-specific orange tab color + badge below, so those override
-# the helper's green color. The badge is untouched by the helper. The
-# title written by the helper is overridden by Claude Code anyway (see
-# badge comment below), so it does not conflict.
+# We use the shared Glass.aiff chime so every "user, please come back" signal
+# sounds the same. CRITICAL: the rate-limit alert must NEVER be suppressed, so
+# we call notify_chime_force() (which bypasses the dedup guard in
+# notify_user_attention) rather than the deduped helper — otherwise a
+# concurrent Stop/Notification chime in the same 2s window could silence the
+# rate-limit alert. The orange tab color + badge set below override any color.
 # _notify.sh is already sourced at the top of this script.
 # ---------------------------------------------------------------------------
-notify_user_attention
+notify_chime_force
 
 # ---------------------------------------------------------------------------
 # Set iTerm2 tab BADGE to a visible rate-limit indicator.

@@ -579,6 +579,66 @@ def test_no_runs_state(tmp_path):
     assert any("No CI runs visible" in m for _, m in out["notify_calls"])
 
 
+def test_no_ci_state(tmp_path):
+    """A branch with zero workflow_runs and no PR resolves to terminal no-ci.
+
+    After SHA_RUNS_EMPTY_MAX empty iterations, with no PR merge gate signalling
+    pending required checks, the watcher writes 'no-ci' once and notifies.
+    """
+    # Default make_api_get: pr=[] (no PR), runs={"workflow_runs": []} (zero runs).
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(),
+        max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
+    )
+    assert out["state_value"] == "no-ci"
+    no_ci_msgs = [m for _, m in out["notify_calls"] if "no CI" in m]
+    assert len(no_ci_msgs) == 1, f"expected exactly one no-ci notify, got {no_ci_msgs}"
+
+
+def test_no_ci_not_fired_when_runs_present(tmp_path):
+    """A repo with workflow runs present must never be classified as no-ci."""
+    runs = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "name": "build",
+                "head_sha": "sha-old",
+                "status": "in_progress",
+                "conclusion": None,
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(runs=runs),
+        max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
+    )
+    assert out["state_value"] != "no-ci"
+    assert not any("no CI" in m for _, m in out["notify_calls"])
+
+
+def test_no_ci_suppressed_when_pr_blocked(tmp_path):
+    """An open PR with BLOCKED mergeable_state means required checks are pending;
+    zero runs must NOT be misclassified as no-ci (CI is expected)."""
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "blocked",
+        }
+    ]
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr),
+        max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
+    )
+    assert out["state_value"] != "no-ci"
+    assert not any("no CI" in m for _, m in out["notify_calls"])
+
+
 def test_timeout_state(tmp_path):
     """After MAIN_WAIT_MAX iterations with commit visible but no runs, state=timeout."""
     pr = [

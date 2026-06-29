@@ -518,6 +518,7 @@ class WatchState:
         self.reported_conflict = False
         self.reported_behind = False
         self.reported_no_runs = False
+        self.reported_no_ci = False
         # Stuck-pending tracking. Counts consecutive iterations where the same
         # required-check name set has been un-emitted while all emitted checks
         # are complete. Resets to 0 whenever the stuck set changes or any
@@ -568,6 +569,7 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.reported_behind = False
         state.sha_runs_empty_count = 0
         state.reported_no_runs = False
+        state.reported_no_ci = False
         state.stuck_pending_iters = 0
         state.stuck_pending_names = frozenset()
         state.reported_stuck_pending = False
@@ -1089,6 +1091,34 @@ def watch(
             )
 
         if not all_runs:
+            # Zero workflow_runs for this branch. Either the repo genuinely has
+            # no CI, or CI is expected but hasn't appeared yet (queuing, or
+            # required checks configured). Use the same grace period as the
+            # per-SHA no-runs timeout. After the grace period, treat it as a
+            # terminal "no-ci" (pass-equivalent) state UNLESS the PR's merge
+            # gate signals that checks ARE expected — for an open PR a
+            # BLOCKED/UNKNOWN/empty mergeable_state means required checks are
+            # pending, so CI exists and we must keep waiting rather than
+            # mislabel it as no-ci. With no PR there is no merge gate to wait
+            # on, so empty runs genuinely mean no CI.
+            state.sha_runs_empty_count += 1
+            checks_expected = (
+                pr_data_available
+                and bool(pr_number)
+                and mergeable_state in ("", "UNKNOWN", "BLOCKED")
+            )
+            if (
+                not state.reported_no_ci
+                and state.sha_runs_empty_count >= SHA_RUNS_EMPTY_MAX
+                and not checks_expected
+            ):
+                state.reported_no_ci = True
+                write_state(slot, branch, "no-ci")
+                notify(
+                    port,
+                    f"ℹ️ Branch {branch} has no CI to watch — "
+                    f"no workflow runs detected.",
+                )
             time.sleep(POLL_INTERVAL)
             continue
 

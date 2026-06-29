@@ -108,16 +108,26 @@ except Exception as e:
 PYEOF
     2>/dev/null)
 
-    # If active agent count > 0, suppress the sound and exit silently
+    # Record whether background agents/tasks are still active.
     if [ -n "$ACTIVE_COUNT" ] && [ "$ACTIVE_COUNT" -gt 0 ] 2>/dev/null; then
-        exit 0
+        BG_ACTIVE=1
     fi
 fi
 
-# Clear the iTerm2 tab badge — the stop__title.sh hook will set it to
-# "✅ Done (OrgName)" right after us, but if this hook runs without that
-# one (e.g. suppressed by active agents above) we still want a clean slate.
-# Passing an empty base64 payload clears any previously set badge text.
-printf '\e]1337;SetBadgeFormat=\a' > /dev/tty 2>/dev/null || true
+# Clear the iTerm2 tab badge regardless of which path we take below — we always
+# want a clean slate (the badge is set elsewhere for done/rate-limit states).
+# Passing an empty base64 payload clears any previously set badge text. Resolve
+# the real tty (handles detached-tty subagent contexts) rather than hardcoding
+# /dev/tty, matching the other _notify.sh emitters.
+printf '\e]1337;SetBadgeFormat=\a' > "$(_resolve_target_tty)" 2>/dev/null || true
+
+# Decision (unified state model):
+#   - BLUE, NO chime  = main agent free but background work continues:
+#                       bg agents/tasks still active OR CI actively running.
+#   - GREEN + 1 chime = fully settled, needs attention.
+if [ "${BG_ACTIVE:-0}" = "1" ] || ci_is_active; then
+    set_blue_bar
+    exit 0
+fi
 
 notify_user_attention
