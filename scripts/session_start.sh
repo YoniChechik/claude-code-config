@@ -137,7 +137,9 @@ process_worktree() {
     fi
 
     # If the branch still exists on origin, the worktree is in active use — keep it.
-    if git ls-remote --heads origin "$wt_branch" 2>/dev/null | grep -qF "refs/heads/$wt_branch"; then
+    # Use an EXACT-ref check (never a substring grep, which would treat 'feat' as
+    # existing when only 'feat-2' exists).
+    if git ls-remote --exit-code --heads origin "$wt_branch" >/dev/null 2>&1; then
         existing_worktrees+=("$dir_name")
         return
     fi

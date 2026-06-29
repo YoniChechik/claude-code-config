@@ -108,7 +108,7 @@ fi
 warning=""
 if [ -n "$branch" ]; then
   in_worktree=false
-  if [[ "$dir" == *"_worktrees/"* ]]; then
+  if [[ "$dir" == *"/_worktrees/"* ]]; then
     in_worktree=true
   fi
 

@@ -16,23 +16,26 @@ fi
 SOURCE_DIR=$(cd "$SOURCE_DIR" && pwd)
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-ENV_FILES=$(find "$SOURCE_DIR" \
-    -path "*/.git" -prune -o \
-    -path "*/node_modules" -prune -o \
-    -path "*/venv" -prune -o \
-    -path "*/.venv" -prune -o \
-    -path "*/__pycache__" -prune -o \
-    -path "*/_worktrees" -prune -o \
-    -name ".env*" ! -name "*.example" ! -name "*.tpl" ! -name "*.tpl.*" ! -name "*.keyshelf" ! -name "*.keyshelf.*" -type f -print 2>/dev/null)
-
-if [ -z "$ENV_FILES" ]; then
-    echo "No .env* files found in $SOURCE_DIR"
-    exit 0
-fi
+# Build the find command once. It emits matches NUL-separated (-print0) so the
+# read loop below is space-safe and never word-splits on whitespace in paths.
+# Process substitution (not a pipe) keeps the loop body in the current shell, so
+# the linked counter survives after the loop.
+find_env_files() {
+    find "$SOURCE_DIR" \
+        -path "*/.git" -prune -o \
+        -path "*/node_modules" -prune -o \
+        -path "*/venv" -prune -o \
+        -path "*/.venv" -prune -o \
+        -path "*/__pycache__" -prune -o \
+        -path "*/_worktrees" -prune -o \
+        -name ".env*" ! -name "*.example" ! -name "*.tpl" ! -name "*.tpl.*" ! -name "*.keyshelf" ! -name "*.keyshelf.*" -type f -print0 2>/dev/null
+}
 
 echo "Symlinking .env* files from $SOURCE_DIR to $TARGET_DIR:"
 
-for SOURCE_FILE in $ENV_FILES; do
+# Iterate NUL-delimited records so paths containing spaces survive intact.
+linked=0
+while IFS= read -r -d '' SOURCE_FILE; do
     REL_PATH="${SOURCE_FILE#$SOURCE_DIR/}"
     TARGET_FILE="$TARGET_DIR/$REL_PATH"
 
@@ -44,4 +47,10 @@ for SOURCE_FILE in $ENV_FILES; do
 
     ln -s "$SOURCE_FILE" "$TARGET_FILE"
     echo "  $REL_PATH -> $SOURCE_FILE"
-done
+    linked=$((linked + 1))
+done < <(find_env_files)
+
+# Report when nothing matched (after the loop, since the loop drives detection).
+if [ "$linked" -eq 0 ]; then
+    echo "No .env* files found in $SOURCE_DIR"
+fi

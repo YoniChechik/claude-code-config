@@ -67,16 +67,19 @@ if [ "$LOCAL_EXISTS" = true ]; then
     echo "Local branch detected: $FEATURE_NAME — checking it out in a new worktree."
     git worktree add "$WORKTREE_PATH" "$FEATURE_NAME"
 elif [ "$REMOTE_EXISTS" = true ]; then
-    # The branch exists on origin: create a worktree tracking the remote branch
-    # (creates a local tracking branch off origin/$FEATURE_NAME).
+    # The branch exists on origin (and no local branch exists, per the preflight):
+    # create a worktree with an explicit local tracking branch off
+    # origin/$FEATURE_NAME (explicit --track instead of relying on git DWIM).
     echo "Existing remote branch detected: $FEATURE_NAME — checking it out in a new worktree."
-    git worktree add "$WORKTREE_PATH" "$FEATURE_NAME"
+    git worktree add --track -b "$FEATURE_NAME" "$WORKTREE_PATH" "origin/$FEATURE_NAME"
 else
     # New-branch mode: branch off FRESH origin/main (never a stale local main),
-    # then publish the branch and set its upstream.
+    # then publish the branch and set its upstream. The push is non-fatal: under
+    # set -e a push failure would otherwise abort before env setup and before the
+    # final path is echoed, leaving a half-provisioned worktree.
     echo "New branch mode: creating $FEATURE_NAME off origin/main."
     git worktree add -b "$FEATURE_NAME" "$WORKTREE_PATH" origin/main
-    git push -u origin "$FEATURE_NAME"
+    git push -u origin "$FEATURE_NAME" || echo "Warning: push failed; branch is local-only, push manually later" >&2
 fi
 
 # Symlink env files from the base repo root into the new worktree.
