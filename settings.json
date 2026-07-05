@@ -1,7 +1,7 @@
 {
   "env": {
     "ENABLE_TOOL_SEARCH": "true",
-    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
   },
   "includeCoAuthoredBy": false,
   "permissions": {
