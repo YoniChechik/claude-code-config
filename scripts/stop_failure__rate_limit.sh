@@ -145,4 +145,4 @@ printf '\e]1337;SetBadgeFormat=%s\a' "$(printf '%s' "$TAB_TITLE" | base64)" > "$
 # just set, since rate-limit is a different state than "waiting for user".
 # Escape sequence format: \033]6;1;bg;<channel>;brightness;<0-255>\a
 # ---------------------------------------------------------------------------
-printf '\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;140\a\033]6;1;bg;blue;brightness;0\a' > "$TARGET_TTY" 2>/dev/null || true
+printf '\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;128\a\033]6;1;bg;blue;brightness;0\a' > "$TARGET_TTY" 2>/dev/null || true

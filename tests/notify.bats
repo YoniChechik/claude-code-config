@@ -257,29 +257,30 @@ stub_branch() {
     [[ "$output" == *"6;1;bg;blue;brightness;56"* ]]
 }
 
-@test "set_blue_bar: emits blue RGB (30/90/220), no bell sound, no title OSC" {
+@test "set_blue_bar: emits blue RGB (0/0/255), no bell sound, no title OSC" {
     redirect_tty_to_file
     set_blue_bar
     run cat "$TTY_CAPTURE"
-    [[ "$output" == *"6;1;bg;red;brightness;30"* ]]
-    [[ "$output" == *"6;1;bg;green;brightness;90"* ]]
-    [[ "$output" == *"6;1;bg;blue;brightness;220"* ]]
+    [[ "$output" == *"6;1;bg;red;brightness;0"* ]]
+    [[ "$output" == *"6;1;bg;green;brightness;0"* ]]
+    [[ "$output" == *"6;1;bg;blue;brightness;255"* ]]
     # No title sequence (OSC 0 "]0;").
     [[ "$output" != *"]0;"* ]]
     # No "waiting" title text.
     [[ "$output" != *"waiting"* ]]
 }
 
-@test "notify_user_attention: emits green RGB (0/180/0) and a waiting title" {
+@test "notify_user_attention: emits green RGB (0/255/0) and a plain branch-name title" {
     redirect_tty_to_file
     stub_branch "feat-x"
     notify_user_attention "attention" >/dev/null 2>&1
     run cat "$TTY_CAPTURE"
     [[ "$output" == *"6;1;bg;red;brightness;0"* ]]
-    [[ "$output" == *"6;1;bg;green;brightness;180"* ]]
+    [[ "$output" == *"6;1;bg;green;brightness;255"* ]]
     [[ "$output" == *"6;1;bg;blue;brightness;0"* ]]
-    [[ "$output" == *"]0;"* ]]
-    [[ "$output" == *"waiting"* ]]
+    # Title is the plain branch name — no "waiting", no emoji decorations.
+    [[ "$output" == *"]0;feat-x"* ]]
+    [[ "$output" != *"waiting"* ]]
 }
 
 @test "set_blue_bar: does NOT create a dedup lock (background state never chimes)" {

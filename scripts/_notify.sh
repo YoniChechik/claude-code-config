@@ -119,7 +119,7 @@ notify_user_attention() {
 
     # Always set the green color and title even when the chime is deduped —
     # the visual state is idempotent, only the audible chime must be unique.
-    _set_tab_rgb 0 180 0 "$target_tty"
+    _set_tab_rgb 0 255 0 "$target_tty"
 
     if _dedup_should_chime "$event_type" "$target_tty"; then
         _play_chime_sound
@@ -127,7 +127,7 @@ notify_user_attention() {
 
     local branch
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-repo")
-    printf '\033]0;🔴 %s waiting... 🔔\007' "$branch" > "$target_tty" 2>/dev/null || true
+    printf '\033]0;%s\007' "$branch" > "$target_tty" 2>/dev/null || true
 }
 
 # Play the attention chime UNCONDITIONALLY (bypasses the dedup guard). Used by
@@ -140,7 +140,7 @@ notify_chime_force() {
 # BLUE tab, NO chime, NO title change: the main agent is free but background
 # work (bg agents/tasks or actively-running CI) is still in progress.
 set_blue_bar() {
-    _set_tab_rgb 30 90 220
+    _set_tab_rgb 0 0 255
 }
 
 reset_tab_color() {
