@@ -2,7 +2,6 @@
   "env": {
     "ENABLE_TOOL_SEARCH": "true",
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
-    "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1"
   },
   "includeCoAuthoredBy": false,
   "permissions": {
@@ -198,5 +197,6 @@
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
   "voiceEnabled": true,
-  "disableBypassPermissionsMode": false
+  "disableBypassPermissionsMode": false,
+  "includeGitInstructions": false
 }
