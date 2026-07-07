@@ -25,6 +25,7 @@ State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
 Exit conditions:
     - branch not found on remote (1)
     - PR merged and main CI resolved for the merge commit (0)
+    - PR merged but the default branch has no CI to trigger (0)
     - timeout waiting for main CI runs after merge (0)
     - session health check fails after retries (0)
 """
@@ -49,6 +50,12 @@ import requests
 POLL_INTERVAL = 1.0
 SHA_RUNS_EMPTY_MAX = 120  # 120 * 1s = 2 min
 MAIN_WAIT_MAX = 300  # 300 * 1s = 5 min
+# Grace before flagging "no CI on main" when a SUCCESSFUL main-runs fetch shows
+# zero workflow runs on the default branch. Still far shorter than the 5-min
+# false wait (MAIN_WAIT_MAX) we're eliminating, but tolerant of a slow first-run
+# registration. Combined with the main_fetch_ok gate, persistent API errors
+# never flag no-main-ci — they fall through to the MAIN_WAIT_MAX timeout webhook.
+NO_MAIN_CI_GRACE = 30  # 30 * 1s = 30s
 HEALTH_RETRY_MAX = 5  # 5 attempts with 2s sleep between (~10s window)
 HEALTH_RETRY_SLEEP = 2.0
 # Stuck-pending detection: number of consecutive iterations a required check
@@ -993,6 +1000,11 @@ def watch(
             main_runs_data, _ = api_get(
                 main_runs_url, state.main_runs_cache, gh_token_value()
             )
+            # api_get returns None (its default cache.data) when the fetch
+            # failed with no cached payload — indistinguishable from a genuine
+            # empty result once coerced to []. Track the success signal so a
+            # transient API hiccup can't masquerade as "no CI on main".
+            main_fetch_ok = main_runs_data is not None
             all_main_runs = (main_runs_data or {}).get("workflow_runs", [])
             # Filter out Dependabot's dependency-graph runs ("event":"dynamic",
             # path "dynamic/dependabot/..."). They're triggered on every merge
@@ -1026,6 +1038,32 @@ def watch(
                     visible = False
                 if visible:
                     state.main_wait_iterations += 1
+                    # A SUCCESSFUL fetch that returns zero workflow runs on the
+                    # default branch means the repo has no CI on main, so the
+                    # merge will never trigger a run. Flag it promptly (after a
+                    # short grace for runs to first register) instead of burning
+                    # the full MAIN_WAIT_MAX timeout. Gate on main_fetch_ok so a
+                    # persistent API failure (which also yields an empty list)
+                    # does NOT flag no-main-ci — it keeps advancing the shared
+                    # counter and falls through to the MAIN_WAIT_MAX timeout,
+                    # which fires the actionable "check manually" webhook. When
+                    # main DOES have runs (for other commits) but none for our
+                    # merge commit, CI exists and is merely slow to register, so
+                    # we also fall through to the timeout. No webhook for the
+                    # no-main-ci case — mirroring the no-CI-branch case, the
+                    # "ci: no main ci" statusline flag is enough.
+                    if (
+                        main_fetch_ok
+                        and not all_main_runs
+                        and state.main_wait_iterations >= NO_MAIN_CI_GRACE
+                    ):
+                        write_state(slot, branch, "no-main-ci")
+                        state.keep_state_file = True
+                        print(
+                            f"No CI on {default_branch} for merge of "
+                            f"'{branch}' — nothing to watch. Exiting."
+                        )
+                        return
                     if state.main_wait_iterations >= MAIN_WAIT_MAX:
                         notify(
                             port,
@@ -1114,11 +1152,9 @@ def watch(
             ):
                 state.reported_no_ci = True
                 write_state(slot, branch, "no-ci")
-                notify(
-                    port,
-                    f"ℹ️ Branch {branch} has no CI to watch — "
-                    f"no workflow runs detected.",
-                )
+                # No webhook here: "no CI to watch" is a no-op the user finds
+                # noisy. The statusline "ci: none" flag is enough — genuine
+                # pass/fail/behind notifications are unaffected.
             time.sleep(POLL_INTERVAL)
             continue
 
