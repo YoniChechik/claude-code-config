@@ -8,6 +8,8 @@ argument-hint: "[target or question]"
 
 Delegate read-only review work to the `codex` CLI. Codex gets its own look at the code/plan/diff and reports back. Claude stays in charge of any writes.
 
+> **⚠️ IMPORTANT — set the Bash tool `timeout` to `600000` (10 min).** Codex runs are LONG and the Bash tool's DEFAULT timeout is only 120000ms (2 min), which kills codex mid-run (this has happened). The foreground poll-wait loop below caps at 10 min (`MAX_BATCHES=60`), so you MUST pass `timeout: 600000` (the Bash tool maximum) on EVERY Bash call that runs codex — otherwise the whole invocation is silently capped at 2 min and codex dies. This is the single most important thing to get right.
+
 > **Subagent vs main-agent compatibility note.** This skill is called from both the main agent and subagents. Subagents are killed shortly after their final tool call returns, which means `run_in_background=true` on the Bash tool would kill codex prematurely (the background process is tied to the subagent's lifetime). The canonical invocation below uses **shell-level backgrounding + a foreground poll-wait** so the same recipe works identically in both contexts. Do not "optimize" this back to `run_in_background=true` — it breaks subagent callers.
 
 ## Mandatory flags
@@ -68,7 +70,9 @@ After the Bash call returns, read `$OUT` with the Read tool. If `$OUT` is empty 
 
 - **Always run from `/tmp` via `-C /tmp --skip-git-repo-check`.** Never `-C` into a real project directory — see the mandatory-flags rationale above.
 - **Always use `-o <file>`** to write output to a file. Never consume codex stdout directly.
+- **Always pass `timeout: 600000`** on the Bash tool call. The default 2-min cap kills codex mid-run; 600000ms (10 min) is the Bash tool maximum and matches the poll-wait's `MAX_BATCHES=60` cap.
 - **Never use `run_in_background=true`** on the Bash tool. Use shell-level `&` + `wait` as shown. This is required for subagent compatibility.
+- **If codex ever needs longer than 10 min** (rare for a read-only review): codex is already backgrounded with `&`, so it keeps running after the Bash call returns. Don't treat a full-window timeout as failure — issue a follow-up Bash call (again with `timeout: 600000`) that re-polls the same `$OUT`/`$CODEX_PID` with the same 1s-interval loop until it finishes. Never use `sleep` to wait outside that loop.
 - Sandbox MUST be `read-only`. Never use `--full-auto` (implies workspace-write) or `--dangerously-bypass-approvals-and-sandbox`.
 - Approval policy goes via `-c approval_policy="never"` — `codex exec` has no `--ask-for-approval` flag.
 - `read-only` sandbox **blocks network egress**. Any `gh`/`git fetch`/`curl` must be run by Claude OUTSIDE codex and piped into codex via stdin (or written to a file codex reads).

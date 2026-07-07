@@ -54,11 +54,20 @@ _schedule_lockdir_cleanup() {
 }
 
 # --- Duplicate-ping dedup guard ---------------------------------------------
-# Several hooks fire for one logical event (e.g. Stop + Notification), so we
-# suppress a second chime within _DEDUP_WINDOW_SECONDS using an atomic mkdir
-# (only one concurrent racer wins). The lock is keyed per event-type + session
-# + tty. Returns 0 (chime — first in burst) or 1 (suppress).
-_DEDUP_WINDOW_SECONDS=2
+# Several hooks fire for one logical user-facing moment (e.g. the PreToolUse
+# AskUserQuestion/permission hook AND a Notification hook, or Stop AND a
+# Notification), so we suppress the extra chime within _DEDUP_WINDOW_SECONDS
+# using an atomic mkdir (only one concurrent racer wins).
+#
+# The lock is keyed per event-type + SESSION. It is deliberately NOT keyed on
+# the tty: the separate hook processes climb different PPID chains and can
+# resolve DIFFERENT ttys, which produced two distinct lockdirs and a DOUBLE
+# chime. The session id (CLAUDE_CODE_SESSION_ID) is identical across every hook
+# of one Claude session, so it collapses them to a single chime. Only when no
+# session id is available do we fall back to the tty so two concurrent terminals
+# don't cross-suppress each other's chimes.
+# Returns 0 (chime — first in burst) or 1 (suppress).
+_DEDUP_WINDOW_SECONDS=3
 readonly _DEDUP_WINDOW_SECONDS
 
 # Arg 1: event-type key. Arg 2 (optional): an already-resolved target tty;
@@ -68,10 +77,16 @@ _dedup_should_chime() {
     local target_tty="${2:-}"
     [ -n "$target_tty" ] || target_tty=$(_resolve_target_tty)
 
-    local session_id="${CLAUDE_CODE_SESSION_ID:-nosession}"
-    # Sanitize the tty path into a filename-safe token (strip slashes).
-    local tty_token="${target_tty//\//_}"
-    local lockdir="${CLAUDE_NOTIFY_TMP_DIR}/notify_dedup_${event_type}_${session_id}_${tty_token}"
+    # Prefer the stable per-session scope; fall back to the tty only when there
+    # is no session id (sanitized into a filename-safe token by stripping /).
+    local session_id="${CLAUDE_CODE_SESSION_ID:-}"
+    local scope
+    if [ -n "$session_id" ]; then
+        scope="$session_id"
+    else
+        scope="${target_tty//\//_}"
+    fi
+    local lockdir="${CLAUDE_NOTIFY_TMP_DIR}/notify_dedup_${event_type}_${scope}"
 
     # Atomic claim: mkdir succeeds for exactly one racer — that racer chimes.
     if mkdir "$lockdir" 2>/dev/null; then
@@ -107,10 +122,26 @@ _play_chime_sound() {
 
 # GREEN tab + single chime + "waiting" title: the fully-settled, needs-
 # attention signal. Deduped per event-type so two hooks firing for one event
-# produce exactly one chime. The optional first arg is the event-type key used
-# for dedup scoping (defaults to "attention").
+# produce exactly one chime.
+#
+# The OPTIONAL first arg is a transcript path. When it is passed AND either a
+# background agent is still running or CI is actively running, the main agent
+# is free but background work continues — paint the tab BLUE, no chime, and
+# return. Called with NO arg (e.g. the manual notify-waiting skill) it behaves
+# exactly as before: unconditional green + chime.
 notify_user_attention() {
-    local event_type="${1:-attention}"
+    local transcript="${1:-}"
+
+    # Background-work gate: only when a transcript was supplied. Empty arg keeps
+    # the legacy unconditional-green behavior untouched.
+    if [ -n "$transcript" ] && { bg_agents_active "$transcript" || ci_is_active; }; then
+        set_blue_bar
+        return 0
+    fi
+
+    # Dedup scope for the chime. Kept as a fixed key so concurrent Stop /
+    # Notification / AskUserQuestion hooks for one event chime only once.
+    local event_type="attention"
 
     # Resolve the tty once and thread it to the helpers — find_user_tty walks
     # the PPID chain via ps, so we avoid repeating that on every hook fire.
@@ -147,6 +178,124 @@ reset_tab_color() {
     local target_tty
     target_tty=$(_resolve_target_tty)
     printf '\033]6;1;bg;*;default\a' > "$target_tty" 2>/dev/null || true
+}
+
+# Returns 0 (true) if >=1 background agent is still running per the transcript
+# at $1, else 1 (false). Fail-safe: empty/missing/unparseable transcript => false.
+# Detection: entries whose toolUseResult.status == "async_launched" carry a
+# launched agentId; <task-notification> blocks whose <status> is terminal mark
+# that task-id terminated; active = launched - terminated.
+bg_agents_active() {
+    local transcript="$1"
+    # No usable transcript => treat as no background work.
+    [ -n "$transcript" ] && [ -f "$transcript" ] || return 1
+
+    # Cheap early-out before spawning python: a launched background agent always
+    # leaves an "async_launched" marker in the transcript. If the substring is
+    # absent there can be no launched agents, so bail false without the python.
+    grep -q "async_launched" "$transcript" || return 1
+
+    # Count active background agents via the transcript scan (fail-open to 0).
+    local count
+    count=$(python3 - "$transcript" <<'PYEOF' 2>/dev/null
+import sys, json, re, os
+
+transcript_path = sys.argv[1]
+debug = os.environ.get("CLAUDE_DEBUG_NOTIFY") == "1"
+
+# Any of these statuses in a <task-notification> means the agent is no longer
+# running. Treating only "completed" as terminal would leave failed/cancelled
+# agents pinned as "active" forever and silence the stop sound permanently.
+TERMINAL_STATUSES = {
+    "completed", "failed", "cancelled", "canceled",
+    "error", "errored", "timeout", "timed_out", "aborted",
+}
+
+# agent IDs that were async-launched (toolUseResult.agentId)
+launched = set()
+# task-ids that reached a terminal status (parsed from <task-notification> blocks).
+# These are the SAME identifier namespace as agentId — both sides use the
+# 17-char "a"-prefixed hex string, so direct set subtraction works.
+terminated = set()
+
+# Match <task-notification> blocks and pull out their <task-id> + <status>.
+# DOTALL so .*? crosses the literal "\n" inside the JSON-encoded string.
+TASK_NOTIF_RE = re.compile(
+    r"<task-notification>(.*?)</task-notification>", re.DOTALL
+)
+TASK_ID_RE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
+STATUS_RE = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
+
+def scan_text_for_terminations(text):
+    if not text or "<task-notification>" not in text:
+        return
+    for block in TASK_NOTIF_RE.findall(text):
+        status_match = STATUS_RE.search(block)
+        if not status_match:
+            continue
+        status = status_match.group(1).strip().lower()
+        if status not in TERMINAL_STATUSES:
+            continue
+        task_id_match = TASK_ID_RE.search(block)
+        if task_id_match:
+            terminated.add(task_id_match.group(1).strip())
+
+try:
+    with open(transcript_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # --- Launches: toolUseResult.status == "async_launched" carries agentId
+            tool_result = entry.get("toolUseResult", {})
+            if isinstance(tool_result, dict) and tool_result.get("status") == "async_launched":
+                agent_id = tool_result.get("agentId") or entry.get("agentId")
+                if agent_id:
+                    launched.add(agent_id)
+
+            # --- Terminations: <task-notification> blocks appear in multiple forms.
+            # Form 1: queue-operation entry, top-level "content" is a plain string
+            top_content = entry.get("content")
+            if isinstance(top_content, str):
+                scan_text_for_terminations(top_content)
+
+            # Form 2: user/assistant message.content as plain string or block list
+            message = entry.get("message", {})
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str):
+                    scan_text_for_terminations(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        text = block.get("text", "") or ""
+                        scan_text_for_terminations(text)
+
+    # Active = launched agents whose ID we haven't seen reach a terminal status
+    active = launched - terminated
+    if debug:
+        print(
+            f"[bg_agents_active] launched={sorted(launched)} "
+            f"terminated={sorted(terminated)} active={sorted(active)}",
+            file=sys.stderr,
+        )
+    print(len(active))
+except Exception as e:
+    if debug:
+        print(f"[bg_agents_active] error: {e!r}", file=sys.stderr)
+    # On any error, assume 0 active so sound plays
+    print(0)
+PYEOF
+    )
+
+    # True iff we parsed a positive active count.
+    [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null
 }
 
 # Return 0 (CI actively running) ONLY when ALL hold, checked in this order:
