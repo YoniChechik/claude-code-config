@@ -583,7 +583,9 @@ def test_no_ci_state(tmp_path):
     """A branch with zero workflow_runs and no PR resolves to terminal no-ci.
 
     After SHA_RUNS_EMPTY_MAX empty iterations, with no PR merge gate signalling
-    pending required checks, the watcher writes 'no-ci' once and notifies.
+    pending required checks, the watcher writes 'no-ci' once. It must NOT fire a
+    webhook — "no CI to watch" is a no-op the user finds noisy; the statusline
+    flag is enough.
     """
     # Default make_api_get: pr=[] (no PR), runs={"workflow_runs": []} (zero runs).
     out = run_watch(
@@ -593,7 +595,7 @@ def test_no_ci_state(tmp_path):
     )
     assert out["state_value"] == "no-ci"
     no_ci_msgs = [m for _, m in out["notify_calls"] if "no CI" in m]
-    assert len(no_ci_msgs) == 1, f"expected exactly one no-ci notify, got {no_ci_msgs}"
+    assert no_ci_msgs == [], f"expected no no-ci notify, got {no_ci_msgs}"
 
 
 def test_no_ci_not_fired_when_runs_present(tmp_path):
@@ -639,8 +641,13 @@ def test_no_ci_suppressed_when_pr_blocked(tmp_path):
     assert not any("no CI" in m for _, m in out["notify_calls"])
 
 
-def test_timeout_state(tmp_path):
-    """After MAIN_WAIT_MAX iterations with commit visible but no runs, state=timeout."""
+def test_no_main_ci_state(tmp_path):
+    """A merged PR on a repo whose default branch has NO workflow runs resolves
+    to terminal no-main-ci quickly (within NO_MAIN_CI_GRACE), not a long timeout.
+
+    Mirroring the no-CI-branch case, no webhook is fired — the statusline flag
+    is enough.
+    """
     pr = [
         {
             "html_url": "u",
@@ -651,8 +658,143 @@ def test_timeout_state(tmp_path):
             "merge_commit_sha": "merge-sha",
         }
     ]
-    # main_runs is empty — no runs match the merge SHA.
+    # main_runs is empty — the default branch has no CI at all.
     main_runs = {"workflow_runs": []}
+
+    # Allow well beyond the grace but well below MAIN_WAIT_MAX to prove it flags
+    # promptly rather than burning the full timeout.
+    fake_sleep, sleep_state = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX)
+    notify_calls: list[tuple[int, str]] = []
+
+    def fake_notify(p, m):
+        notify_calls.append((p, m))
+
+    branch = "feat"
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(
+            ci_watch, "api_get", side_effect=make_api_get(pr=pr, main_runs=main_runs)
+        ),
+        patch.object(ci_watch, "notify", side_effect=fake_notify),
+        patch.object(ci_watch, "health_check", return_value=True),
+        patch.object(ci_watch, "has_pending_checks", return_value=False),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
+        # Commit visible on main — drives the wait counter.
+        commit_get.return_value = MagicMock(status_code=200)
+        ci_watch.watch(
+            branch=branch,
+            slot=branch,
+            port=1,
+            session_token="t",
+            owner="o",
+            repo="r",
+            default_branch="main",
+            latest_sha="sha-old",
+        )
+
+    state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
+    # State file must persist (keep_state_file=True) and read no-main-ci.
+    assert state_path.exists()
+    assert state_path.read_text() == f"{branch}:no-main-ci"
+    # Flagged at/near the grace boundary — not burning the full timeout.
+    assert sleep_state["n"] <= ci_watch.NO_MAIN_CI_GRACE + 2
+    # No webhook for the no-main-ci case.
+    assert not any("No CI runs found on main" in m for _, m in notify_calls)
+
+
+def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
+    """A persistent main-runs fetch failure (api_get returns None) during the
+    merged phase must NOT be mistaken for 'no CI on main'. It falls through to
+    the MAIN_WAIT_MAX timeout path and fires the actionable webhook, exactly as
+    before the no-main-ci optimization."""
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+
+    def api_get_main_fails(url, cache, token):
+        if "/pulls" in url:
+            return pr, True
+        if "/actions/runs" in url:
+            # Simulate api_get failure with no cached data for main runs.
+            if "branch=main" in url:
+                return None, False
+            return {"workflow_runs": []}, True
+        return None, False
+
+    fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
+    notify_calls: list[tuple[int, str]] = []
+
+    def fake_notify(p, m):
+        notify_calls.append((p, m))
+
+    branch = "feat"
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(ci_watch, "api_get", side_effect=api_get_main_fails),
+        patch.object(ci_watch, "notify", side_effect=fake_notify),
+        patch.object(ci_watch, "health_check", return_value=True),
+        patch.object(ci_watch, "has_pending_checks", return_value=False),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
+        # Commit visible on main — drives main_wait_iterations toward timeout.
+        commit_get.return_value = MagicMock(status_code=200)
+        ci_watch.watch(
+            branch=branch,
+            slot=branch,
+            port=1,
+            session_token="t",
+            owner="o",
+            repo="r",
+            default_branch="main",
+            latest_sha="sha-old",
+        )
+
+    state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
+    # Must land on timeout (with webhook), NOT no-main-ci.
+    assert state_path.read_text() == f"{branch}:timeout"
+    assert any("No CI runs found on main" in m for _, m in notify_calls)
+
+
+def test_timeout_state(tmp_path):
+    """After MAIN_WAIT_MAX iterations with commit visible but the merge run never
+    appearing, state=timeout. Main HAS CI (a run for another commit exists), so
+    this is a genuine slow/missing-run timeout, not the no-main-ci case."""
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    # Main has CI runs, but none for the merge commit — so we wait to timeout.
+    main_runs = {
+        "workflow_runs": [
+            {
+                "id": 99,
+                "name": "build",
+                "head_sha": "other-sha",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+    }
 
     fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
     notify_calls: list[tuple[int, str]] = []

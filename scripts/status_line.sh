@@ -157,7 +157,7 @@ if [ -n "$slot" ]; then
     # For active states, verify the watcher process is still alive.
     _watcher_alive=false
     case "$ci_state_only" in
-      passed|failed|merged-passed|merged-failed|timeout|no-ci)
+      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci)
         _watcher_alive=true
         ;;
       *)
@@ -189,6 +189,7 @@ if [ -n "$slot" ]; then
         behind)        ci_display="${yellow}ci: behind${reset}" ;;
         no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
         no-ci)         ci_display="${green}ci: none${reset}" ;;
+        no-main-ci)    ci_display="${green}ci: no main ci${reset}" ;;
         timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
         merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
         merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
