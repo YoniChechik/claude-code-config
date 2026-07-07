@@ -24,4 +24,8 @@ if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" =
     exit 0
 fi
 
-notify_user_attention
+# Extract the transcript path so notify_user_attention can keep the tab BLUE
+# (not green) while a background agent/task or CI is still running.
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+
+notify_user_attention "$TRANSCRIPT"

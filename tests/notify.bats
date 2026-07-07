@@ -273,7 +273,8 @@ stub_branch() {
 @test "notify_user_attention: emits green RGB (0/255/0) and a plain branch-name title" {
     redirect_tty_to_file
     stub_branch "feat-x"
-    notify_user_attention "attention" >/dev/null 2>&1
+    # No arg => legacy unconditional-green path (no background-work gating).
+    notify_user_attention >/dev/null 2>&1
     run cat "$TTY_CAPTURE"
     [[ "$output" == *"6;1;bg;red;brightness;0"* ]]
     [[ "$output" == *"6;1;bg;green;brightness;255"* ]]
