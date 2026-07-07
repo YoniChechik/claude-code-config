@@ -8,6 +8,7 @@
 - NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
 - THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
 - NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
+- NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact. Do not proactively produce artifacts.
 - When working on feature- make sure you used `/create-clone` or `/cd-permanent` to work inside the clone. NEVER work directly in the base repo directory.
 - NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead. Each loop must complete in max 10 sec (target avg 3 sec); if the condition isn't met by then, let the loop iterate again — never extend a single loop's timeout.
 - ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed unless the logic is truly complex and non-obvious.
