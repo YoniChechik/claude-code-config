@@ -13,7 +13,7 @@ Always work based on data. Never guess. ALWAYS run as subagent (opus high effort
 - Read the error message and stack trace if available
 
 ### 2. Build a Feedback Loop
-Pick the highest option that fits — a loop you can run, not a plan to read code.
+Options are ordered by preference — pick the first that fits. A loop you can run, not a plan to read code.
 1. Failing test at the right seam (real code path, minimal mocking)
 2. curl/HTTP script against a dev server
 3. CLI invocation diffed against known-good output
@@ -24,19 +24,19 @@ Pick the highest option that fits — a loop you can run, not a plan to read cod
 8. Bisection harness for regressions (`git bisect run`)
 9. Differential loop — old vs new, or working vs broken input
 
-### 3. Gate: Is the Loop Good Enough?
+### 3. Gate the Loop
 Do not proceed until all four hold:
 - **Red-capable** — asserts the user's exact symptom, not "didn't crash"
 - **Deterministic** — pin time, seed RNG, freeze network
 - **Fast** — seconds, not minutes
 - **Agent-runnable** — you can name one command you have already run at least once
 
-**Stop rule:** if you're reading code to build a theory before that command exists, stop. That's the exact failure this skill prevents.
+**Stop rule:** if you're reading code to build a theory before that command exists, stop.
 
-**Non-deterministic bugs:** the goal is a higher reproduction rate, not a clean repro. Loop the trigger, parallelise, inject sleeps. 50% flake is debuggable; 1% is not.
+**Non-deterministic bugs:** the goal is a higher reproduction rate, not a clean repro. Loop the trigger, parallelize, inject sleeps. 50% flake is debuggable; 1% is not.
 
-### 4. Minimise
-Once red, shrink to the smallest scenario that still goes red. Cut inputs/callers/config one at a time, re-running after each cut. Done when every remaining element is load-bearing. This shrinks the hypothesis space and becomes your regression test.
+### 4. Minimize
+Once red, shrink to the smallest scenario that still goes red. Cut inputs/callers/config one at a time, re-running after each cut. Done when every remaining element is load-bearing. This shrinks the hypothesis space.
 
 ### 5. Rank Multiple Hypotheses
 Generate 3-5 ranked hypotheses **before testing any** — single-hypothesis generation anchors on the first plausible idea.
@@ -58,9 +58,9 @@ Generate 3-5 ranked hypotheses **before testing any** — single-hypothesis gene
 ### 8. Verify Fix
 Run the loop from step 2 again — it must go green.
 
-**If it still fails: loop back to step 2** — gather more debug data and try again.
+**If it still fails: loop back to step 5** — the fix falsified your hypothesis, so re-rank and probe again.
 
-Keep the minimised repro as a regression test, written at the seam that exercises the real bug pattern as it occurs at the call site. If no correct seam exists, that itself is the finding — report it rather than writing a test that gives false confidence.
+Keep the minimized repro as a regression test, written at the seam that exercises the real bug pattern as it occurs at the call site. If no correct seam exists, that itself is the finding — report it rather than writing a test that gives false confidence.
 
 ### 9. Clean Up & Post-Mortem
 - Remove debug scaffolding: `grep -r` the tag you chose in step 6 and delete every hit
