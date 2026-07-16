@@ -8,7 +8,7 @@ argument-hint: "[target or question]"
 
 Delegate read-only review work to the `codex` CLI. Codex gets its own look at the code/plan/diff and reports back. Claude stays in charge of any writes.
 
-Codex runs are LONG (often many minutes, sometimes over an hour). This skill spawns **one dedicated subagent** whose entire job is: launch codex detached → monitor until it exits → read the output → digest it → return a summary. The calling agent does not babysit codex and does not read raw codex output — it gets a finished summary back from the subagent.
+Codex runs are LONG (often many minutes, sometimes over an hour). This skill spawns **one dedicated subagent** whose entire job is: launch codex detached → block on a re-invoked poll loop until it exits → read the output → digest it → return a summary. The calling agent does not babysit codex and does not read raw codex output — it gets a finished summary back from the subagent.
 
 ## Mandatory flags
 
@@ -74,37 +74,65 @@ echo "RUN_ID=$RUN_ID PID=$(cat "/tmp/${RUN_ID}-pid") OUT=$OUT STDERR=$STDERR DON
 
 This call returns immediately. Record RUN_ID / OUT / STDERR / DONE from its output.
 
-## Step 2: wait for codex with the Monitor tool
+## Step 2: wait for codex with a BLOCKING re-invoke poll loop
 
-Call Monitor with `timeout_ms: 3600000` (the maximum), `persistent: false`, and a
-`description` like "codex run <RUN_ID>". Substitute the real paths into this command:
+Wait by calling the poll command below as a **foreground** Bash tool call (NOT
+`run_in_background`, NOT the Monitor tool — see why below). Each call BLOCKS your turn
+for up to ~9 minutes, then prints exactly one verdict. This is a RE-INVOKE loop: if the
+verdict is `STILL_RUNNING`, you IMMEDIATELY call the exact same Bash command AGAIN, and
+keep re-calling it until you get `DONE` or `ABORTED`. Every re-call is a real tool call,
+so your turn stays alive across the whole wait.
+
+Substitute the real paths recorded from Step 1 into this command:
 
 ```bash
 DONE="<DONE>"; OUT="<OUT>"; STDERR="<STDERR>"; PID="<PID>"
 
-# Emit exactly ONE line on ANY terminal state, then exit -- exiting ends the watch.
-# Silence is not success: this loop must break on failure as well as on success, or a
-# SIGKILLed codex would look identical to a still-running one.
-while true; do
-  # Terminal state 1: codex exited and published its exit code.
+# Bounded blocking poll: up to 540 iterations of a 1-second sleep (~9 min of real
+# waiting), kept safely under the foreground Bash 600000ms/10-min cap. Print ONE verdict
+# and exit 0 the instant a terminal state is known. Silence is never success -- every
+# branch below prints, so a SIGKILLed codex can never masquerade as still-running.
+for i in $(seq 1 540); do
+  # Terminal state 1: codex exited and published its exit code via the done-marker.
   if [[ -f "$DONE" ]]; then
-    echo "codex finished exit=$(cat "$DONE") out=$OUT"; break
+    echo "DONE exit=$(cat "$DONE") out=$OUT"; exit 0
   fi
   # Terminal state 2: the launcher subshell vanished without ever writing a marker
-  # (SIGKILL / OOM / reboot). Grace window covers the marker landing between checks.
+  # (SIGKILL / OOM / reboot). A 1s grace re-check covers the marker landing right at
+  # the moment the subshell exited.
   if ! kill -0 "$PID" 2>/dev/null; then
-    sleep 2
-    if [[ -f "$DONE" ]]; then echo "codex finished exit=$(cat "$DONE") out=$OUT"
-    else echo "codex ABORTED: pid $PID gone, no done-marker. stderr=$STDERR"; fi
-    break
+    sleep 1
+    if [[ -f "$DONE" ]]; then echo "DONE exit=$(cat "$DONE") out=$OUT"
+    else echo "ABORTED: pid $PID gone, no done-marker. stderr=$STDERR"; fi
+    exit 0
   fi
-  sleep 5
+  # Not terminal yet: wait one second and re-check. 1-second interval ONLY -- never a
+  # long blocking sleep.
+  sleep 1
 done
+# Hit the ~9-min cap with codex still alive and no marker: it is simply still running.
+# Report that so the supervisor re-invokes this SAME command to keep waiting.
+echo "STILL_RUNNING pid=$PID (codex still running; re-invoke this poll command)"
 ```
 
-If Monitor times out after the full hour with no event, just re-arm it with the same
-command. Re-arming is safe and idempotent: the loop checks the done-marker first, so a
-run that finished during the gap is picked up on the next iteration's first check.
+Act on the verdict:
+
+- **`DONE exit=<code> ...`** — codex finished. Proceed to Step 3.
+- **`ABORTED: ...`** — the launcher died with no marker. Proceed to Step 3 and diagnose
+  via `$STDERR`.
+- **`STILL_RUNNING ...`** — the poll hit its ~9-min cap before codex finished. You MUST
+  immediately call the EXACT SAME poll Bash command again. Do this as many times as it
+  takes; codex runs can exceed an hour, i.e. many re-invocations.
+
+CRITICAL — this is a RE-INVOKE loop, NOT fire-and-forget. You MUST NOT end your turn
+while the last poll printed `STILL_RUNNING`: that means codex is still running and you
+owe another poll call. Only a `DONE` or `ABORTED` verdict lets you move to Step 3.
+
+Do NOT use the `Monitor` tool to wait here. `Monitor` is asynchronous — it arms a
+background watcher and returns immediately without blocking your turn. If you armed it
+and stopped, your turn would end (marked `completed`) before codex finished, and the
+completion notification would be lost because a terminated subagent is not reliably
+re-invoked. The blocking re-invoke poll above is the required path.
 
 ## Step 3: digest and return
 
@@ -137,7 +165,7 @@ When the subagent returns:
 
 - **Always run from `/tmp` via `-C /tmp --skip-git-repo-check`.** Never `-C` into a real project directory — see the mandatory-flags rationale above.
 - **Always use `-o <file>`** to write output to a file. Never consume codex stdout directly.
-- **The launch is always detached (`&`) and always monitored from inside the subagent.** Never `run_in_background=true` (it dies with the subagent) and never a blocking foreground Bash call (10 min cap, codex runs exceed it). The subagent launches, Monitors, digests, returns.
+- **The launch is always detached (`&`); the wait is always a blocking re-invoke poll loop inside the subagent.** The launcher subshell uses shell-level `&` (never `run_in_background=true`, which dies with the subagent). The WAIT is a foreground Bash poll call the subagent re-invokes until it prints `DONE`/`ABORTED` — never the async `Monitor` tool (it returns immediately and the subagent's turn would end before codex finishes). The subagent launches, polls in a re-invoke loop, digests, returns.
 - **Never let the caller poll for codex.** The subagent owns the entire wait. The calling agent's only interaction is spawning it and reading its summary.
 - Sandbox MUST be `read-only`. Never use `--full-auto` (implies workspace-write) or `--dangerously-bypass-approvals-and-sandbox`.
 - Approval policy goes via `-c approval_policy="never"` — `codex exec` has no `--ask-for-approval` flag.
