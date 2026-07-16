@@ -1,6 +1,6 @@
 ---
 name: "feature-workflow"
-description: "End-to-end feature development pipeline: plan → implement → build tests → post checks → PR → summary. Invoked by /new-feature and /continue-feature. Run proactively whenever the user asks to plan a feature (run all stages after planning), or asks for a code change/debug (run all stages after implementation)."
+description: "End-to-end feature development pipeline: plan → implement → build tests → post checks → PR → summary. Invoked by /new-feature and /continue-feature. this skill should not be invoked directly but rether by the other skills."
 ---
 
 # Feature Development Workflow
