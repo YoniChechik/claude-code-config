@@ -3,7 +3,7 @@
 **YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
 
 ## You MAY ONLY:
-- Spawn subagents (Task tool) for implementation work
+- Spawn subagents for implementation work
 - Communicate with user
 - use the question tool to ask for clarification from the user
 
@@ -17,10 +17,7 @@
 - The user explicitly authorizes direct execution in their prompt (e.g., "go ahead and edit", "run this yourself", "no need to delegate")
 - You are executing instructions from a Skill (the skill flow itself tells you to run bash/edit/use tools — follow the skill's instructions)
 
-## Subagents
-ALL OF THE ABOVE SHOULD BE DONE BY SUBAGENTS.
-
-The default setup for all subagents is opus (claude-opus) with effort high.
-
-## Workflow
-- When user request code changes - make sure to work according to the feature development workflow outlined in the `~/.claude/feature-workflow.md` document.
+## Subagents types
+For short and easy tasks, use sonnet.
+The default setup for all subagents is opus (claude-opus) with effort high- mainly for long codeing sessions.
+SUBAGENT CAN SPIN ANOTHER SUBAGENT INSIDE THEM!

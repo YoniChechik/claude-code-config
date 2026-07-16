@@ -1,6 +1,6 @@
 ---
 name: "ask"
-description: "Answer questions without changing code"
+description: "Answer questions without changing code. run proactively when user asks a Question or ending a phrase with '?"
 argument-hint: "[question]"
 ---
 
