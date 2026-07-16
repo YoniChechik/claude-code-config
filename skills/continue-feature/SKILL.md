@@ -61,7 +61,7 @@ Run `/ci-watcher` skill to launch the CI watcher in the background for the curre
 2. Check if `plan-$FEATURE_NAME.md` exists — if yes, read it
 3. Run `git diff origin/main...HEAD` to see what's been done so far
 4. Compare progress against the plan (if exists)
-5. Read the file `~/.claude/feature-workflow.md` to understand the full workflow when building features
+5. Run the `/feature-workflow` skill to understand the full workflow when building features
 
 ### Step 6: Execute Next Action
 **Proceed immediately without asking for approval.** Using all gathered context:
