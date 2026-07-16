@@ -3,7 +3,6 @@
 - The current year is 2026.
 
 - Be concise. No unnecessary detail.
-- ALWAYS USE TASKS! EVEN FOR SIMPLE 1 BLOCK TASKS! AFTER READING SKILL ADD ALL NEW TASKS TO TASK LIST IMMEDIATELY! REMOVE each completed task from the list — only uncompleted tasks should remain visible.
 - COMMIT AND PUSH FREQUENTLY!
 - NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
 - THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!

@@ -51,7 +51,7 @@ Change to the feature clone directory using `/cd-permanent _clones/$FEATURE_NAME
 ```bash
 bash ~/.claude/scripts/git_branch_state.sh
 ```
-if not synced with main, add "run `/sync` skill" to task list
+if not synced with main, run the `/sync` skill
 
 ### Step 4: Launch CI Watcher
 Run `/ci-watcher` skill to launch the CI watcher in the background for the current branch.
@@ -70,7 +70,3 @@ Run `/ci-watcher` skill to launch the CI watcher in the background for the curre
 - Git branch state
 - Where we are in the feature-workflow
 - The user's requested next action
-
-
-## How to start
-ADD ALL ABOVE STEPS as steps to task list and start working.

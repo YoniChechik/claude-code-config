@@ -30,6 +30,3 @@ Run `/ci-watcher` skill to launch the CI watcher in the background for the curre
 
 ### Step 5: Summary
 Report what was built and the PR URL.
-
-## How to start
-ADD ALL ABOVE STEPS (Implement, PR Creation, CI Watcher, Summary) as steps to task list and start working.

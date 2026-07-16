@@ -124,7 +124,6 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
   survives compaction: which PRs merged (numbers + commits), what's verified in
   prod, what's the next human-gated action, and every rollback path. Update it, keep
   it accurate, mark the roadmap HISTORICAL once done.
-- **Keep a live task list** — add all steps on invocation, remove each as completed.
 - **Communicate crisply.** Status tables, not prose walls. Surface the ONE decision
   that needs the human, recommend a default, don't over-ask. Flag known-accepted
   regressions explicitly rather than hiding them.
@@ -132,8 +131,8 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
 ## Procedure when invoked
 
 1. **Map the rollout** into the minimum ordered PRs deploy-ordering forces. Note for
-   each: additive vs risky, auto-deploy vs manual, rollback path. Add to task list.
-   Run `/codex` on the plan.
+   each: additive vs risky, auto-deploy vs manual, rollback path. Run `/codex` on
+   the plan.
 2. **For each PR, in order:**
    a. Branch a fresh clone off `origin/main` (fetch first). Never the base repo.
    b. Implement the smallest coherent step. Keep the prior path inert-but-present if

@@ -29,6 +29,3 @@ Finally, clean up any results directories:
 ```bash
 rm -rf quality-results review.md
 ```
-
-## How to start
-ADD ALL ABOVE STEPS (Quality+Review+Review Tests, Lint & Format) as steps to task list and start working.
