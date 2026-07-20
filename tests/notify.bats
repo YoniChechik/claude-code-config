@@ -133,6 +133,16 @@ stub_branch() {
     [ "$status" -ne 0 ]
 }
 
+@test "ci_is_active: NON-active when current-branch watcher is DEAD but another branch's is alive" {
+    stub_branch "feat-x"
+    # An alive watcher on another branch must NOT rescue a dead current-branch
+    # watcher — liveness is checked per matching row, not leaked across rows.
+    write_watcher "other-1111aaaa" "other-branch:running:1000" "$(spawn_fake_watcher)"
+    write_watcher "feat-x-2222bbbb" "feat-x:running:1000" "$(dead_pid)"
+    run ci_is_active
+    [ "$status" -ne 0 ]
+}
+
 @test "ci_is_active: NON-active when state file missing" {
     stub_branch "feat-x"
     write_lock "$(spawn_fake_watcher)"

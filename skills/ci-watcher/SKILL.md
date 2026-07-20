@@ -25,7 +25,7 @@ The watcher is intentionally always-on and stays alive across CI runs, PR merges
 
 # step 0: handle `stop` subcommand
 
-If the first argument is `stop`, drop a per-branch kill flag and exit — do NOT launch the watcher. State/lock/kill files are keyed by a composite `<CLAUDE_CODE_SESSION_ID>__<sanitized_branch>`, where `sanitize()` MUST stay byte-identical to `ci_watch.py:sanitize_branch` (same readable transform + `sha256(branch)[:8]` suffix); divergence sends the kill flag to a filename the watcher never checks.
+If the first argument is `stop`, drop a per-branch kill flag and exit — do NOT launch the watcher. State/lock/kill files are keyed by a composite `<CLAUDE_CODE_SESSION_ID>__<sanitized_branch>`, where `sanitize()` MUST stay byte-identical to `ci_watch.py:_sanitize_branch` (same readable transform + `sha256(branch)[:8]` suffix); divergence sends the kill flag to a filename the watcher never checks.
 
 Two modes:
 
@@ -35,7 +35,7 @@ if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot stop ci watcher." >&2
     exit 1
 fi
-# MUST match ci_watch.py:sanitize_branch byte-for-byte.
+# MUST match ci_watch.py:_sanitize_branch byte-for-byte.
 sanitize() {
     local b="$1" readable hash8
     readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars
@@ -100,7 +100,7 @@ if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     exit 1
 fi
 
-# MUST match ci_watch.py:sanitize_branch byte-for-byte (readable + sha256[:8]).
+# MUST match ci_watch.py:_sanitize_branch byte-for-byte (readable + sha256[:8]).
 sanitize() {
     local b="$1" readable hash8
     readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars

@@ -123,12 +123,23 @@ if [ -n "$branch" ]; then
   fi
 fi
 
+# Terminal CI states: rendered forever, no liveness check, no elapsed timer.
+# Single source of truth for both the liveness gate and the timer gate below.
+_ci_is_terminal_state() {
+  case "$1" in
+    passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # PR blocks: one stacked row per watched branch. ci_watch.py keys every state
 # file as ci_watch_state_<slot>__<sanitized_branch>, so we glob all of this
 # session's watchers and render each as its own row. No gh call here — data
 # comes from the watcher's cache files.
 pr_block=""
 if [ -n "$slot" ]; then
+  # One clock read per render, shared by every row's elapsed-time calc.
+  _now=$(date +%s)
   # nullglob so an unmatched glob yields zero iterations, not a literal string.
   shopt -s nullglob
   for ci_state_file in /tmp/ci_watch_state_"${slot}"__*; do
@@ -158,43 +169,42 @@ if [ -n "$slot" ]; then
     pr_cache_file="${ci_state_file/ci_watch_state/ci_watch_pr}"
     _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
 
-    # Clickable PR link, only for an OPEN PR (same as before).
+    # Clickable PR link, only for an OPEN PR (same as before). One jq pass pulls
+    # every field this row needs (url/number/state for the link, mergeStateStatus
+    # for the behind/conflict refinement) so we fork jq once, not 3-4 times/row.
     pr_line=""
     pr_json=""
+    pr_merge_state=""
     if [ -f "$pr_cache_file" ]; then
       pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
-      pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
-      pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
-      pr_state=$(printf '%s' "$pr_json" | jq -r '.state // ""' 2>/dev/null)
+      IFS=$'\t' read -r pr_url pr_number pr_state pr_merge_state < <(
+        printf '%s' "$pr_json" \
+          | jq -r '[.url // "", .number // "", .state // "", .mergeStateStatus // ""] | @tsv' 2>/dev/null
+      )
       if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
         pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
       fi
     fi
 
     # Terminal states show forever with no timer and no liveness check; active
-    # states verify the watcher process is alive. Keep this set identical to the
-    # "no timer" set below so "shows a timer" ≡ "liveness-checked".
+    # states verify the watcher process is alive.
     _watcher_alive=false
-    case "$ci_state_only" in
-      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending)
+    if _ci_is_terminal_state "$ci_state_only"; then
+      _watcher_alive=true
+    else
+      _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
+      if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
+         && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
         _watcher_alive=true
-        ;;
-      *)
-        _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
-        if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
-           && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
-          _watcher_alive=true
-        fi
-        ;;
-    esac
+      fi
+    fi
 
     if [[ "$_watcher_alive" == false && -n "$ci_state_only" ]]; then
       ci_display="${red}⚠ ci watcher died${reset}"
     else
       ci_state="$ci_state_only"
-      if [ "$ci_state" = "passed" ] && [ -f "$pr_cache_file" ]; then
-        _merge_state=$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
-        case "$_merge_state" in
+      if [ "$ci_state" = "passed" ]; then
+        case "$pr_merge_state" in
           BEHIND)              ci_state="behind" ;;
           DIRTY|CONFLICTING)   ci_state="conflict" ;;
         esac
@@ -218,30 +228,24 @@ if [ -n "$slot" ]; then
       esac
     fi
 
-    # Elapsed timer for ACTIVE (non-terminal) states only. Reuse the terminal
-    # set above so terminal rows never show a timer.
+    # Elapsed timer for ACTIVE (non-terminal) states only, so terminal rows
+    # never show a timer (same gate as the liveness check above).
     timer_part=""
-    case "$ci_state_only" in
-      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending)
-        : ;;
-      *)
-        if [[ "$ci_epoch" =~ ^[0-9]+$ ]] && [ "$ci_epoch" -gt 0 ]; then
-          _now=$(date +%s)
-          _elapsed=$((_now - ci_epoch))
-          if [ "$_elapsed" -lt 0 ]; then
-            _elapsed=0
-          fi
-          if [ "$_elapsed" -lt 60 ]; then
-            timer_part="${_elapsed}s"
-          elif [ "$_elapsed" -lt 3600 ]; then
-            printf -v timer_part '%dm%02ds' $((_elapsed / 60)) $((_elapsed % 60))
-          else
-            printf -v timer_part '%dh%02dm' $((_elapsed / 3600)) $(((_elapsed % 3600) / 60))
-          fi
-          timer_part="${blue}${timer_part}${reset}"
-        fi
-        ;;
-    esac
+    if ! _ci_is_terminal_state "$ci_state_only" \
+       && [[ "$ci_epoch" =~ ^[0-9]+$ ]] && [ "$ci_epoch" -gt 0 ]; then
+      _elapsed=$((_now - ci_epoch))
+      if [ "$_elapsed" -lt 0 ]; then
+        _elapsed=0
+      fi
+      if [ "$_elapsed" -lt 60 ]; then
+        timer_part="${_elapsed}s"
+      elif [ "$_elapsed" -lt 3600 ]; then
+        printf -v timer_part '%dm%02ds' $((_elapsed / 60)) $((_elapsed % 60))
+      else
+        printf -v timer_part '%dh%02dm' $((_elapsed / 3600)) $(((_elapsed % 3600) / 60))
+      fi
+      timer_part="${blue}${timer_part}${reset}"
+    fi
 
     # Row identity: when there is no OPEN PR link, prefix the stored branch so
     # stacked rows stay distinguishable.

@@ -14,6 +14,7 @@ is patched to break the watch loop after a controlled number of iterations.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import sys
@@ -1049,7 +1050,7 @@ def test_write_pr_cache(tmp_path):
 
 
 def test_sanitize_branch_hash_suffix():
-    out = ci_watch.sanitize_branch("feature/foo")
+    out = ci_watch._sanitize_branch("feature/foo")
     # readable prefix keeps safe chars, slashes become dashes, then -<hash8>.
     assert out.startswith("feature-foo-")
     suffix = out.rsplit("-", 1)[1]
@@ -1059,17 +1060,36 @@ def test_sanitize_branch_hash_suffix():
 def test_sanitize_branch_collision_resistance():
     """'feature/foo' and 'feature-foo' must NOT share a key (lossy char-replace
     would collide them; the sha256 suffix is the guarantor)."""
-    a = ci_watch.sanitize_branch("feature/foo")
-    b = ci_watch.sanitize_branch("feature-foo")
+    a = ci_watch._sanitize_branch("feature/foo")
+    b = ci_watch._sanitize_branch("feature-foo")
     # Same readable prefix, different hash → different full key.
     assert a != b
     assert a.rsplit("-", 1)[0] == b.rsplit("-", 1)[0]
 
 
+def test_sanitize_branch_all_unsafe_chars():
+    """A branch of only unsafe chars still yields a valid, non-empty key: every
+    char becomes '-' and the sha256 suffix keeps distinct inputs distinct."""
+    a = ci_watch._sanitize_branch("***")
+    b = ci_watch._sanitize_branch("///")
+    assert a.startswith("----") and b.startswith("----")
+    assert a != b
+
+
 def test_key_composite_scheme():
     key = ci_watch._key("sess-uuid", "feature/foo")
-    assert key == f"sess-uuid__{ci_watch.sanitize_branch('feature/foo')}"
+    assert key == f"sess-uuid__{ci_watch._sanitize_branch('feature/foo')}"
     assert "__" in key
+
+
+def test_state_filename_matches_bash_glob():
+    """The state file watch() writes (via _key) MUST be found by the bash-side
+    'ci_watch_state_<slot>__*' glob in status_line.sh / _notify.sh, or the
+    status line and stop-hook would never see this watcher."""
+    slot = "sess-uuid"
+    key = ci_watch._key(slot, "feature/foo")
+    name = ci_watch._state_path(key).name
+    assert fnmatch.fnmatch(name, f"ci_watch_state_{slot}__*")
 
 
 def test_temp_files_not_matching_status_glob(tmp_path):

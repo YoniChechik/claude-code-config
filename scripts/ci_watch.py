@@ -19,7 +19,7 @@ Args (positional, in this order to match SKILL.md):
 
 State files (keyed by a composite key = "<slot>__<sanitized_branch>", where
 slot = CLAUDE_CODE_SESSION_ID (full UUID) and sanitized_branch =
-sanitize_branch(branch) = "<readable>-<sha256(branch)[:8]>". The hash suffix
+_sanitize_branch(branch) = "<readable>-<sha256(branch)[:8]>". The hash suffix
 guarantees distinct branches never collide (a pure char-replace is lossy).
 Several branches can be watched concurrently in the same session:
     /tmp/ci_watch_state_{key}    "<branch>:<state>:<epoch>" (single line)
@@ -431,7 +431,7 @@ def make_pr_cache(pr: dict) -> dict:
 # --- Keying ---
 
 
-def sanitize_branch(branch: str) -> str:
+def _sanitize_branch(branch: str) -> str:
     """Filesystem-safe branch key: '<readable>-<sha256(branch)[:8]>'.
 
     The readable prefix is cosmetic (for /tmp debuggability); the hash suffix
@@ -445,7 +445,7 @@ def sanitize_branch(branch: str) -> str:
 
 
 def _key(slot: str, branch: str) -> str:
-    return f"{slot}__{sanitize_branch(branch)}"
+    return f"{slot}__{_sanitize_branch(branch)}"
 
 
 # --- File writers ---
