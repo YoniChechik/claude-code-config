@@ -15,6 +15,7 @@ is patched to break the watch loop after a controlled number of iterations.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -212,9 +213,12 @@ def run_watch(
         except StopLoop:
             pass
 
+    # watch() is driven with slot=branch in these tests, so the state file is
+    # keyed on the bare branch string (no composite _key applied inside watch).
     state_path = Path(tmp_dir) / f"ci_watch_state_{branch}"
     raw = state_path.read_text() if state_path.exists() else None
-    state_value = raw.split(":", 1)[1] if raw and ":" in raw else raw
+    # New format: "<branch>:<state>:<epoch>" — value is the middle field.
+    state_value = raw.split(":")[1] if raw and raw.count(":") >= 2 else raw
     return {
         "notify_calls": notify_calls,
         "state_value": state_value,
@@ -699,7 +703,9 @@ def test_no_main_ci_state(tmp_path):
     state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
     # State file must persist (keep_state_file=True) and read no-main-ci.
     assert state_path.exists()
-    assert state_path.read_text() == f"{branch}:no-main-ci"
+    _fields = state_path.read_text().split(":")
+    assert _fields[0] == branch and _fields[1] == "no-main-ci"
+    assert _fields[2].isdigit()
     # Flagged at/near the grace boundary — not burning the full timeout.
     assert sleep_state["n"] <= ci_watch.NO_MAIN_CI_GRACE + 2
     # No webhook for the no-main-ci case.
@@ -765,7 +771,9 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
 
     state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
     # Must land on timeout (with webhook), NOT no-main-ci.
-    assert state_path.read_text() == f"{branch}:timeout"
+    _fields = state_path.read_text().split(":")
+    assert _fields[0] == branch and _fields[1] == "timeout"
+    assert _fields[2].isdigit()
     assert any("No CI runs found on main" in m for _, m in notify_calls)
 
 
@@ -832,7 +840,9 @@ def test_timeout_state(tmp_path):
     state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
     # State file must persist (keep_state_file=True).
     assert state_path.exists()
-    assert state_path.read_text() == f"{branch}:timeout"
+    _fields = state_path.read_text().split(":")
+    assert _fields[0] == branch and _fields[1] == "timeout"
+    assert _fields[2].isdigit()
     assert any("No CI runs found on main" in m for _, m in notify_calls)
 
 
@@ -1019,9 +1029,11 @@ def test_failure_still_fires_without_pr(tmp_path):
 def test_write_state_atomic(tmp_path):
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
         ci_watch.write_state("br", "br", "running")
-        assert (tmp_path / "ci_watch_state_br").read_text() == "br:running"
+        fields = (tmp_path / "ci_watch_state_br").read_text().split(":")
+        assert fields[0] == "br" and fields[1] == "running" and fields[2].isdigit()
         ci_watch.write_state("br", "br", "passed")
-        assert (tmp_path / "ci_watch_state_br").read_text() == "br:passed"
+        fields = (tmp_path / "ci_watch_state_br").read_text().split(":")
+        assert fields[0] == "br" and fields[1] == "passed" and fields[2].isdigit()
 
 
 def test_write_pr_cache(tmp_path):
@@ -1029,6 +1041,124 @@ def test_write_pr_cache(tmp_path):
         ci_watch.write_pr_cache("br", {"url": "u", "state": "OPEN"})
         data = json.loads((tmp_path / "ci_watch_pr_br").read_text())
         assert data == {"url": "u", "state": "OPEN"}
+
+
+# ---------------------------------------------------------------------------
+# Composite key + sanitize_branch
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_branch_hash_suffix():
+    out = ci_watch.sanitize_branch("feature/foo")
+    # readable prefix keeps safe chars, slashes become dashes, then -<hash8>.
+    assert out.startswith("feature-foo-")
+    suffix = out.rsplit("-", 1)[1]
+    assert len(suffix) == 8 and all(c in "0123456789abcdef" for c in suffix)
+
+
+def test_sanitize_branch_collision_resistance():
+    """'feature/foo' and 'feature-foo' must NOT share a key (lossy char-replace
+    would collide them; the sha256 suffix is the guarantor)."""
+    a = ci_watch.sanitize_branch("feature/foo")
+    b = ci_watch.sanitize_branch("feature-foo")
+    # Same readable prefix, different hash → different full key.
+    assert a != b
+    assert a.rsplit("-", 1)[0] == b.rsplit("-", 1)[0]
+
+
+def test_key_composite_scheme():
+    key = ci_watch._key("sess-uuid", "feature/foo")
+    assert key == f"sess-uuid__{ci_watch.sanitize_branch('feature/foo')}"
+    assert "__" in key
+
+
+def test_temp_files_not_matching_status_glob(tmp_path):
+    """mkstemp temp files must use a neutral prefix so status_line's
+    ci_watch_state_<key>* glob never matches an in-flight temp file."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.write_state("slot__br-abc", "br", "running")
+        ci_watch.write_pr_cache("slot__br-abc", {"url": "u"})
+    names = [p.name for p in tmp_path.iterdir()]
+    # Exactly the two final files; no leftover temp files, and none of the
+    # temp prefixes collide with the state/pr key prefixes.
+    assert "ci_watch_state_slot__br-abc" in names
+    assert "ci_watch_pr_slot__br-abc" in names
+    assert not any(n.startswith("ci_watch_tmp_") for n in names)
+
+
+# ---------------------------------------------------------------------------
+# Epoch (F2) — timer semantics of write_state
+# ---------------------------------------------------------------------------
+
+
+def _read_epoch(path: Path) -> int:
+    return int(path.read_text().split(":")[2])
+
+
+def test_epoch_preserved_across_same_value_writes(tmp_path):
+    """Repeated same-value writes (e.g. every-iteration 'merging') keep the
+    first epoch so the timer keeps ticking."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        with patch.object(ci_watch.time, "time", return_value=1000):
+            ci_watch.write_state("k", "br", "merging")
+        path = tmp_path / "ci_watch_state_k"
+        assert _read_epoch(path) == 1000
+        with patch.object(ci_watch.time, "time", return_value=1050):
+            ci_watch.write_state("k", "br", "merging")
+        assert _read_epoch(path) == 1000  # preserved
+
+
+def test_epoch_resets_on_value_change(tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        with patch.object(ci_watch.time, "time", return_value=1000):
+            ci_watch.write_state("k", "br", "running")
+        path = tmp_path / "ci_watch_state_k"
+        assert _read_epoch(path) == 1000
+        with patch.object(ci_watch.time, "time", return_value=1050):
+            ci_watch.write_state("k", "br", "passed")
+        assert _read_epoch(path) == 1050  # reset on transition
+
+
+def test_epoch_resets_on_reset_timer_even_same_value(tmp_path):
+    """A new-SHA / rerun writes 'running' when the value is already 'running';
+    reset_timer=True must still restart the timer."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        with patch.object(ci_watch.time, "time", return_value=1000):
+            ci_watch.write_state("k", "br", "running")
+        path = tmp_path / "ci_watch_state_k"
+        assert _read_epoch(path) == 1000
+        with patch.object(ci_watch.time, "time", return_value=1050):
+            ci_watch.write_state("k", "br", "running", reset_timer=True)
+        assert _read_epoch(path) == 1050
+
+
+def test_epoch_fresh_when_legacy_two_field_file(tmp_path):
+    """A legacy 2-field file (no epoch) is treated as 'no valid epoch' → now."""
+    path = tmp_path / "ci_watch_state_k"
+    path.write_text("br:running")  # legacy 2-field
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        with patch.object(ci_watch.time, "time", return_value=2000):
+            ci_watch.write_state("k", "br", "running")
+    assert _read_epoch(path) == 2000
+
+
+# ---------------------------------------------------------------------------
+# Per-branch lock eviction (F1)
+# ---------------------------------------------------------------------------
+
+
+def test_acquire_lock_is_per_branch(tmp_path):
+    """acquire_lock for branch-A's key must not touch branch-B's lock file."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        key_a = ci_watch._key("sess", "feat-a")
+        key_b = ci_watch._key("sess", "feat-b")
+        # Pre-seed B's lock with a live-but-unrelated PID (this test process).
+        ci_watch._lock_path(key_b).write_text(str(os.getpid()))
+        b_before = ci_watch._lock_path(key_b).read_text()
+        ci_watch.acquire_lock(key_a)
+        # A's lock now holds our pid; B's lock is untouched.
+        assert ci_watch._lock_path(key_a).read_text() == str(os.getpid())
+        assert ci_watch._lock_path(key_b).read_text() == b_before
 
 
 def test_main_aborts_without_session_id(monkeypatch, capsys):

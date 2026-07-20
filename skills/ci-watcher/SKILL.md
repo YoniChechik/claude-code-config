@@ -1,7 +1,7 @@
 ---
 name: "ci-watcher"
-description: "Run the CI watcher script for the current or specified branch. Use `/ci-watcher stop` to kill the watcher for the current session."
-argument-hint: "[branch|stop]"
+description: "Run the CI watcher for the current or specified branch (multiple branches can be watched at once). `/ci-watcher stop` kills ALL watchers for this session; `/ci-watcher stop <branch>` kills only that branch's watcher."
+argument-hint: "[branch|stop [branch]]"
 ---
 
 CI watcher: always-on background process that monitors CI and notifies on both failure and pass via webhook channel.
@@ -25,16 +25,53 @@ The watcher is intentionally always-on and stays alive across CI runs, PR merges
 
 # step 0: handle `stop` subcommand
 
-If the first argument is `stop`, drop a per-session kill flag and exit — do NOT launch the watcher:
+If the first argument is `stop`, drop a per-branch kill flag and exit — do NOT launch the watcher. State/lock/kill files are keyed by a composite `<CLAUDE_CODE_SESSION_ID>__<sanitized_branch>`, where `sanitize()` MUST stay byte-identical to `ci_watch.py:sanitize_branch` (same readable transform + `sha256(branch)[:8]` suffix); divergence sends the kill flag to a filename the watcher never checks.
+
+Two modes:
+
+- `/ci-watcher stop <branch>` — stop only that branch:
 ```bash
 if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot stop ci watcher." >&2
     exit 1
 fi
-touch "/tmp/ci_watch_kill_${CLAUDE_CODE_SESSION_ID}"
-echo "CI watcher stop flag set for session ${CLAUDE_CODE_SESSION_ID}"
+# MUST match ci_watch.py:sanitize_branch byte-for-byte.
+sanitize() {
+    local b="$1" readable hash8
+    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars
+    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)        # sha256(branch)[:8]
+    printf '%s-%s' "$readable" "$hash8"
+}
+BRANCH="<branch arg>"
+touch "/tmp/ci_watch_kill_${CLAUDE_CODE_SESSION_ID}__$(sanitize "$BRANCH")"
+echo "CI watcher stop flag set for branch $BRANCH"
 ```
-The running watcher (if any) will detect the flag at its next poll iteration and exit cleanly.
+
+- bare `/ci-watcher stop` — fan out to EVERY live watcher for this session:
+```bash
+if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+    echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot stop ci watcher." >&2
+    exit 1
+fi
+# nullglob FIRST so an unmatched glob yields zero iterations, not a literal string.
+shopt -s nullglob
+count=0
+# Enumerate live watchers by their lock files (written directly, no mkstemp temp
+# ambiguity); the composite key is the filename after the ci_watch_lock_ prefix.
+for lock in /tmp/ci_watch_lock_"${CLAUDE_CODE_SESSION_ID}"__*; do
+    composite="${lock#/tmp/ci_watch_lock_}"
+    touch "/tmp/ci_watch_kill_${composite}"
+    count=$((count + 1))
+done
+shopt -u nullglob
+if [ "$count" -eq 0 ]; then
+    echo "No CI watchers running for session ${CLAUDE_CODE_SESSION_ID}"
+else
+    echo "CI watcher stop flag set for $count watcher(s) in session ${CLAUDE_CODE_SESSION_ID}"
+fi
+```
+
+The running watcher(s) detect the flag at the next poll iteration and exit cleanly.
 
 # step 1: parse branch name from user input
 
@@ -63,16 +100,29 @@ if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     exit 1
 fi
 
+# MUST match ci_watch.py:sanitize_branch byte-for-byte (readable + sha256[:8]).
+sanitize() {
+    local b="$1" readable hash8
+    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars
+    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)        # sha256(branch)[:8]
+    printf '%s-%s' "$readable" "$hash8"
+}
+LOG="/tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}__$(sanitize "$BRANCH").log"
+
 uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "$PORT" "$SESSION_TOKEN" \
-    </dev/null >>/tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}.log 2>&1 &
-echo "CI watcher launched for branch $BRANCH (PID $!, log: /tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}.log)"
+    </dev/null >>"$LOG" 2>&1 &
+echo "CI watcher launched for branch $BRANCH (PID $!, log: $LOG)"
 ```
 
-Note: state, PR-cache, lock, and log files in `/tmp/` are all keyed on
-`CLAUDE_CODE_SESSION_ID` (full UUID). The watched branch is recorded inside
-the state file as `<branch>:<state>`. Switching branches mid-feature re-launches
-`/ci-watcher`, which kills the old watcher via its PID lock and starts a new one with
-the new branch.
+Note: state, PR-cache, lock, kill, and log files in `/tmp/` are keyed by the
+composite `ci_watch_<kind>_<CLAUDE_CODE_SESSION_ID>__<sanitized_branch>`, where
+`sanitized_branch = <readable>-<sha256(branch)[:8]>`. The hash suffix guarantees
+distinct branches never collide, so **several branches can be watched
+concurrently in the same session** — each gets its own files and status-line row.
+The watched branch is also recorded inside the state file as `<branch>:<state>:<epoch>`
+(epoch = last state transition, drives the status-line timer). Re-launching the
+SAME branch evicts its own prior watcher via the per-branch PID lock; other
+branches are untouched.
 
 # behavior notes
 

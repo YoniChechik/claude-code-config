@@ -298,52 +298,65 @@ PYEOF
     [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null
 }
 
-# Return 0 (CI actively running) ONLY when ALL hold, checked in this order:
+# Return 0 (CI actively running) when ANY of this session's watchers (globbed by
+# the composite ci_watch_state_<slot>__* key) satisfies ALL of:
 #   (1) the state value is "running" or "merging",
 #   (2) the stored <branch> prefix matches the current git branch,
 #   (3) the CI watcher process is ALIVE (lockfile PID + kill -0 + args match).
-# Returns 1 (non-active) when the state file is missing/empty, the watcher is
-# dead (so a stale "running" from a crashed watcher can never pin blue), the
-# branch mismatches, or the state is terminal.
+# Returns 1 (non-active) when no state file matches, every watcher is on another
+# branch or terminal, or the matching watcher is dead (so a stale "running" from
+# a crashed watcher can never pin blue).
 ci_is_active() {
     local slot="${CLAUDE_CODE_SESSION_ID:-}"
     [ -n "$slot" ] || return 1
 
-    # Read the atomically-written "<branch>:<state>" line. cat handles the
-    # missing-file case; the empty-string guard below covers missing/empty.
-    local state_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${slot}"
-    local raw
-    raw=$(cat "$state_file" 2>/dev/null || true)
-    [ -n "$raw" ] || return 1
-
-    # Split "<branch>:<state>". If there is no colon, there is no branch prefix.
-    local stored_branch="${raw%%:*}"
-    local state_only="${raw#*:}"
-    if [ "$stored_branch" = "$raw" ]; then
-        return 1
-    fi
-
-    # (1) Only "running" / "merging" count as actively running.
-    case "$state_only" in
-        running|merging) ;;
-        *) return 1 ;;
-    esac
-
-    # (2) Branch prefix must match the current git branch.
+    # The current git branch — a watcher must be on THIS branch to count.
     local cur_branch
     cur_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     [ -n "$cur_branch" ] || return 1
-    [ "$stored_branch" = "$cur_branch" ] || return 1
 
-    # (3) Watcher must be alive — reuse the status_line.sh liveness approach:
-    # read the PID from the lockfile, kill -0 it, and confirm its args mention
-    # ci_watch (so a recycled PID owned by an unrelated process can't pass).
-    local lock_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_lock_${slot}"
-    local watcher_pid
-    watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
-    if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
-       && ps -p "$watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
-        return 0
-    fi
-    return 1
+    # State files are keyed ci_watch_state_<slot>__<sanitized_branch>; several
+    # branches may be watched at once. Glob this session's watchers and return
+    # active if ANY one is on the current branch, running/merging, and alive.
+    # nullglob so an unmatched glob yields zero iterations, not a literal string.
+    local had_nullglob=0
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+
+    local rc=1
+    local state_file
+    for state_file in "${CLAUDE_NOTIFY_TMP_DIR}"/ci_watch_state_"${slot}"__*; do
+        local raw
+        raw=$(cat "$state_file" 2>/dev/null || true)
+        [ -n "$raw" ] || continue
+
+        # Parse "<branch>:<state>:<epoch>" (tolerate a legacy 2-field line).
+        local stored_branch="${raw%%:*}"
+        local rest="${raw#*:}"
+        [ "$stored_branch" = "$raw" ] && continue
+        local state_only="${rest%%:*}"
+
+        # (1) branch must match the current git branch.
+        [ "$stored_branch" = "$cur_branch" ] || continue
+
+        # (2) only running / merging count as actively running.
+        case "$state_only" in
+            running|merging) ;;
+            *) continue ;;
+        esac
+
+        # (3) watcher must be alive — PID from the sibling lockfile, kill -0,
+        # and args must mention ci_watch (so a recycled PID can't pass).
+        local lock_file="${state_file/ci_watch_state/ci_watch_lock}"
+        local watcher_pid
+        watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
+        if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
+           && ps -p "$watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
+            rc=0
+            break
+        fi
+    done
+
+    [ "$had_nullglob" -eq 1 ] || shopt -u nullglob
+    return "$rc"
 }

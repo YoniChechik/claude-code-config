@@ -123,45 +123,63 @@ if [ -n "$branch" ]; then
   fi
 fi
 
-# Line 3: clickable PR link (if branch has an open PR)
-# Read from the cache file written by ci_watch.py — no gh call here.
-pr_line=""
-pr_json=""
-pr_cache_file=""
+# PR blocks: one stacked row per watched branch. ci_watch.py keys every state
+# file as ci_watch_state_<slot>__<sanitized_branch>, so we glob all of this
+# session's watchers and render each as its own row. No gh call here — data
+# comes from the watcher's cache files.
+pr_block=""
 if [ -n "$slot" ]; then
-  pr_cache_file="/tmp/ci_watch_pr_${slot}"
-  # Render PR link whenever the watcher cache has it, regardless of the
-  # shell's current branch — the user may be in main while the watcher
-  # tracks a feature branch in a clone.
-  if [ -f "$pr_cache_file" ]; then
-    pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
-    pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
-    pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
-    pr_state=$(printf '%s' "$pr_json" | jq -r '.state // ""' 2>/dev/null)
-    if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
-      pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
-    fi
-  fi
-
-  ci_state_file="/tmp/ci_watch_state_${slot}"
-  if [ -f "$ci_state_file" ]; then
+  # nullglob so an unmatched glob yields zero iterations, not a literal string.
+  shopt -s nullglob
+  for ci_state_file in /tmp/ci_watch_state_"${slot}"__*; do
     _ci_state_raw=$(cat "$ci_state_file" 2>/dev/null || true)
+    [ -n "$_ci_state_raw" ] || continue
+
+    # Parse the 3-field "<branch>:<state>:<epoch>" line. Tolerate a legacy
+    # 2-field line (no epoch → no timer).
     ci_stored_branch="${_ci_state_raw%%:*}"
-    ci_state_only="${_ci_state_raw#*:}"
+    _rest="${_ci_state_raw#*:}"
     if [[ "$ci_stored_branch" == "$_ci_state_raw" ]]; then
+      # No colon at all — treat the whole thing as the state.
       ci_stored_branch=""
       ci_state_only="$_ci_state_raw"
+      ci_epoch=""
+    else
+      ci_state_only="${_rest%%:*}"
+      if [[ "$ci_state_only" == "$_rest" ]]; then
+        # Only two fields — no epoch.
+        ci_epoch=""
+      else
+        ci_epoch="${_rest##*:}"
+      fi
     fi
 
-    # For terminal states, no watcher is expected — show result forever.
-    # For active states, verify the watcher process is still alive.
+    # Sibling pr-cache and lock files share the composite suffix.
+    pr_cache_file="${ci_state_file/ci_watch_state/ci_watch_pr}"
+    _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
+
+    # Clickable PR link, only for an OPEN PR (same as before).
+    pr_line=""
+    pr_json=""
+    if [ -f "$pr_cache_file" ]; then
+      pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
+      pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null)
+      pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
+      pr_state=$(printf '%s' "$pr_json" | jq -r '.state // ""' 2>/dev/null)
+      if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
+        pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
+      fi
+    fi
+
+    # Terminal states show forever with no timer and no liveness check; active
+    # states verify the watcher process is alive. Keep this set identical to the
+    # "no timer" set below so "shows a timer" ≡ "liveness-checked".
     _watcher_alive=false
     case "$ci_state_only" in
-      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci)
+      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending)
         _watcher_alive=true
         ;;
       *)
-        _lock_file="${ci_state_file/ci_watch_state/ci_watch_lock}"
         _watcher_pid=$(cat "$_lock_file" 2>/dev/null || true)
         if [[ -n "$_watcher_pid" ]] && kill -0 "$_watcher_pid" 2>/dev/null \
            && ps -p "$_watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
@@ -190,6 +208,8 @@ if [ -n "$slot" ]; then
         no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
         no-ci)         ci_display="${green}ci: none${reset}" ;;
         no-main-ci)    ci_display="${green}ci: no main ci${reset}" ;;
+        closed)        ci_display="${magenta}ci: closed${reset}" ;;
+        stuck-pending) ci_display="${red}⚠ checks stuck${reset}" ;;
         timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
         merging)       ci_display="${yellow}ci: merging to main...${reset}" ;;
         merged-passed) ci_display="${green}✓ main CI passed${reset}" ;;
@@ -198,27 +218,70 @@ if [ -n "$slot" ]; then
       esac
     fi
 
-    if [ -n "$ci_display" ] && [ -n "$pr_line" ]; then
-      pr_line="${pr_line} | ${ci_display}"
-    elif [ -n "$ci_display" ]; then
-      pr_line="${ci_display}"
-    fi
-  fi
-fi
+    # Elapsed timer for ACTIVE (non-terminal) states only. Reuse the terminal
+    # set above so terminal rows never show a timer.
+    timer_part=""
+    case "$ci_state_only" in
+      passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending)
+        : ;;
+      *)
+        if [[ "$ci_epoch" =~ ^[0-9]+$ ]] && [ "$ci_epoch" -gt 0 ]; then
+          _now=$(date +%s)
+          _elapsed=$((_now - ci_epoch))
+          if [ "$_elapsed" -lt 0 ]; then
+            _elapsed=0
+          fi
+          if [ "$_elapsed" -lt 60 ]; then
+            timer_part="${_elapsed}s"
+          elif [ "$_elapsed" -lt 3600 ]; then
+            printf -v timer_part '%dm%02ds' $((_elapsed / 60)) $((_elapsed % 60))
+          else
+            printf -v timer_part '%dh%02dm' $((_elapsed / 3600)) $(((_elapsed % 3600) / 60))
+          fi
+          timer_part="${blue}${timer_part}${reset}"
+        fi
+        ;;
+    esac
 
-current_time=$(date +%H:%M:%S)
-time_part="${blue}${current_time}${reset}"
+    # Row identity: when there is no OPEN PR link, prefix the stored branch so
+    # stacked rows stay distinguishable.
+    row_head="$pr_line"
+    if [ -z "$row_head" ] && [ -n "$ci_stored_branch" ]; then
+      row_head="${ci_stored_branch}"
+    fi
+
+    # Assemble this block: <head> | ci: <state> | <timer>
+    _row=""
+    if [ -n "$row_head" ]; then
+      _row="$row_head"
+    fi
+    if [ -n "$ci_display" ]; then
+      if [ -n "$_row" ]; then
+        _row="${_row} | ${ci_display}"
+      else
+        _row="${ci_display}"
+      fi
+    fi
+    if [ -n "$timer_part" ] && [ -n "$_row" ]; then
+      _row="${_row} | ${timer_part}"
+    fi
+
+    if [ -n "$_row" ]; then
+      if [ -n "$pr_block" ]; then
+        pr_block="${pr_block}\n${_row}"
+      else
+        pr_block="${_row}"
+      fi
+    fi
+  done
+  shopt -u nullglob
+fi
 
 output="${status}${warning}"
 if [ -n "$info_line" ]; then
   output="${output}\n${info_line}"
 fi
-if [ -n "$pr_line" ]; then
-  output="${output}\n${pr_line} | ${time_part}"
-elif [ -n "$info_line" ]; then
-  # Time goes on the info_line (last line) — rebuild it with time appended
-  output="${status}${warning}\n${info_line} | ${time_part}"
-else
-  output="${status}${warning}\n${time_part}"
+if [ -n "$pr_block" ]; then
+  output="${output}\n${pr_block}"
 fi
 printf '%b' "$output"

@@ -17,10 +17,17 @@ Args (positional, in this order to match SKILL.md):
     PORT           webhook HTTP port
     SESSION_TOKEN  expected health-check token
 
-State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
-    /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line)
-    /tmp/ci_watch_pr_{slot}       PR JSON cache for status_line.sh
-    /tmp/ci_watch_lock_{slot}     PID lock
+State files (keyed by a composite key = "<slot>__<sanitized_branch>", where
+slot = CLAUDE_CODE_SESSION_ID (full UUID) and sanitized_branch =
+sanitize_branch(branch) = "<readable>-<sha256(branch)[:8]>". The hash suffix
+guarantees distinct branches never collide (a pure char-replace is lossy).
+Several branches can be watched concurrently in the same session:
+    /tmp/ci_watch_state_{key}    "<branch>:<state>:<epoch>" (single line)
+    /tmp/ci_watch_pr_{key}       PR JSON cache for status_line.sh
+    /tmp/ci_watch_lock_{key}     PID lock
+    /tmp/ci_watch_kill_{key}     per-branch manual-stop flag
+The epoch (integer seconds) marks the last state VALUE transition, so the
+status line can render a per-block elapsed timer.
 
 Exit conditions:
     - branch not found on remote (1)
@@ -33,8 +40,10 @@ Exit conditions:
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -419,33 +428,82 @@ def make_pr_cache(pr: dict) -> dict:
     }
 
 
+# --- Keying ---
+
+
+def sanitize_branch(branch: str) -> str:
+    """Filesystem-safe branch key: '<readable>-<sha256(branch)[:8]>'.
+
+    The readable prefix is cosmetic (for /tmp debuggability); the hash suffix
+    is the collision guarantor so distinct branches (e.g. 'feature/foo' vs
+    'feature-foo') never share a key. MUST stay byte-identical to the bash
+    sanitize() in skills/ci-watcher/SKILL.md and status_line.sh.
+    """
+    readable = re.sub(r"[^A-Za-z0-9._-]", "-", branch)
+    hash8 = hashlib.sha256(branch.encode()).hexdigest()[:8]
+    return f"{readable}-{hash8}"
+
+
+def _key(slot: str, branch: str) -> str:
+    return f"{slot}__{sanitize_branch(branch)}"
+
+
 # --- File writers ---
 
 
-def _state_path(slot: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_state_{slot}"
+def _state_path(key: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_state_{key}"
 
 
-def _pr_path(slot: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_pr_{slot}"
+def _pr_path(key: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_pr_{key}"
 
 
-def _lock_path(slot: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
+def _lock_path(key: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_lock_{key}"
 
 
-def _kill_path(slot: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_kill_{slot}"
+def _kill_path(key: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_kill_{key}"
 
 
-def write_state(slot: str, branch: str, value: str) -> None:
-    """Atomic write of '<branch>:<state>'."""
+def _read_state_epoch(path: Path, new_value: str) -> int:
+    """Return the epoch to write for new_value.
+
+    Reuse the existing file's epoch only when its state VALUE equals new_value
+    and its epoch is a valid integer; otherwise return a fresh epoch. A legacy
+    2-field or malformed line is treated as "no valid epoch".
+    """
+    now = int(time.time())
+    try:
+        raw = path.read_text().strip()
+    except (FileNotFoundError, OSError):
+        return now
+    parts = raw.split(":")
+    if len(parts) < 3:
+        return now
+    old_value = parts[1]
+    old_epoch = parts[2]
+    if old_value == new_value and old_epoch.isdigit():
+        return int(old_epoch)
+    return now
+
+
+def write_state(key: str, branch: str, value: str, reset_timer: bool = False) -> None:
+    """Atomic write of '<branch>:<state>:<epoch>'.
+
+    epoch is the integer second of the last state VALUE change. It is preserved
+    across repeated same-value writes (so a running/merging timer keeps ticking)
+    and reset when the value changes or reset_timer is True (a new SHA or rerun
+    restarts the timer even though the string stays 'running').
+    """
     print(f"[ci_watch] write_state -> {value!r}", flush=True)
-    path = _state_path(slot)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{slot}.", dir=TMP_DIR)
+    path = _state_path(key)
+    epoch = int(time.time()) if reset_timer else _read_state_epoch(path, value)
+    fd, tmp = tempfile.mkstemp(prefix="ci_watch_tmp_", dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(f"{branch}:{value}")
+            f.write(f"{branch}:{value}:{epoch}")
         os.replace(tmp, path)
     except Exception:
         try:
@@ -455,9 +513,9 @@ def write_state(slot: str, branch: str, value: str) -> None:
         raise
 
 
-def write_pr_cache(slot: str, data: dict) -> None:
-    path = _pr_path(slot)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_pr_{slot}.", dir=TMP_DIR)
+def write_pr_cache(key: str, data: dict) -> None:
+    path = _pr_path(key)
+    fd, tmp = tempfile.mkstemp(prefix="ci_watch_tmp_", dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -473,9 +531,16 @@ def write_pr_cache(slot: str, data: dict) -> None:
 # --- Lock handling ---
 
 
-def acquire_lock(slot: str) -> None:
-    """Kill any stale predecessor and take the lock for this slot."""
-    lock_path = _lock_path(slot)
+def acquire_lock(key: str) -> None:
+    """Kill any stale predecessor and take the lock for this session+branch key.
+
+    Because the lock path is per-branch, this only ever evicts a prior watcher
+    for the SAME session+branch; other branches have distinct locks and coexist.
+    The trailing os.unlink of the kill flag clears only THIS branch's stale stop
+    flag. It races a simultaneous '/ci-watcher stop <branch>'; relaunch intent
+    wins by design (not a bug).
+    """
+    lock_path = _lock_path(key)
     if lock_path.exists():
         try:
             old_pid = int(lock_path.read_text().strip())
@@ -500,7 +565,7 @@ def acquire_lock(slot: str) -> None:
             pass
     lock_path.write_text(str(os.getpid()))
     try:
-        os.unlink(_kill_path(slot))
+        os.unlink(_kill_path(key))
     except FileNotFoundError:
         pass
 
@@ -582,8 +647,9 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.reported_stuck_pending = False
         # Reset state file to "running" so the statusline reflects the new
         # in-progress run instead of remaining stuck on the previous
-        # terminal state (passed/failed).
-        write_state(state.slot, state.branch, "running")
+        # terminal state (passed/failed). reset_timer=True because the value
+        # may already be "running" but this is a NEW run — restart the timer.
+        write_state(state.slot, state.branch, "running", reset_timer=True)
 
 
 def check_pr_condition(
@@ -836,7 +902,11 @@ def watch(
     default_branch: str,
     latest_sha: str,
 ) -> None:
-    """Run the CI watch loop until a terminal condition fires."""
+    """Run the CI watch loop until a terminal condition fires.
+
+    ``slot`` here carries the composite session+branch key (see _key); all
+    per-branch state/pr/lock/kill files are derived from it.
+    """
     state = WatchState(branch, slot, latest_sha, default_branch)
 
     runs_url = (
@@ -863,7 +933,14 @@ def watch(
         if not state.keep_state_file:
             _state_path(slot).unlink(missing_ok=True)
             _pr_path(slot).unlink(missing_ok=True)
-        _lock_path(slot).unlink(missing_ok=True)
+        # Only unlink the lock if it still holds OUR pid. With per-branch keys a
+        # same-branch successor may have already overwritten it with its own pid
+        # during acquire_lock; a slow-exiting predecessor must not blank it.
+        try:
+            if _lock_path(slot).read_text().strip() == str(os.getpid()):
+                _lock_path(slot).unlink(missing_ok=True)
+        except (FileNotFoundError, OSError):
+            pass
 
     atexit.register(cleanup)
 
@@ -877,10 +954,12 @@ def watch(
     last_heartbeat_iter = 0
     while True:
         iter_count += 1
-        # --- Kill flag check (per-session manual stop) ---
+        # --- Kill flag check (per-branch manual stop) ---
+        # A bare '/ci-watcher stop' fans out a per-branch flag to every live
+        # watcher (SKILL.md), so no session-wide sentinel is needed here.
         if _kill_path(slot).exists():
             print(
-                f"[ci_watch] received kill signal for session {slot}; exiting",
+                f"[ci_watch] received kill signal for {slot}; exiting",
                 file=sys.stderr,
                 flush=True,
             )
@@ -1196,7 +1275,9 @@ def watch(
             state.reported_fail = False
             state.reported_pass = False
             state.terminal_run_ids = set()
-            write_state(slot, branch, "running")
+            # Same-SHA rerun: value stays "running" but it's a new run, so
+            # restart the elapsed timer.
+            write_state(slot, branch, "running", reset_timer=True)
 
         # Only fire branch failure/pass notifications when we have fresh PR
         # data confirming the PR is still open.  Without it, the PR might
@@ -1261,13 +1342,14 @@ def main() -> None:
         )
         sys.exit(2)
 
-    acquire_lock(slot)
+    key = _key(slot, branch)
+    acquire_lock(key)
 
     token = gh_token_value()
     owner, repo, default_branch = repo_info()
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(branch, slot, port, session_token, owner, repo, default_branch, latest_sha)
+    watch(branch, key, port, session_token, owner, repo, default_branch, latest_sha)
 
 
 if __name__ == "__main__":

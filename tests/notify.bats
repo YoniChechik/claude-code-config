@@ -63,12 +63,23 @@ redirect_tty_to_file() {
     eval "_resolve_target_tty() { printf '%s' '$TTY_CAPTURE'; }"
 }
 
+# State files are keyed by the composite <slot>__<sanitized_branch>; ci_is_active
+# globs them. Single-watcher tests use a fixed suffix.
+STATE_KEY="testbranch"
+
 write_state() {
-    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}__${STATE_KEY}"
 }
 
 write_lock() {
-    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}__${STATE_KEY}"
+}
+
+# Write a composite-keyed state+lock pair for a named watcher suffix.
+#   $1 = key suffix, $2 = state content line, $3 = lock pid
+write_watcher() {
+    printf '%s' "$2" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}__$1"
+    printf '%s' "$3" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}__$1"
 }
 
 # Force ci_is_active to see a deterministic "current branch" by stubbing git.
@@ -83,7 +94,7 @@ stub_branch() {
 
 @test "ci_is_active: ACTIVE when watcher alive + state running + branch matches" {
     stub_branch "feat-x"
-    write_state "feat-x:running"
+    write_state "feat-x:running:1000"
     write_lock "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -eq 0 ]
@@ -91,10 +102,35 @@ stub_branch() {
 
 @test "ci_is_active: ACTIVE for merging state too" {
     stub_branch "feat-x"
-    write_state "feat-x:merging"
+    write_state "feat-x:merging:1000"
     write_lock "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -eq 0 ]
+}
+
+@test "ci_is_active: ACTIVE parses legacy 2-field line (no epoch)" {
+    stub_branch "feat-x"
+    write_state "feat-x:running"
+    write_lock "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -eq 0 ]
+}
+
+@test "ci_is_active: ACTIVE when one of several watchers is on the current branch" {
+    stub_branch "feat-x"
+    # A watcher on ANOTHER branch (alive) plus one on the current branch (alive).
+    write_watcher "other-1111aaaa" "other-branch:running:1000" "$(spawn_fake_watcher)"
+    write_watcher "feat-x-2222bbbb" "feat-x:running:1000" "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -eq 0 ]
+}
+
+@test "ci_is_active: NON-active when watchers exist only for OTHER branches" {
+    stub_branch "feat-x"
+    write_watcher "other-1111aaaa" "other-branch:running:1000" "$(spawn_fake_watcher)"
+    write_watcher "third-3333cccc" "third-branch:merging:1000" "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when state file missing" {

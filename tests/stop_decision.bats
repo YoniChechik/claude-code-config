@@ -45,11 +45,15 @@ write_active_agent_transcript() {
     printf '%s\n' '{"toolUseResult":{"status":"async_launched","agentId":"a0123456789abcdef"}}' > "$TRANSCRIPT"
 }
 
+# State/lock files are keyed by the composite <slot>__<sanitized_branch>;
+# ci_is_active (called by the hook) globs them. Use a fixed suffix here.
+STATE_KEY="testbranch"
+
 spawn_fake_watcher() {
     bash -c 'exec -a ci_watch_fake sleep 30' </dev/null >/dev/null 2>&1 &
     WPID=$!
     disown 2>/dev/null || true
-    printf '%s' "$WPID" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$WPID" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}__${STATE_KEY}"
 }
 
 run_hook() {
@@ -73,7 +77,7 @@ dedup_lock_count() {
 
 @test "stop decision: BLUE path when CI actively running (no chime)" {
     write_idle_transcript
-    printf '%s' "${CUR_BRANCH}:running" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "${CUR_BRANCH}:running:1000" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}__${STATE_KEY}"
     spawn_fake_watcher
     run_hook
     [ "$(dedup_lock_count)" -eq 0 ]
@@ -88,7 +92,7 @@ dedup_lock_count() {
 
 @test "stop decision: GREEN path when CI reached a terminal state (passed)" {
     write_idle_transcript
-    printf '%s' "${CUR_BRANCH}:passed" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "${CUR_BRANCH}:passed:1000" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}__${STATE_KEY}"
     spawn_fake_watcher
     run_hook
     [ "$(dedup_lock_count)" -ge 1 ]
