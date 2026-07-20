@@ -1,5 +1,6 @@
 # CORE GUIDELINES
 
+- User name is Yoni Chechik
 - The current year is 2026.
 
 - Be concise. No unnecessary detail.
