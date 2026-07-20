@@ -190,12 +190,51 @@ bg_agents_active() {
     # No usable transcript => treat as no background work.
     [ -n "$transcript" ] && [ -f "$transcript" ] || return 1
 
-    # Cheap early-out before spawning python: a launched background agent always
-    # leaves an "async_launched" marker in the transcript. If the substring is
-    # absent there can be no launched agents, so bail false without the python.
-    grep -q "async_launched" "$transcript" || return 1
+    # --- Race-hardened early-out (fixes the green-instead-of-blue flush/read
+    # race). A launched background agent leaves an "async_launched" marker in
+    # the transcript, but Claude Code can durably append that line microseconds
+    # AFTER the Stop hook fires and reads the file. A single instantaneous read
+    # therefore sometimes misses a genuinely-running agent and wrongly paints
+    # the tab green. So instead of returning false on the first miss, poll the
+    # marker a small bounded number of times, re-reading the file each attempt
+    # with a 1s gap, to give a just-launched line time to flush to disk. The
+    # common cases (marker already present, or truly no background work) are
+    # settled on the first attempt and pay no retry cost; only a real miss pays.
+    local grep_count=0       # raw `grep -c async_launched` from the last read
+    local retries=0          # extra reads beyond the first (0 == hit first try)
+    local found=1            # 0 once the marker is seen, else 1
+    local max_tries=3        # smallest bound that reliably closes the flush race
+    local attempt=0
+    while [ "$attempt" -lt "$max_tries" ]; do
+        attempt=$((attempt + 1))
+        grep_count=$(grep -c "async_launched" "$transcript" 2>/dev/null)
+        grep_count=${grep_count:-0}
+        # Marker present => stop polling and fall through to the counting logic.
+        if [ "$grep_count" -gt 0 ] 2>/dev/null; then
+            found=0
+            break
+        fi
+        # Marker absent: it may simply not have flushed yet. On every attempt
+        # except the last, wait 1s (a cheap 1-sec poll interval) and re-read.
+        if [ "$attempt" -lt "$max_tries" ]; then
+            sleep 1
+        fi
+    done
+    retries=$((attempt - 1))
+
+    # Counts fed to the diagnostic log below; default to the "no work" case that
+    # holds when the marker never appeared after the bounded retries.
+    local n_launched=0 n_terminated=0 n_active=0
+
+    # Marker never showed up even after the retries => genuinely no background
+    # agent. Log the miss and return false (green) without spawning python.
+    if [ "$found" -ne 0 ]; then
+        _bg_agents_log "$grep_count" "$retries" 0 0 0 "green(idle)"
+        return 1
+    fi
 
     # Count active background agents via the transcript scan (fail-open to 0).
+    # Python prints three space-separated counts: launched terminated active.
     local count
     count=$(python3 - "$transcript" <<'PYEOF' 2>/dev/null
 import sys, json, re, os
@@ -285,17 +324,47 @@ try:
             f"terminated={sorted(terminated)} active={sorted(active)}",
             file=sys.stderr,
         )
-    print(len(active))
+    # Emit "launched terminated active" so the caller can both decide (active)
+    # and log the component counts on one line.
+    print(len(launched), len(terminated), len(active))
 except Exception as e:
     if debug:
         print(f"[bg_agents_active] error: {e!r}", file=sys.stderr)
     # On any error, assume 0 active so sound plays
-    print(0)
+    print(0, 0, 0)
 PYEOF
     )
 
-    # True iff we parsed a positive active count.
-    [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null
+    # Split the "launched terminated active" line; blanks fail-open to 0.
+    read -r n_launched n_terminated n_active <<< "$count"
+    n_launched=${n_launched:-0}
+    n_terminated=${n_terminated:-0}
+    n_active=${n_active:-0}
+
+    # Decide: blue (background work) iff we parsed a positive active count.
+    local decision="green(idle)"
+    [ "$n_active" -gt 0 ] 2>/dev/null && decision="blue(active)"
+
+    # --- Diagnostic logging (intentional; kept to confirm the flush/read race
+    # in the wild). One appended line per evaluation; never touches the stdout
+    # or exit code the callers rely on.
+    _bg_agents_log "$grep_count" "$retries" "$n_launched" "$n_terminated" "$n_active" "$decision"
+
+    # True iff we parsed a positive active count (final statement == return code).
+    [ "$n_active" -gt 0 ] 2>/dev/null
+}
+
+# Diagnostic helper: append one line recording a single bg_agents_active
+# evaluation (timestamp, raw async_launched count, retry count, and the
+# launched/terminated/active/decision breakdown). Best-effort — any failure is
+# swallowed so it can never affect the caller's return value or stdout.
+_bg_agents_log() {
+    local grep_count="$1" retries="$2" launched="$3" terminated="$4" active="$5" decision="$6"
+    local logfile="${CLAUDE_NOTIFY_TMP_DIR}/notify_bgdetect_${CLAUDE_CODE_SESSION_ID:-nosession}.log"
+    printf '%s grep_count=%s retries=%s launched=%s terminated=%s active=%s decision=%s\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S')" "$grep_count" "$retries" \
+        "$launched" "$terminated" "$active" "$decision" \
+        >> "$logfile" 2>/dev/null || true
 }
 
 # Return 0 (CI actively running) ONLY when ALL hold, checked in this order:
