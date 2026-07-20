@@ -38,8 +38,8 @@ fi
 # MUST match ci_watch.py:_sanitize_branch byte-for-byte.
 sanitize() {
     local b="$1" readable hash8
-    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars
-    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)        # sha256(branch)[:8]
+    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g' | cut -c1-100)  # unsafe chars -> '-', cap 100
+    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)                     # sha256(FULL branch)[:8]
     printf '%s-%s' "$readable" "$hash8"
 }
 BRANCH="<branch arg>"
@@ -103,8 +103,8 @@ fi
 # MUST match ci_watch.py:_sanitize_branch byte-for-byte (readable + sha256[:8]).
 sanitize() {
     local b="$1" readable hash8
-    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g')  # replace unsafe chars
-    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)        # sha256(branch)[:8]
+    readable=$(printf '%s' "$b" | sed 's#[^A-Za-z0-9._-]#-#g' | cut -c1-100)  # unsafe chars -> '-', cap 100
+    hash8=$(printf '%s' "$b" | shasum -a 256 | cut -c1-8)                     # sha256(FULL branch)[:8]
     printf '%s-%s' "$readable" "$hash8"
 }
 LOG="/tmp/ci_watch_${CLAUDE_CODE_SESSION_ID}__$(sanitize "$BRANCH").log"

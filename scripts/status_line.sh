@@ -125,9 +125,12 @@ fi
 
 # Terminal CI states: rendered forever, no liveness check, no elapsed timer.
 # Single source of truth for both the liveness gate and the timer gate below.
+# NOTE: 'stuck-pending' is deliberately NOT terminal — ci_watch.py keeps polling
+# after writing it, so its row must be liveness-checked (flip to the dead-watcher
+# warning if that watcher dies) rather than persist forever.
 _ci_is_terminal_state() {
   case "$1" in
-    passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed|stuck-pending) return 0 ;;
+    passed|failed|merged-passed|merged-failed|timeout|no-ci|no-main-ci|closed) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -228,10 +231,12 @@ if [ -n "$slot" ]; then
       esac
     fi
 
-    # Elapsed timer for ACTIVE (non-terminal) states only, so terminal rows
-    # never show a timer (same gate as the liveness check above).
+    # Elapsed timer for a LIVE watcher on an ACTIVE (non-terminal) state only.
+    # Terminal rows never show a timer, and a DEAD watcher row (showing the
+    # "⚠ ci watcher died" warning) must not append a misleading "0s".
     timer_part=""
-    if ! _ci_is_terminal_state "$ci_state_only" \
+    if [[ "$_watcher_alive" == true ]] \
+       && ! _ci_is_terminal_state "$ci_state_only" \
        && [[ "$ci_epoch" =~ ^[0-9]+$ ]] && [ "$ci_epoch" -gt 0 ]; then
       _elapsed=$((_now - ci_epoch))
       if [ "$_elapsed" -lt 0 ]; then

@@ -1181,6 +1181,56 @@ def test_acquire_lock_is_per_branch(tmp_path):
         assert ci_watch._lock_path(key_b).read_text() == b_before
 
 
+def test_cleanup_skips_when_lock_taken_over_by_other_pid(tmp_path):
+    """A slow-exiting predecessor whose lock was taken over by a DIFFERENT live
+    pid must NOT delete the successor's state/pr/lock files (else it blanks the
+    live successor's status-line row)."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        key = "sess__br-abc"
+        ci_watch.write_state(key, "br", "running")
+        ci_watch.write_pr_cache(key, {"url": "u"})
+        other_pid = str(os.getpid() + 1)
+        ci_watch._lock_path(key).write_text(other_pid)
+
+        ci_watch.cleanup_files(key, keep_state_file=False)
+
+        assert ci_watch._state_path(key).exists()
+        assert ci_watch._pr_path(key).exists()
+        assert ci_watch._lock_path(key).read_text() == other_pid
+
+
+def test_cleanup_removes_files_when_lock_holds_our_pid(tmp_path):
+    """Positive control: when the lock still holds our own pid, cleanup removes
+    all three files."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        key = "sess__br-abc"
+        ci_watch.write_state(key, "br", "running")
+        ci_watch.write_pr_cache(key, {"url": "u"})
+        ci_watch._lock_path(key).write_text(str(os.getpid()))
+
+        ci_watch.cleanup_files(key, keep_state_file=False)
+
+        assert not ci_watch._state_path(key).exists()
+        assert not ci_watch._pr_path(key).exists()
+        assert not ci_watch._lock_path(key).exists()
+
+
+def test_cleanup_keeps_state_but_releases_lock(tmp_path):
+    """With keep_state_file (terminal state) the state/pr files persist but the
+    lock is still released — provided the lock holds our pid."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        key = "sess__br-abc"
+        ci_watch.write_state(key, "br", "passed")
+        ci_watch.write_pr_cache(key, {"url": "u"})
+        ci_watch._lock_path(key).write_text(str(os.getpid()))
+
+        ci_watch.cleanup_files(key, keep_state_file=True)
+
+        assert ci_watch._state_path(key).exists()
+        assert ci_watch._pr_path(key).exists()
+        assert not ci_watch._lock_path(key).exists()
+
+
 def test_main_aborts_without_session_id(monkeypatch, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br", "1234", "tok"])

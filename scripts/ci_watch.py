@@ -436,10 +436,13 @@ def _sanitize_branch(branch: str) -> str:
 
     The readable prefix is cosmetic (for /tmp debuggability); the hash suffix
     is the collision guarantor so distinct branches (e.g. 'feature/foo' vs
-    'feature-foo') never share a key. MUST stay byte-identical to the bash
-    sanitize() in skills/ci-watcher/SKILL.md and status_line.sh.
+    'feature-foo') never share a key. The readable prefix is truncated to 100
+    chars so a very long branch name can't push the composite filename past the
+    255-byte limit; the sha256 is still computed over the FULL branch name so
+    uniqueness is preserved regardless of truncation. MUST stay byte-identical
+    to the bash sanitize() in skills/ci-watcher/SKILL.md.
     """
-    readable = re.sub(r"[^A-Za-z0-9._-]", "-", branch)
+    readable = re.sub(r"[^A-Za-z0-9._-]", "-", branch)[:100]
     hash8 = hashlib.sha256(branch.encode()).hexdigest()[:8]
     return f"{readable}-{hash8}"
 
@@ -511,6 +514,28 @@ def write_state(key: str, branch: str, value: str, reset_timer: bool = False) ->
         except FileNotFoundError:
             pass
         raise
+
+
+def cleanup_files(key: str, keep_state_file: bool) -> None:
+    """Remove this watcher's state/pr/lock files on exit.
+
+    Gated behind a single check that the lock file still contains OUR pid. With
+    per-branch keys a same-branch successor may have already overwritten the
+    lock with its own pid during acquire_lock (after outliving our SIGTERM+~10s
+    wait); if so we are a slow-exiting predecessor and must leave ALL of the
+    live successor's files (state, pr cache, lock) alone. If keep_state_file is
+    set (terminal state), the state/pr files persist but the lock is still
+    released.
+    """
+    try:
+        if _lock_path(key).read_text().strip() != str(os.getpid()):
+            return
+    except (FileNotFoundError, OSError):
+        return
+    if not keep_state_file:
+        _state_path(key).unlink(missing_ok=True)
+        _pr_path(key).unlink(missing_ok=True)
+    _lock_path(key).unlink(missing_ok=True)
 
 
 def write_pr_cache(key: str, data: dict) -> None:
@@ -929,20 +954,7 @@ def watch(
     )
     write_state(slot, branch, "running")
 
-    def cleanup() -> None:
-        if not state.keep_state_file:
-            _state_path(slot).unlink(missing_ok=True)
-            _pr_path(slot).unlink(missing_ok=True)
-        # Only unlink the lock if it still holds OUR pid. With per-branch keys a
-        # same-branch successor may have already overwritten it with its own pid
-        # during acquire_lock; a slow-exiting predecessor must not blank it.
-        try:
-            if _lock_path(slot).read_text().strip() == str(os.getpid()):
-                _lock_path(slot).unlink(missing_ok=True)
-        except (FileNotFoundError, OSError):
-            pass
-
-    atexit.register(cleanup)
+    atexit.register(lambda: cleanup_files(slot, state.keep_state_file))
 
     def _signal_handler(signum: int, frame: object) -> None:
         sys.exit(0)
