@@ -180,6 +180,20 @@ reset_tab_color() {
     printf '\033]6;1;bg;*;default\a' > "$target_tty" 2>/dev/null || true
 }
 
+# True (0) only when the tail of the transcript at $1 shows a background-capable
+# tool call whose result line has NOT landed yet — the one situation in which an
+# activation marker can still be in flight, so the one situation worth re-reading
+# the file for. `Agent` is the launch tool and `SendMessage` the resume tool (the
+# only two producers of an activation marker across the local corpus: 1314 and
+# 137 occurrences respectively, nothing else). Reaching this helper already means
+# the whole-file marker grep missed, so a tool call sitting in the tail with no
+# marker anywhere is exactly the un-flushed-result case.
+# tail keeps the check O(1) however large the transcript grows; 3 lines gives a
+# little slack for interleaved entries without inviting stale matches.
+_bg_launch_in_flight() {
+    tail -n 3 "$1" 2>/dev/null | grep -qE '"name":"(Agent|SendMessage)"'
+}
+
 # Returns 0 (true) if >=1 background agent is still running per the transcript
 # at $1, else 1 (false). Fail-safe: empty/missing/unparseable transcript => false.
 #
@@ -187,7 +201,7 @@ reset_tab_color() {
 # order (not line order, not set subtraction). Four event kinds move an id:
 #   - launch:  toolUseResult.status == "async_launched"          -> active
 #   - resume:  a SendMessage toolUseResult whose message says the agent was
-#              "resumed ... in the background with your message" -> active
+#              "resumed ... in the background"                   -> active
 #   - stop:    a <task-notification> block with a terminal <status> -> terminated
 #   - reap:    a blocking TaskOutput whose task.status is terminal -> terminated
 # An id is active iff its LAST event was a launch or a resume. Set subtraction
@@ -200,27 +214,36 @@ bg_agents_active() {
     # No usable transcript => treat as no background work.
     [ -n "$transcript" ] && [ -f "$transcript" ] || return 1
 
-    # --- Race-hardened early-out (fixes the green-instead-of-blue flush/read
-    # race). A launched background agent leaves an "async_launched" marker in
-    # the transcript, but Claude Code can durably append that line microseconds
-    # AFTER the Stop hook fires and reads the file. A single instantaneous read
-    # therefore sometimes misses a genuinely-running agent and wrongly paints
-    # the tab green. So instead of returning false on the first miss, poll the
-    # marker a small bounded number of times, re-reading the file each attempt
-    # with a 1s gap, to give a just-launched line time to flush to disk. The
-    # common cases (marker already present, or truly no background work) are
-    # settled on the first attempt and pay no retry cost; only a real miss pays.
+    # --- Cheap early-out: with no activation marker anywhere in the file no
+    # background agent has ever been started, so skip the python scan entirely.
     #
-    # The needle matches EITHER marker: a fresh launch ("async_launched") or a
-    # resume ("... in the background with your message"). A resume-only
-    # transcript has no async_launched line, so greping for that alone would
-    # early-out to green while a resumed agent runs.
+    # The needle MUST be at least as permissive as the python detector it guards,
+    # or the early-out could skip a case python would call active:
+    #   - "async_launched" is the launch marker.
+    #   - the python resume test needs "resumed" AND "in the background" in the
+    #     SendMessage message, so matching the single word "resumed" is a strict
+    #     superset of it. Matching the longer literal (e.g. "in the background
+    #     with your message") would early-out to green on any resume phrased
+    #     without that exact tail.
+    local marker_re='async_launched|resumed'
+
+    # --- Flush/read race. Claude Code appends the "async_launched" line
+    # milliseconds AFTER the assistant message that launched the agent, and the
+    # Stop hook can read the file in between; a single instantaneous read then
+    # misses a genuinely-running agent and wrongly paints the tab green. So on a
+    # miss we re-read with a 1s poll interval — but ONLY while an activation line
+    # can actually still be in flight (see _bg_launch_in_flight). A transcript
+    # whose last lines are ordinary turns will never grow an activation line, so
+    # the marker-free idle case settles on the FIRST read and waits 0s; before
+    # this gate every idle turn of every session paid a flat ~2s.
+    # Real-world frequency from the diagnostic log below: of 455 logged
+    # evaluations exactly one needed a retry, and it was the first Stop hook
+    # after two `Agent` launches.
     local grep_count=0       # raw count of launch+resume markers from the last read
     local retries=0          # extra reads beyond the first (0 == hit first try)
     local found=1            # 0 once the marker is seen, else 1
     local max_tries=3        # smallest bound that reliably closes the flush race
     local attempt=0
-    local marker_re='async_launched|in the background with your message'
     while [ "$attempt" -lt "$max_tries" ]; do
         attempt=$((attempt + 1))
         grep_count=$(grep -cE "$marker_re" "$transcript" 2>/dev/null)
@@ -230,8 +253,10 @@ bg_agents_active() {
             found=0
             break
         fi
-        # Marker absent: it may simply not have flushed yet. On every attempt
-        # except the last, wait 1s (a cheap 1-sec poll interval) and re-read.
+        # Marker absent AND nothing can still be flushing => settle immediately.
+        _bg_launch_in_flight "$transcript" || break
+        # A launch/resume call is still awaiting its result line: poll again
+        # after a 1s interval (bounded to max_tries reads == <=2s total).
         if [ "$attempt" -lt "$max_tries" ]; then
             sleep 1
         fi
@@ -258,15 +283,16 @@ import sys, json, re, os
 transcript_path = sys.argv[1]
 debug = os.environ.get("CLAUDE_DEBUG_NOTIFY") == "1"
 
-# Any of these statuses in a <task-notification> means the agent is no longer
-# running. Treating only "completed" as terminal would leave failed/cancelled
-# agents pinned as "active" forever and silence the stop sound permanently.
-# "killed" is what TaskStop produces and MUST be here: an unrecognized status
-# never clears an id, so the tab would stay blue and the chime stay silent.
-TERMINAL_STATUSES = {
-    "completed", "failed", "cancelled", "canceled", "killed", "stopped",
-    "interrupted", "error", "errored", "timeout", "timed_out", "aborted",
-}
+# Any of these statuses means the agent is no longer running. An unrecognized
+# status never clears an id, so a missing terminal status pins the tab blue and
+# silences the chime forever — which is why "failed" and "killed" (what TaskStop
+# emits) must be here alongside "completed".
+# This is exactly the set OBSERVED across the local corpus (~2.8k transcripts):
+# completed 2877, failed 265, killed 18 in <task-notification>, and
+# completed / running / in_progress / pending in TaskOutput's task.status.
+# Nothing else is listed on purpose: guessing extra terminal names is the
+# false-GREEN direction (a status invented here could clear a live agent).
+TERMINAL_STATUSES = {"completed", "failed", "killed"}
 
 # agent IDs that were async-launched (toolUseResult.agentId)
 launched = set()
@@ -278,20 +304,38 @@ resumed = set()
 # These are the SAME identifier namespace as agentId — both sides use the
 # 17-char "a"-prefixed hex string.
 terminated = set()
-# Collected (sort_key, task_id, "active"|"terminated") events. They are resolved
-# AFTER the whole file is read, ordered by the entry's own timestamp — NOT by
-# line order. Transcript lines are not in wall-clock order: a queue-operation
-# task-notification is written at the position where it was QUEUED, which can be
-# many lines BEFORE the launch it terminates (observed: notification lines 280
-# and 283 precede launch lines 288 and 290 while carrying later timestamps).
-# Ordering by line number therefore resurrects long-dead agents and pins the tab
-# blue, which would silence the attention chime.
+# Collected (sort_key, task_id, "active"|"terminated") events, resolved AFTER the
+# whole file is read and ordered by the entry's own timestamp — not by line order.
+#
+# NEITHER raw ordering identifies an event on its own, because ONE logical
+# task-notification is recorded TWICE: a queue-operation copy and the delivered
+# copy, byte-identical text, at two DIFFERENT timestamps (1394 duplicate
+# emissions out of 3277 notification blocks measured across that corpus, spread from
+# 12ms to over two minutes apart).
+#   - line order is wrong because a queue-operation entry is written at the
+#     position where it was QUEUED, which can sit many lines away from the event
+#     it describes.
+#   - timestamp order is wrong because the SECOND copy can post-date a
+#     SendMessage resume issued in the same turn, so a stale terminal
+#     notification overrides the resume and the tab goes green while the resumed
+#     agent keeps working (real case: 4341261e, agent ac8f6d806ba8113a1, notified
+#     at 09:51:01.159Z, resumed at 09:51:03.889Z, duplicate copy of the SAME
+#     notification at 09:51:03.983Z, actual finish 09:56:34.201Z).
+# Deduping the copies by <tool-use-id> and keeping the EARLIEST recording is what
+# makes the sort key identify the event instead of one arbitrary recording of it;
+# only then does last-event-wins mean anything.
 events = []
+# Deduped notifications: dedupe id -> (earliest sort_key, task_id). Folded into
+# `events` once the file has been read.
+notif_events = {}
 
-# SendMessage's result message when it (re)starts a stopped agent. Both observed
-# phrasings are covered:
+# SendMessage's result message when it (re)starts a stopped agent. All three
+# phrasings observed in the local corpus are covered (89 / 36 / 10 occurrences):
 #   Agent "<id>" had no active task; resumed from transcript in the background...
 #   Agent "<id>" was stopped (failed); resumed it in the background with your...
+#   Agent "<id>" was stopped (completed); resumed it in the background with your...
+# The match deliberately keys on "resumed" + "in the background" rather than any
+# full phrase, so a fourth wording cannot silently stop being detected.
 RESUME_ID_RE = re.compile(r'Agent "([^"]+)"')
 # Only trust an id in the notification namespace ("a" + 16 hex). SendMessage also
 # accepts an agent NAME, and echoing a name into the active set could pin the tab
@@ -306,6 +350,11 @@ TASK_NOTIF_RE = re.compile(
 )
 TASK_ID_RE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 STATUS_RE = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
+# Identifies WHICH run of an agent a notification belongs to: the launching Task
+# call's id, or the resuming SendMessage's id for a resumed run. Two copies of one
+# notification share it; two runs of the same agent never do — so it is the right
+# key for collapsing the duplicate copies without collapsing distinct runs.
+TOOL_USE_ID_RE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>")
 
 def scan_text_for_terminations(text, key):
     if not text or "<task-notification>" not in text:
@@ -318,16 +367,32 @@ def scan_text_for_terminations(text, key):
         if status not in TERMINAL_STATUSES:
             continue
         task_id_match = TASK_ID_RE.search(block)
-        if task_id_match:
-            task_id = task_id_match.group(1).strip()
-            terminated.add(task_id)
-            events.append((key, task_id, "terminated"))
+        if not task_id_match:
+            continue
+        task_id = task_id_match.group(1).strip()
+        terminated.add(task_id)
+        # Collapse the duplicate copies of this one notification and keep the
+        # EARLIEST recording of it (see the note on `events`). 159 of 3277 real
+        # blocks carry no <tool-use-id>; those fall back to the full block text,
+        # which is byte-identical between copies and includes the agent's own
+        # <result>, so distinct runs stay distinct.
+        tuid_match = TOOL_USE_ID_RE.search(block)
+        dedupe_id = tuid_match.group(1) if tuid_match else block
+        prev = notif_events.get(dedupe_id)
+        if prev is None or key < prev[0]:
+            notif_events[dedupe_id] = (key, task_id)
 
 try:
     with open(transcript_path, "r") as f:
         # Timestamps are uniform ISO-8601 UTC ("...Z"), so they sort correctly as
-        # plain strings. Entries with no timestamp inherit the last one seen, and
-        # the line number breaks ties, keeping the order total and stable.
+        # plain strings. Entries with no timestamp of their own inherit the last
+        # one seen — their nearest preceding sibling is the best clock available,
+        # and inheriting "" instead would sort them before every timestamped
+        # event, letting an undated termination outrank a real launch. The line
+        # number breaks ties, keeping the order total and stable.
+        # Defensive: the local corpus has 14749 undated entries but none of them
+        # carries a launch or a notification, so this only matters if that ever
+        # changes — which is exactly why the direction is pinned by a test.
         last_ts = ""
         for line_no, line in enumerate(f, 1):
             line = line.strip()
@@ -401,9 +466,20 @@ try:
                         text = block.get("text", "") or ""
                         scan_text_for_terminations(text, key)
 
+    # Fold the deduped notifications in: one event per notification, carrying the
+    # earliest timestamp at which that notification was recorded.
+    for ev_key, task_id in notif_events.values():
+        events.append((ev_key, task_id, "terminated"))
+
     # Resolve last-event-wins per task-id in chronological order.
+    # On an exact key tie (one line recording both an activation and a
+    # termination) "terminated" is sorted last so it wins: a spurious green
+    # chimes once too early, a spurious blue silences the terminal for the whole
+    # session, so ambiguity resolves toward green.
     state = {}
-    for _key, task_id, kind in sorted(events, key=lambda ev: ev[0]):
+    for _key, task_id, kind in sorted(
+        events, key=lambda ev: (ev[0], ev[2] == "terminated")
+    ):
         state[task_id] = kind
 
     # Active = ids whose LAST chronological event was an activation.
@@ -427,6 +503,11 @@ PYEOF
     )
 
     # Split the "launched terminated resumed active" line; blanks fail-open to 0.
+    # That fail-open also covers a missing or broken python3, which then decides
+    # GREEN + chime. Deliberate: a missing interpreter is a PERMANENT condition,
+    # so failing blue would silence the chime on every turn of every session
+    # forever, while failing green only mis-chimes during the rare windows when a
+    # background agent happens to be running.
     read -r n_launched n_terminated n_resumed n_active <<< "$count"
     n_launched=${n_launched:-0}
     n_terminated=${n_terminated:-0}

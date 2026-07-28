@@ -11,8 +11,15 @@
 #   - Watcher liveness uses a REAL alive process (exec -a ci_watch_fake sleep)
 #     vs a guaranteed-dead PID, so the real kill -0 / ps logic runs unmocked.
 #   - The terminal device is the only genuinely-external bit we stub: we
-#     redefine _resolve_target_tty to echo a temp file path so OSC writes land
-#     in a file we can assert on.
+#     redefine _resolve_target_tty to echo a FIFO that a background reader
+#     drains into a capture file, so every OSC write is appended. A plain file
+#     would be TRUNCATED by each `printf ... > "$target_tty"`, leaving only the
+#     last write and silently voiding assertions about the earlier ones.
+#
+# Assertions go through assert_contains / assert_not_contains, never a bare
+# `[[ ... ]]`: bash does not fire the ERR trap for the `[[` keyword, so bats
+# 1.13 SWALLOWS a failing non-final `[[ ... ]]` and reports the test as ok. A
+# shell function returning non-zero does fail the test.
 
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 
@@ -40,10 +47,32 @@ teardown() {
     done
 }
 
+# --- Assertions ------------------------------------------------------------
+# Must be functions, not `[[ ... ]]`: see the header note on bats swallowing a
+# failing non-final `[[ ... ]]`.
+assert_contains() {
+    case "$2" in (*"$1"*) return 0 ;; esac
+    printf 'expected to CONTAIN: %s\nactual: %s\n' "$1" "$2" >&2
+    return 1
+}
+
+assert_not_contains() {
+    case "$2" in (*"$1"*)
+        printf 'expected NOT to contain: %s\nactual: %s\n' "$1" "$2" >&2
+        return 1
+    ;; esac
+    return 0
+}
+
 # Spawn a real, alive process whose argv contains "ci_watch" (so the ps/grep
 # liveness check passes against a genuine process). Echoes its PID.
 spawn_fake_watcher() {
-    bash -c 'exec -a ci_watch_fake sleep 30' </dev/null >/dev/null 2>&1 &
+    # The sleep only has to outlive the single ci_is_active call under test, and
+    # it must stay SHORT: every call site is `$(spawn_fake_watcher)`, so the
+    # SPAWNED_PIDS append below happens in the command-substitution subshell and
+    # is lost — teardown cannot reap it, and bats waits for it before exiting.
+    # At the original 30s that single sleep cost the suite ~30s of dead wall clock.
+    bash -c 'exec -a ci_watch_fake sleep 3' </dev/null >/dev/null 2>&1 3>&- &
     local pid=$!
     disown 2>/dev/null || true
     SPAWNED_PIDS+=("$pid")
@@ -55,12 +84,46 @@ dead_pid() {
     printf '%s' "999999"
 }
 
-# Override the TTY resolution to a file under the test tmp dir so OSC writes
-# are captured instead of going to a real terminal.
+# Override the TTY resolution so OSC writes are captured instead of going to a
+# real terminal. The target is a FIFO, not a plain file: the code writes with
+# `> "$target_tty"`, which truncates a regular file on every write, so a
+# multi-write function (notify_user_attention emits the colors, then the title)
+# would leave only its LAST write behind and every earlier assertion would be
+# checked against a string that cannot contain it.
 redirect_tty_to_file() {
+    TTY_FIFO="$BATS_TEST_TMPDIR/tty_fifo"
     TTY_CAPTURE="$BATS_TEST_TMPDIR/tty_capture"
+    rm -f "$TTY_FIFO"
+    mkfifo "$TTY_FIFO"
     : > "$TTY_CAPTURE"
-    eval "_resolve_target_tty() { printf '%s' '$TTY_CAPTURE'; }"
+    # ONE long-lived reader for the whole test. 3>&- is load-bearing: bats waits
+    # for its internal fd 3 to be closed by every descendant, so a reader that
+    # inherits it would hang the run after the last test reports.
+    cat "$TTY_FIFO" > "$TTY_CAPTURE" </dev/null 2>/dev/null 3>&- &
+    TTY_READER_PID=$!
+    # disown so teardown's belt-and-braces kill does not print a job-control
+    # "Terminated" line into the bats output.
+    disown 2>/dev/null || true
+    SPAWNED_PIDS+=("$TTY_READER_PID")
+    # Hold a writer open ourselves so the reader never sees EOF between the
+    # separate `> "$target_tty"` writes the code under test performs. Without it
+    # the reader would exit after the first write and the rest would be lost (or
+    # block forever waiting for a new reader).
+    exec 9>"$TTY_FIFO"
+    eval "_resolve_target_tty() { printf '%s' '$TTY_FIFO'; }"
+}
+
+# Close our writer end and wait (bounded 1s-interval poll, never a bare sleep)
+# for the reader to flush and exit, so TTY_CAPTURE is complete before assertions.
+close_tty_capture() {
+    exec 9>&-
+    local i
+    for i in 1 2 3 4 5; do
+        kill -0 "$TTY_READER_PID" 2>/dev/null || return 0
+        sleep 1
+    done
+    printf 'tty capture reader did not exit\n' >&2
+    return 1
 }
 
 write_state() {
@@ -251,23 +314,25 @@ stub_branch() {
 @test "_set_tab_rgb: emits the OSC 6 three-channel sequence with given values" {
     redirect_tty_to_file
     _set_tab_rgb 12 34 56
-    run cat "$TTY_CAPTURE"
-    [[ "$output" == *"6;1;bg;red;brightness;12"* ]]
-    [[ "$output" == *"6;1;bg;green;brightness;34"* ]]
-    [[ "$output" == *"6;1;bg;blue;brightness;56"* ]]
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "6;1;bg;red;brightness;12" "$output"
+    assert_contains "6;1;bg;green;brightness;34" "$output"
+    assert_contains "6;1;bg;blue;brightness;56" "$output"
 }
 
 @test "set_blue_bar: emits blue RGB (0/0/255), no bell sound, no title OSC" {
     redirect_tty_to_file
     set_blue_bar
-    run cat "$TTY_CAPTURE"
-    [[ "$output" == *"6;1;bg;red;brightness;0"* ]]
-    [[ "$output" == *"6;1;bg;green;brightness;0"* ]]
-    [[ "$output" == *"6;1;bg;blue;brightness;255"* ]]
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "6;1;bg;red;brightness;0" "$output"
+    assert_contains "6;1;bg;green;brightness;0" "$output"
+    assert_contains "6;1;bg;blue;brightness;255" "$output"
     # No title sequence (OSC 0 "]0;").
-    [[ "$output" != *"]0;"* ]]
+    assert_not_contains "]0;" "$output"
     # No "waiting" title text.
-    [[ "$output" != *"waiting"* ]]
+    assert_not_contains "waiting" "$output"
 }
 
 @test "notify_user_attention: emits green RGB (0/255/0) and a plain branch-name title" {
@@ -275,13 +340,14 @@ stub_branch() {
     stub_branch "feat-x"
     # No arg => legacy unconditional-green path (no background-work gating).
     notify_user_attention >/dev/null 2>&1
-    run cat "$TTY_CAPTURE"
-    [[ "$output" == *"6;1;bg;red;brightness;0"* ]]
-    [[ "$output" == *"6;1;bg;green;brightness;255"* ]]
-    [[ "$output" == *"6;1;bg;blue;brightness;0"* ]]
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "6;1;bg;red;brightness;0" "$output"
+    assert_contains "6;1;bg;green;brightness;255" "$output"
+    assert_contains "6;1;bg;blue;brightness;0" "$output"
     # Title is the plain branch name — no "waiting", no emoji decorations.
-    [[ "$output" == *"]0;feat-x"* ]]
-    [[ "$output" != *"waiting"* ]]
+    assert_contains "]0;feat-x" "$output"
+    assert_not_contains "waiting" "$output"
 }
 
 @test "set_blue_bar: does NOT create a dedup lock (background state never chimes)" {
