@@ -86,11 +86,11 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/reset__color.sh"
+            "command": "bash $HOME/.claude/scripts/post_tool_use__reset_color.sh",
+            "async": true
           }
         ]
       }

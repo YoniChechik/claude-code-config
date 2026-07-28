@@ -18,8 +18,11 @@ if [ -z "$TARGET_TTY" ] || [ ! -w "$TARGET_TTY" ]; then
     TARGET_TTY=/dev/tty
 fi
 
-# Reset iTerm2 tab to default — Claude is now processing
-printf '\033]6;1;bg;*;default\a' > "$TARGET_TTY" 2>/dev/null || true
+# Reset iTerm2 tab to default — Claude is now processing. Goes through
+# reset_tab_color rather than a raw escape sequence so it also drops the
+# last-painted-state record the PostToolUse reset hook reads; a hand-rolled
+# printf here would leave a stale "green" behind.
+reset_tab_color
 
 # Clear the iTerm2 tab badge so it doesn't persist while Claude is busy.
 # The badge was set to "✅ Done (OrgName)" or "⏳ RATE LIMITED (OrgName)"

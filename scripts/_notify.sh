@@ -25,8 +25,18 @@ find_user_tty() {
 
 # Resolve the tty to write escape sequences to. Prefers the real user tty,
 # falls back to /dev/tty. Echoes the chosen path on stdout.
+#
+# CLAUDE_NOTIFY_TTY overrides the PPID walk entirely. It is the seam the tests
+# use to capture the raw OSC bytes a hook SUBPROCESS emits: an exported bash
+# function cannot do it (sourcing _notify.sh redefines this function in the
+# child), so without an env override the escape sequences are unassertable and
+# tests can only check indirect side effects like the dedup lockdir.
 _resolve_target_tty() {
     local target_tty
+    if [ -n "${CLAUDE_NOTIFY_TTY:-}" ]; then
+        printf '%s' "$CLAUDE_NOTIFY_TTY"
+        return 0
+    fi
     target_tty=$(find_user_tty)
     if [ -z "$target_tty" ] || [ ! -w "$target_tty" ]; then
         target_tty=/dev/tty
@@ -112,6 +122,30 @@ _dedup_should_chime() {
     return 1
 }
 
+# --- Last-painted tab state -------------------------------------------------
+# The escape sequences are write-only: a terminal cannot be asked what colour a
+# tab currently has. So the painters record what they last painted, and the
+# PostToolUse reset hook consults that record to decide whether there is a green
+# to clear. Without it the reset would have to fire blindly on every tool call,
+# which would also wipe the BLUE background-work bar (a background agent's own
+# tool calls would erase the very bar that says it is running).
+# Keyed per session so two terminals never read each other's state.
+_tab_state_file() {
+    printf '%s/notify_tabstate_%s' \
+        "$CLAUDE_NOTIFY_TMP_DIR" "${CLAUDE_CODE_SESSION_ID:-nosession}"
+}
+
+# Record the state just painted ("green" | "blue"). Best-effort: a failure here
+# must never change the caller's exit code or its visible behaviour.
+_set_tab_state() {
+    printf '%s' "$1" > "$(_tab_state_file)" 2>/dev/null || true
+}
+
+# Echo the last painted state, or nothing if none was recorded.
+tab_state() {
+    cat "$(_tab_state_file)" 2>/dev/null || true
+}
+
 # Play the attention chime (Glass.aiff) detached, if afplay is available.
 _play_chime_sound() {
     if command -v afplay >/dev/null 2>&1; then
@@ -151,6 +185,7 @@ notify_user_attention() {
     # Always set the green color and title even when the chime is deduped —
     # the visual state is idempotent, only the audible chime must be unique.
     _set_tab_rgb 0 255 0 "$target_tty"
+    _set_tab_state green
 
     if _dedup_should_chime "$event_type" "$target_tty"; then
         _play_chime_sound
@@ -172,12 +207,16 @@ notify_chime_force() {
 # work (bg agents/tasks or actively-running CI) is still in progress.
 set_blue_bar() {
     _set_tab_rgb 0 0 255
+    _set_tab_state blue
 }
 
 reset_tab_color() {
     local target_tty
     target_tty=$(_resolve_target_tty)
     printf '\033]6;1;bg;*;default\a' > "$target_tty" 2>/dev/null || true
+    # The tab now carries no state of ours, so drop the record — otherwise a
+    # stale "green" would make the reset hook keep firing pointlessly.
+    rm -f "$(_tab_state_file)" 2>/dev/null || true
 }
 
 # True (0) only when the tail of the transcript at $1 shows a background-capable
