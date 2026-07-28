@@ -45,6 +45,38 @@ write_active_agent_transcript() {
     printf '%s\n' '{"toolUseResult":{"status":"async_launched","agentId":"a0123456789abcdef"}}' > "$TRANSCRIPT"
 }
 
+# --- Transcript line builders (shapes copied from real Claude Code transcripts).
+# $1 is an ISO-8601 UTC timestamp; the agent id is the same throughout so the
+# events form one agent's lifecycle.
+AGENT_ID="a0123456789abcdef"
+
+# Task tool result for a background launch.
+line_launch() {
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"status":"async_launched","agentId":"%s"}}\n' \
+        "$1" "$AGENT_ID"
+}
+
+# A <task-notification> in its queue-operation form (top-level "content" string,
+# with the literal \n separators the real transcript carries). $2 is the status.
+line_notification() {
+    printf '{"type":"queue-operation","timestamp":"%s","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n</task-notification>"}\n' \
+        "$1" "$AGENT_ID" "$2"
+}
+
+# SendMessage result that restarts a stopped agent in the background. This is the
+# event that has NO async_launched marker of its own.
+line_resume() {
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"success":true,"message":"Agent \\"%s\\" had no active task; resumed from transcript in the background with your message. You'"'"'ll be notified when it finishes."}}\n' \
+        "$1" "$AGENT_ID"
+}
+
+# Blocking TaskOutput result: it reaps the agent itself, so no task-notification
+# is ever emitted and this is the only record that the agent stopped.
+line_task_output() {
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"retrieval_status":"success","task":{"task_id":"%s","task_type":"local_agent","status":"%s"}}}\n' \
+        "$1" "$AGENT_ID" "$2"
+}
+
 spawn_fake_watcher() {
     bash -c 'exec -a ci_watch_fake sleep 30' </dev/null >/dev/null 2>&1 &
     WPID=$!
@@ -90,6 +122,74 @@ dedup_lock_count() {
     write_idle_transcript
     printf '%s' "${CUR_BRANCH}:passed" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
     spawn_fake_watcher
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# Resumed background agents (regression: green fired while an agent still ran)
+#
+# A stopped agent restarted with SendMessage runs again WITHOUT emitting a new
+# async_launched marker. The old detector computed active = launched - terminated,
+# so an id that had stopped once could never leave the terminated set: the Stop
+# hook painted the tab GREEN and chimed while the resumed agent was still working.
+# ---------------------------------------------------------------------------
+
+@test "stop decision: BLUE when a stopped agent was RESUMED in the background" {
+    {
+        line_launch       "2026-07-27T17:21:37.477Z"
+        line_notification "2026-07-27T17:54:33.752Z" "failed"
+        line_resume       "2026-07-28T06:27:56.919Z"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN once the resumed agent finally reports completed" {
+    {
+        line_launch       "2026-07-27T17:21:37.477Z"
+        line_notification "2026-07-27T17:54:33.752Z" "failed"
+        line_resume       "2026-07-28T06:27:56.919Z"
+        line_notification "2026-07-28T06:34:48.201Z" "completed"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN when a resumed agent is later killed (TaskStop)" {
+    # "killed" is what TaskStop emits; an unrecognized status would never clear
+    # the id, pinning the tab blue and silencing the chime forever.
+    {
+        line_launch       "2026-07-27T17:21:37.477Z"
+        line_notification "2026-07-27T17:54:33.752Z" "completed"
+        line_resume       "2026-07-28T06:27:56.919Z"
+        line_notification "2026-07-28T06:30:00.000Z" "killed"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN when a resumed agent is reaped by a blocking TaskOutput" {
+    # A blocking TaskOutput collects the result itself, so NO task-notification
+    # is ever written — its task.status is the only stop record.
+    {
+        line_launch     "2026-07-27T17:21:37.477Z"
+        line_resume     "2026-07-28T06:27:56.919Z"
+        line_task_output "2026-07-28T06:29:00.000Z" "completed"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN when the stop notification precedes the launch line but is newer" {
+    # Transcript lines are NOT in wall-clock order: a queue-operation
+    # notification is written where it was QUEUED, which can be many lines
+    # BEFORE the launch it terminates. Ordering by line number instead of by
+    # timestamp would resurrect this long-dead agent and pin the tab blue.
+    {
+        line_notification "2026-07-27T13:09:19.222Z" "completed"
+        line_launch       "2026-07-27T13:09:18.460Z"
+    } > "$TRANSCRIPT"
     run_hook
     [ "$(dedup_lock_count)" -ge 1 ]
 }

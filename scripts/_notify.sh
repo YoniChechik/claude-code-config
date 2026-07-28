@@ -182,9 +182,19 @@ reset_tab_color() {
 
 # Returns 0 (true) if >=1 background agent is still running per the transcript
 # at $1, else 1 (false). Fail-safe: empty/missing/unparseable transcript => false.
-# Detection: entries whose toolUseResult.status == "async_launched" carry a
-# launched agentId; <task-notification> blocks whose <status> is terminal mark
-# that task-id terminated; active = launched - terminated.
+#
+# Detection is a per-task-id LAST-EVENT-WINS state machine resolved in TIMESTAMP
+# order (not line order, not set subtraction). Four event kinds move an id:
+#   - launch:  toolUseResult.status == "async_launched"          -> active
+#   - resume:  a SendMessage toolUseResult whose message says the agent was
+#              "resumed ... in the background with your message" -> active
+#   - stop:    a <task-notification> block with a terminal <status> -> terminated
+#   - reap:    a blocking TaskOutput whose task.status is terminal -> terminated
+# An id is active iff its LAST event was a launch or a resume. Set subtraction
+# (active = launched - terminated) was wrong because termination was monotonic:
+# a resumed agent emits NO new async_launched marker, so an id that had already
+# stopped once could never leave the terminated set and the tab went green while
+# the resumed agent was still running.
 bg_agents_active() {
     local transcript="$1"
     # No usable transcript => treat as no background work.
@@ -200,14 +210,20 @@ bg_agents_active() {
     # with a 1s gap, to give a just-launched line time to flush to disk. The
     # common cases (marker already present, or truly no background work) are
     # settled on the first attempt and pay no retry cost; only a real miss pays.
-    local grep_count=0       # raw `grep -c async_launched` from the last read
+    #
+    # The needle matches EITHER marker: a fresh launch ("async_launched") or a
+    # resume ("... in the background with your message"). A resume-only
+    # transcript has no async_launched line, so greping for that alone would
+    # early-out to green while a resumed agent runs.
+    local grep_count=0       # raw count of launch+resume markers from the last read
     local retries=0          # extra reads beyond the first (0 == hit first try)
     local found=1            # 0 once the marker is seen, else 1
     local max_tries=3        # smallest bound that reliably closes the flush race
     local attempt=0
+    local marker_re='async_launched|in the background with your message'
     while [ "$attempt" -lt "$max_tries" ]; do
         attempt=$((attempt + 1))
-        grep_count=$(grep -c "async_launched" "$transcript" 2>/dev/null)
+        grep_count=$(grep -cE "$marker_re" "$transcript" 2>/dev/null)
         grep_count=${grep_count:-0}
         # Marker present => stop polling and fall through to the counting logic.
         if [ "$grep_count" -gt 0 ] 2>/dev/null; then
@@ -224,17 +240,17 @@ bg_agents_active() {
 
     # Counts fed to the diagnostic log below; default to the "no work" case that
     # holds when the marker never appeared after the bounded retries.
-    local n_launched=0 n_terminated=0 n_active=0
+    local n_launched=0 n_terminated=0 n_resumed=0 n_active=0
 
     # Marker never showed up even after the retries => genuinely no background
     # agent. Log the miss and return false (green) without spawning python.
     if [ "$found" -ne 0 ]; then
-        _bg_agents_log "$grep_count" "$retries" 0 0 0 "green(idle)"
+        _bg_agents_log "$grep_count" "$retries" 0 0 0 0 "green(idle)"
         return 1
     fi
 
     # Count active background agents via the transcript scan (fail-open to 0).
-    # Python prints three space-separated counts: launched terminated active.
+    # Python prints four space-separated counts: launched terminated resumed active.
     local count
     count=$(python3 - "$transcript" <<'PYEOF' 2>/dev/null
 import sys, json, re, os
@@ -245,17 +261,43 @@ debug = os.environ.get("CLAUDE_DEBUG_NOTIFY") == "1"
 # Any of these statuses in a <task-notification> means the agent is no longer
 # running. Treating only "completed" as terminal would leave failed/cancelled
 # agents pinned as "active" forever and silence the stop sound permanently.
+# "killed" is what TaskStop produces and MUST be here: an unrecognized status
+# never clears an id, so the tab would stay blue and the chime stay silent.
 TERMINAL_STATUSES = {
-    "completed", "failed", "cancelled", "canceled",
-    "error", "errored", "timeout", "timed_out", "aborted",
+    "completed", "failed", "cancelled", "canceled", "killed", "stopped",
+    "interrupted", "error", "errored", "timeout", "timed_out", "aborted",
 }
 
 # agent IDs that were async-launched (toolUseResult.agentId)
 launched = set()
+# agent IDs that were RESUMED in the background via SendMessage. A resume makes a
+# previously-stopped agent live again WITHOUT emitting a new async_launched
+# marker, so it must be tracked as its own activation event.
+resumed = set()
 # task-ids that reached a terminal status (parsed from <task-notification> blocks).
 # These are the SAME identifier namespace as agentId — both sides use the
-# 17-char "a"-prefixed hex string, so direct set subtraction works.
+# 17-char "a"-prefixed hex string.
 terminated = set()
+# Collected (sort_key, task_id, "active"|"terminated") events. They are resolved
+# AFTER the whole file is read, ordered by the entry's own timestamp — NOT by
+# line order. Transcript lines are not in wall-clock order: a queue-operation
+# task-notification is written at the position where it was QUEUED, which can be
+# many lines BEFORE the launch it terminates (observed: notification lines 280
+# and 283 precede launch lines 288 and 290 while carrying later timestamps).
+# Ordering by line number therefore resurrects long-dead agents and pins the tab
+# blue, which would silence the attention chime.
+events = []
+
+# SendMessage's result message when it (re)starts a stopped agent. Both observed
+# phrasings are covered:
+#   Agent "<id>" had no active task; resumed from transcript in the background...
+#   Agent "<id>" was stopped (failed); resumed it in the background with your...
+RESUME_ID_RE = re.compile(r'Agent "([^"]+)"')
+# Only trust an id in the notification namespace ("a" + 16 hex). SendMessage also
+# accepts an agent NAME, and echoing a name into the active set could pin the tab
+# blue forever (no notification would ever clear it), permanently silencing the
+# attention chime. Ignoring those keeps the failure direction safe.
+AGENT_ID_RE = re.compile(r"^a[0-9a-f]{16}$")
 
 # Match <task-notification> blocks and pull out their <task-id> + <status>.
 # DOTALL so .*? crosses the literal "\n" inside the JSON-encoded string.
@@ -265,7 +307,7 @@ TASK_NOTIF_RE = re.compile(
 TASK_ID_RE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 STATUS_RE = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
 
-def scan_text_for_terminations(text):
+def scan_text_for_terminations(text, key):
     if not text or "<task-notification>" not in text:
         return
     for block in TASK_NOTIF_RE.findall(text):
@@ -277,11 +319,17 @@ def scan_text_for_terminations(text):
             continue
         task_id_match = TASK_ID_RE.search(block)
         if task_id_match:
-            terminated.add(task_id_match.group(1).strip())
+            task_id = task_id_match.group(1).strip()
+            terminated.add(task_id)
+            events.append((key, task_id, "terminated"))
 
 try:
     with open(transcript_path, "r") as f:
-        for line in f:
+        # Timestamps are uniform ISO-8601 UTC ("...Z"), so they sort correctly as
+        # plain strings. Entries with no timestamp inherit the last one seen, and
+        # the line number breaks ties, keeping the order total and stable.
+        last_ts = ""
+        for line_no, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
@@ -290,55 +338,99 @@ try:
             except json.JSONDecodeError:
                 continue
 
+            ts = entry.get("timestamp")
+            if isinstance(ts, str) and ts:
+                last_ts = ts
+            key = (last_ts, line_no)
+
             # --- Launches: toolUseResult.status == "async_launched" carries agentId
             tool_result = entry.get("toolUseResult", {})
             if isinstance(tool_result, dict) and tool_result.get("status") == "async_launched":
                 agent_id = tool_result.get("agentId") or entry.get("agentId")
                 if agent_id:
                     launched.add(agent_id)
+                    events.append((key, agent_id, "active"))
+
+            # --- Resumes: a SendMessage result that restarted a stopped agent in
+            # the background. This is an activation event with no async_launched
+            # marker of its own, so without it a resumed agent stays wrongly
+            # pinned as terminated by its earlier stop notification.
+            if isinstance(tool_result, dict) and tool_result.get("success") is not False:
+                msg = tool_result.get("message")
+                if isinstance(msg, str) and "resumed" in msg \
+                        and "in the background" in msg:
+                    id_match = RESUME_ID_RE.search(msg)
+                    if id_match and AGENT_ID_RE.match(id_match.group(1)):
+                        agent_id = id_match.group(1)
+                        resumed.add(agent_id)
+                        events.append((key, agent_id, "active"))
+
+            # --- Terminations via TaskOutput: a blocking TaskOutput reaps the
+            # agent itself and NO <task-notification> is ever emitted, so this is
+            # the only record that the agent stopped. Missing it leaves the id
+            # active forever, pinning the tab blue and silencing the chime.
+            # Only the terminal direction is honored: a "running" reading is
+            # already covered by the launch/resume event and trusting it could
+            # revive an agent that has since stopped.
+            if isinstance(tool_result, dict):
+                task = tool_result.get("task")
+                if isinstance(task, dict):
+                    task_id = task.get("task_id")
+                    task_status = task.get("status")
+                    if task_id and isinstance(task_status, str) \
+                            and task_status.strip().lower() in TERMINAL_STATUSES:
+                        terminated.add(task_id)
+                        events.append((key, task_id, "terminated"))
 
             # --- Terminations: <task-notification> blocks appear in multiple forms.
             # Form 1: queue-operation entry, top-level "content" is a plain string
             top_content = entry.get("content")
             if isinstance(top_content, str):
-                scan_text_for_terminations(top_content)
+                scan_text_for_terminations(top_content, key)
 
             # Form 2: user/assistant message.content as plain string or block list
             message = entry.get("message", {})
             if isinstance(message, dict):
                 content = message.get("content")
                 if isinstance(content, str):
-                    scan_text_for_terminations(content)
+                    scan_text_for_terminations(content, key)
                 elif isinstance(content, list):
                     for block in content:
                         if not isinstance(block, dict):
                             continue
                         text = block.get("text", "") or ""
-                        scan_text_for_terminations(text)
+                        scan_text_for_terminations(text, key)
 
-    # Active = launched agents whose ID we haven't seen reach a terminal status
-    active = launched - terminated
+    # Resolve last-event-wins per task-id in chronological order.
+    state = {}
+    for _key, task_id, kind in sorted(events, key=lambda ev: ev[0]):
+        state[task_id] = kind
+
+    # Active = ids whose LAST chronological event was an activation.
+    active = {task_id for task_id, st in state.items() if st == "active"}
     if debug:
         print(
             f"[bg_agents_active] launched={sorted(launched)} "
+            f"resumed={sorted(resumed)} "
             f"terminated={sorted(terminated)} active={sorted(active)}",
             file=sys.stderr,
         )
-    # Emit "launched terminated active" so the caller can both decide (active)
-    # and log the component counts on one line.
-    print(len(launched), len(terminated), len(active))
+    # Emit "launched terminated resumed active" so the caller can both decide
+    # (active) and log the component counts on one line.
+    print(len(launched), len(terminated), len(resumed), len(active))
 except Exception as e:
     if debug:
         print(f"[bg_agents_active] error: {e!r}", file=sys.stderr)
     # On any error, assume 0 active so sound plays
-    print(0, 0, 0)
+    print(0, 0, 0, 0)
 PYEOF
     )
 
-    # Split the "launched terminated active" line; blanks fail-open to 0.
-    read -r n_launched n_terminated n_active <<< "$count"
+    # Split the "launched terminated resumed active" line; blanks fail-open to 0.
+    read -r n_launched n_terminated n_resumed n_active <<< "$count"
     n_launched=${n_launched:-0}
     n_terminated=${n_terminated:-0}
+    n_resumed=${n_resumed:-0}
     n_active=${n_active:-0}
 
     # Decide: blue (background work) iff we parsed a positive active count.
@@ -348,22 +440,24 @@ PYEOF
     # --- Diagnostic logging (intentional; kept to confirm the flush/read race
     # in the wild). One appended line per evaluation; never touches the stdout
     # or exit code the callers rely on.
-    _bg_agents_log "$grep_count" "$retries" "$n_launched" "$n_terminated" "$n_active" "$decision"
+    _bg_agents_log "$grep_count" "$retries" "$n_launched" "$n_terminated" \
+        "$n_resumed" "$n_active" "$decision"
 
     # True iff we parsed a positive active count (final statement == return code).
     [ "$n_active" -gt 0 ] 2>/dev/null
 }
 
 # Diagnostic helper: append one line recording a single bg_agents_active
-# evaluation (timestamp, raw async_launched count, retry count, and the
-# launched/terminated/active/decision breakdown). Best-effort — any failure is
-# swallowed so it can never affect the caller's return value or stdout.
+# evaluation (timestamp, raw launch+resume marker count, retry count, and the
+# launched/terminated/resumed/active/decision breakdown). Best-effort — any
+# failure is swallowed so it can never affect the caller's return value or stdout.
 _bg_agents_log() {
-    local grep_count="$1" retries="$2" launched="$3" terminated="$4" active="$5" decision="$6"
+    local grep_count="$1" retries="$2" launched="$3" terminated="$4"
+    local resumed="$5" active="$6" decision="$7"
     local logfile="${CLAUDE_NOTIFY_TMP_DIR}/notify_bgdetect_${CLAUDE_CODE_SESSION_ID:-nosession}.log"
-    printf '%s grep_count=%s retries=%s launched=%s terminated=%s active=%s decision=%s\n' \
+    printf '%s grep_count=%s retries=%s launched=%s terminated=%s resumed=%s active=%s decision=%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S')" "$grep_count" "$retries" \
-        "$launched" "$terminated" "$active" "$decision" \
+        "$launched" "$terminated" "$resumed" "$active" "$decision" \
         >> "$logfile" 2>/dev/null || true
 }
 
