@@ -659,7 +659,7 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
         msg = f"{msg} Failed jobs: {' '.join(all_failed_jobs)} "
     msg = f"{msg} Run 'gh run view {first_failed_id} --log-failed' to get the logs."
     if context == "branch":
-        msg = f"{msg} Delegate the fix to coder-agent."
+        msg = f"{msg} Delegate the fix to a subagent."
 
     if context == "main":
         write_state(state.slot, state.branch, "merged-failed")
@@ -1114,7 +1114,7 @@ def watch(
                 "reported_conflict",
                 state,
                 f"CI FAILURE on branch {branch}: PR has merge conflicts. "
-                f"Delegate the fix to coder-agent.",
+                f"Delegate the fix to a subagent.",
                 "conflict",
                 port,
             )
