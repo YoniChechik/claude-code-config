@@ -20,6 +20,8 @@ Use the Agent tool to launch all agents concurrently in a single message. For ea
 
 **CRITICAL SCOPE RULE:** All review agents must ONLY flag issues in code that was added or modified compared to what we branched out from. Never flag, remove, or suggest changes to pre-existing code that was not touched by the current changes. If pre-existing code has issues, it is out of scope.
 
+**ANALYSIS ONLY:** All review agents are analysis-only — they MUST NOT modify source files. Their only write is their own findings file.
+
 **RESULTS OUTPUT:** Each agent MUST write its findings to a file in the `quality-results/` directory. Use the Write tool to create the file. If no issues are found, write "No issues found." to the file. The file is the source of truth — the agent's return message is just a brief summary.
 
 **File format for each agent's results file:**
@@ -108,14 +110,4 @@ Review the same changes for proper code organization:
 - No relative imports (use absolute imports)
 - Python: All private items MUST start with `_` prefix
 
-## Phase 3: Fix Issues
-Wait for all five agents to complete, then aggregate and fix all issues:
-
-1. Read ALL result files from `quality-results/` directory (`1-code-reuse.md` through `5-structure.md`). If any expected file is missing, note it and proceed with available files.
-2. **Aggregate & deduplicate**: Collect all issues from all files into a single list. Remove duplicates — if multiple agents flagged the same code location or the same problem, keep only one entry.
-3. **Print the consolidated list**: Output the full deduplicated issue list so the user can see everything that was found before fixes begin.
-4. **Fix each issue one by one**:
-   - Work through the list sequentially
-   - Fix each issue directly in the codebase
-   - If a fix changes code referenced by a later issue, re-read the affected file to find the updated location. Skip issues already resolved by an earlier fix.
-5. After all issues are fixed, briefly summarize what was fixed
+Wait for all five agents to complete. The skill ends there: the findings files in `quality-results/` are the output. Do NOT fix anything — fixing is a separate, single-writer phase.

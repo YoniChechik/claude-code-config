@@ -19,7 +19,7 @@ If provided, the above gives optional extra constraints or focus areas for the r
 
 Use a subagent to carry out the review.
 
-**IMPORTANT**: This agent is a reviewer only - do NOT modify any code. Report issues for the fix agent to handle.
+**IMPORTANT**: This agent is a reviewer only - do NOT modify any code. Report issues for the separate fix phase to handle.
 
 Before starting the review, the subagent should:
 
@@ -120,19 +120,13 @@ Create `review.md` with the following structure:
 
 ### Subagent 2: Codex critique pass
 
-After the review subagent writes `review.md` and before the fix subagent runs, get a second opinion from Codex:
+After the review subagent writes `review.md`, get a second opinion from Codex:
 
 - **Critique**: Invoke the `/codex` skill on the current branch diff (per its PR diff review recipe). Ask it to find things the primary review missed — bugs, security issues, design smells, untested paths, missed edge cases.
 - **Triage**: Separate valid Codex findings from noise.
-- **Merge**: Append the valid new findings into `review.md` under the appropriate severity sections, tagged as `(Codex)` so the fix subagent picks them up in the same pass.
+- **Merge**: Append the valid new findings into `review.md` under the appropriate severity sections, tagged as `(Codex)` so the fix phase picks them up.
 
-### Subagent 3: Fix
-
-After the review and Codex critique are merged into `review.md`, use another subagent (opus high effort) to fix all issues:
-
-1. Read `review.md` in the current directory
-2. Fix all issues found in the review (including Codex-tagged items)
-3. Briefly summarize what was fixed, calling out which fixes came from the Codex second pass
+The skill ends with the merged `review.md`. Do NOT fix anything — fixing is a separate, single-writer phase.
 
 ## Important Notes
 
