@@ -290,4 +290,81 @@ else
     echo "No JS/TS files changed"
 fi
 
+echo ""
+
+# ============================================================
+# Markdown
+# ------------------------------------------------------------
+# CI runs Prettier against changed Markdown in two places that this
+# script previously never touched:
+#   - Quality CI      -> job `format`             (npx prettier --check on
+#     changed *.md / */CLAUDE.md files)
+#   - infra-github-ci -> job `infra-github-lint`  (prettier --check .)
+# Neither gate is scoped to Python/JS files, so a docs-only change sailed
+# through this script and only failed once it hit CI. Mirror the same file
+# selection and tool here so Markdown is checked locally too.
+#
+# This script is user-global and runs in every repo, many of which have no
+# Prettier setup (or no npx/node at all). Only run the check when BOTH a
+# resolvable prettier binary AND a repo-level Prettier config are present --
+# otherwise skip quietly instead of hard-failing an unrelated repo's run.
+#
+# NOTE: this leg is check-only, even under --fix. `prettier --write` on
+# Markdown corrupts pre-existing prose here (it turns `+` continuation lines
+# into list bullets, and misreads a line starting "2026)" as an ordered-list
+# marker and reflows it wrong) -- a real incident this script caused. So we
+# never write to Markdown; violations are reported and must be fixed by hand.
+# ============================================================
+
+MD_FILES=$(get_changed_files "*.md" "*/CLAUDE.md")
+
+if [ -n "$MD_FILES" ]; then
+    echo "=== Markdown files to check ==="
+    echo "$MD_FILES"
+    echo ""
+
+    # A repo-level Prettier config can live in a dotfile, a *.config.js, or
+    # an embedded "prettier" key in package.json. Check all three forms
+    # before assuming the repo actually opts into Prettier.
+    HAS_PRETTIER_CONFIG=false
+    for cfg in .prettierrc .prettierrc.json .prettierrc.yml .prettierrc.yaml \
+        .prettierrc.js .prettierrc.cjs .prettierrc.mjs \
+        prettier.config.js prettier.config.cjs prettier.config.mjs; do
+        if [ -f "$cfg" ]; then
+            HAS_PRETTIER_CONFIG=true
+            break
+        fi
+    done
+    if [ "$HAS_PRETTIER_CONFIG" = false ] && grep -q '"prettier"[[:space:]]*:' package.json 2>/dev/null; then
+        HAS_PRETTIER_CONFIG=true
+    fi
+
+    if [ "$HAS_PRETTIER_CONFIG" = false ]; then
+        echo "SKIP: no Prettier config found in repo root, skipping Markdown format check"
+    elif [ ! -x "node_modules/.bin/prettier" ] && ! command -v npx &>/dev/null; then
+        echo "SKIP: npx/prettier not found, skipping Markdown format check"
+    else
+        PRETTIER_CMD=$(resolve_js_tool prettier)
+
+        # No --write branch here on purpose (see NOTE above): Markdown is
+        # always check-only, in both plain and --fix mode.
+        echo "=== Running prettier --check (Markdown) ==="
+        # shellcheck disable=SC2086
+        if ! echo "$MD_FILES" | xargs $PRETTIER_CMD --check; then
+            EXIT_CODE=1
+            if $FIX_MODE; then
+                echo ""
+                echo "Markdown auto-fix is OFF on purpose: prettier --write corrupts prose in"
+                echo "this repo (e.g. '+' continuation lines become list bullets; a line"
+                echo "starting with a number+paren like '2026)' gets misparsed as an ordered"
+                echo "list and reflowed wrong). Fix the file(s) listed above by hand, then"
+                echo "verify each with:"
+                echo "  npx prettier --check <file>"
+            fi
+        fi
+    fi
+else
+    echo "No Markdown files changed"
+fi
+
 exit $EXIT_CODE
