@@ -2,9 +2,8 @@
 # Unified startup hook: env validation, git sync, clone cleanup.
 # Outputs a single JSON systemMessage line. Always exits 0.
 
-# ── Stdin payload (consumed once, early, before anything else reads it) ──────
-INPUT=$(cat)
-SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // ""' 2>/dev/null || true)
+# ── Drain the stdin payload so the hook never dies on SIGPIPE ────────────────
+cat >/dev/null
 
 output=""
 add_line() { output+="$1"$'\n'; }
@@ -118,12 +117,6 @@ if [[ ${#existing_clones[@]} -gt 0 || ${#removed_clones[@]} -gt 0 || ${#removed_
     for branch in "${removed_branches[@]}"; do
         add_line "  Removed branch: $branch"
     done
-fi
-
-# --- Resume detection ---
-if [[ "$SOURCE" == "resume" ]]; then
-    add_line ""
-    add_line "RESUME DETECTED: Immediately invoke /continue-feature to restore working context for the active feature branch."
 fi
 
 # --- Output JSON systemMessage ---
