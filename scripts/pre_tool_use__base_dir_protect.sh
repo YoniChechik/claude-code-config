@@ -172,6 +172,12 @@ if [ "$tool_name" = "Bash" ]; then
             if echo "$effective_cwd" | grep -q '_clones/'; then
                 exit 0
             fi
+            # Harness agent worktrees live at <repo>/.claude/worktrees/<agent-id>/ — nested inside
+            # the base repo but a separate checkout, so they are a legitimate isolated workspace.
+            # Require a non-empty <agent-id> component so the container dir itself stays protected.
+            if echo "$effective_cwd" | grep -qE '/\.claude/worktrees/[^/]+(/|$)'; then
+                exit 0
+            fi
             if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$effective_cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
                 exit 0
             fi
@@ -210,6 +216,13 @@ else
 
     # Inside a git repo: allow modifications inside _clones directories
     if echo "$file_path" | grep -q '_clones/'; then
+        exit 0
+    fi
+
+    # Harness agent worktrees live at <repo>/.claude/worktrees/<agent-id>/ — nested inside the base
+    # repo but a separate checkout, so they are a legitimate isolated workspace. Require a path
+    # component AFTER <agent-id> so the worktrees container dir itself stays protected.
+    if echo "$file_path" | grep -qE '/\.claude/worktrees/[^/]+/'; then
         exit 0
     fi
 
