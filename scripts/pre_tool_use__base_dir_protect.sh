@@ -22,6 +22,146 @@ fi
 
 tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
+# Strip every span of a shell command that is DATA rather than an executable command,
+# so pattern heuristics cannot be tripped by prose (a commit message, a heredoc body).
+# Rules, all derived from what the shell would actually execute:
+#   - single-quoted spans  -> dropped entirely (never expanded, never executed)
+#   - heredoc bodies       -> dropped entirely (fed to stdin as data)
+#   - double-quoted spans  -> dropped, EXCEPT nested `$( )` / backtick substitutions,
+#                             which the shell DOES execute inside double quotes and
+#                             which are therefore kept (recursively)
+#   - backticks            -> rewritten to `( )` so the paren heuristic sees them too
+# Every dropped span leaves a space behind, so two fragments can never be glued into
+# a token that looks like `git`. Command text outside quotes is preserved verbatim.
+#
+# Used ONLY by the command-substitution heuristic below. The main per-segment scan
+# still runs on the raw command, because it needs the quoted arguments (e.g. the
+# target of `cd "/some path"`) to track the effective cwd.
+sanitize_shell_text() {
+    local s=$1
+    local n=${#s}
+    local i=0
+    local out=""
+    local stack="N"      # context stack, top = last word: N top-level, S '..', D "..", P $(..), B `..`
+    local depth="0"      # parallel stack of paren depths, one entry per P context
+    local heredocs=""    # FIFO queue of heredoc delimiters awaiting their body
+    local c c2 top j q delim ch rest chunk line stripped d
+
+    while [ "$i" -lt "$n" ]; do
+        top=${stack##* }
+        c=${s:i:1}
+
+        # --- inside a single-quoted span: pure literal text ---
+        if [ "$top" = "S" ]; then
+            if [ "$c" = "'" ]; then
+                stack=${stack% *}
+                out+=" "
+                i=$((i + 1))
+                continue
+            fi
+            # Fast-forward to the closing quote instead of walking char by char.
+            rest=${s:i}
+            chunk=${rest%%\'*}
+            if [ "$chunk" = "$rest" ]; then i=$n; else i=$((i + ${#chunk})); fi
+            continue
+        fi
+
+        # --- inside a double-quoted span: literal EXCEPT command substitutions ---
+        if [ "$top" = "D" ]; then
+            if [ "$c" = '\' ]; then out+=" "; i=$((i + 2)); continue; fi
+            if [ "$c" = '"' ]; then stack=${stack% *}; out+=" "; i=$((i + 1)); continue; fi
+            if [ "$c" = '`' ]; then stack="$stack B"; out+="("; i=$((i + 1)); continue; fi
+            if [ "$c" = '$' ]; then
+                if [ "${s:i+1:1}" = "(" ]; then
+                    stack="$stack P"; depth="$depth 1"; out+='$('; i=$((i + 2)); continue
+                fi
+                i=$((i + 1)); continue
+            fi
+            # Fast-forward to the next char that could change state.
+            rest=${s:i}
+            chunk=${rest%%[\`\"\$\\]*}
+            if [ "$chunk" = "$rest" ]; then i=$n; else i=$((i + ${#chunk})); fi
+            continue
+        fi
+
+        # --- command context (N top level, P inside $( ), B inside backticks) ---
+        if [ "$c" = '\' ]; then
+            # Escaped char is literal; keep alphanumerics (so `\g\i\t` still reads as git),
+            # blank out anything that could otherwise fake a metacharacter.
+            c2=${s:i+1:1}
+            case "$c2" in
+                [A-Za-z0-9]) out+="$c2" ;;
+                *) out+=" " ;;
+            esac
+            i=$((i + 2)); continue
+        fi
+        if [ "$c" = "'" ]; then stack="$stack S"; out+=" "; i=$((i + 1)); continue; fi
+        if [ "$c" = '"' ]; then stack="$stack D"; out+=" "; i=$((i + 1)); continue; fi
+        if [ "$c" = '`' ]; then
+            if [ "$top" = "B" ]; then stack=${stack% *}; out+=")"; else stack="$stack B"; out+="("; fi
+            i=$((i + 1)); continue
+        fi
+        if [ "$c" = '$' ] && [ "${s:i+1:1}" = "(" ]; then
+            stack="$stack P"; depth="$depth 1"; out+='$('; i=$((i + 2)); continue
+        fi
+        if [ "$c" = "(" ]; then
+            if [ "$top" = "P" ]; then d=${depth##* }; depth="${depth% *} $((d + 1))"; fi
+            out+="("; i=$((i + 1)); continue
+        fi
+        if [ "$c" = ")" ]; then
+            out+=")"
+            if [ "$top" = "P" ]; then
+                d=${depth##* }; d=$((d - 1))
+                if [ "$d" -le 0 ]; then stack=${stack% *}; depth=${depth% *}
+                else depth="${depth% *} $d"; fi
+            fi
+            i=$((i + 1)); continue
+        fi
+        # Heredoc redirection: queue the delimiter, body is skipped at the next newline.
+        # `<<<` is a here-STRING, not a heredoc, so it is excluded.
+        if [ "$c" = "<" ] && [ "${s:i+1:1}" = "<" ] && [ "${s:i+2:1}" != "<" ]; then
+            j=$((i + 2))
+            [ "${s:j:1}" = "-" ] && j=$((j + 1))
+            while [ "${s:j:1}" = " " ] || [ "${s:j:1}" = "	" ]; do j=$((j + 1)); done
+            q=""
+            if [ "${s:j:1}" = "'" ] || [ "${s:j:1}" = '"' ]; then q=${s:j:1}; j=$((j + 1)); fi
+            delim=""
+            while [ "$j" -lt "$n" ]; do
+                ch=${s:j:1}
+                if [ -n "$q" ]; then
+                    if [ "$ch" = "$q" ]; then j=$((j + 1)); break; fi
+                else
+                    case "$ch" in [A-Za-z0-9_.-]) ;; *) break ;; esac
+                fi
+                delim="$delim$ch"; j=$((j + 1))
+            done
+            [ -n "$delim" ] && heredocs="$heredocs $delim"
+            out+=" "; i=$j; continue
+        fi
+        # Newline in command context: any queued heredoc bodies start here — drop them.
+        if [ "$c" = $'\n' ]; then
+            out+=$'\n'; i=$((i + 1))
+            while [ -n "$heredocs" ]; do
+                heredocs=${heredocs# }
+                delim=${heredocs%% *}
+                if [ "$delim" = "$heredocs" ]; then heredocs=""; else heredocs=${heredocs#* }; fi
+                while [ "$i" -lt "$n" ]; do
+                    rest=${s:i}
+                    line=${rest%%$'\n'*}
+                    if [ "$line" = "$rest" ]; then i=$n; else i=$((i + ${#line} + 1)); fi
+                    stripped=${line#"${line%%[![:space:]]*}"}
+                    stripped=${stripped%"${stripped##*[![:space:]]}"}
+                    [ "$stripped" = "$delim" ] && break
+                done
+            done
+            continue
+        fi
+        out+="$c"; i=$((i + 1))
+    done
+
+    printf '%s' "$out"
+}
+
 if [ "$tool_name" = "Bash" ]; then
     # === Git write protection logic ===
     command=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -42,7 +182,6 @@ if [ "$tool_name" = "Bash" ]; then
     # not when they appear inside a heredoc / commit-message body.
     BYPASS_SHELL_LEAD='^(bash|sh|zsh|dash)[[:space:]]+-c([[:space:]]|$)'
     EVAL_LEAD='^eval([[:space:]]|$)'
-    SUBSHELL_LEAD='^\(.*\<git[[:space:]]+'
 
     has_bypass_shell=0
     has_eval=0
@@ -51,9 +190,20 @@ if [ "$tool_name" = "Bash" ]; then
     # Pre-split scan: detect subshell groupings `(...)` because tr-splitting on `&|;` would
     # break the parentheses across multiple segments. If an opening `(` is followed (eventually)
     # by a git write subcommand and a closing `)`, treat the whole command as a bypass.
-    if echo "$command" | grep -qE '\([^)]*\<git[[:space:]]+'; then
+    #
+    # This runs on the SANITIZED command, not the raw one. The threat being caught is a git
+    # write smuggled through a command substitution, which only executes in command position;
+    # the same characters sitting inside a commit message, a single-quoted argument, or a
+    # heredoc body are inert prose and must not trip the rule. sanitize_shell_text() keeps
+    # exactly the executable part — including `$( )` nested inside double quotes, which the
+    # shell really does run — and rewrites backticks to parens so they are caught here too.
+    sanitized_command=$(sanitize_shell_text "$command")
+    if echo "$sanitized_command" | grep -qE '\([^)]*\<git[[:space:]]+' \
+        || echo "$sanitized_command" | tr ';&|' '\n' | grep -qE '^[[:space:]]*\(.*\<git[[:space:]]+'; then
         # Confirm the inner content actually invokes a write subcommand (not e.g. `(git status)`).
-        if echo "$command" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|')"; then
+        # `)` is part of the trailing boundary here because a substitution commonly ends
+        # right after the subcommand, as in `$(git -C /repo commit)`.
+        if echo "$sanitized_command" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|'|\))"; then
             has_subshell_git=1
         fi
     fi
@@ -115,8 +265,11 @@ if [ "$tool_name" = "Bash" ]; then
             continue
         fi
 
-        # Per-segment bypass detection: a `bash -c "..."`, `eval "..."`, or `(... git ...)`
-        # segment that contains a git write subcommand anywhere in the segment.
+        # Per-segment bypass detection: a `bash -c "..."` or `eval "..."` segment that
+        # contains a git write subcommand anywhere in the segment. These deliberately scan
+        # the RAW segment: for these two forms the quoted text IS the command that runs.
+        # (Subshell/command-substitution detection is handled by the sanitized pre-split
+        # scan above, which sees parens that tr-splitting would have torn apart.)
         if echo "$segment" | grep -qE "$BYPASS_SHELL_LEAD" && echo "$segment" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|')"; then
             has_bypass_shell=1
             has_git_write=1
@@ -127,12 +280,6 @@ if [ "$tool_name" = "Bash" ]; then
             has_git_write=1
             break
         fi
-        if echo "$segment" | grep -qE "$SUBSHELL_LEAD" && echo "$segment" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|')"; then
-            has_subshell_git=1
-            has_git_write=1
-            break
-        fi
-
         # Check if this segment is a git write operation (covers env-prefix, absolute-path, and -C variants).
         if echo "$segment" | grep -qE "$GIT_WRITE_PATTERN"; then
             has_git_write=1
