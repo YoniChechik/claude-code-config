@@ -31,6 +31,13 @@ tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
 #                             which the shell DOES execute inside double quotes and
 #                             which are therefore kept (recursively)
 #   - backticks            -> rewritten to `( )` so the paren heuristic sees them too
+#
+# ONE exception to "quoted text is data": the quoted argument of `eval` or of
+# `bash|sh|zsh|dash -c` IS code — that string is handed straight back to a shell to
+# execute. Those spans are kept and scanned as command text. Without this a write
+# nested in a substitution, `$(bash -c "git -C <base> commit")`, would sanitize down
+# to nothing; the per-segment `eval` / `-c` checks are anchored at segment start and
+# never see it, so the span scan is the only thing standing in front of it.
 # Every dropped span leaves a space behind, so two fragments can never be glued into
 # a token that looks like `git`. Command text outside quotes is preserved verbatim.
 #
@@ -42,10 +49,14 @@ sanitize_shell_text() {
     local n=${#s}
     local i=0
     local out=""
-    local stack="N"      # context stack, top = last word: N top-level, S '..', D "..", P $(..), B `..`
+    # Context stack, top = last word. N top-level, S '..', D "..", P $(..), B `..`,
+    # SC/DC = a '..' / ".." span that is an eval / -c argument, i.e. code not data.
+    local stack="N"
     local depth="0"      # parallel stack of paren depths, one entry per P context
     local heredocs=""    # FIFO queue of heredoc delimiters awaiting their body
     local c c2 top j q delim ch rest chunk line stripped d
+    # A quote opening right after this is a shell-code argument, not a literal.
+    local code_arg_lead='(^|[;&|(`]|[[:space:]])(eval|(bash|sh|zsh|dash)[[:space:]]+-c)([[:space:]]+-[^[:space:]]+)*[[:space:]]+$'
 
     while [ "$i" -lt "$n" ]; do
         top=${stack##* }
@@ -95,8 +106,18 @@ sanitize_shell_text() {
             esac
             i=$((i + 2)); continue
         fi
-        if [ "$c" = "'" ]; then stack="$stack S"; out+=" "; i=$((i + 1)); continue; fi
-        if [ "$c" = '"' ]; then stack="$stack D"; out+=" "; i=$((i + 1)); continue; fi
+        if [ "$c" = "'" ]; then
+            if [ "$top" = "SC" ]; then stack=${stack% *}
+            elif printf '%s\n' "${out##*$'\n'}" | grep -qE "$code_arg_lead"; then stack="$stack SC"
+            else stack="$stack S"; fi
+            out+=" "; i=$((i + 1)); continue
+        fi
+        if [ "$c" = '"' ]; then
+            if [ "$top" = "DC" ]; then stack=${stack% *}
+            elif printf '%s\n' "${out##*$'\n'}" | grep -qE "$code_arg_lead"; then stack="$stack DC"
+            else stack="$stack D"; fi
+            out+=" "; i=$((i + 1)); continue
+        fi
         if [ "$c" = '`' ]; then
             if [ "$top" = "B" ]; then stack=${stack% *}; out+=")"; else stack="$stack B"; out+="("; fi
             i=$((i + 1)); continue
@@ -162,6 +183,52 @@ sanitize_shell_text() {
     printf '%s' "$out"
 }
 
+# Does any subshell / command-substitution span in the given (already sanitized)
+# text actually invoke a git WRITE *inside* the parens?
+#
+# Scoped to the span deliberately. A write sitting OUTSIDE the parens —
+# `$(git log -1) && git -C /base commit` — is caught by the per-segment scan below,
+# which resolves the effective cwd and the -C target properly, so requiring the
+# write inside opens no hole. It only stops a read-only span such as
+# `MSG=$(git log -1 --format=%B)` from being condemned by the word "commit"
+# appearing somewhere else entirely in the command.
+#
+# Spans are matched with balanced parens, so nested substitutions are covered, and
+# an unbalanced `(` is treated as running to end-of-text (conservative).
+# Uses the global GIT_WRITE_SUBCMD, set in the Bash branch before this is called.
+subshell_span_has_git_write() {
+    local s=$1
+    local n=${#s}
+    local i=0
+    local j depth c span
+    while [ "$i" -lt "$n" ]; do
+        if [ "${s:i:1}" = "(" ]; then
+            depth=0
+            j=$i
+            while [ "$j" -lt "$n" ]; do
+                c=${s:j:1}
+                if [ "$c" = "(" ]; then
+                    depth=$((depth + 1))
+                elif [ "$c" = ")" ]; then
+                    depth=$((depth - 1))
+                    [ "$depth" -le 0 ] && break
+                fi
+                j=$((j + 1))
+            done
+            span=${s:i:j - i + 1}
+            # Both halves must be inside the span: an actual `git` invocation, and a
+            # write subcommand. `)` is part of the trailing boundary because a
+            # substitution commonly ends right after it, as in `$(git -C /repo commit)`.
+            if printf '%s' "$span" | grep -qE '\<git[[:space:]]' \
+                && printf '%s' "$span" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|'|\))"; then
+                return 0
+            fi
+        fi
+        i=$((i + 1))
+    done
+    return 1
+}
+
 if [ "$tool_name" = "Bash" ]; then
     # === Git write protection logic ===
     command=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -198,14 +265,8 @@ if [ "$tool_name" = "Bash" ]; then
     # exactly the executable part — including `$( )` nested inside double quotes, which the
     # shell really does run — and rewrites backticks to parens so they are caught here too.
     sanitized_command=$(sanitize_shell_text "$command")
-    if echo "$sanitized_command" | grep -qE '\([^)]*\<git[[:space:]]+' \
-        || echo "$sanitized_command" | tr ';&|' '\n' | grep -qE '^[[:space:]]*\(.*\<git[[:space:]]+'; then
-        # Confirm the inner content actually invokes a write subcommand (not e.g. `(git status)`).
-        # `)` is part of the trailing boundary here because a substitution commonly ends
-        # right after the subcommand, as in `$(git -C /repo commit)`.
-        if echo "$sanitized_command" | grep -qE "[[:space:]]${GIT_WRITE_SUBCMD}([[:space:]]|\$|\"|'|\))"; then
-            has_subshell_git=1
-        fi
+    if subshell_span_has_git_write "$sanitized_command"; then
+        has_subshell_git=1
     fi
 
     # Split the compound command on separators (;, &&, ||, |, newlines) into individual segments,

@@ -270,10 +270,75 @@ EOF"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
 
-@test "deny: commit message interpolating a real git substitution" {
-    # Pinned conservative behaviour, unchanged by the sanitizer: the substitution
-    # is read-only here, but the heuristic does not try to prove that.
+@test "allow: commit message interpolating a READ-ONLY git substitution" {
+    # The write check is scoped to the inside of the span, so a `git log` span no
+    # longer inherits the guilt of a `commit` sitting outside it.
     cmd="git $C -m \"\$(git log -1 --format=%s)\""
+    assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: read-only substitution with a write word elsewhere in the command" {
+    # The case that bit a live session: \$(git log ...) plus the word "commit"
+    # appearing in an unrelated comment.
+    cmd="MSG=\$(git log -1 --format=%B)   # reconstruct the real $C message
+echo \"\$MSG\""
+    assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: read-only substitution assigned in the base repo" {
+    cmd="TOP=\$(git rev-parse --show-toplevel) && echo \"$C target: \$TOP\""
+    assert_decision ALLOW "$(bash_decide "$BASE" "$cmd")"
+}
+
+# =============================================================================
+# DENIED: a write OUTSIDE a substitution span is not the span scan's job — the
+# per-segment scan owns it, and these pin that hand-off.
+# =============================================================================
+
+@test "deny: read-only substitution followed by a real base-repo git -C write" {
+    cmd="\$(git log -1) && git -C $BASE $C -m x"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: read-only substitution, then cd to base repo, then git write" {
+    cmd="\$(git rev-parse HEAD) && cd $BASE && git $C -m x"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+# =============================================================================
+# DENIED: `eval` / `sh -c` arguments are CODE, not data. A shell re-parses that
+# quoted string, so the sanitizer must keep it. Nested inside a substitution
+# these dodge the segment-anchored eval / -c checks entirely, which makes the
+# span scan the only thing in their way.
+# =============================================================================
+
+@test "deny: bash -c with a double-quoted git write, nested in a substitution" {
+    cmd="\$(bash -c \"git -C $BASE $C -m x\")"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: bash -c with a single-quoted git write, nested in a substitution" {
+    cmd="\$(bash -c 'git -C $BASE $C -m x')"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: eval with a git write, nested in a substitution" {
+    cmd="\$(eval \"git -C $BASE $C -m x\")"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: bash -c nested in a substitution inside a double-quoted string" {
+    cmd="echo \"\$(bash -c 'git -C $BASE $C -m x')\""
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: bash -c inside a plain subshell grouping" {
+    cmd="(bash -c \"git -C $BASE $C -m x\")"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: sh -c with a git write, nested in a substitution" {
+    cmd="\$(sh -c \"git -C $BASE $C -m x\")"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
 
