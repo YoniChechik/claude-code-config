@@ -106,8 +106,9 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
   **re-run**, not fix.
 
 ### 6. Orchestration mechanics
-- **Throwaway clones off FRESH `origin/main`.** `git fetch` first, branch the clone
-  off up-to-date origin/main — never the stale local main, never the base repo dir.
+- **Throwaway worktrees off FRESH `origin/main`.** `git fetch` first, branch the
+  worktree off up-to-date origin/main — never the stale local main, never the base
+  repo dir. Worktrees live at `<repo-root>/.claude/worktrees/<name>`.
 - **Background subagents + poll-loops.** Wait via a 1s-sleep for-loop, ≤10s per
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
@@ -134,7 +135,7 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
    each: additive vs risky, auto-deploy vs manual, rollback path. Run `/codex` on
    the plan.
 2. **For each PR, in order:**
-   a. Branch a fresh clone off `origin/main` (fetch first). Never the base repo.
+   a. Branch a fresh worktree off `origin/main` (fetch first). Never the base repo.
    b. Implement the smallest coherent step. Keep the prior path inert-but-present if
       this is a flip.
    c. Write rollback + (for cutovers) an attestation block into the PR body via

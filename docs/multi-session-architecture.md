@@ -1,7 +1,7 @@
 # Multi-Session Architecture
 
 How `~/.claude/` handles multiple Claude Code sessions running simultaneously
-across multiple terminal windows, multiple repos, and multiple feature clones.
+across multiple terminal windows, multiple repos, and multiple feature worktrees.
 
 This is an internal design doc. It describes what the code actually does today,
 keyed off `session_start.sh`, `status_line.sh`, the `/ci-watcher` skill, and
@@ -12,7 +12,7 @@ keyed off `session_start.sh`, `status_line.sh`, the `/ci-watcher` skill, and
 ## Overview
 
 The user runs many Claude Code windows at once: a window on `main` in repo-A,
-a window on `feat/auth` in a clone of repo-B, a second window on `main` in
+a window on `feat/auth` in a worktree of repo-B, a second window on `main` in
 repo-B, and so on. Each is an independent Claude process with its own
 `session_id`. The architecture's job is to make per-session state
 (CI watcher state files, status-line readouts, webhook routing) stay correctly
@@ -33,12 +33,12 @@ different session_ids.
 ```
 1. open terminal in   ~/repo-b/                       (base repo, branch=main)
 2. claude starts      → SessionStart hook fires
-                      → session_start.sh runs env validation, fetch, clone
+                      → session_start.sh runs env validation, fetch, worktree
                         cleanup. No session-identity bookkeeping.
 3. user runs /new-feature
-                      → claude creates ~/repo-b/_clones/feat-auth/
+                      → claude creates ~/repo-b/.claude/worktrees/feat-auth/
                         with branch feat-auth checked out
-                      → claude `cd`s into the clone (mid-session)
+                      → claude `cd`s into the worktree (mid-session)
                       → no new session_start fires; CLAUDE_CODE_SESSION_ID
                         is unchanged across `cd`.
 4. user runs /ci-watcher → /ci-watcher skill (running inside the same Claude process):
@@ -60,19 +60,19 @@ different session_ids.
 ASCII view of two windows running at the same time:
 
 ```
-┌─ Window A ────────────────────────────────────────────────────────────────┐
-│ cwd: ~/repo-a              session_id: aaaaaaaa-aaaa-aaaa-aaaa-…          │
-│ branch: main                                                              │
-│ /ci-watcher not running on main → no /tmp/ci_watch_*                      │
-└───────────────────────────────────────────────────────────────────────────┘
+┌─ Window A ──────────────────────────────────────────────────────────────────────────┐
+│ cwd: ~/repo-a              session_id: aaaaaaaa-aaaa-aaaa-aaaa-…                    │
+│ branch: main                                                                        │
+│ /ci-watcher not running on main → no /tmp/ci_watch_*                                │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 
-┌─ Window B ────────────────────────────────────────────────────────────────┐
-│ cwd: ~/repo-b/_clones/feat-auth   session_id: bbbbbbbb-bbbb-bbbb-bbbb-…   │
-│ branch: feat/auth                                                         │
-│ /tmp/ci_watch_state_bbbbbbbb-bbbb-bbbb-bbbb-…  contents: "feat/auth:running" │
-│ /tmp/ci_watch_pr_bbbbbbbb-bbbb-bbbb-bbbb-…     ← watcher writes JSON      │
-│ status_line reads same files                   ← agrees                   │
-└───────────────────────────────────────────────────────────────────────────┘
+┌─ Window B ──────────────────────────────────────────────────────────────────────────┐
+│ cwd: ~/repo-b/.claude/worktrees/feat-auth   session_id: bbbbbbbb-bbbb-bbbb-bbbb-…   │
+│ branch: feat/auth                                                                   │
+│ /tmp/ci_watch_state_bbbbbbbb-bbbb-bbbb-bbbb-…  contents: "feat/auth:running"        │
+│ /tmp/ci_watch_pr_bbbbbbbb-bbbb-bbbb-bbbb-…     ← watcher writes JSON                │
+│ status_line reads same files                   ← agrees                             │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -202,8 +202,8 @@ of spamming a stranger.
 ### Two windows, same repo, different branches
 
 ```
-Window 1: cwd=~/r/_clones/feat-a   session_id=11111111-…   slot=11111111-…
-Window 2: cwd=~/r/_clones/feat-b   session_id=22222222-…   slot=22222222-…
+Window 1: cwd=~/r/.claude/worktrees/feat-a   session_id=11111111-…   slot=11111111-…
+Window 2: cwd=~/r/.claude/worktrees/feat-b   session_id=22222222-…   slot=22222222-…
 
 Watcher 1: /tmp/ci_watch_state_11111111-…   contents: "feat-a:running"
 Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-b:running"
@@ -213,8 +213,8 @@ Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-b:running"
 ### Two windows, same repo, SAME branch (the previously-broken case)
 
 ```
-Window 1: cwd=~/r/_clones/feat-a   session_id=11111111-…   slot=11111111-…
-Window 2: cwd=~/r/_clones/feat-a   session_id=22222222-…   slot=22222222-…
+Window 1: cwd=~/r/.claude/worktrees/feat-a   session_id=11111111-…   slot=11111111-…
+Window 2: cwd=~/r/.claude/worktrees/feat-a   session_id=22222222-…   slot=22222222-…
 
 Watcher 1: /tmp/ci_watch_state_11111111-…   contents: "feat-a:running"
 Watcher 2: /tmp/ci_watch_state_22222222-…   contents: "feat-a:running"
@@ -229,8 +229,8 @@ processes have different session_ids.
 ### Two windows, different repos
 
 ```
-Window 1: cwd=~/repo-a              session_id=aaaaaaaa-…
-Window 2: cwd=~/repo-b/_clones/x    session_id=bbbbbbbb-…
+Window 1: cwd=~/repo-a                        session_id=aaaaaaaa-…
+Window 2: cwd=~/repo-b/.claude/worktrees/x    session_id=bbbbbbbb-…
 
 Completely isolated — different session_ids, different slots,
 different webhook MCP servers (different ports + session tokens).

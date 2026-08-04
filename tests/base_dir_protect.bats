@@ -32,12 +32,16 @@ setup() {
     HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts/pre_tool_use__base_dir_protect.sh"
 
     BASE="$BATS_TEST_TMPDIR/core"
+    # Harness agent worktree and /create-worktree feature worktree — both live under
+    # the same <repo>/.claude/worktrees/ container and get identical treatment.
     WT="$BASE/.claude/worktrees/agent-a0fc5448517fe2aec"
-    CLONE="$BASE/_clones/feat"
+    FEATWT="$BASE/.claude/worktrees/feat"
+    # The retired clone location. Kept as a fixture purely to pin that it is now DENIED.
+    OLDCLONE="$BASE/_clones/feat"
 
     # `.git` marker makes $BASE look like a real repo to the file-edit branch;
     # without it every path under it counts as "outside a git repo" and is allowed.
-    mkdir -p "$BASE/.git" "$BASE/mobile" "$WT/mobile" "$CLONE/mobile" \
+    mkdir -p "$BASE/.git" "$BASE/mobile" "$WT/mobile" "$FEATWT/mobile" "$OLDCLONE/mobile" \
         "$BASE/.claude/worktrees" "$BASE/myclaude/worktrees/x"
 
     C="com""mit"
@@ -76,7 +80,9 @@ assert_decision() { # <expected> <actual>
 }
 
 # =============================================================================
-# ALLOWED: harness agent worktrees are a legitimate isolated workspace
+# ALLOWED: worktrees under <repo>/.claude/worktrees/ are the ONLY legitimate
+# isolated workspace — both harness agent worktrees and /create-worktree feature
+# worktrees.
 # =============================================================================
 
 @test "allow: Write a nested file inside an agent worktree" {
@@ -107,8 +113,16 @@ assert_decision() { # <expected> <actual>
     assert_decision ALLOW "$(bash_decide "$BASE" "git status")"
 }
 
-@test "allow: the _clones escape hatch is intact" {
-    assert_decision ALLOW "$(file_decide Write "$BASE" "$CLONE/mobile/foo.ts")"
+@test "allow: Write a nested file inside a feature worktree" {
+    assert_decision ALLOW "$(file_decide Write "$FEATWT" "$FEATWT/mobile/foo.ts")"
+}
+
+@test "allow: git write with cwd = feature worktree root" {
+    assert_decision ALLOW "$(bash_decide "$FEATWT" "git $C -m x")"
+}
+
+@test "allow: git -C <feature worktree> from base repo cwd" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git -C $FEATWT $A -A")"
 }
 
 # =============================================================================
@@ -153,6 +167,14 @@ assert_decision() { # <expected> <actual>
 
 @test "deny: git write with cwd = the worktrees CONTAINER dir" {
     assert_decision DENY "$(bash_decide "$BASE/.claude/worktrees" "git $C -m x")"
+}
+
+@test "deny: the retired _clones location is no longer an escape hatch (file edit)" {
+    assert_decision DENY "$(file_decide Write "$BASE" "$OLDCLONE/mobile/foo.ts")"
+}
+
+@test "deny: the retired _clones location is no longer an escape hatch (git write)" {
+    assert_decision DENY "$(bash_decide "$OLDCLONE" "git $C -m x")"
 }
 
 @test "deny: lookalike myclaude/worktrees file path" {

@@ -1,8 +1,10 @@
 #!/bin/bash
 
-# PreToolUse hook: block file edits and git write operations outside _clones directories.
-# For Edit/Write/NotebookEdit: checks file_path is inside _clones/ or outside any git repo.
-# For Bash: checks if command is a git write operation and cwd is inside _clones/.
+# PreToolUse hook: block file edits and git write operations outside git worktrees.
+# Worktrees live at <repo-root>/.claude/worktrees/<name>/ — Claude Code's native worktree
+# convention, used both by the /create-worktree skill and by the harness EnterWorktree tool.
+# For Edit/Write/NotebookEdit: checks file_path is inside a worktree or outside any git repo.
+# For Bash: checks if command is a git write operation and cwd is inside a worktree.
 # Receives tool input via stdin as JSON with session_id, cwd, tool_name, tool_input.
 # Exit 0 = allow. Outputs JSON with permissionDecision=ask to prompt user.
 
@@ -271,7 +273,7 @@ if [ "$tool_name" = "Bash" ]; then
 
     # Split the compound command on separators (;, &&, ||, |, newlines) into individual segments,
     # then track cd/pushd commands to compute effective_cwd and check if any segment is a git write op.
-    # This catches "cd /outside && git commit" even when session cwd is inside _clones/.
+    # This catches "cd /outside && git commit" even when session cwd is inside a worktree.
     effective_cwd="$cwd"
     has_git_write=0
     git_c_target=""
@@ -362,7 +364,7 @@ if [ "$tool_name" = "Bash" ]; then
 
     if [ "$has_git_write" = "1" ]; then
         # If `git -C <path>` was used, validate that path — it overrides cwd at runtime.
-        # Resolve to an absolute path, then require it to be inside _clones/ (or CLAUDE_CONFIG_DIR).
+        # Resolve to an absolute path, then require it to be inside a worktree (or CLAUDE_CONFIG_DIR).
         if [ -n "$git_c_target" ]; then
             git_c_target="${git_c_target/#\~/$HOME}"
             if [[ "$git_c_target" != /* ]]; then
@@ -377,12 +379,10 @@ if [ "$tool_name" = "Bash" ]; then
             fi
         fi
         if [ "$has_bypass_shell" != "1" ] && [ "$has_eval" != "1" ] && [ "$has_subshell_git" != "1" ]; then
-            if echo "$effective_cwd" | grep -q '_clones/'; then
-                exit 0
-            fi
-            # Harness agent worktrees live at <repo>/.claude/worktrees/<agent-id>/ — nested inside
-            # the base repo but a separate checkout, so they are a legitimate isolated workspace.
-            # Require a non-empty <agent-id> component so the container dir itself stays protected.
+            # Worktrees live at <repo>/.claude/worktrees/<name>/ — nested inside the base repo
+            # but a separate checkout, so they are a legitimate isolated workspace. Covers both
+            # feature worktrees from /create-worktree and harness agent worktrees.
+            # Require a non-empty <name> component so the container dir itself stays protected.
             if echo "$effective_cwd" | grep -qE '/\.claude/worktrees/[^/]+(/|$)'; then
                 exit 0
             fi
@@ -391,7 +391,7 @@ if [ "$tool_name" = "Bash" ]; then
             fi
         fi
         cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: Git write operation attempted outside a _clones/ directory. Direct writes to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that clone."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: Git write operation attempted outside a git worktree. Direct writes to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) Run '/create-worktree <feature-description>' — this creates an isolated git worktree under .claude/worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that worktree."}}
 EOF
         exit 0
     fi
@@ -422,20 +422,17 @@ else
         exit 0
     fi
 
-    # Inside a git repo: allow modifications inside _clones directories
-    if echo "$file_path" | grep -q '_clones/'; then
-        exit 0
-    fi
-
-    # Harness agent worktrees live at <repo>/.claude/worktrees/<agent-id>/ — nested inside the base
-    # repo but a separate checkout, so they are a legitimate isolated workspace. Require a path
-    # component AFTER <agent-id> so the worktrees container dir itself stays protected.
+    # Inside a git repo: allow modifications inside worktrees, which live at
+    # <repo>/.claude/worktrees/<name>/ — nested inside the base repo but a separate checkout,
+    # so they are a legitimate isolated workspace. Covers both feature worktrees from
+    # /create-worktree and harness agent worktrees. Require a path component AFTER <name>
+    # so the worktrees container dir itself stays protected.
     if echo "$file_path" | grep -qE '/\.claude/worktrees/[^/]+/'; then
         exit 0
     fi
 
     cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: File edit/write attempted outside a _clones/ directory inside a git repo. Direct edits to the base repo are forbidden. You MUST use the clone+PR workflow: (1) Run '/create-clone <feature-description>' — this creates an isolated git clone under _clones/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that clone. Never edit files directly in the base repo directory."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: File edit/write attempted outside a git worktree inside a git repo. Direct edits to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) Run '/create-worktree <feature-description>' — this creates an isolated git worktree under .claude/worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that worktree. Never edit files directly in the base repo directory."}}
 EOF
     exit 0
 fi

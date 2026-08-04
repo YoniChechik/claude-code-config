@@ -1,10 +1,10 @@
 ---
 name: "new-feature-fast"
-description: "Fast feature development: clone → implement → PR (no planning, no tests)"
+description: "Fast feature development: worktree → implement → PR (no planning, no tests)"
 argument-hint: "[feature-description]"
 ---
 
-Creates a new feature clone and goes straight to implementation then PR — skipping planning, tests, and quality checks.
+Creates a new feature worktree and goes straight to implementation then PR — skipping planning, tests, and quality checks.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -14,8 +14,8 @@ Creates a new feature clone and goes straight to implementation then PR — skip
 
 ## Process
 
-### Step 1: Create Clone
-Run `/create-clone $ARGUMENTS`.
+### Step 1: Create Worktree
+Run `/create-worktree $ARGUMENTS`.
 
 ### Step 2: Implement
 Use a subagent to implement the feature directly based on the description.

@@ -4,7 +4,7 @@ description: "Start a new feature with full planning. Use PROACTIVELY, without b
 argument-hint: "[feature-description]"
 ---
 
-Creates a new feature branch using git clone for isolated development with full planning.
+Creates a new feature branch using a git worktree for isolated development with full planning.
 
 ## Feature description from user input
 "$ARGUMENTS"
@@ -14,8 +14,8 @@ Creates a new feature branch using git clone for isolated development with full 
 
 ## Process
 
-### Step 1: Create Clone
-Run `/create-clone $ARGUMENTS`. This also sets the terminal tab title to the feature name. Optionally tell the user they may run `/rename <name>` to also rename the session in the resume picker (`/rename` is interactive-only, so it cannot be automated).
+### Step 1: Create Worktree
+Run `/create-worktree $ARGUMENTS`. This also sets the terminal tab title to the feature name. Optionally tell the user they may run `/rename <name>` to also rename the session in the resume picker (`/rename` is interactive-only, so it cannot be automated).
 
 ### Step 2: Run Feature workflow
 Run the `/feature-workflow` skill and work according to it.

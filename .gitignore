@@ -15,7 +15,6 @@
 # Re-include tracked top-level entries.
 !/.gitignore
 !/channel
-!/CLAUDE_append_to_user_prompt_main_agent_only.md
 !/CLAUDE.md
 !/docs
 !/README.md
@@ -33,4 +32,8 @@
 *.pyo
 **/.pytest_cache/
 quality-results/
-_clones/
+
+# Feature worktrees live at <repo-root>/.claude/worktrees/<name>. In this repo the
+# root IS ~/.claude, so they land at ~/.claude/.claude/worktrees/ — already covered
+# by the /* rule above, but spelled out so the intent survives a layout change.
+**/.claude/worktrees/

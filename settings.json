@@ -5,6 +5,7 @@
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
   },
   "includeCoAuthoredBy": false,
+  "includeGitInstructions": false,
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
@@ -198,6 +199,5 @@
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
   "voiceEnabled": true,
-  "disableBypassPermissionsMode": false,
-  "includeGitInstructions": false
+  "disableBypassPermissionsMode": false
 }

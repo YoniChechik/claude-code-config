@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unified startup hook: env validation, git sync, clone cleanup.
+# Unified startup hook: env validation, git sync, worktree cleanup.
 # Outputs a single JSON systemMessage line. Always exits 0.
 
 # ── Stdin payload (consumed once, early, before anything else reads it) ──────
@@ -63,36 +63,62 @@ else
     add_line "Git: no current branch (detached HEAD)"
 fi
 
-# --- Clone cleanup ---
-clones_dir="${git_root}/_clones"
-removed_clones=()
-existing_clones=()
+# --- Worktree cleanup ---
+# Feature worktrees live at <repo-root>/.claude/worktrees/<name>. Drop any whose
+# branch no longer exists on origin (i.e. the PR was merged and the branch deleted).
+worktrees_dir="${git_root}/.claude/worktrees"
+removed_worktrees=()
+existing_worktrees=()
 
-if [[ -d "$clones_dir" ]]; then
-    for clone_dir in "${clones_dir}"/*; do
-        [[ ! -d "$clone_dir" ]] && continue
-        [[ ! -d "$clone_dir/.git" ]] && continue
+# Drop stale administrative records first, so `git worktree list` reflects reality
+# even if a directory was deleted by hand.
+git worktree prune 2>/dev/null || true
 
-        branch=$(git -C "$clone_dir" branch --show-current 2>/dev/null)
-        [[ -z "$branch" ]] && continue
+# Parse `git worktree list --porcelain`: records are blank-line separated, with a
+# `worktree <abs-path>` line and (unless detached) a `branch refs/heads/<name>` line.
+wt_path=""
+wt_branch=""
+process_worktree() {
+    # Only consider worktrees under .claude/worktrees — never the main checkout.
+    [[ -z "$wt_path" ]] && return
+    [[ "$wt_path" != "${worktrees_dir}/"* ]] && return
+    # Detached HEAD or no branch: leave it alone, we can't reason about its remote.
+    [[ -z "$wt_branch" ]] && return
 
-        dir_name=$(basename "$clone_dir")
+    local dir_name
+    dir_name=$(basename "$wt_path")
 
-        if [[ $branch == "main" || $branch == "master" ]]; then
-            existing_clones+=("$dir_name")
-            continue
-        fi
+    if [[ $wt_branch == "main" || $wt_branch == "master" ]]; then
+        existing_worktrees+=("$dir_name")
+        return
+    fi
 
-        if git ls-remote --heads origin "$branch" 2>/dev/null | grep -qF "refs/heads/$branch"; then
-            existing_clones+=("$dir_name")
-            continue
-        fi
+    if git ls-remote --heads origin "$wt_branch" 2>/dev/null | grep -qF "refs/heads/$wt_branch"; then
+        existing_worktrees+=("$dir_name")
+        return
+    fi
 
-        if rm -rf "$clone_dir" 2>/dev/null; then
-            removed_clones+=("$dir_name")
-        fi
-    done
-fi
+    # Branch is gone upstream. --force is needed because the worktree may hold
+    # untracked leftovers (node_modules, .venv, symlinked .env files).
+    if git worktree remove --force "$wt_path" 2>/dev/null; then
+        removed_worktrees+=("$dir_name")
+    else
+        existing_worktrees+=("$dir_name")
+    fi
+}
+
+while IFS= read -r line; do
+    case "$line" in
+        "worktree "*) wt_path="${line#worktree }" ;;
+        "branch refs/heads/"*) wt_branch="${line#branch refs/heads/}" ;;
+        "") process_worktree; wt_path=""; wt_branch="" ;;
+    esac
+done < <(git worktree list --porcelain 2>/dev/null)
+# The last record may not be followed by a blank line.
+process_worktree
+
+# Removing a worktree can leave its branch behind; prune the admin files again.
+git worktree prune 2>/dev/null || true
 
 # Clean local branches with gone tracking
 removed_branches=()
@@ -106,14 +132,14 @@ while read -r line; do
     fi
 done < <(git branch -vv)
 
-# Output clones section only if there's something to report
-if [[ ${#existing_clones[@]} -gt 0 || ${#removed_clones[@]} -gt 0 || ${#removed_branches[@]} -gt 0 ]]; then
-    add_line "Clones:"
-    for clone in "${existing_clones[@]}"; do
-        add_line "  Existing: $clone"
+# Output worktrees section only if there's something to report
+if [[ ${#existing_worktrees[@]} -gt 0 || ${#removed_worktrees[@]} -gt 0 || ${#removed_branches[@]} -gt 0 ]]; then
+    add_line "Worktrees:"
+    for wt in "${existing_worktrees[@]}"; do
+        add_line "  Existing: $wt"
     done
-    for clone in "${removed_clones[@]}"; do
-        add_line "  Removed: $clone"
+    for wt in "${removed_worktrees[@]}"; do
+        add_line "  Removed: $wt"
     done
     for branch in "${removed_branches[@]}"; do
         add_line "  Removed branch: $branch"

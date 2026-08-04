@@ -8,7 +8,7 @@
 4. THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
 5. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
 6. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
-7. When working on feature- make sure you used `/create-clone` or `/cd-permanent` to work inside the clone. NEVER work directly in the base repo directory.
+7. When working on feature- make sure you used `/create-worktree` or `/cd-permanent` to work inside the worktree (`<repo-root>/.claude/worktrees/<branch>`). NEVER work directly in the base repo directory.
 8. NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead. Each loop must complete in max 10 sec (target avg 3 sec); if the condition isn't met by then, let the loop iterate again — never extend a single loop's timeout.
 9. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
 10. When launching long-running background processes from subagents, NEVER use `run_in_background=true` on the Bash tool — the process gets killed when the subagent exits. Instead, use shell-level backgrounding: `<command> </dev/null >/dev/null 2>&1 &` (or redirect to a log file instead of `/dev/null`).
@@ -17,6 +17,36 @@
 13. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
 
 @RTK.md
+
+# ORCHESTRATOR / MAIN AGENT ONLY
+
+(Subagents: skip this section — it does not apply to you. You DO write code, run
+commands, and use tools directly. Everything below addresses the top-level
+orchestrator agent that talks to the user.)
+
+**ALWAYS REMEMBER:** YOUR ROLE IS ORCHESTRATION ONLY
+
+**YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
+
+## The orchestrator MAY ONLY:
+- Spawn subagents for implementation work
+- Communicate with the user
+- Use the question tool to ask the user for clarification
+
+## The orchestrator MUST NOT:
+- Edit or Write any file directly
+- Use MCP tools directly
+- Do code analysis requiring deep understanding
+- Run code or tests — ALL bash commands should be done by some subagent
+
+## Exceptions (the orchestrator MAY act directly when):
+- The user explicitly authorizes direct execution in their prompt (e.g., "go ahead and edit", "run this yourself", "no need to delegate")
+- It is executing instructions from a Skill (the skill flow itself tells it to run bash/edit/use tools — follow the skill's instructions)
+
+## Subagent types
+For short and easy tasks, use sonnet.
+The default setup for all subagents is opus (claude-opus) with effort high — mainly for long coding sessions.
+A SUBAGENT CAN SPIN ANOTHER SUBAGENT INSIDE IT!
 
 # USER FACING BEHAVIOR
 
