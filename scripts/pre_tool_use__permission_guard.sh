@@ -294,14 +294,13 @@ done
 # ---------------------------------------------------------------------------
 # supabase
 # ---------------------------------------------------------------------------
-SUPABASE_ASK_MSG="supabase command targets a REMOTE database and requires confirmation."
-
 # --- target detection helpers -----------------------------------------------
 # Several supabase subcommands run against EITHER the local dev database (the
 # docker Postgres started by `supabase start`) or a remote one. The CLI picks
-# the target from three mutually-exclusive flags (see supabase/cli
+# the target from these mutually-exclusive flags (see supabase/cli
 # internal/utils/flags/db_url.go, ParseDatabaseConfig):
 #   --linked          -> the linked cloud project (REMOTE, destructive)
+#   --proxy           -> the same cloud project, tunnelled via the Supabase API
 #   --db-url <conn>   -> an arbitrary connection string (remote UNLESS its host
 #                        is loopback, e.g. the local supabase container)
 #   --local           -> the local dev database (safe)
@@ -311,33 +310,42 @@ SUPABASE_ASK_MSG="supabase command targets a REMOTE database and requires confir
 # Note: `--project-ref` alone does NOT redirect the db target (it only names
 # which project `--linked` would resolve to), so it is not a remote signal.
 
-# Extracts the --db-url host and reports 0 (true) when it is loopback, i.e. the
-# local dev database. Handles `--db-url X`, `--db-url=X` and quoted values.
-# A value we cannot resolve (e.g. "$DATABASE_URL") is NOT loopback -> remote.
+# Strips characters that would break the printf-built JSON of ask()/deny()
+# (double quotes, backslashes, percent signs) out of interpolated text.
+supabase_json_safe() {
+    echo "$1" | tr -d '"\\%' | tr -d '\n'
+}
+
+# Echoes the raw connection string that follows --db-url, or nothing when the
+# flag is absent. Handles `--db-url X`, `--db-url=X` and quoted values.
+supabase_db_url_value() {
+    echo "$1" | sed -nE "s/.*--db-url[[:space:]=]+[\"']?([^\"'[:space:]]+).*/\1/p"
+}
+
+# Echoes the host part of the --db-url value: drops scheme, drops user:pass@,
+# drops path/query, drops :port, unwraps [::1]-style IPv6 brackets.
+supabase_db_url_host() {
+    echo "$1" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@/]*@##; s#[/?].*$##; s#:[0-9]+$##; s#^\[(.*)\]$#\1#'
+}
+
+# True when the --db-url host is loopback, i.e. the local dev database. A value
+# we cannot resolve (e.g. "$DATABASE_URL") is NOT loopback -> treated as remote.
 supabase_db_url_is_local() {
-    local seg="$1" url host
-    # Pull the raw connection string that follows --db-url.
-    url=$(echo "$seg" | sed -nE "s/.*--db-url[[:space:]=]+[\"']?([^\"'[:space:]]+).*/\1/p")
+    local url host
+    url=$(supabase_db_url_value "$1")
     [ -n "$url" ] || return 1
-    # Reduce the URL to its host: drop scheme, drop user:pass@, drop path/query,
-    # drop :port, and unwrap [::1]-style IPv6 brackets.
-    host=$(echo "$url" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@/]*@##; s#[/?].*$##; s#:[0-9]+$##; s#^\[(.*)\]$#\1#')
+    host=$(supabase_db_url_host "$url")
     case "$host" in
         localhost | localhost.localdomain | 127.*.*.* | 0.0.0.0 | ::1 | host.docker.internal) return 0 ;;
         *) return 1 ;;
     esac
 }
 
-# True when the segment explicitly aims at a remote database.
-supabase_targets_remote() {
-    local seg="$1"
-    # --linked (or the API-proxied --proxy path) is always a cloud project.
-    echo "$seg" | grep -qE '(^|\s)--(linked|proxy)(=|\s|$)' && return 0
-    # --db-url counts as remote only when its host is not loopback.
-    if echo "$seg" | grep -qE '(^|\s)--db-url(=|\s)'; then
-        supabase_db_url_is_local "$seg" || return 0
-    fi
-    return 1
+# True when ANY target-selecting flag is present. Drives the "bare call" branch
+# of the three-way policy below: no flag at all means the agent never stated its
+# intent, so the guard denies instead of trusting the CLI's implicit default.
+supabase_has_target_flag() {
+    echo "$1" | grep -qE '(^|\s)--(local|linked|proxy|db-url)(=|\s|$)'
 }
 
 # True when the segment explicitly aims at the local dev database.
@@ -350,8 +358,32 @@ supabase_targets_local() {
     return 1
 }
 
+# Echoes a human phrase that names the remote target the segment implies, so the
+# confirmation prompt says WHAT gets hit instead of just "a remote database".
+supabase_remote_detail() {
+    local seg="$1" url host
+    if echo "$seg" | grep -qE '(^|\s)--linked(=|\s|$)'; then
+        echo "--linked targets the linked cloud project"
+        return
+    fi
+    if echo "$seg" | grep -qE '(^|\s)--proxy(=|\s|$)'; then
+        echo "--proxy targets the linked cloud project through the Supabase API"
+        return
+    fi
+    url=$(supabase_db_url_value "$seg")
+    host=$(supabase_db_url_host "$url")
+    if [ -n "$host" ] && echo "$host" | grep -qE '^[A-Za-z0-9._-]+$'; then
+        echo "--db-url targets the DB at $(supabase_json_safe "$host")"
+    else
+        # Unresolvable value (shell variable, etc.) — a flag IS present, so this
+        # stays an ask, never a deny; the guard just cannot name the host.
+        echo "--db-url targets an unresolved remote DB ($(supabase_json_safe "$url"))"
+    fi
+}
+
 # --- pattern lists ----------------------------------------------------------
-# 1) Always remote / always destructive: ask unconditionally.
+# 1) Always remote / always destructive: ask unconditionally. These take no
+#    local/remote target flags, so the three-way policy does not apply to them.
 SUPABASE_PATTERNS=(
     "supabase projects delete"
     "supabase storage rm"
@@ -374,19 +406,22 @@ SUPABASE_PATTERNS=(
     "supabase storage mv"
 )
 
-# 2) Target-aware, DEFAULT = LOCAL (verified in supabase/cli cmd/db.go and
-#    cmd/migration.go: these register `--local` with default true). Routine
-#    local dev usage must not prompt, so ask only on an explicit remote target.
-SUPABASE_LOCAL_DEFAULT_PATTERNS=(
+# 2) Target-aware subcommands: each one accepts --local / --linked / --db-url,
+#    so the same command is either harmless dev-loop work or a remote mutation.
+#    The CLI's own defaults differ per subcommand (db reset / migration up /
+#    migration down / migration squash default to --local; db push and
+#    migration repair default to --linked), which makes a bare call ambiguous
+#    to read. The guard therefore ignores those defaults completely and applies
+#    ONE three-way policy to every pattern below:
+#      a) no target flag at all  -> deny; the agent must state its intent.
+#      b) --local or loopback --db-url -> allow silently, no prompt.
+#      c) --linked / --proxy / non-loopback or unresolvable --db-url -> ask,
+#         naming the remote target in the prompt.
+SUPABASE_TARGET_AWARE_PATTERNS=(
     "supabase db reset"
     "supabase migration up"
     "supabase migration down"
     "supabase migration squash"
-)
-
-# 3) Target-aware, DEFAULT = REMOTE (same source files register `--linked` with
-#    default true). Keep asking unless the segment explicitly says local.
-SUPABASE_REMOTE_DEFAULT_PATTERNS=(
     "supabase db push"
     "supabase migration repair"
 )
@@ -399,19 +434,23 @@ for pattern in "${SUPABASE_PATTERNS[@]}"; do
     done
 done
 
-for pattern in "${SUPABASE_LOCAL_DEFAULT_PATTERNS[@]}"; do
+for pattern in "${SUPABASE_TARGET_AWARE_PATTERNS[@]}"; do
     for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)" && supabase_targets_remote "$segment"; then
-            ask "$SUPABASE_ASK_MSG"
-        fi
-    done
-done
+        echo "$segment" | grep -qE "^${pattern}(\s|$)" || continue
 
-for pattern in "${SUPABASE_REMOTE_DEFAULT_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)" && ! supabase_targets_local "$segment"; then
-            ask "$SUPABASE_ASK_MSG"
+        # (b) Explicitly local — the safe dev-loop path, no prompt.
+        if supabase_targets_local "$segment"; then
+            continue
         fi
+
+        # (a) Bare call — no target flag, so the effective database depends on a
+        #     per-subcommand CLI default. Refuse rather than guess.
+        if ! supabase_has_target_flag "$segment"; then
+            deny "Blocked: \`${pattern}\` needs an explicit target — add --local to hit the local dev DB, or --linked/--db-url <remote> to target remote (remote will then require confirmation)."
+        fi
+
+        # (c) A remote target is named — ask, and say which one.
+        ask "\`${pattern}\` $(supabase_remote_detail "$segment") — confirm this is intended."
     done
 done
 
