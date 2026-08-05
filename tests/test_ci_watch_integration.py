@@ -174,10 +174,16 @@ def run_watch(
     has_pending=False,
     health_ok=True,
     max_sleeps: int = 3,
+    strict_policy: bool = False,
 ) -> dict:
     """Drive ``ci_watch.watch`` for ``max_sleeps`` iterations.
 
     Returns a dict with ``notify_calls``, ``state_file_path``, ``state_value``.
+
+    ``strict_policy`` stubs ``get_strict_required_status_checks_policy`` so
+    tests never shell out to the real ``gh`` CLI; it defaults to False (the
+    function's own fail-safe default) and is overridden to True by tests
+    that exercise the "behind" alert.
     """
     fake_sleep, _ = make_sleep_breaker(max_sleeps)
 
@@ -195,6 +201,11 @@ def run_watch(
         patch.object(ci_watch, "health_check", return_value=health_ok),
         patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
         patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(
+            ci_watch,
+            "get_strict_required_status_checks_policy",
+            return_value=strict_policy,
+        ),
         patch.object(ci_watch.requests, "get") as commit_get,
     ):
         commit_get.return_value = MagicMock(status_code=200)
@@ -510,9 +521,32 @@ def test_behind_detection(tmp_path):
     out = run_watch(
         str(tmp_path),
         api_get_side_effect=make_api_get(pr=pr),
+        strict_policy=True,
     )
     assert out["state_value"] == "behind"
     assert any("behind the base branch" in m for _, m in out["notify_calls"])
+
+
+def test_behind_not_reported_when_not_strict(tmp_path):
+    """When the repo's branch protection doesn't require branches to be up
+    to date before merging, mergeable_state=behind must NOT fire — GitHub
+    will merge it fine, so alerting would be a false positive."""
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "behind",
+        }
+    ]
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr),
+        strict_policy=False,
+    )
+    assert out["state_value"] != "behind"
+    assert not any("behind the base branch" in m for _, m in out["notify_calls"])
 
 
 def test_new_sha_resets_state(tmp_path):
@@ -934,6 +968,7 @@ def test_merge_after_behind_supersedes_behind_alert(tmp_path):
         str(tmp_path),
         api_get_side_effect=side_effect,
         max_sleeps=10,
+        strict_policy=True,
     )
     msgs = [m for _, m in out["notify_calls"]]
     # The merge notification should include the superseded note.

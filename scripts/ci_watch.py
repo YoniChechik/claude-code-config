@@ -172,15 +172,14 @@ def has_pending_checks(branch: str) -> bool:
 # --- Stuck-pending required-checks detection ---
 
 
-def get_required_contexts(
-    owner: str, repo: str, default_branch: str
-) -> tuple[list[str], int | None]:
-    """Return (required_check_contexts, ruleset_id) for the default branch.
+def _get_branch_rules(owner: str, repo: str, default_branch: str) -> list | None:
+    """Fetch the active branch-protection ruleset via ``gh api``.
 
-    Reads the active branch-protection ruleset via ``gh api``. Returns
-    ``([], None)`` on any error — callers MUST treat empty as "unknown, do
-    not trigger stuck-pending detection" rather than "no requirements".
-    Errors are logged to stderr; we never silently swallow.
+    Shared by ``get_required_contexts`` and
+    ``get_strict_required_status_checks_policy``. Returns ``None`` on any
+    error (timeout, non-zero exit, bad JSON) so callers can fail toward
+    their own safe default. Errors are logged to stderr; we never silently
+    swallow.
     """
     try:
         result = subprocess.run(
@@ -194,18 +193,32 @@ def get_required_contexts(
             timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"[warn] get_required_contexts gh api failed: {e}", file=sys.stderr)
-        return [], None
+        print(f"[warn] _get_branch_rules gh api failed: {e}", file=sys.stderr)
+        return None
     if result.returncode != 0:
         print(
-            f"[warn] get_required_contexts gh api non-zero: {result.stderr.strip()}",
+            f"[warn] _get_branch_rules gh api non-zero: {result.stderr.strip()}",
             file=sys.stderr,
         )
-        return [], None
+        return None
     try:
-        rules = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        print(f"[warn] get_required_contexts JSON decode failed: {e}", file=sys.stderr)
+        print(f"[warn] _get_branch_rules JSON decode failed: {e}", file=sys.stderr)
+        return None
+
+
+def get_required_contexts(
+    owner: str, repo: str, default_branch: str
+) -> tuple[list[str], int | None]:
+    """Return (required_check_contexts, ruleset_id) for the default branch.
+
+    Reads the active branch-protection ruleset via ``gh api``. Returns
+    ``([], None)`` on any error — callers MUST treat empty as "unknown, do
+    not trigger stuck-pending detection" rather than "no requirements".
+    """
+    rules = _get_branch_rules(owner, repo, default_branch)
+    if rules is None:
         return [], None
     for rule in rules:
         if rule.get("type") != "required_status_checks":
@@ -218,6 +231,31 @@ def get_required_contexts(
         ]
         return contexts, rule.get("ruleset_id")
     return [], None
+
+
+def get_strict_required_status_checks_policy(
+    owner: str, repo: str, default_branch: str
+) -> bool:
+    """Return whether the default branch requires branches to be up to date
+    before merging (GitHub's "Require branches to be up to date before
+    merging" / ``strict_required_status_checks_policy``).
+
+    Reads the same branch-protection ruleset as ``get_required_contexts``.
+    Returns ``False`` on ANY error (missing rule, missing key, gh api
+    failure, JSON parse error, etc.) — fail toward NOT alerting, since a
+    false negative here (missing a real "needs update" alert) is far less
+    disruptive than a false positive nagging to /sync a PR that GitHub will
+    merge fine as-is.
+    """
+    rules = _get_branch_rules(owner, repo, default_branch)
+    if rules is None:
+        return False
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters") or {}
+        return params.get("strict_required_status_checks_policy") is True
+    return False
 
 
 def get_emitted_check_names(pr_number: int) -> tuple[set[str], bool]:
@@ -550,6 +588,11 @@ class WatchState:
 
         self.keep_state_file = False
 
+        # Lazily fetched once per watch() invocation — whether the default
+        # branch actually requires branches to be up to date before merging.
+        # None means "not yet fetched"; see get_strict_policy_cached().
+        self.strict_policy: bool | None = None
+
 
 # --- Detection helpers ---
 
@@ -584,6 +627,22 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         # in-progress run instead of remaining stuck on the previous
         # terminal state (passed/failed).
         write_state(state.slot, state.branch, "running")
+
+
+def get_strict_policy_cached(
+    state: WatchState, owner: str, repo: str, default_branch: str
+) -> bool:
+    """Fetch-if-None-then-reuse wrapper around
+    ``get_strict_required_status_checks_policy``.
+
+    The setting can't change mid-watch in any way that matters, so we fetch
+    it once per process lifetime instead of polling it every loop iteration.
+    """
+    if state.strict_policy is None:
+        state.strict_policy = get_strict_required_status_checks_policy(
+            owner, repo, default_branch
+        )
+    return state.strict_policy
 
 
 def check_pr_condition(
@@ -1118,15 +1177,23 @@ def watch(
                 "conflict",
                 port,
             )
-            check_pr_condition(
-                is_behind(pr_detail or pr),
-                "reported_behind",
-                state,
-                f"CI FAILURE on branch {branch}: PR is behind the base branch "
-                f"and needs to be updated. Run /sync to update the branch.",
-                "behind",
-                port,
-            )
+            # Only alert on "behind" when the repo's branch protection actually
+            # requires branches to be up to date before merging. If that
+            # setting is off, mergeable_state=behind doesn't block merging —
+            # GitHub will merge it fine — so alerting would be a false
+            # positive. Skip the check entirely when not strict: don't flip
+            # reported_behind or write any "behind" state.
+            if get_strict_policy_cached(state, owner, repo, default_branch):
+                check_pr_condition(
+                    is_behind(pr_detail or pr),
+                    "reported_behind",
+                    state,
+                    f"CI FAILURE on branch {branch}: PR is behind the base "
+                    f"branch and needs to be updated. Run /sync to update "
+                    f"the branch.",
+                    "behind",
+                    port,
+                )
 
         if not all_runs:
             # Zero workflow_runs for this branch. Either the repo genuinely has
