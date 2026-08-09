@@ -77,7 +77,7 @@ _schedule_lockdir_cleanup() {
 # session id is available do we fall back to the tty so two concurrent terminals
 # don't cross-suppress each other's chimes.
 # Returns 0 (chime — first in burst) or 1 (suppress).
-_DEDUP_WINDOW_SECONDS=3
+_DEDUP_WINDOW_SECONDS=10
 readonly _DEDUP_WINDOW_SECONDS
 
 # Arg 1: event-type key. Arg 2 (optional): an already-resolved target tty;
