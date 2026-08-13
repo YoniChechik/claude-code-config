@@ -15,7 +15,7 @@ The user runs many Claude Code windows at once: a window on `main` in repo-A,
 a window on `feat/auth` in a worktree of repo-B, a second window on `main` in
 repo-B, and so on. Each is an independent Claude process with its own
 `session_id`. The architecture's job is to make per-session state
-(CI watcher state files, status-line readouts, webhook routing) stay correctly
+(CI watcher state files, status-line readouts) stay correctly
 isolated as the user `cd`s between dirs and as multiple windows touch the same
 branch from different sessions.
 
@@ -42,15 +42,16 @@ different session_ids.
                       → no new session_start fires; CLAUDE_CODE_SESSION_ID
                         is unchanged across `cd`.
 4. user runs /ci-watcher → /ci-watcher skill (running inside the same Claude process):
-                          - calls mcp__webhook__get_port → "PORT:TOKEN"
-                          - reads $CLAUDE_CODE_SESSION_ID from the env
-                          - launches ci_watch.py detached with
-                            (BRANCH, PORT, SESSION_TOKEN) as argv
-                          - the env var is inherited by the detached child
+                          - reads $CLAUDE_CODE_SESSION_ID and cwd
+                          - calls Monitor({command, persistent: true}) with both
+                            inlined as literals in the command string
+                          - writes the returned task id to
+                            /tmp/ci_watch_task_<slot>
 5. watcher runs       → slot = $CLAUDE_CODE_SESSION_ID  (full UUID)
                       → writes /tmp/ci_watch_state_<slot> as
                           "<branch>:<state>" every poll
-                      → posts results to http://127.0.0.1:$PORT
+                      → prints notifications to stdout; Monitor relays each
+                        line to the session
 6. status_line ticks  → status_line.sh hook receives payload with session_id
                       → slot = .session_id from the payload
                       → reads /tmp/ci_watch_state_<slot>      ← agrees
@@ -81,16 +82,16 @@ ASCII view of two windows running at the same time:
 
 `slot = $CLAUDE_CODE_SESSION_ID` — the full session UUID (36 chars including
 dashes) that Claude Code's harness injects into every Bash-tool subshell. The
-detached watcher inherits the env var from the launching shell, so all four
-consumers (the launcher, the watcher, the status line, and any future hook
-script) see the same value with no inter-process bookkeeping.
+`/ci-watcher` skill inlines that value into the `Monitor` command it launches,
+so all four consumers (the launcher, the watcher, the status line, and any
+future hook script) see the same value with no inter-process bookkeeping.
 
 ### How each consumer gets the slot
 
 | Component           | How it gets the slot                                                                                      |
 | ------------------- | --------------------------------------------------------------------------------------------------------- |
 | `/ci-watcher` skill | Reads `$CLAUDE_CODE_SESSION_ID` (env var injected into the Bash-tool subshell).                           |
-| `ci_watch.py`       | Reads `$CLAUDE_CODE_SESSION_ID` (inherited from the launching subshell). Fails loud and exits 2 if unset. |
+| `ci_watch.py`       | Reads `$CLAUDE_CODE_SESSION_ID` (set explicitly by the Monitor command). Fails loud and exits 2 if unset. |
 | `status_line.sh`    | Parses `.session_id` from the hook payload (env vars are not available in the status-line context).       |
 | `session_start.sh`  | Does not need it — the SessionStart hook no longer writes any session-identity files.                     |
 
@@ -100,10 +101,14 @@ top-level field of the JSON payload Claude Code passes on stdin, and slices it
 out with the same `jq` call that pulls `current_dir` and the rate-limit
 fields.
 
-The detached watcher inherits the env var because the `/ci-watcher` skill launches it
-from a Bash-tool subshell (with shell-level backgrounding `&`, not via the
-`run_in_background` parameter). Children of that subshell inherit its
-environment, including `CLAUDE_CODE_SESSION_ID`.
+The watcher does NOT inherit the env var. `Monitor` runs in the same shell
+environment as the Bash tool, but neither its cwd nor its env inheritance is
+contractually guaranteed, so the `/ci-watcher` skill resolves
+`$CLAUDE_CODE_SESSION_ID` and the repo dir in a preceding Bash call and inlines
+both into the `Monitor` command string as literals:
+`cd "<DIR>" && exec env CLAUDE_CODE_SESSION_ID="<UUID>" uv run … ci_watch.py "<BRANCH>"`.
+`exec` makes the process `Monitor` tracks the watcher itself, so `TaskStop`
+kills the real process instead of an orphanable parent shell.
 
 ---
 
@@ -115,7 +120,10 @@ All CI watcher state lives in `/tmp/` and is keyed on the full session UUID:
 /tmp/ci_watch_state_<slot>      writer: ci_watch.py     reader: status_line.sh
 /tmp/ci_watch_lock_<slot>       writer/reader: ci_watch.py (PID lockfile)
 /tmp/ci_watch_pr_<slot>         writer: ci_watch.py     reader: status_line.sh
-/tmp/ci_watch_<slot>.log        writer: redirected stdout/stderr  readers: humans (tail -f)
+/tmp/ci_watch_<slot>.log        writer: redirected STDERR only    readers: humans (tail -f)
+                                (stdout is the Monitor event stream, not the log)
+/tmp/ci_watch_task_<slot>       writer: /ci-watcher skill
+                                readers: /ci-watcher stop, relaunch (Monitor task id)
 ```
 
 `<slot>` is the full UUID, e.g. `a3b4c5d6-e7f8-49a0-b1c2-d3e4f5a6b7c8`.
@@ -141,13 +149,12 @@ slow reader never observes partial content.
 
 ### Startup (from `/ci-watcher`)
 
-1. `/ci-watcher` skill runs inside Claude. It calls `mcp__webhook__get_port`, gets
-   `PORT:TOKEN`, and reads `$CLAUDE_CODE_SESSION_ID` from the env. If the var
-   is unset, the skill fails loud and exits.
-2. Launches `uv run ~/.claude/scripts/ci_watch.py "$BRANCH" "$PORT" "$SESSION_TOKEN"`
-   with shell-level backgrounding (`</dev/null >>log 2>&1 &`) — NOT via the
-   Bash tool's `run_in_background=true`, which would kill the process when
-   the subagent exits.
+1. `/ci-watcher` skill runs inside Claude. It reads `$CLAUDE_CODE_SESSION_ID`
+   and the repo dir. If the session id is unset, the skill fails loud and exits.
+2. Calls `Monitor({command, persistent: true})` with the session id, repo dir,
+   and branch inlined into the command as quoted literals, and stderr appended
+   to `/tmp/ci_watch_<slot>.log`. The skill then writes the returned task id to
+   `/tmp/ci_watch_task_<slot>` atomically (temp file + `mv`).
 3. Watcher reads `$CLAUDE_CODE_SESSION_ID` → `slot`. If unset, exits 2 to
    stderr immediately.
 4. Watcher takes the lock at `/tmp/ci_watch_lock_<slot>`. If a stale
@@ -159,18 +166,18 @@ slow reader never observes partial content.
 Two sessions on the same branch each have a different slot, so their
 locks/state/pr files are disjoint. They never kill each other.
 
-### Health check
+### Lifetime
 
-Every loop iteration:
-```
-GET http://127.0.0.1:$PORT/health   → expects "ok:$SESSION_TOKEN"
-```
+The watcher runs until one of three things happens:
 
-5 attempts × 2s sleep window for macOS sleep/wake recovery. If all 5 fail,
-the watcher exits cleanly via the `atexit` cleanup. The token check guards
-against OS port reuse: if the original session died and another session got
-assigned the same port, the token will mismatch and the watcher exits instead
-of spamming a stranger.
+1. `TaskStop` on the stored Monitor task id — either from `/ci-watcher stop` or
+   from a branch-switch relaunch.
+2. The process exits on its own terminal condition (PR closed without merge, no
+   CI on the default branch, main-CI timeout, main CI resolved).
+3. The session ends and Monitor tears the `persistent: true` task down.
+
+Case 3 is what makes the old per-loop webhook health check unnecessary: the
+harness now owns the "do not outlive the session" guarantee.
 
 ### Status line consumption
 
@@ -188,8 +195,10 @@ of spamming a stranger.
 
 ### Self-cleanup
 
-- **Graceful exit** (SIGTERM, SIGINT, or webhook MCP died → 5 health-check
-  retries fail): the `atexit` closure unlinks state/pr/lock.
+- **Graceful exit** (SIGTERM or SIGINT, including the `TaskStop` path): the
+  `atexit` closure unlinks state/pr/lock. A session-end SIGKILL can skip
+  `atexit` and leave orphan files — the same case the `⚠ ci watcher died`
+  rendering already covers.
 - **SIGKILL or power-off**: orphan files remain. `status_line.sh` detects this
   via a `kill -0` + `ps` arg-grep on the lock-file's PID and renders
   `⚠ ci watcher died` instead of a stale state. Orphan files are otherwise
@@ -233,7 +242,7 @@ Window 1: cwd=~/repo-a                        session_id=aaaaaaaa-…
 Window 2: cwd=~/repo-b/.claude/worktrees/x    session_id=bbbbbbbb-…
 
 Completely isolated — different session_ids, different slots,
-different webhook MCP servers (different ports + session tokens).
+different Monitor tasks.
 ```
 
 ---
@@ -247,10 +256,12 @@ different webhook MCP servers (different ports + session tokens).
   garbage-collects the files. They rot in `/tmp` until reboot. Because slots
   are per-session, orphans never collide with new watchers.
 
-- **No cross-session broadcast of webhook ports.** Each session's webhook MCP
-  binds an OS-assigned port and mints its own token. Reaching another
-  session's webhook from outside that session is not supported. The only
-  consumer that holds the port is the watcher launched by that same session.
+- **stdout must stay notification-only.** `Monitor` turns every stdout line
+  into a session notification and automatically stops a monitor that produces
+  too many events. A single diagnostic on stdout per loop iteration would be
+  one notification per second and the harness would kill the watcher. That is
+  why every diagnostic in `ci_watch.py` writes to stderr, and only `notify()`
+  writes to stdout.
 
 - **`session_start.sh` runs `git fetch -p` and `git merge --ff-only` on every
   start.** Two simultaneous sessions in the same base dir will race here;
@@ -264,9 +275,9 @@ different webhook MCP servers (different ports + session tokens).
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Where does the slot come from?                     | The full `CLAUDE_CODE_SESSION_ID` env var (a UUID minted by the Claude Code harness per session).                                     |
 | How does `/ci-watcher` get it?                     | Reads `$CLAUDE_CODE_SESSION_ID` from the Bash-tool subshell environment.                                                              |
-| How does the watcher get it?                       | Reads `$CLAUDE_CODE_SESSION_ID` (inherited from the launching subshell). Exits 2 if unset.                                            |
+| How does the watcher get it?                       | Reads `$CLAUDE_CODE_SESSION_ID`, set explicitly by the `Monitor` command via `env`. Exits 2 if unset.                                 |
 | How does `status_line.sh` get it?                  | Parses `.session_id` from its hook payload — env vars are unavailable in the status-line context.                                     |
 | What's the state-file key?                         | `slot = $CLAUDE_CODE_SESSION_ID` (full UUID).                                                                                         |
 | What's the state-file content?                     | A single line `<branch>:<state>` (e.g. `feat/auth:passed`).                                                                           |
 | What stops two watchers from colliding?            | PID-file lock at `/tmp/ci_watch_lock_<slot>`. Disjoint paths across sessions; in-session re-launch evicts the predecessor by SIGTERM. |
-| What stops the watcher from outliving the session? | Per-loop `/health` check against the session's webhook MCP, validated by `SESSION_TOKEN`.                                             |
+| What stops the watcher from outliving the session? | Monitor's `persistent: true` task ends when the session ends; `TaskStop` ends it early.                                               |
