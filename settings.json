@@ -28,16 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/scripts/session_start.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/startup__rtk_update.sh",
+            "command": "bash $HOME/.claude/scripts/session_start.sh",
             "async": true
           }
         ]
