@@ -14,8 +14,11 @@ is patched to break the watch loop after a controlled number of iterations.
 
 from __future__ import annotations
 
+import ast
 import json
+import subprocess
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -172,6 +175,7 @@ def run_watch(
     has_pending=False,
     max_sleeps: int = 3,
     strict_policy: bool = False,
+    real_notify: bool = False,
 ) -> dict:
     """Drive ``ci_watch.watch`` for ``max_sleeps`` iterations.
 
@@ -181,29 +185,38 @@ def run_watch(
     tests never shell out to the real ``gh`` CLI; it defaults to False (the
     function's own fail-safe default) and is overridden to True by tests
     that exercise the "behind" alert.
+
+    ``real_notify`` keeps recording every message BUT also lets the real
+    ``notify`` run, so a caller holding ``capsys`` can compare the recorded
+    messages against what actually reached stdout.
     """
     fake_sleep, _ = make_sleep_breaker(max_sleeps)
 
     notify_calls: list[str] = []
+    unpatched_notify = ci_watch.notify
 
     def fake_notify(m):
         notify_calls.append(m)
+        if real_notify:
+            unpatched_notify(m)
 
-    with (
-        patch.object(ci_watch, "TMP_DIR", tmp_dir),
-        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
-        patch.object(ci_watch.time, "sleep", fake_sleep),
-        patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
-        patch.object(ci_watch, "notify", side_effect=fake_notify),
-        patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
-        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
-        patch.object(
-            ci_watch,
-            "get_strict_required_status_checks_policy",
-            return_value=strict_policy,
-        ),
-        patch.object(ci_watch.requests, "get") as commit_get,
-    ):
+    with ExitStack() as stack:
+        for patcher in (
+            patch.object(ci_watch, "TMP_DIR", tmp_dir),
+            patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+            patch.object(ci_watch.time, "sleep", fake_sleep),
+            patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
+            patch.object(ci_watch, "notify", side_effect=fake_notify),
+            patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
+            patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+            patch.object(
+                ci_watch,
+                "get_strict_required_status_checks_policy",
+                return_value=strict_policy,
+            ),
+        ):
+            stack.enter_context(patcher)
+        commit_get = stack.enter_context(patch.object(ci_watch.requests, "get"))
         commit_get.return_value = MagicMock(status_code=200)
         try:
             ci_watch.watch(
@@ -1094,6 +1107,187 @@ def test_stdout_carries_only_notifications(tmp_path, capsys):
     assert "[ci_watch] starting watch loop" in captured.err
 
 
+def test_notify_multiline_message_is_written_whole(capsys):
+    """A multi-line notification must reach stdout as ONE ``print`` of the whole
+    body plus a single trailing newline.
+
+    Monitor batches stdout lines that arrive within 200ms into one
+    notification. Rewriting ``notify`` to loop over the lines (one ``print``
+    per line) would put every line at the mercy of that timing window and can
+    split one alert into many notifications, so the body must never be split.
+    """
+    writes: list[str] = []
+
+    class RecordingStdout:
+        def write(self, s: str) -> int:
+            writes.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            pass
+
+    msg = "CI FAILURE on branch feat: STUCK\nline two\n\nline four"
+    with patch.object(ci_watch.sys, "stdout", RecordingStdout()):
+        ci_watch.notify(msg)
+
+    # print() emits the body, then the terminator — the body itself must be
+    # one single write, never one write per line.
+    assert writes[0] == msg
+    assert "".join(writes) == msg + "\n"
+
+
+def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, capsys):
+    """The longest notification the watcher emits (STUCK_PENDING_REQUIRED_CHECKS,
+    ~20 lines) must land on stdout byte-for-byte, with the diagnostics that the
+    same call path writes going to stderr.
+    """
+    state = ci_watch.WatchState("feat", "feat", "sha-old", "main")
+    stuck = frozenset({"build / test", "lint"})
+    state.stuck_pending_names = stuck
+    state.stuck_pending_iters = ci_watch.STUCK_PENDING_MIN_ITERS - 1
+
+    # detect_stuck_pending shells out to `gh` (external service) — the only
+    # thing stubbed here; the message building and notify path are real.
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(
+            ci_watch, "detect_stuck_pending", return_value=(stuck, 4242, True)
+        ),
+    ):
+        ci_watch.check_stuck_pending(state, "o", "r", "main", 7)
+
+    expected = ci_watch._stuck_pending_message("feat", "o", "r", stuck, 4242)
+    captured = capsys.readouterr()
+    assert captured.out == expected + "\n"
+    assert len(expected.splitlines()) > 10, "message should be genuinely multi-line"
+    # The state write happened, and its log line went to stderr only.
+    assert (tmp_path / "ci_watch_state_feat").read_text() == "feat:stuck-pending"
+    assert "[ci_watch] write_state" in captured.err
+    assert state.reported_stuck_pending is True
+
+
+def test_every_print_outside_notify_targets_stderr():
+    """Static guard on the Monitor contract: stdout is the notification stream,
+    so ``notify`` owns the ONLY ``print`` in ci_watch.py without
+    ``file=sys.stderr``. A new diagnostic print that forgets the kwarg would
+    turn into a spurious session notification.
+    """
+    tree = ast.parse((SCRIPTS_DIR / "ci_watch.py").read_text())
+    notify_fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "notify"
+    )
+    inside_notify = {id(n) for n in ast.walk(notify_fn)}
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ):
+            continue
+        if id(node) in inside_notify:
+            continue
+        file_kw = next((k for k in node.keywords if k.arg == "file"), None)
+        if file_kw is None or ast.unparse(file_kw.value) != "sys.stderr":
+            offenders.append(node.lineno)
+    assert offenders == [], (
+        f"print() without file=sys.stderr at ci_watch.py lines {offenders} — "
+        "stdout is reserved for notify()"
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["running", "branch_failure", "pr_closed_without_merge", "no_runs"],
+)
+def test_stdout_equals_the_notifications_for(scenario, tmp_path, capsys):
+    """Whatever the watcher does, stdout must equal exactly the notifications it
+    emitted — nothing more (diagnostics leaking) and nothing less (a message
+    swallowed). Covers the non-merged terminal paths that
+    ``test_stdout_carries_only_notifications`` does not reach.
+    """
+    open_pr = {
+        "html_url": "u",
+        "number": 1,
+        "state": "open",
+        "merged": False,
+        "mergeable_state": "clean",
+        "merge_commit_sha": None,
+    }
+    if scenario == "running":
+        kwargs = {
+            "api_get_side_effect": make_api_get(
+                runs={
+                    "workflow_runs": [
+                        {
+                            "id": 1,
+                            "name": "build",
+                            "head_sha": "sha-old",
+                            "status": "in_progress",
+                            "conclusion": None,
+                        }
+                    ]
+                }
+            ),
+            "max_sleeps": 3,
+        }
+    elif scenario == "branch_failure":
+        kwargs = {
+            "api_get_side_effect": make_api_get(
+                pr=[open_pr],
+                runs={
+                    "workflow_runs": [
+                        {
+                            "id": 99,
+                            "name": "build",
+                            "head_sha": "sha-old",
+                            "status": "completed",
+                            "conclusion": "failure",
+                        }
+                    ]
+                },
+            ),
+            "max_sleeps": 3,
+        }
+    elif scenario == "pr_closed_without_merge":
+        kwargs = {
+            "api_get_side_effect": make_api_get(
+                pr=[{**open_pr, "state": "closed", "merged": False}]
+            ),
+            "max_sleeps": 3,
+        }
+    else:  # no_runs — SHA_RUNS_EMPTY_MAX iterations with an empty run list
+        kwargs = {
+            "api_get_side_effect": make_api_get(
+                pr=[open_pr],
+                runs={
+                    "workflow_runs": [
+                        {
+                            "id": 1,
+                            "name": "build",
+                            "status": "completed",
+                            "conclusion": "success",
+                        }
+                    ]
+                },
+            ),
+            "max_sleeps": ci_watch.SHA_RUNS_EMPTY_MAX + 2,
+        }
+
+    out = run_watch(str(tmp_path), real_notify=True, **kwargs)
+
+    captured = capsys.readouterr()
+    assert captured.out == "".join(m + "\n" for m in out["notify_calls"])
+    assert "[ci_watch]" not in captured.out
+    if scenario == "running":
+        assert captured.out == ""
+    else:
+        assert out["notify_calls"], f"{scenario} should emit a notification"
+
+
 def test_main_aborts_without_session_id(monkeypatch, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br"])
@@ -1101,3 +1295,91 @@ def test_main_aborts_without_session_id(monkeypatch, capsys):
         ci_watch.main()
     assert exc.value.code == 2
     assert "CLAUDE_CODE_SESSION_ID" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        # Legacy webhook-era invocation: branch + port + session token.
+        ["ci_watch.py", "br", "1234", "tok"],
+        # Branch + port, the half-migrated form.
+        ["ci_watch.py", "br", "1234"],
+        # No branch at all.
+        ["ci_watch.py"],
+    ],
+)
+def test_main_rejects_wrong_argument_count(argv, monkeypatch, capsys):
+    """The CLI takes exactly one positional arg now. A stale launcher still
+    passing port/token must fail loudly instead of watching a branch named
+    after its own port.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "slot-1")
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        ci_watch.main()
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "Usage: ci_watch.py <branch>" in captured.err
+    # Even the usage error stays off the notification stream.
+    assert captured.out == ""
+
+
+# ---------------------------------------------------------------------------
+# Repo hygiene: the webhook mechanism is gone for good
+# ---------------------------------------------------------------------------
+
+REPO_DIR = Path(__file__).parent.parent
+
+
+def test_no_dangling_references_to_the_removed_webhook_mechanism():
+    """Every artifact of the retired mechanism must be gone. A leftover
+    reference (a launcher passing a port, a kill-flag touch, the npm channel
+    dir) silently breaks the watcher instead of failing at setup time.
+    """
+    forbidden = [
+        "ci_watch_kill_",  # kill-flag stop mechanism, replaced by TaskStop
+        "ci_watch_oneshot",  # deleted script
+        "dangerously-load-development-channels",  # old cc alias flag
+        "mcp__webhook",  # webhook MCP tool ids
+        "npx tsx",  # webhook.ts launcher
+    ]
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+
+    hits: list[str] = []
+    for rel in tracked:
+        # This test file names the tokens on purpose; plans are historical.
+        if not rel or rel == "tests/test_ci_watch_integration.py":
+            continue
+        if rel.startswith(("plan-", "docs/")):
+            continue
+        path = REPO_DIR / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        hits += [f"{rel}: {tok}" for tok in forbidden if tok in text]
+    assert hits == [], f"dangling references to the removed webhook path: {hits}"
+
+
+def test_deleted_paths_are_really_gone():
+    assert not (REPO_DIR / "channel").exists()
+    assert not (REPO_DIR / "scripts" / "ci_watch_oneshot.sh").exists()
+
+
+def test_ci_watch_module_has_no_webhook_surface():
+    """``notify`` posting over HTTP and the health-check loop are gone: nothing
+    in the module may reach for them again.
+    """
+    assert not hasattr(ci_watch, "health_check")
+    assert not hasattr(ci_watch, "_kill_path")
+    assert not hasattr(ci_watch, "HEALTH_RETRY_MAX")
+    source = (SCRIPTS_DIR / "ci_watch.py").read_text()
+    assert "requests.post" not in source
