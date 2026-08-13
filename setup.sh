@@ -33,6 +33,8 @@ try:
     config = json.loads(target.read_text())
 except (json.JSONDecodeError, OSError):
     sys.exit(0)
+if not isinstance(config, dict):
+    sys.exit(0)
 servers = config.get("mcpServers")
 if not isinstance(servers, dict) or "webhook" not in servers:
     sys.exit(0)
