@@ -106,9 +106,15 @@ environment as the Bash tool, but neither its cwd nor its env inheritance is
 contractually guaranteed, so the `/ci-watcher` skill resolves
 `$CLAUDE_CODE_SESSION_ID` and the repo dir in a preceding Bash call and inlines
 both into the `Monitor` command string as literals:
-`cd "<DIR>" && exec env CLAUDE_CODE_SESSION_ID="<UUID>" uv run … ci_watch.py "<BRANCH>"`.
+`cd '<DIR>' && exec env CLAUDE_CODE_SESSION_ID='<UUID>' uv run … ci_watch.py '<BRANCH>'`.
 `exec` makes the process `Monitor` tracks the watcher itself, so `TaskStop`
 kills the real process instead of an orphanable parent shell.
+
+The literals are **single**-quoted, not double-quoted. A shell runs this string,
+and a git branch name may legally contain `$`, backticks, `;` and `&`. Double
+quotes stop word splitting and `;`/`&` but NOT `$VAR`, `` `cmd` `` or `$(cmd)`,
+so a branch named `x$(id)` would execute. Only single quotes suppress every
+substitution; a literal single quote inside a value is written `'\''`.
 
 ---
 
@@ -152,9 +158,14 @@ slow reader never observes partial content.
 1. `/ci-watcher` skill runs inside Claude. It reads `$CLAUDE_CODE_SESSION_ID`
    and the repo dir. If the session id is unset, the skill fails loud and exits.
 2. Calls `Monitor({command, persistent: true})` with the session id, repo dir,
-   and branch inlined into the command as quoted literals, and stderr appended
-   to `/tmp/ci_watch_<slot>.log`. The skill then writes the returned task id to
-   `/tmp/ci_watch_task_<slot>` atomically (temp file + `mv`).
+   and branch inlined into the command as single-quoted literals, and stderr
+   appended to `/tmp/ci_watch_<slot>.log`. The skill then writes the returned
+   task id to `/tmp/ci_watch_task_<slot>` atomically (temp file + `mv`), and
+   only afterwards polls the lockfile (1s, max 10 tries) to confirm the watcher
+   actually came up. Persisting before verifying is deliberate: a watcher that
+   is alive but slow to appear must still be stoppable. On a `DEAD` verdict the
+   skill shows the tail of the log, since a dead-on-arrival watcher writes its
+   error to stderr and stderr no longer reaches `TaskOutput`.
 3. Watcher reads `$CLAUDE_CODE_SESSION_ID` → `slot`. If unset, exits 2 to
    stderr immediately.
 4. Watcher takes the lock at `/tmp/ci_watch_lock_<slot>`. If a stale
@@ -178,6 +189,12 @@ The watcher runs until one of three things happens:
 
 Case 3 is what makes the old per-loop webhook health check unnecessary: the
 harness now owns the "do not outlive the session" guarantee.
+
+`/ci-watcher stop` does not depend on the task-id file alone. If
+`/tmp/ci_watch_task_<slot>` is missing (reaped from `/tmp`, or the session died
+between `Monitor` returning and the id being persisted) but the lockfile shows a
+live watcher, the skill kills that PID directly. The old kill-flag mechanism
+needed only the session id, so stop always worked; this keeps that property.
 
 ### Status line consumption
 

@@ -8,18 +8,20 @@
 """Integration tests for ci_watch.
 
 Tests import the ci_watch module directly. The module's network calls
-(``api_get``, ``notify``) are mocked, and ``time.sleep``
-is patched to break the watch loop after a controlled number of iterations.
+(``api_get``) and its stdout notification sink (``notify``) are mocked, and
+``time.sleep`` is patched to break the watch loop after a controlled number of
+iterations.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
-from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,8 +30,7 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import ci_watch  # noqa: E402
-
+import ci_watch
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -179,7 +180,7 @@ def run_watch(
 ) -> dict:
     """Drive ``ci_watch.watch`` for ``max_sleeps`` iterations.
 
-    Returns a dict with ``notify_calls``, ``state_file_path``, ``state_value``.
+    Returns a dict with ``notify_calls`` and ``state_value``.
 
     ``strict_policy`` stubs ``get_strict_required_status_checks_policy`` so
     tests never shell out to the real ``gh`` CLI; it defaults to False (the
@@ -200,23 +201,21 @@ def run_watch(
         if real_notify:
             unpatched_notify(m)
 
-    with ExitStack() as stack:
-        for patcher in (
-            patch.object(ci_watch, "TMP_DIR", tmp_dir),
-            patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
-            patch.object(ci_watch.time, "sleep", fake_sleep),
-            patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
-            patch.object(ci_watch, "notify", side_effect=fake_notify),
-            patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
-            patch.object(ci_watch, "get_failed_job_names", return_value=[]),
-            patch.object(
-                ci_watch,
-                "get_strict_required_status_checks_policy",
-                return_value=strict_policy,
-            ),
-        ):
-            stack.enter_context(patcher)
-        commit_get = stack.enter_context(patch.object(ci_watch.requests, "get"))
+    with (
+        patch.object(ci_watch, "TMP_DIR", tmp_dir),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
+        patch.object(ci_watch, "notify", side_effect=fake_notify),
+        patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(
+            ci_watch,
+            "get_strict_required_status_checks_policy",
+            return_value=strict_policy,
+        ),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
         commit_get.return_value = MagicMock(status_code=200)
         try:
             ci_watch.watch(
@@ -314,27 +313,6 @@ def test_ci_passes(tmp_path):
     assert any("CI PASSED" in m for m in out["notify_calls"])
 
 
-def test_ci_fails(tmp_path):
-    runs = {
-        "workflow_runs": [
-            {
-                "id": 99,
-                "name": "build",
-                "head_sha": "sha-old",
-                "status": "completed",
-                "conclusion": "failure",
-            },
-        ]
-    }
-    out = run_watch(
-        str(tmp_path),
-        api_get_side_effect=make_api_get(runs=runs),
-    )
-    assert out["state_value"] == "failed"
-    msgs = [m for m in out["notify_calls"]]
-    assert any("CI FAILURE" in m and "99" in m for m in msgs)
-
-
 def test_ci_passes_with_skipped_run(tmp_path):
     """Skipped workflow runs (path-filter skip) should not block 'passed'."""
     pr = [
@@ -412,7 +390,7 @@ def test_ci_startup_failure_is_not_failure(tmp_path):
     )
     # Should pass, not fail — startup_failure is non-blocking.
     assert out["state_value"] == "passed"
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     assert not any("CI FAILURE" in m for m in msgs)
     assert any("CI PASSED" in m for m in msgs)
 
@@ -449,7 +427,7 @@ def test_ci_cancelled_is_not_failure(tmp_path):
     )
     # Should pass, not fail — cancelled is non-blocking.
     assert out["state_value"] == "passed"
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     assert not any("CI FAILURE" in m for m in msgs)
 
 
@@ -471,7 +449,7 @@ def test_ci_real_failure(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     assert any("CI FAILURE" in m and "99" in m for m in msgs)
 
 
@@ -493,7 +471,7 @@ def test_ci_timed_out_is_failure(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     assert any("CI FAILURE" in m and "77" in m for m in msgs)
 
 
@@ -941,7 +919,7 @@ def test_merge_after_behind_supersedes_behind_alert(tmp_path):
         max_sleeps=10,
         strict_policy=True,
     )
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     # The merge notification should include the superseded note.
     merge_msgs = [m for m in msgs if "merged" in m.lower()]
     assert any("disregard" in m for m in merge_msgs), (
@@ -986,7 +964,7 @@ def test_failure_suppressed_when_pr_fetch_fails(tmp_path):
         api_get_side_effect=side_effect,
         max_sleeps=3,
     )
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     # No CI FAILURE notification should fire — PR data is unavailable
     # and we can't confirm the PR is still open.
     fail_msgs = [m for m in msgs if "CI FAILURE" in m]
@@ -1013,7 +991,7 @@ def test_failure_still_fires_without_pr(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for m in out["notify_calls"]]
+    msgs = out["notify_calls"]
     assert any("CI FAILURE" in m for m in msgs)
 
 
@@ -1107,33 +1085,57 @@ def test_stdout_carries_only_notifications(tmp_path, capsys):
     assert "[ci_watch] starting watch loop" in captured.err
 
 
-def test_notify_multiline_message_is_written_whole(capsys):
+def test_notify_multiline_message_is_written_whole_and_flushed():
     """A multi-line notification must reach stdout as ONE ``print`` of the whole
-    body plus a single trailing newline.
+    body plus a single trailing newline, followed by a flush.
 
     Monitor batches stdout lines that arrive within 200ms into one
     notification. Rewriting ``notify`` to loop over the lines (one ``print``
     per line) would put every line at the mercy of that timing window and can
     split one alert into many notifications, so the body must never be split.
+    The flush is what stops a finished notification from sitting in a block
+    buffer until the next one (or being lost entirely on SIGKILL).
     """
-    writes: list[str] = []
+    events: list[tuple[str, str]] = []
 
     class RecordingStdout:
         def write(self, s: str) -> int:
-            writes.append(s)
+            events.append(("write", s))
             return len(s)
 
         def flush(self) -> None:
-            pass
+            events.append(("flush", ""))
 
     msg = "CI FAILURE on branch feat: STUCK\nline two\n\nline four"
     with patch.object(ci_watch.sys, "stdout", RecordingStdout()):
         ci_watch.notify(msg)
 
+    writes = [payload for kind, payload in events if kind == "write"]
     # print() emits the body, then the terminator — the body itself must be
     # one single write, never one write per line.
     assert writes[0] == msg
     assert "".join(writes) == msg + "\n"
+    # The flush must come after the whole message, not before or between writes.
+    assert events[-1][0] == "flush"
+
+
+def test_notify_survives_a_dead_stdout():
+    """A broken pipe must never kill the watcher.
+
+    Monitor auto-stops a task that emits too many events, and the skill's
+    CRITICAL RULE is that nothing stops this process by accident. So a failed
+    write is dropped with a stderr warning instead of propagating.
+    """
+
+    class BrokenStdout:
+        def write(self, s: str) -> int:
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self) -> None:
+            pass
+
+    with patch.object(ci_watch.sys, "stdout", BrokenStdout()):
+        ci_watch.notify("CI PASSED on branch feat")  # must not raise
 
 
 def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, capsys):
@@ -1160,6 +1162,13 @@ def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, ca
     captured = capsys.readouterr()
     assert captured.out == expected + "\n"
     assert len(expected.splitlines()) > 10, "message should be genuinely multi-line"
+    # ``expected`` comes from the same function under test, so it only pins the
+    # plumbing. Assert the load-bearing content separately: without the check
+    # names and the ruleset id the alert is not actionable.
+    for name in stuck:
+        assert name in captured.out
+    assert "4242" in captured.out
+    assert "feat" in captured.out
     # The state write happened, and its log line went to stderr only.
     assert (tmp_path / "ci_watch_state_feat").read_text() == "feat:stuck-pending"
     assert "[ci_watch] write_state" in captured.err
@@ -1198,6 +1207,44 @@ def test_every_print_outside_notify_targets_stderr():
         "stdout is reserved for notify()"
     )
 
+    # print() is not the only way onto stdout.
+    direct_writes = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and ast.unparse(node.func) in ("sys.stdout.write", "os.write")
+        and id(node) not in inside_notify
+    ]
+    assert direct_writes == [], (
+        f"direct stdout write at ci_watch.py lines {direct_writes} — "
+        "stdout is reserved for notify()"
+    )
+
+
+def test_every_subprocess_call_captures_its_child_stdout():
+    """A child process that inherits stdout writes straight into the Monitor
+    event stream. Every ``gh``/``git`` shell-out must capture or redirect it.
+    """
+    tree = ast.parse((SCRIPTS_DIR / "ci_watch.py").read_text())
+    offenders = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("run", "Popen", "call", "check_call")
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            continue
+        kwargs = {k.arg for k in node.keywords}
+        if not kwargs & {"capture_output", "stdout"}:
+            offenders.append(node.lineno)
+    assert offenders == [], (
+        f"subprocess call inheriting stdout at ci_watch.py lines {offenders} — "
+        "pass capture_output=True or an explicit stdout="
+    )
+
 
 @pytest.mark.parametrize(
     "scenario",
@@ -1217,6 +1264,7 @@ def test_stdout_equals_the_notifications_for(scenario, tmp_path, capsys):
         "mergeable_state": "clean",
         "merge_commit_sha": None,
     }
+    kwargs: dict[str, Any]
     if scenario == "running":
         kwargs = {
             "api_get_side_effect": make_api_get(
@@ -1288,6 +1336,37 @@ def test_stdout_equals_the_notifications_for(scenario, tmp_path, capsys):
         assert out["notify_calls"], f"{scenario} should emit a notification"
 
 
+def test_release_lock_drops_our_own_lockfile(tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        lock.write_text(str(os.getpid()))
+        ci_watch.release_lock("slot-1")
+    assert not lock.exists()
+
+
+def test_release_lock_leaves_a_successors_lockfile_alone(tmp_path):
+    """A predecessor that exits after ``acquire_lock`` gave up waiting must not
+    unlink the successor's lockfile.
+
+    The /ci-watcher skill treats that file as its only liveness oracle, so a
+    false DEAD makes it launch a second watcher on the same slot.
+    """
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        lock.write_text(str(os.getpid() + 1))
+        ci_watch.release_lock("slot-1")
+    assert lock.read_text() == str(os.getpid() + 1)
+
+
+@pytest.mark.parametrize("content", ["", "not-a-pid"])
+def test_release_lock_tolerates_a_garbled_lockfile(content, tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        lock.write_text(content)
+        ci_watch.release_lock("slot-1")  # must not raise
+    assert lock.exists()
+
+
 def test_main_aborts_without_session_id(monkeypatch, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br"])
@@ -1324,6 +1403,51 @@ def test_main_rejects_wrong_argument_count(argv, monkeypatch, capsys):
     assert captured.out == ""
 
 
+@pytest.mark.parametrize("branch", ["", "   "])
+def test_main_rejects_an_empty_branch(branch, monkeypatch, capsys):
+    """An unsubstituted Monitor command template expands its placeholders to
+    empty strings, and ``cd ''`` succeeds — so an empty branch is a real
+    launch shape. Fail here, not with a confusing "branch not found" later.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "slot-1")
+    monkeypatch.setattr(sys, "argv", ["ci_watch.py", branch])
+    with pytest.raises(SystemExit) as exc:
+        ci_watch.main()
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "branch argument is empty" in captured.err
+    assert captured.out == ""
+
+
+def test_main_passes_resolved_repo_context_to_watch(monkeypatch):
+    """``watch`` takes six same-typed positional strings. Nothing else pins
+    their order, so a transposition of ``owner``/``repo`` (or
+    ``default_branch``/``latest_sha``) would ship green.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "slot-1")
+    monkeypatch.setattr(sys, "argv", ["ci_watch.py", "feat/x"])
+
+    with (
+        patch.object(ci_watch, "acquire_lock"),
+        patch.object(ci_watch, "gh_token_value", return_value="tok"),
+        patch.object(
+            ci_watch, "repo_info", return_value=("the-owner", "the-repo", "main")
+        ),
+        patch.object(ci_watch, "resolve_branch_sha", return_value="sha-123"),
+        patch.object(ci_watch, "watch") as watch_mock,
+    ):
+        ci_watch.main()
+
+    assert watch_mock.call_args.args == (
+        "feat/x",
+        "slot-1",
+        "the-owner",
+        "the-repo",
+        "main",
+        "sha-123",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Repo hygiene: the webhook mechanism is gone for good
 # ---------------------------------------------------------------------------
@@ -1353,17 +1477,19 @@ def test_no_dangling_references_to_the_removed_webhook_mechanism():
 
     hits: list[str] = []
     for rel in tracked:
-        # This test file names the tokens on purpose; plans are historical.
-        if not rel or rel == "tests/test_ci_watch_integration.py":
-            continue
-        if rel.startswith(("plan-", "docs/")):
+        # Test files name the retired tokens on purpose, in negative assertions
+        # (this scan itself, and the bats suites' assert_not_contains checks).
+        # Everything else — scripts/, skills/, docs/, setup.sh, settings.json —
+        # is scanned, because a stale launcher snippet in any of them breaks the
+        # watcher silently.
+        if not rel or rel.startswith("tests/"):
             continue
         path = REPO_DIR / rel
         if not path.is_file():
             continue
         try:
             text = path.read_text()
-        except (UnicodeDecodeError, OSError):
+        except UnicodeDecodeError:
             continue
         hits += [f"{rel}: {tok}" for tok in forbidden if tok in text]
     assert hits == [], f"dangling references to the removed webhook path: {hits}"

@@ -116,6 +116,10 @@ run_cleanup() {
     [ "$status" -eq 0 ]
 
     # Last byte must be a newline (POSIX-clean file, no "\ No newline" diffs).
+    # bats strips the trailing newline from $output, so an empty $output means
+    # "ends in a newline" — but a zero-byte file gives the same result. Assert
+    # the file is non-empty first, or a truncating rewrite would pass here.
+    [ -s "$TARGET" ]
     run tail -c 1 "$TARGET"
     [ "$output" = "" ]
     run grep -c '^  "mcpServers": {$' "$TARGET"
@@ -146,12 +150,15 @@ run_cleanup() {
     [ ! -e "$TARGET" ]
 }
 
-@test "no-op on malformed JSON — the file is left byte-identical" {
+@test "no-op on malformed JSON — the file is left byte-identical, with a warning" {
+    # Silently giving up would leave the stale webhook entry in place and never
+    # tell the user, which is exactly the failure this block exists to prevent.
     write_target '{"mcpServers": {"webhook": '
 
     run run_cleanup
     [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    assert_contains "WARNING: cannot read" "$output"
+    assert_contains "delete mcpServers.webhook by hand" "$output"
     assert_target_unchanged
 }
 
@@ -190,6 +197,41 @@ run_cleanup() {
 # ---------------------------------------------------------------------------
 # The rest of setup.sh must not resurrect the webhook launcher
 # ---------------------------------------------------------------------------
+
+@test "the rewrite is atomic and never truncates on a write failure" {
+    # An unwritable parent directory makes the temp-file write fail. The old
+    # in-place write_text could truncate the config here; os.replace cannot.
+    write_target '{"mcpServers":{"webhook":{"command":"npx"},"linear":{"command":"x"}}}'
+    local dir="$BATS_TEST_TMPDIR/ro"
+    mkdir -p "$dir"
+    cp "$TARGET" "$dir/claude.json"
+    chmod a-w "$dir"
+
+    run uv run --no-project python "$SNIPPET" "$dir/claude.json"
+    chmod u+w "$dir"
+    # Best-effort migration: it warns and gives up, it does not abort setup.sh.
+    [ "$status" -eq 0 ]
+    assert_contains "WARNING: could not rewrite" "$output"
+    run cmp -s "$dir/claude.json" "$BEFORE"
+    [ "$status" -eq 0 ]
+    # No temp-file litter left behind.
+    run find "$dir" -name '.claude.json.*'
+    [ "$output" = "" ]
+}
+
+@test "setup.sh runs the cleanup snippet against ~/.claude.json" {
+    # The tests above run the extracted snippet directly, so a wrong path (or a
+    # heredoc that is never invoked) would go unnoticed without this.
+    run cat "$SETUP_SH"
+    assert_contains 'uv run --no-project python - "$HOME/.claude.json" <<'"'"'PYTHON'"'"'' "$output"
+}
+
+@test "setup.sh skips the cleanup instead of aborting when uv is missing" {
+    # set -euo pipefail would otherwise kill the installer before the cc alias.
+    run cat "$SETUP_SH"
+    assert_contains 'if command -v uv >/dev/null 2>&1; then' "$output"
+    assert_contains "Skipping webhook MCP cleanup: uv not found." "$output"
+}
 
 @test "setup.sh installs a plain cc alias with no dev-channel flag" {
     run grep -c "^NEW_ALIAS=\"alias cc='claude'\"$" "$SETUP_SH"

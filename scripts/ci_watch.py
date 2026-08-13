@@ -21,7 +21,13 @@ Args (positional):
 State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
     /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line)
     /tmp/ci_watch_pr_{slot}       PR JSON cache for status_line.sh
-    /tmp/ci_watch_lock_{slot}     PID lock
+    /tmp/ci_watch_lock_{slot}     PID lock; also the liveness oracle the
+                                  /ci-watcher skill uses to decide whether a
+                                  stored Monitor task id is stale
+    /tmp/ci_watch_task_{slot}     Monitor task id; written by the /ci-watcher
+                                  skill, not by this script
+    /tmp/ci_watch_{slot}.log      this process's stderr, redirected by the
+                                  Monitor command line
 
 Exit conditions:
     - branch not found on remote (1)
@@ -118,8 +124,16 @@ def notify(message: str) -> None:
     The Monitor tool treats each stdout line as an event and batches lines
     emitted within 200ms into one notification, so a multi-line message stays
     one notification as long as it is written by a single ``print``.
+
+    Best-effort: a dead reader (Monitor's auto-stop on high event volume, a
+    closed pipe) must never take the watcher process down with it. The CRITICAL
+    RULE of the /ci-watcher skill is that nothing kills this process by
+    accident, so a failed write is dropped, not raised.
     """
-    print(message, flush=True)
+    try:
+        print(message, flush=True)
+    except OSError as e:
+        print(f"[warn] notify failed: {e}", file=sys.stderr, flush=True)
 
 
 # --- gh CLI fallbacks (used only on rare events) ---
@@ -526,6 +540,22 @@ def acquire_lock(slot: str) -> None:
     lock_path.write_text(str(os.getpid()))
 
 
+def release_lock(slot: str) -> None:
+    """Drop the lock, but only if it still holds OUR pid.
+
+    ``acquire_lock`` gives up waiting for a predecessor after 10s and writes its
+    own pid anyway; a predecessor that exits later would otherwise unlink the
+    SUCCESSOR's lockfile. The /ci-watcher skill reads that file as its only
+    liveness oracle, so a false DEAD would make it launch a second watcher.
+    """
+    lock_path = _lock_path(slot)
+    try:
+        if int(lock_path.read_text().strip()) == os.getpid():
+            lock_path.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        pass
+
+
 # --- State container ---
 
 
@@ -904,7 +934,7 @@ def watch(
         if not state.keep_state_file:
             _state_path(slot).unlink(missing_ok=True)
             _pr_path(slot).unlink(missing_ok=True)
-        _lock_path(slot).unlink(missing_ok=True)
+        release_lock(slot)
 
     atexit.register(cleanup)
 
@@ -1284,7 +1314,16 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    branch = sys.argv[1]
+    branch = sys.argv[1].strip()
+    if not branch:
+        # A Monitor command line built from an unsubstituted template expands
+        # its placeholders to empty strings. Fail here instead of deep inside
+        # the API layer with a confusing "branch not found".
+        print(
+            "Error: branch argument is empty.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     slot = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
     if not slot:

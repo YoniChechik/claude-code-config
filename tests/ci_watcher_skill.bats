@@ -25,13 +25,18 @@ setup() {
     export CLAUDE_CODE_SESSION_ID="testsess"
     LOCK="$BATS_TEST_TMPDIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
     TASK="$BATS_TEST_TMPDIR/ci_watch_task_${CLAUDE_CODE_SESSION_ID}"
-    SPAWNED_PIDS=()
+    # PIDs go to a FILE, not a shell array: every call site is
+    # `$(spawn_fake_watcher)`, so an array append inside that command
+    # substitution happens in a subshell and never reaches teardown.
+    SPAWNED_PIDS_FILE="$BATS_TEST_TMPDIR/spawned_pids"
+    : > "$SPAWNED_PIDS_FILE"
 }
 
 teardown() {
-    for pid in "${SPAWNED_PIDS[@]:-}"; do
-        [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-    done
+    while read -r pid; do
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null
+    done < "$SPAWNED_PIDS_FILE"
+    return 0
 }
 
 assert_contains() {
@@ -73,8 +78,6 @@ extract_block() {
 
 # Spawn a real, alive process whose argv contains "ci_watch" so the ps/grep
 # check in the snippet passes against a genuine process. Echoes its PID.
-# The sleep stays short: the append below happens inside the command
-# substitution subshell, so teardown cannot reap it and bats waits for it.
 spawn_fake_watcher() {
     spawn_named_process "ci_watch_fake"
 }
@@ -84,12 +87,25 @@ spawn_unrelated_process() {
     spawn_named_process "totally_unrelated"
 }
 
+# The sleep must comfortably outlive the test: a decoy that has already exited
+# turns "assert DEAD" into a test that passes for the wrong reason. teardown
+# kills it, so the duration costs no wall clock. 3>&- is load-bearing — bats
+# waits for its internal fd 3 to be closed by every descendant.
 spawn_named_process() {
-    bash -c "exec -a $1 sleep 3" </dev/null >/dev/null 2>&1 3>&- &
+    bash -c "exec -a $1 sleep 300" </dev/null >/dev/null 2>&1 3>&- &
     local pid=$!
     disown 2>/dev/null || true
-    SPAWNED_PIDS+=("$pid")
+    printf '%s\n' "$pid" >> "$SPAWNED_PIDS_FILE"
     printf '%s' "$pid"
+}
+
+# Fail loudly if a decoy died before the check ran.
+assert_process_alive() {
+    if ! kill -0 "$1" 2>/dev/null; then
+        printf 'helper process %s already exited before the check\n' "$1" >&2
+        return 1
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -100,6 +116,7 @@ spawn_named_process() {
     local script pid
     script="$(extract_block 'ps -p "$PID" -o args=')"
     pid="$(spawn_fake_watcher)"
+    assert_process_alive "$pid"
     printf '%s' "$pid" > "$LOCK"
 
     run bash "$script"
@@ -141,13 +158,32 @@ spawn_named_process() {
     # PID recycling: an unrelated process must never be reported as the watcher.
     # (Not $$ — the bats process argv holds this file's name, which itself
     # contains "ci_watch" and would match the grep.)
-    local script
+    local script pid
     script="$(extract_block 'ps -p "$PID" -o args=')"
-    printf '%s' "$(spawn_unrelated_process)" > "$LOCK"
+    pid="$(spawn_unrelated_process)"
+    printf '%s' "$pid" > "$LOCK"
+
+    # The whole point of this test is the `| grep -q ci_watch` guard. A decoy
+    # that already exited would print DEAD for the wrong reason and keep passing
+    # even if the grep were deleted from SKILL.md.
+    assert_process_alive "$pid"
+    run ps -p "$pid" -o args=
+    assert_not_contains "ci_watch" "$output"
 
     run bash "$script"
     [ "$status" -eq 0 ]
     [ "$output" = "DEAD" ]
+}
+
+@test "liveness: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
+    # Without the guard the path collapses to /tmp/ci_watch_lock_ and the check
+    # reports another session's watcher (or none) as this session's state.
+    local script
+    script="$(extract_block 'ps -p "$PID" -o args=')"
+
+    run env -u CLAUDE_CODE_SESSION_ID bash "$script"
+    [ "$status" -eq 1 ]
+    assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
 }
 
 @test "liveness: DEAD when the lockfile holds garbage instead of a pid" {
@@ -200,14 +236,19 @@ spawn_named_process() {
 # ---------------------------------------------------------------------------
 
 @test "launch: reports session, cwd and NONE when there is no previous task id" {
-    local script
+    local script expected_dir
     script="$(extract_block 'cannot launch ci watcher')"
     rm -f "$TASK"
+
+    # Run from a DIFFERENT directory than the test's own cwd: comparing the
+    # snippet's `pwd` against the test's `pwd` would be true by construction.
+    expected_dir="$(cd "$BATS_TEST_TMPDIR" && pwd)"
+    cd "$BATS_TEST_TMPDIR"
 
     run bash "$script"
     [ "$status" -eq 0 ]
     assert_contains "SESSION=testsess" "$output"
-    assert_contains "DIR=$(pwd)" "$output"
+    assert_contains "DIR=$expected_dir" "$output"
     assert_contains "NONE" "$output"
 }
 
@@ -270,11 +311,36 @@ spawn_named_process() {
 
 @test "skill: launches ci_watch.py with the branch as its only argument" {
     run cat "$SKILL_MD"
-    assert_contains 'uv run ~/.claude/scripts/ci_watch.py "$BRANCH"' "$output"
+    assert_contains "uv run ~/.claude/scripts/ci_watch.py '<BRANCH>'" "$output"
     # Port / session-token args, the webhook port tool, and the kill flag are
     # all gone.
     assert_not_contains '"$BRANCH" "$PORT"' "$output"
     assert_not_contains "get_port" "$output"
     assert_not_contains "ci_watch_kill_" "$output"
     assert_not_contains "run_in_background" "$output"
+}
+
+@test "skill: every value interpolated into the Monitor command is single-quoted" {
+    # Double quotes do NOT stop $(...), backticks or $VAR. A branch name may
+    # legally contain all three, and the command string is run by a shell, so
+    # double-quoting the branch is a live command-injection path.
+    run cat "$SKILL_MD"
+    assert_contains "cd '<DIR>'" "$output"
+    assert_contains "CLAUDE_CODE_SESSION_ID='<SESSION>'" "$output"
+    assert_contains "ci_watch.py '<BRANCH>'" "$output"
+    assert_not_contains 'cd "$DIR"' "$output"
+    assert_not_contains 'CLAUDE_CODE_SESSION_ID="$SESSION"' "$output"
+    assert_not_contains 'ci_watch.py "$BRANCH"' "$output"
+}
+
+@test "skill: the Monitor command execs, is persistent, and redirects stderr only" {
+    run cat "$SKILL_MD"
+    # Without exec, TaskStop kills a parent shell and orphans the watcher.
+    assert_contains "&& exec env CLAUDE_CODE_SESSION_ID=" "$output"
+    assert_contains '`persistent`: `true`' "$output"
+    # stdout IS the notification stream. Redirecting it (&>> or 1>>) would make
+    # every notification vanish with no test failing.
+    assert_contains "2>>'/tmp/ci_watch_<SESSION>.log'" "$output"
+    assert_not_contains '&>>' "$output"
+    assert_not_contains '1>>' "$output"
 }
