@@ -8,7 +8,7 @@
 """Integration tests for ci_watch.
 
 Tests import the ci_watch module directly. The module's network calls
-(``api_get``, ``notify``, ``health_check``) are mocked, and ``time.sleep``
+(``api_get``, ``notify``) are mocked, and ``time.sleep``
 is patched to break the watch loop after a controlled number of iterations.
 """
 
@@ -164,15 +164,12 @@ def make_sleep_breaker(max_calls: int):
 def run_watch(
     tmp_dir: str,
     branch: str = "feat",
-    port: int = 12345,
-    token: str = "tk",
     owner: str = "o",
     repo: str = "r",
     default_branch: str = "main",
     latest_sha: str = "sha-old",
     api_get_side_effect=None,
     has_pending=False,
-    health_ok=True,
     max_sleeps: int = 3,
     strict_policy: bool = False,
 ) -> dict:
@@ -187,10 +184,10 @@ def run_watch(
     """
     fake_sleep, _ = make_sleep_breaker(max_sleeps)
 
-    notify_calls: list[tuple[int, str]] = []
+    notify_calls: list[str] = []
 
-    def fake_notify(p, m):
-        notify_calls.append((p, m))
+    def fake_notify(m):
+        notify_calls.append(m)
 
     with (
         patch.object(ci_watch, "TMP_DIR", tmp_dir),
@@ -198,7 +195,6 @@ def run_watch(
         patch.object(ci_watch.time, "sleep", fake_sleep),
         patch.object(ci_watch, "api_get", side_effect=api_get_side_effect),
         patch.object(ci_watch, "notify", side_effect=fake_notify),
-        patch.object(ci_watch, "health_check", return_value=health_ok),
         patch.object(ci_watch, "has_pending_checks", return_value=has_pending),
         patch.object(ci_watch, "get_failed_job_names", return_value=[]),
         patch.object(
@@ -213,8 +209,6 @@ def run_watch(
             ci_watch.watch(
                 branch=branch,
                 slot=branch,
-                port=port,
-                session_token=token,
                 owner=owner,
                 repo=repo,
                 default_branch=default_branch,
@@ -267,9 +261,9 @@ def test_ci_running_state(tmp_path):
         str(tmp_path),
         api_get_side_effect=make_api_get(runs=runs),
     )
-    # No pass/fail webhook fired; state stays 'running'.
-    pass_msgs = [m for _, m in out["notify_calls"] if "passed" in m.lower()]
-    fail_msgs = [m for _, m in out["notify_calls"] if "failure" in m.lower()]
+    # No pass/fail notification fired; state stays 'running'.
+    pass_msgs = [m for m in out["notify_calls"] if "passed" in m.lower()]
+    fail_msgs = [m for m in out["notify_calls"] if "failure" in m.lower()]
     assert pass_msgs == []
     assert fail_msgs == []
     assert out["state_value"] == "running"
@@ -304,7 +298,7 @@ def test_ci_passes(tmp_path):
         has_pending=False,
     )
     assert out["state_value"] == "passed"
-    assert any("CI PASSED" in m for _, m in out["notify_calls"])
+    assert any("CI PASSED" in m for m in out["notify_calls"])
 
 
 def test_ci_fails(tmp_path):
@@ -324,7 +318,7 @@ def test_ci_fails(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert any("CI FAILURE" in m and "99" in m for m in msgs)
 
 
@@ -405,7 +399,7 @@ def test_ci_startup_failure_is_not_failure(tmp_path):
     )
     # Should pass, not fail — startup_failure is non-blocking.
     assert out["state_value"] == "passed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert not any("CI FAILURE" in m for m in msgs)
     assert any("CI PASSED" in m for m in msgs)
 
@@ -442,7 +436,7 @@ def test_ci_cancelled_is_not_failure(tmp_path):
     )
     # Should pass, not fail — cancelled is non-blocking.
     assert out["state_value"] == "passed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert not any("CI FAILURE" in m for m in msgs)
 
 
@@ -464,7 +458,7 @@ def test_ci_real_failure(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert any("CI FAILURE" in m and "99" in m for m in msgs)
 
 
@@ -486,7 +480,7 @@ def test_ci_timed_out_is_failure(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert any("CI FAILURE" in m and "77" in m for m in msgs)
 
 
@@ -505,7 +499,7 @@ def test_conflict_detection(tmp_path):
         api_get_side_effect=make_api_get(pr=pr),
     )
     assert out["state_value"] == "conflict"
-    assert any("merge conflicts" in m for _, m in out["notify_calls"])
+    assert any("merge conflicts" in m for m in out["notify_calls"])
 
 
 def test_behind_detection(tmp_path):
@@ -524,7 +518,7 @@ def test_behind_detection(tmp_path):
         strict_policy=True,
     )
     assert out["state_value"] == "behind"
-    assert any("behind the base branch" in m for _, m in out["notify_calls"])
+    assert any("behind the base branch" in m for m in out["notify_calls"])
 
 
 def test_behind_not_reported_when_not_strict(tmp_path):
@@ -546,7 +540,7 @@ def test_behind_not_reported_when_not_strict(tmp_path):
         strict_policy=False,
     )
     assert out["state_value"] != "behind"
-    assert not any("behind the base branch" in m for _, m in out["notify_calls"])
+    assert not any("behind the base branch" in m for m in out["notify_calls"])
 
 
 def test_new_sha_resets_state(tmp_path):
@@ -561,33 +555,6 @@ def test_new_sha_resets_state(tmp_path):
     assert state.reported_pass is False
     assert state.reported_fail is False
     assert state.reported_no_runs is False
-
-
-def test_health_check_failure_exits(tmp_path):
-    """When health checks fail HEALTH_RETRY_MAX times, watch() returns."""
-    fake_sleep, sleep_state = make_sleep_breaker(1000)
-
-    with (
-        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
-        patch.object(ci_watch, "_GH_TOKEN", "tk"),
-        patch.object(ci_watch.time, "sleep", fake_sleep),
-        patch.object(ci_watch, "health_check", return_value=False),
-        patch.object(ci_watch, "api_get") as mock_api,
-        patch.object(ci_watch, "notify"),
-    ):
-        mock_api.return_value = (None, False)
-        ci_watch.watch(
-            branch="b",
-            slot="b",
-            port=1,
-            session_token="t",
-            owner="o",
-            repo="r",
-            default_branch="main",
-            latest_sha="s",
-        )
-    # Exactly HEALTH_RETRY_MAX sleeps (one per failed health attempt) before exit.
-    assert sleep_state["n"] == ci_watch.HEALTH_RETRY_MAX
 
 
 def test_no_runs_state(tmp_path):
@@ -610,7 +577,7 @@ def test_no_runs_state(tmp_path):
         max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
     )
     assert out["state_value"] == "no-runs"
-    assert any("No CI runs visible" in m for _, m in out["notify_calls"])
+    assert any("No CI runs visible" in m for m in out["notify_calls"])
 
 
 def test_no_ci_state(tmp_path):
@@ -618,7 +585,7 @@ def test_no_ci_state(tmp_path):
 
     After SHA_RUNS_EMPTY_MAX empty iterations, with no PR merge gate signalling
     pending required checks, the watcher writes 'no-ci' once. It must NOT fire a
-    webhook — "no CI to watch" is a no-op the user finds noisy; the statusline
+    notification — "no CI to watch" is a no-op the user finds noisy; the statusline
     flag is enough.
     """
     # Default make_api_get: pr=[] (no PR), runs={"workflow_runs": []} (zero runs).
@@ -628,7 +595,7 @@ def test_no_ci_state(tmp_path):
         max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
     )
     assert out["state_value"] == "no-ci"
-    no_ci_msgs = [m for _, m in out["notify_calls"] if "no CI" in m]
+    no_ci_msgs = [m for m in out["notify_calls"] if "no CI" in m]
     assert no_ci_msgs == [], f"expected no no-ci notify, got {no_ci_msgs}"
 
 
@@ -651,7 +618,7 @@ def test_no_ci_not_fired_when_runs_present(tmp_path):
         max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
     )
     assert out["state_value"] != "no-ci"
-    assert not any("no CI" in m for _, m in out["notify_calls"])
+    assert not any("no CI" in m for m in out["notify_calls"])
 
 
 def test_no_ci_suppressed_when_pr_blocked(tmp_path):
@@ -672,14 +639,14 @@ def test_no_ci_suppressed_when_pr_blocked(tmp_path):
         max_sleeps=ci_watch.SHA_RUNS_EMPTY_MAX + 2,
     )
     assert out["state_value"] != "no-ci"
-    assert not any("no CI" in m for _, m in out["notify_calls"])
+    assert not any("no CI" in m for m in out["notify_calls"])
 
 
 def test_no_main_ci_state(tmp_path):
     """A merged PR on a repo whose default branch has NO workflow runs resolves
     to terminal no-main-ci quickly (within NO_MAIN_CI_GRACE), not a long timeout.
 
-    Mirroring the no-CI-branch case, no webhook is fired — the statusline flag
+    Mirroring the no-CI-branch case, no notification is fired — the statusline flag
     is enough.
     """
     pr = [
@@ -698,10 +665,10 @@ def test_no_main_ci_state(tmp_path):
     # Allow well beyond the grace but well below MAIN_WAIT_MAX to prove it flags
     # promptly rather than burning the full timeout.
     fake_sleep, sleep_state = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX)
-    notify_calls: list[tuple[int, str]] = []
+    notify_calls: list[str] = []
 
-    def fake_notify(p, m):
-        notify_calls.append((p, m))
+    def fake_notify(m):
+        notify_calls.append(m)
 
     branch = "feat"
     with (
@@ -712,7 +679,6 @@ def test_no_main_ci_state(tmp_path):
             ci_watch, "api_get", side_effect=make_api_get(pr=pr, main_runs=main_runs)
         ),
         patch.object(ci_watch, "notify", side_effect=fake_notify),
-        patch.object(ci_watch, "health_check", return_value=True),
         patch.object(ci_watch, "has_pending_checks", return_value=False),
         patch.object(ci_watch, "get_failed_job_names", return_value=[]),
         patch.object(ci_watch.requests, "get") as commit_get,
@@ -722,8 +688,6 @@ def test_no_main_ci_state(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
-            port=1,
-            session_token="t",
             owner="o",
             repo="r",
             default_branch="main",
@@ -736,14 +700,14 @@ def test_no_main_ci_state(tmp_path):
     assert state_path.read_text() == f"{branch}:no-main-ci"
     # Flagged at/near the grace boundary — not burning the full timeout.
     assert sleep_state["n"] <= ci_watch.NO_MAIN_CI_GRACE + 2
-    # No webhook for the no-main-ci case.
-    assert not any("No CI runs found on main" in m for _, m in notify_calls)
+    # No notification for the no-main-ci case.
+    assert not any("No CI runs found on main" in m for m in notify_calls)
 
 
 def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
     """A persistent main-runs fetch failure (api_get returns None) during the
     merged phase must NOT be mistaken for 'no CI on main'. It falls through to
-    the MAIN_WAIT_MAX timeout path and fires the actionable webhook, exactly as
+    the MAIN_WAIT_MAX timeout path and fires the actionable notification, exactly as
     before the no-main-ci optimization."""
     pr = [
         {
@@ -767,10 +731,10 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
         return None, False
 
     fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
-    notify_calls: list[tuple[int, str]] = []
+    notify_calls: list[str] = []
 
-    def fake_notify(p, m):
-        notify_calls.append((p, m))
+    def fake_notify(m):
+        notify_calls.append(m)
 
     branch = "feat"
     with (
@@ -779,7 +743,6 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
         patch.object(ci_watch.time, "sleep", fake_sleep),
         patch.object(ci_watch, "api_get", side_effect=api_get_main_fails),
         patch.object(ci_watch, "notify", side_effect=fake_notify),
-        patch.object(ci_watch, "health_check", return_value=True),
         patch.object(ci_watch, "has_pending_checks", return_value=False),
         patch.object(ci_watch, "get_failed_job_names", return_value=[]),
         patch.object(ci_watch.requests, "get") as commit_get,
@@ -789,8 +752,6 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
-            port=1,
-            session_token="t",
             owner="o",
             repo="r",
             default_branch="main",
@@ -798,9 +759,9 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
         )
 
     state_path = Path(str(tmp_path)) / f"ci_watch_state_{branch}"
-    # Must land on timeout (with webhook), NOT no-main-ci.
+    # Must land on timeout (with notification), NOT no-main-ci.
     assert state_path.read_text() == f"{branch}:timeout"
-    assert any("No CI runs found on main" in m for _, m in notify_calls)
+    assert any("No CI runs found on main" in m for m in notify_calls)
 
 
 def test_timeout_state(tmp_path):
@@ -831,10 +792,10 @@ def test_timeout_state(tmp_path):
     }
 
     fake_sleep, _ = make_sleep_breaker(ci_watch.MAIN_WAIT_MAX + 2)
-    notify_calls: list[tuple[int, str]] = []
+    notify_calls: list[str] = []
 
-    def fake_notify(p, m):
-        notify_calls.append((p, m))
+    def fake_notify(m):
+        notify_calls.append(m)
 
     branch = "feat"
     with (
@@ -845,7 +806,6 @@ def test_timeout_state(tmp_path):
             ci_watch, "api_get", side_effect=make_api_get(pr=pr, main_runs=main_runs)
         ),
         patch.object(ci_watch, "notify", side_effect=fake_notify),
-        patch.object(ci_watch, "health_check", return_value=True),
         patch.object(ci_watch, "has_pending_checks", return_value=False),
         patch.object(ci_watch, "get_failed_job_names", return_value=[]),
         patch.object(ci_watch.requests, "get") as commit_get,
@@ -855,8 +815,6 @@ def test_timeout_state(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
-            port=1,
-            session_token="t",
             owner="o",
             repo="r",
             default_branch="main",
@@ -867,7 +825,7 @@ def test_timeout_state(tmp_path):
     # State file must persist (keep_state_file=True).
     assert state_path.exists()
     assert state_path.read_text() == f"{branch}:timeout"
-    assert any("No CI runs found on main" in m for _, m in notify_calls)
+    assert any("No CI runs found on main" in m for m in notify_calls)
 
 
 def test_merge_tracking(tmp_path):
@@ -899,7 +857,7 @@ def test_merge_tracking(tmp_path):
         max_sleeps=10,  # merge path may need a few extra ticks
     )
     assert out["state_value"] == "merged-passed"
-    assert any("CI PASSED on main" in m for _, m in out["notify_calls"])
+    assert any("CI PASSED on main" in m for m in out["notify_calls"])
 
 
 # ---------------------------------------------------------------------------
@@ -970,7 +928,7 @@ def test_merge_after_behind_supersedes_behind_alert(tmp_path):
         max_sleeps=10,
         strict_policy=True,
     )
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     # The merge notification should include the superseded note.
     merge_msgs = [m for m in msgs if "merged" in m.lower()]
     assert any("disregard" in m for m in merge_msgs), (
@@ -1015,7 +973,7 @@ def test_failure_suppressed_when_pr_fetch_fails(tmp_path):
         api_get_side_effect=side_effect,
         max_sleeps=3,
     )
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     # No CI FAILURE notification should fire — PR data is unavailable
     # and we can't confirm the PR is still open.
     fail_msgs = [m for m in msgs if "CI FAILURE" in m]
@@ -1042,7 +1000,7 @@ def test_failure_still_fires_without_pr(tmp_path):
         api_get_side_effect=make_api_get(runs=runs),
     )
     assert out["state_value"] == "failed"
-    msgs = [m for _, m in out["notify_calls"]]
+    msgs = [m for m in out["notify_calls"]]
     assert any("CI FAILURE" in m for m in msgs)
 
 
@@ -1066,9 +1024,79 @@ def test_write_pr_cache(tmp_path):
         assert data == {"url": "u", "state": "OPEN"}
 
 
+def test_notify_writes_one_stdout_line(capsys):
+    ci_watch.notify("CI PASSED on branch x")
+    captured = capsys.readouterr()
+    assert captured.out == "CI PASSED on branch x\n"
+    assert captured.err == ""
+
+
+def test_stdout_carries_only_notifications(tmp_path, capsys):
+    """Monitor treats every stdout line as a session notification and auto-stops
+    a monitor that emits too many. Drive the merged path with the REAL notify and
+    assert stdout holds notifications only — no write_state / heartbeat / banner.
+    """
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    # A still-running main run for the merge commit keeps the loop iterating
+    # without firing a terminal pass/fail notification.
+    main_runs = {
+        "workflow_runs": [
+            {
+                "id": 7,
+                "name": "build",
+                "head_sha": "merge-sha",
+                "status": "in_progress",
+                "conclusion": None,
+            },
+        ]
+    }
+
+    fake_sleep, _ = make_sleep_breaker(5)
+    branch = "feat"
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "_GH_TOKEN", "tk-cached"),
+        patch.object(ci_watch.time, "sleep", fake_sleep),
+        patch.object(
+            ci_watch, "api_get", side_effect=make_api_get(pr=pr, main_runs=main_runs)
+        ),
+        patch.object(ci_watch, "has_pending_checks", return_value=False),
+        patch.object(ci_watch, "get_failed_job_names", return_value=[]),
+        patch.object(ci_watch.requests, "get") as commit_get,
+    ):
+        commit_get.return_value = MagicMock(status_code=200)
+        try:
+            ci_watch.watch(
+                branch=branch,
+                slot=branch,
+                owner="o",
+                repo="r",
+                default_branch="main",
+                latest_sha="sha-old",
+            )
+        except StopLoop:
+            pass
+
+    captured = capsys.readouterr()
+    stdout_lines = [ln for ln in captured.out.splitlines() if ln]
+    assert stdout_lines == ["PR #1 merged to main"]
+    # The diagnostics DID run — they just went to stderr.
+    assert "[ci_watch] write_state" in captured.err
+    assert "[ci_watch] starting watch loop" in captured.err
+
+
 def test_main_aborts_without_session_id(monkeypatch, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br", "1234", "tok"])
+    monkeypatch.setattr(sys, "argv", ["ci_watch.py", "br"])
     with pytest.raises(SystemExit) as exc:
         ci_watch.main()
     assert exc.value.code == 2
