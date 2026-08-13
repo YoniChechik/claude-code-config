@@ -8,14 +8,15 @@
 """
 CI Watcher
 
-Monitors GitHub Actions CI status for a branch and reports results via
-webhook. Uses GitHub REST API directly with ETag conditional requests so
-we can poll at 1s without burning API quota.
+Monitors GitHub Actions CI status for a branch and reports results as plain
+stdout lines. The process is launched by the /ci-watcher skill through Claude
+Code's Monitor tool, which turns every stdout line into a session notification.
+Stdout therefore carries notifications ONLY — every diagnostic goes to stderr.
+Uses GitHub REST API directly with ETag conditional requests so we can poll at
+1s without burning API quota.
 
-Args (positional, in this order to match SKILL.md):
+Args (positional):
     BRANCH         branch to watch
-    PORT           webhook HTTP port
-    SESSION_TOKEN  expected health-check token
 
 State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
     /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line)
@@ -27,7 +28,7 @@ Exit conditions:
     - PR merged and main CI resolved for the merge commit (0)
     - PR merged but the default branch has no CI to trigger (0)
     - timeout waiting for main CI runs after merge (0)
-    - session health check fails after retries (0)
+    - PR closed without merge (0)
 """
 
 from __future__ import annotations
@@ -54,10 +55,8 @@ MAIN_WAIT_MAX = 300  # 300 * 1s = 5 min
 # zero workflow runs on the default branch. Still far shorter than the 5-min
 # false wait (MAIN_WAIT_MAX) we're eliminating, but tolerant of a slow first-run
 # registration. Combined with the main_fetch_ok gate, persistent API errors
-# never flag no-main-ci — they fall through to the MAIN_WAIT_MAX timeout webhook.
+# never flag no-main-ci — they fall through to the MAIN_WAIT_MAX timeout notification.
 NO_MAIN_CI_GRACE = 30  # 30 * 1s = 30s
-HEALTH_RETRY_MAX = 5  # 5 attempts with 2s sleep between (~10s window)
-HEALTH_RETRY_SLEEP = 2.0
 # Stuck-pending detection: number of consecutive iterations a required check
 # must remain un-emitted (with all emitted checks already completed) before we
 # fire the STUCK_PENDING_REQUIRED_CHECKS notification.
@@ -113,21 +112,14 @@ def api_get(url: str, cache: ApiCache, token: str) -> tuple[Any, bool]:
         return cache.data, False
 
 
-def notify(port: int, message: str) -> None:
-    """Send a webhook notification. Best-effort — silently swallow errors."""
-    try:
-        requests.post(f"http://127.0.0.1:{port}", data=message, timeout=5)
-    except Exception:
-        pass
+def notify(message: str) -> None:
+    """Emit one notification as a single stdout write.
 
-
-def health_check(port: int, token: str) -> bool:
-    """Verify the local webhook server is alive and bound to our session."""
-    try:
-        resp = requests.get(f"http://127.0.0.1:{port}/health", timeout=3)
-        return resp.text == f"ok:{token}"
-    except Exception:
-        return False
+    The Monitor tool treats each stdout line as an event and batches lines
+    emitted within 200ms into one notification, so a multi-line message stays
+    one notification as long as it is written by a single ``print``.
+    """
+    print(message, flush=True)
 
 
 # --- gh CLI fallbacks (used only on rare events) ---
@@ -341,7 +333,7 @@ def _stuck_pending_message(
     stuck: frozenset[str],
     ruleset_id: int | None,
 ) -> str:
-    """Build the webhook payload for STUCK_PENDING_REQUIRED_CHECKS."""
+    """Build the notification payload for STUCK_PENDING_REQUIRED_CHECKS."""
     names_block = "\n".join(f"  - {n}" for n in sorted(stuck))
     ruleset_ref = str(ruleset_id) if ruleset_id is not None else "<RULESET_ID>"
     return (
@@ -376,7 +368,6 @@ def check_stuck_pending(
     repo: str,
     default_branch: str,
     pr_number: int | None,
-    port: int,
 ) -> None:
     """Fire STUCK_PENDING_REQUIRED_CHECKS notification on rising edge.
 
@@ -407,7 +398,7 @@ def check_stuck_pending(
     if state.stuck_pending_iters < STUCK_PENDING_MIN_ITERS:
         return
     msg = _stuck_pending_message(state.branch, owner, repo, stuck, ruleset_id)
-    notify(port, msg)
+    notify(msg)
     write_state(state.slot, state.branch, "stuck-pending")
     state.reported_stuck_pending = True
 
@@ -472,13 +463,9 @@ def _lock_path(slot: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
 
 
-def _kill_path(slot: str) -> Path:
-    return Path(TMP_DIR) / f"ci_watch_kill_{slot}"
-
-
 def write_state(slot: str, branch: str, value: str) -> None:
     """Atomic write of '<branch>:<state>'."""
-    print(f"[ci_watch] write_state -> {value!r}", flush=True)
+    print(f"[ci_watch] write_state -> {value!r}", file=sys.stderr, flush=True)
     path = _state_path(slot)
     fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{slot}.", dir=TMP_DIR)
     try:
@@ -537,10 +524,6 @@ def acquire_lock(slot: str) -> None:
         except (ValueError, ProcessLookupError, PermissionError):
             pass
     lock_path.write_text(str(os.getpid()))
-    try:
-        os.unlink(_kill_path(slot))
-    except FileNotFoundError:
-        pass
 
 
 # --- State container ---
@@ -609,6 +592,7 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         print(
             f"New push detected on branch '{state.branch}' "
             f"(new SHA: {current_sha}). Now tracking new CI run.",
+            file=sys.stderr,
             flush=True,
         )
         state.latest_sha = current_sha
@@ -651,13 +635,12 @@ def check_pr_condition(
     state: WatchState,
     message: str,
     state_string: str,
-    port: int,
 ) -> None:
-    """Fire a webhook + write state once on rising edge; reset on falling edge."""
+    """Notify + write state once on rising edge; reset on falling edge."""
     flag = getattr(state, flag_name)
     if condition:
         if not flag:
-            notify(port, message)
+            notify(message)
             setattr(state, flag_name, True)
             write_state(state.slot, state.branch, state_string)
     else:
@@ -669,8 +652,8 @@ def check_pr_condition(
             write_state(state.slot, state.branch, "running")
 
 
-def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -> None:
-    """Fire CI-failure webhook once per failure streak.
+def check_failures(context: str, sha_runs: list, state: WatchState) -> None:
+    """Fire the CI-failure notification once per failure streak.
 
     ``context`` is "branch" or "main" — controls message wording, state string,
     and which reported_* flag we toggle.
@@ -723,8 +706,7 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
     if context == "main":
         write_state(state.slot, state.branch, "merged-failed")
         notify(
-            port,
-            f"CI FAILURE on {state.default_branch} for merge of {state.branch}: {msg}",
+            f"CI FAILURE on {state.default_branch} for merge of {state.branch}: {msg}"
         )
         state.reported_main_fail = True
     else:
@@ -733,10 +715,11 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
             print(
                 f"[ci_watch] skipping failure notification — "
                 f"latest_sha {state.latest_sha[:7]} != remote HEAD {remote_head[:7]}",
+                file=sys.stderr,
                 flush=True,
             )
             return
-        notify(port, f"CI FAILURE on branch {state.branch}: {msg}")
+        notify(f"CI FAILURE on branch {state.branch}: {msg}")
         write_state(state.slot, state.branch, "failed")
         state.reported_fail = True
         state.terminal_run_ids = {
@@ -745,9 +728,9 @@ def check_failures(context: str, sha_runs: list, state: WatchState, port: int) -
 
 
 def check_all_passed(
-    context: str, sha_runs: list, state: WatchState, mergeable_state: str, port: int
+    context: str, sha_runs: list, state: WatchState, mergeable_state: str
 ) -> None:
-    """Fire CI-passed webhook once when every run is completed+success/skipped."""
+    """Fire the CI-passed notification once when every run is completed+success/skipped."""
     if not sha_runs:
         return
     # A run "passes" if its conclusion is not a code failure. Conclusions like
@@ -775,8 +758,7 @@ def check_all_passed(
     if context == "main":
         write_state(state.slot, state.branch, "merged-passed")
         notify(
-            port,
-            f"CI PASSED on {state.default_branch} after merge of branch {state.branch}",
+            f"CI PASSED on {state.default_branch} after merge of branch {state.branch}"
         )
         state.reported_main_pass = True
         return
@@ -792,10 +774,11 @@ def check_all_passed(
         print(
             f"[ci_watch] skipping pass notification — "
             f"latest_sha {state.latest_sha[:7]} != remote HEAD {remote_head[:7]}",
+            file=sys.stderr,
             flush=True,
         )
         return
-    notify(port, f"CI PASSED on branch {state.branch}")
+    notify(f"CI PASSED on branch {state.branch}")
     state.reported_pass = True
     state.terminal_run_ids = {r["id"] for r in sha_runs}
     write_state(state.slot, state.branch, "passed")
@@ -888,8 +871,6 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
 def watch(
     branch: str,
     slot: str,
-    port: int,
-    session_token: str,
     owner: str,
     repo: str,
     default_branch: str,
@@ -914,6 +895,7 @@ def watch(
         f"[ci_watch] starting watch loop branch={branch} "
         f"latest_sha={latest_sha[:8]} default_branch={default_branch} "
         f"pid={os.getpid()}",
+        file=sys.stderr,
         flush=True,
     )
     write_state(slot, branch, "running")
@@ -936,33 +918,6 @@ def watch(
     last_heartbeat_iter = 0
     while True:
         iter_count += 1
-        # --- Kill flag check (per-session manual stop) ---
-        if _kill_path(slot).exists():
-            print(
-                f"[ci_watch] received kill signal for session {slot}; exiting",
-                file=sys.stderr,
-                flush=True,
-            )
-            try:
-                os.unlink(_kill_path(slot))
-            except FileNotFoundError:
-                pass
-            sys.exit(0)
-        # --- Session health check (5x retries with 2s sleep ~ 10s window) ---
-        # On Mac wake-from-sleep, the localhost webhook server may briefly be
-        # unreachable while its process resumes.
-        ok = False
-        for _ in range(HEALTH_RETRY_MAX):
-            if health_check(port, session_token):
-                ok = True
-                break
-            time.sleep(HEALTH_RETRY_SLEEP)
-        if not ok:
-            print(
-                f"Health check failed after {HEALTH_RETRY_MAX} attempts. Exiting.",
-                flush=True,
-            )
-            return
         # Heartbeat every 30 iterations (~30s of polling time, longer with
         # API call latency) — proves the watcher is alive without flooding
         # the log. Useful for diagnosing "is it running?" without per-iteration
@@ -974,6 +929,7 @@ def watch(
                 f"latest_sha={state.latest_sha[:8] if state.latest_sha else 'None'} "
                 f"reported_fail={state.reported_fail} "
                 f"reported_pass={state.reported_pass}",
+                file=sys.stderr,
                 flush=True,
             )
 
@@ -1030,11 +986,13 @@ def watch(
                     f" (previous {'/'.join(superseded)} alert was a transient"
                     f" race condition — disregard)"
                 )
-            notify(port, f"PR #{pr_number} merged to {default_branch}{suffix}")
+            notify(f"PR #{pr_number} merged to {default_branch}{suffix}")
             print(
                 f"PR for branch '{branch}' has been merged "
                 f"(merge commit: {state.merge_commit_sha}). "
-                f"Now tracking CI on {default_branch}."
+                f"Now tracking CI on {default_branch}.",
+                file=sys.stderr,
+                flush=True,
             )
 
         # --- Detect closed without merge ---
@@ -1045,10 +1003,14 @@ def watch(
             and fresh_pr.get("state") == "closed"
             and not fresh_pr.get("merged")
         ):
-            notify(port, f"PR closed without merge on branch {branch}")
+            notify(f"PR closed without merge on branch {branch}")
             write_state(slot, branch, "closed")
             state.keep_state_file = True
-            print(f"PR for branch '{branch}' closed without merge. Exiting.")
+            print(
+                f"PR for branch '{branch}' closed without merge. Exiting.",
+                file=sys.stderr,
+                flush=True,
+            )
             return
 
         # --- Merged path: track main CI for the merge commit ---
@@ -1105,11 +1067,11 @@ def watch(
                     # persistent API failure (which also yields an empty list)
                     # does NOT flag no-main-ci — it keeps advancing the shared
                     # counter and falls through to the MAIN_WAIT_MAX timeout,
-                    # which fires the actionable "check manually" webhook. When
-                    # main DOES have runs (for other commits) but none for our
-                    # merge commit, CI exists and is merely slow to register, so
-                    # we also fall through to the timeout. No webhook for the
-                    # no-main-ci case — mirroring the no-CI-branch case, the
+                    # which fires the actionable "check manually" notification.
+                    # When main DOES have runs (for other commits) but none for
+                    # our merge commit, CI exists and is merely slow to register,
+                    # so we also fall through to the timeout. No notification for
+                    # the no-main-ci case — mirroring the no-CI-branch case, the
                     # "ci: no main ci" statusline flag is enough.
                     if (
                         main_fetch_ok
@@ -1120,20 +1082,25 @@ def watch(
                         state.keep_state_file = True
                         print(
                             f"No CI on {default_branch} for merge of "
-                            f"'{branch}' — nothing to watch. Exiting."
+                            f"'{branch}' — nothing to watch. Exiting.",
+                            file=sys.stderr,
+                            flush=True,
                         )
                         return
                     if state.main_wait_iterations >= MAIN_WAIT_MAX:
                         notify(
-                            port,
                             f"⚠️ No CI runs found on {default_branch} "
                             f"for merge commit of {branch} after "
                             f"{int(MAIN_WAIT_MAX * POLL_INTERVAL)}s. "
-                            f"Check manually.",
+                            f"Check manually."
                         )
                         write_state(slot, branch, "timeout")
                         state.keep_state_file = True
-                        print("Timed out waiting for main CI runs. Exiting.")
+                        print(
+                            "Timed out waiting for main CI runs. Exiting.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                         return
                 else:
                     state.main_wait_iterations = 0
@@ -1141,11 +1108,15 @@ def watch(
                 continue
 
             state.main_wait_iterations = 0
-            check_failures("main", sha_runs, state, port)
-            check_all_passed("main", sha_runs, state, mergeable_state, port)
+            check_failures("main", sha_runs, state)
+            check_all_passed("main", sha_runs, state, mergeable_state)
 
             if state.reported_main_pass or state.reported_main_fail:
-                print(f"Main CI resolved for merge of '{branch}'. Exiting.")
+                print(
+                    f"Main CI resolved for merge of '{branch}'. Exiting.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 state.keep_state_file = True
                 return
 
@@ -1175,7 +1146,6 @@ def watch(
                 f"CI FAILURE on branch {branch}: PR has merge conflicts. "
                 f"Delegate the fix to a subagent.",
                 "conflict",
-                port,
             )
             # Only alert on "behind" when the repo's branch protection actually
             # requires branches to be up to date before merging. If that
@@ -1192,7 +1162,6 @@ def watch(
                     f"branch and needs to be updated. Run /sync to update "
                     f"the branch.",
                     "behind",
-                    port,
                 )
 
         if not all_runs:
@@ -1219,7 +1188,7 @@ def watch(
             ):
                 state.reported_no_ci = True
                 write_state(slot, branch, "no-ci")
-                # No webhook here: "no CI to watch" is a no-op the user finds
+                # No notification here: "no CI to watch" is a no-op the user finds
                 # noisy. The statusline "ci: none" flag is enough — genuine
                 # pass/fail/behind notifications are unaffected.
             time.sleep(POLL_INTERVAL)
@@ -1236,9 +1205,8 @@ def watch(
             ):
                 state.reported_no_runs = True
                 notify(
-                    port,
                     f"⚠️ No CI runs visible for {branch} after 2 min "
-                    f"— workflow may be missing or still queuing.",
+                    f"— workflow may be missing or still queuing."
                 )
                 write_state(slot, branch, "no-runs")
             time.sleep(POLL_INTERVAL)
@@ -1270,15 +1238,15 @@ def watch(
         # already be merged (API timeout) and firing a failure here would be
         # a false positive.
         if pr_data_available:
-            check_failures("branch", sha_runs, state, port)
-        check_all_passed("branch", sha_runs, state, mergeable_state, port)
+            check_failures("branch", sha_runs, state)
+        check_all_passed("branch", sha_runs, state, mergeable_state)
 
         # Stuck-pending required-checks detection. Only meaningful when the PR
         # is BLOCKED (so we know the merge gate is the cause) and we have a
         # PR number. Skipping when BLOCKED is absent avoids false positives
         # during normal in-progress windows.
         if pr_number and mergeable_state == "BLOCKED":
-            check_stuck_pending(state, owner, repo, default_branch, pr_number, port)
+            check_stuck_pending(state, owner, repo, default_branch, pr_number)
         else:
             state.stuck_pending_iters = 0
             state.stuck_pending_names = frozenset()
@@ -1299,25 +1267,24 @@ def gh_token_value() -> str:
 
 
 def main() -> None:
-    # When stdout/stderr are redirected to a file (as in the SKILL launcher),
-    # Python defaults to block buffering — log lines can sit in the buffer for
-    # minutes before flushing, making the watcher look hung. Force line
-    # buffering so each print() reaches the log file immediately.
+    # stdout is the Monitor event stream: each line becomes one session
+    # notification, so it must reach the pipe as soon as it is written. Python
+    # block-buffers a non-tty stdout by default, which would delay (or on a
+    # SIGKILL, lose) notifications. stderr goes to the log file and gets line
+    # buffering for the same "tail -f is not stale" reason.
     try:
         sys.stdout.reconfigure(line_buffering=True)
         sys.stderr.reconfigure(line_buffering=True)
     except (AttributeError, OSError):
         pass
 
-    if len(sys.argv) < 4:
+    if len(sys.argv) != 2:
         print(
-            "Usage: ci_watch.py <branch> <port> <session_token>",
+            "Usage: ci_watch.py <branch>",
             file=sys.stderr,
         )
         sys.exit(1)
     branch = sys.argv[1]
-    port = int(sys.argv[2])
-    session_token = sys.argv[3]
 
     slot = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
     if not slot:
@@ -1334,7 +1301,7 @@ def main() -> None:
     owner, repo, default_branch = repo_info()
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(branch, slot, port, session_token, owner, repo, default_branch, latest_sha)
+    watch(branch, slot, owner, repo, default_branch, latest_sha)
 
 
 if __name__ == "__main__":
