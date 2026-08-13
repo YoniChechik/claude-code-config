@@ -16,43 +16,33 @@ if [ ! -d "$CLAUDE_DIR/.git" ]; then
   echo "    Done. Continuing setup from $CLAUDE_DIR"
 fi
 
-SCRIPT_DIR="$CLAUDE_DIR"
-CHANNEL_DIR="$SCRIPT_DIR/channel"
-MCP_TARGET="$HOME/.claude.json"
+# --- Drop the retired webhook MCP registration from ~/.claude.json ---
+# Older installs registered an MCP server pointing at channel/webhook.ts. That
+# file is gone, so a leftover entry makes every session start error out.
+# Python (not node) because uv/python is the only runtime this repo needs.
+echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
+uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
 
-echo "==> Installing npm dependencies in $CHANNEL_DIR"
-cd "$CHANNEL_DIR"
-npm install
-
-# --- Register webhook MCP server directly in ~/.claude.json (no .mcp.json file needed) ---
-echo "==> Registering webhook MCP server in $MCP_TARGET"
-node -e "$(cat <<'NODEJS'
-  const fs = require('fs');
-  const path = require('path');
-  const target = process.argv[1];
-  const homeDir = process.argv[2];
-
-  // Build the webhook MCP entry using $HOME so the path is portable
-  const webhookEntry = {
-    command: "npx",
-    args: ["tsx", path.join(homeDir, ".claude", "channel", "webhook.ts")]
-  };
-
-  // Load existing config or start fresh
-  let config = {};
-  if (fs.existsSync(target)) {
-    config = JSON.parse(fs.readFileSync(target, 'utf8'));
-  }
-
-  // Add/update the webhook entry under mcpServers
-  config.mcpServers = { ...config.mcpServers, webhook: webhookEntry };
-  fs.writeFileSync(target, JSON.stringify(config, null, 2) + '\n');
-NODEJS
-)" -- "$MCP_TARGET" "$HOME"
-echo "    Registered webhook MCP server in $MCP_TARGET"
+target = Path(sys.argv[1])
+if not target.exists():
+    sys.exit(0)
+try:
+    config = json.loads(target.read_text())
+except (json.JSONDecodeError, OSError):
+    sys.exit(0)
+servers = config.get("mcpServers")
+if not isinstance(servers, dict) or "webhook" not in servers:
+    sys.exit(0)
+del servers["webhook"]
+target.write_text(json.dumps(config, indent=2) + "\n")
+print("    Removed mcpServers.webhook")
+PYTHON
 
 # --- Update cc alias ---
-NEW_ALIAS='alias cc='"'"'claude --dangerously-load-development-channels server:webhook'"'"''
+NEW_ALIAS="alias cc='claude'"
 
 update_alias() {
   local rc_file="$1"
