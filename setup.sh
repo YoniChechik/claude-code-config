@@ -16,43 +16,64 @@ if [ ! -d "$CLAUDE_DIR/.git" ]; then
   echo "    Done. Continuing setup from $CLAUDE_DIR"
 fi
 
-SCRIPT_DIR="$CLAUDE_DIR"
-CHANNEL_DIR="$SCRIPT_DIR/channel"
-MCP_TARGET="$HOME/.claude.json"
+# --- Drop the retired webhook MCP registration from ~/.claude.json ---
+# Older installs registered an MCP server pointing at channel/webhook.ts. That
+# file is gone, so a leftover entry makes every session start error out.
+# Python (not node) because uv/python is the only runtime this repo needs.
+# Guarded on uv: under `set -e` a missing uv would abort the whole installer
+# here and never reach the cc alias step below.
+if command -v uv >/dev/null 2>&1; then
+  echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
+  uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
 
-echo "==> Installing npm dependencies in $CHANNEL_DIR"
-cd "$CHANNEL_DIR"
-npm install
-
-# --- Register webhook MCP server directly in ~/.claude.json (no .mcp.json file needed) ---
-echo "==> Registering webhook MCP server in $MCP_TARGET"
-node -e "$(cat <<'NODEJS'
-  const fs = require('fs');
-  const path = require('path');
-  const target = process.argv[1];
-  const homeDir = process.argv[2];
-
-  // Build the webhook MCP entry using $HOME so the path is portable
-  const webhookEntry = {
-    command: "npx",
-    args: ["tsx", path.join(homeDir, ".claude", "channel", "webhook.ts")]
-  };
-
-  // Load existing config or start fresh
-  let config = {};
-  if (fs.existsSync(target)) {
-    config = JSON.parse(fs.readFileSync(target, 'utf8'));
-  }
-
-  // Add/update the webhook entry under mcpServers
-  config.mcpServers = { ...config.mcpServers, webhook: webhookEntry };
-  fs.writeFileSync(target, JSON.stringify(config, null, 2) + '\n');
-NODEJS
-)" -- "$MCP_TARGET" "$HOME"
-echo "    Registered webhook MCP server in $MCP_TARGET"
+target = Path(sys.argv[1])
+try:
+    config = json.loads(target.read_text())
+except FileNotFoundError:
+    sys.exit(0)
+except (json.JSONDecodeError, OSError) as exc:
+    print(f"    WARNING: cannot read {target} ({exc}).", file=sys.stderr)
+    print("    Left untouched. If sessions error on a missing", file=sys.stderr)
+    print("    channel/webhook.ts, delete mcpServers.webhook by hand.", file=sys.stderr)
+    sys.exit(0)
+if not isinstance(config, dict):
+    sys.exit(0)
+servers = config.get("mcpServers")
+if not isinstance(servers, dict) or "webhook" not in servers:
+    sys.exit(0)
+del servers["webhook"]
+# Atomic rewrite: this file holds every project, MCP server and history entry,
+# and setup.sh usually runs from inside a live Claude session that also writes
+# it. A truncating in-place write could destroy all of that on a crash or a
+# concurrent write; a sibling temp file plus os.replace cannot.
+tmp_name = ""
+try:
+    mode = target.stat().st_mode & 0o777
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".claude.json.")
+    with os.fdopen(fd, "w") as handle:
+        handle.write(json.dumps(config, indent=2) + "\n")
+    os.chmod(tmp_name, mode)
+    os.replace(tmp_name, target)
+except OSError as exc:
+    if tmp_name:
+        Path(tmp_name).unlink(missing_ok=True)
+    print(f"    WARNING: could not rewrite {target} ({exc}).", file=sys.stderr)
+    print("    Left untouched; delete mcpServers.webhook by hand.", file=sys.stderr)
+    sys.exit(0)
+print("    Removed mcpServers.webhook")
+PYTHON
+else
+  echo "==> Skipping webhook MCP cleanup: uv not found."
+  echo "    Install uv (https://docs.astral.sh/uv/), then re-run this script."
+fi
 
 # --- Update cc alias ---
-NEW_ALIAS='alias cc='"'"'claude --dangerously-load-development-channels server:webhook'"'"''
+NEW_ALIAS="alias cc='claude'"
 
 update_alias() {
   local rc_file="$1"

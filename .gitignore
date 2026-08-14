@@ -14,7 +14,6 @@
 
 # Re-include tracked top-level entries.
 !/.gitignore
-!/channel
 !/CLAUDE.md
 !/docs
 !/README.md
