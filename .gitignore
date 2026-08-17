@@ -30,6 +30,7 @@
 *.pyc
 *.pyo
 **/.pytest_cache/
+**/.DS_Store
 quality-results/
 
 # Feature worktrees live at <repo-root>/.claude/worktrees/<name>. In this repo the
