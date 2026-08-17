@@ -32,6 +32,15 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/session_start_main_agent_prompt.sh"
+          }
+        ]
       }
     ],
     "Notification": [
