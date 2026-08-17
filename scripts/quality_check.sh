@@ -145,6 +145,43 @@ resolve_js_tool() {
     fi
 }
 
+# A root eslint.config.* (flat config, ESLint 9+) or legacy .eslintrc* is
+# required for `eslint` to run at all from the invocation root. Many
+# monorepos (pnpm workspaces, isolated per-service projects) keep lint
+# config per-workspace and have no root config — running eslint there is a
+# guaranteed hard failure ("ESLint couldn't find an eslint.config.(js|mjs|cjs)
+# file"), not a real lint finding, so skip quietly instead of reporting it.
+has_root_eslint_config() {
+    local cfg
+    for cfg in eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts \
+        .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yml .eslintrc.yaml .eslintrc; do
+        [ -f "$cfg" ] && return 0
+    done
+    return 1
+}
+
+# A tsconfig.json only describes a real, checkable project if it scopes one
+# via `include` or `files`. A bare stub (e.g. `{"compilerOptions": {},
+# "extends": "..."}`) is common at a monorepo/workspace root purely to
+# satisfy editors -- it has no `include`, so `tsc --noEmit` against it walks
+# the *entire* tree (every workspace, plus node_modules types) with none of
+# the per-workspace compiler options. In this repo that produced thousands
+# of bogus TS2304/TS2307 errors and, on a bigger tree, an out-of-memory
+# crash -- never a real type-check.
+#
+# This is a grep heuristic, not a JSON(C) parser, on purpose: tsconfig.json
+# allows comments and trailing commas, and a real per-project config almost
+# always contains glob/path values with a literal `/*` (e.g. `"src/**/*"`,
+# a path-alias key like `"@/*"`) -- a comment-aware JSON parser has to avoid
+# misreading those as a `/* ... */` comment start, which is more risk than
+# it's worth here. Just check whether an `include`/`files` key exists at
+# all; the workspace-root stub this bug is about has neither.
+has_meaningful_tsconfig() {
+    local cfg="$1"
+    [ -f "$cfg" ] || return 1
+    grep -Eq '"(include|files)"[[:space:]]*:' "$cfg"
+}
+
 # ============================================================
 # Python
 # ============================================================
@@ -268,23 +305,31 @@ if [ -n "$JS_FILES" ]; then
         # shellcheck disable=SC2086
         echo "$JS_FILES" | xargs $PRETTIER_CMD --write || true
 
-        echo "=== Running eslint --fix ==="
+        if has_root_eslint_config; then
+            echo "=== Running eslint --fix ==="
+            # shellcheck disable=SC2086
+            echo "$JS_FILES" | xargs $ESLINT_CMD --fix || true
+        fi
+    fi
+
+    if has_root_eslint_config; then
+        echo "=== Running eslint ==="
         # shellcheck disable=SC2086
-        echo "$JS_FILES" | xargs $ESLINT_CMD --fix || true
+        if ! echo "$JS_FILES" | xargs $ESLINT_CMD; then
+            EXIT_CODE=1
+        fi
+    else
+        echo "SKIP: no root eslint.config.*/.eslintrc* found, skipping eslint (likely a per-workspace-config monorepo)"
     fi
 
-    echo "=== Running eslint ==="
-    # shellcheck disable=SC2086
-    if ! echo "$JS_FILES" | xargs $ESLINT_CMD; then
-        EXIT_CODE=1
-    fi
-
-    if [ -f "tsconfig.json" ]; then
+    if has_meaningful_tsconfig "tsconfig.json"; then
         echo "=== Running tsc --noEmit ==="
         # shellcheck disable=SC2086
         if ! $TSC_CMD --noEmit; then
             EXIT_CODE=1
         fi
+    else
+        echo "SKIP: tsconfig.json has no include/files (workspace-root stub), skipping tsc --noEmit"
     fi
 else
     echo "No JS/TS files changed"
