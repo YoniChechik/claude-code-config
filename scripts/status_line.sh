@@ -104,6 +104,17 @@ if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
   fi
 fi
 
+# Line 2b: current Claude org, shown directly under the 5h rate-limit line.
+# Source: oauthAccount.organizationName in ~/.claude.json (not part of the
+# statusLine JSON payload, so we read it from disk).
+org_line=""
+if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
+  org_name=$(jq -r '.oauthAccount.organizationName // empty' "$HOME/.claude.json" 2>/dev/null || echo "")
+  if [ -n "$org_name" ]; then
+    org_line="${green}org: ${org_name}${reset}"
+  fi
+fi
+
 # Line 2: warnings (only if in a git repo)
 warning=""
 if [ -n "$branch" ]; then
@@ -206,19 +217,14 @@ if [ -n "$slot" ]; then
   fi
 fi
 
-current_time=$(date +%H:%M:%S)
-time_part="${blue}${current_time}${reset}"
-
 output="${status}${warning}"
 if [ -n "$info_line" ]; then
   output="${output}\n${info_line}"
 fi
+if [ -n "$org_line" ]; then
+  output="${output}\n${org_line}"
+fi
 if [ -n "$pr_line" ]; then
-  output="${output}\n${pr_line} | ${time_part}"
-elif [ -n "$info_line" ]; then
-  # Time goes on the info_line (last line) — rebuild it with time appended
-  output="${status}${warning}\n${info_line} | ${time_part}"
-else
-  output="${status}${warning}\n${time_part}"
+  output="${output}\n${pr_line}"
 fi
 printf '%b' "$output"
