@@ -33,6 +33,7 @@ Exit conditions:
     - branch not found on remote (1)
     - PR merged and main CI resolved for the merge commit (0)
     - PR merged but the default branch has no CI to trigger (0)
+    - PR merged in a repo with no workflow files at all (0)
     - timeout waiting for main CI runs after merge (0)
     - PR closed without merge (0)
 """
@@ -570,6 +571,15 @@ class WatchState:
         self.latest_sha = latest_sha
         self.default_branch = default_branch
 
+        # Set once at watch() startup by detect_no_ci_configured(): the repo has
+        # zero workflow files, so no CI run can EVER appear for this branch or
+        # for the merge commit. Short-circuits both waiting phases.
+        self.no_ci_configured = False
+        # State string the statusline should fall back to whenever a transient
+        # condition (conflict/behind/no-runs) clears. "running" normally,
+        # "no-ci-configured" when there is no CI to run.
+        self.base_state = "running"
+
         self.reported_pass = False
         self.reported_fail = False
         self.terminal_run_ids: set[int] = set()
@@ -592,6 +602,10 @@ class WatchState:
         self.reported_main_fail = False
         self.main_wait_iterations = 0
         self.sha_runs_empty_count = 0
+        # Sticky once True: a merge commit that has been observed on the
+        # default branch can never become un-merged, so a later transient
+        # fetch failure must not un-set this or wipe out main_wait_iterations.
+        self.merge_commit_visible = False
 
         self.runs_cache = ApiCache()
         self.main_runs_cache = ApiCache()
@@ -637,10 +651,10 @@ def detect_new_sha(state: WatchState, all_runs: list) -> None:
         state.stuck_pending_iters = 0
         state.stuck_pending_names = frozenset()
         state.reported_stuck_pending = False
-        # Reset state file to "running" so the statusline reflects the new
-        # in-progress run instead of remaining stuck on the previous
+        # Reset state file to the base state so the statusline reflects the
+        # new in-progress run instead of remaining stuck on the previous
         # terminal state (passed/failed).
-        write_state(state.slot, state.branch, "running")
+        write_state(state.slot, state.branch, state.base_state)
 
 
 def get_strict_policy_cached(
@@ -676,10 +690,10 @@ def check_pr_condition(
     else:
         if flag:
             setattr(state, flag_name, False)
-            # Condition cleared — restore state to "running" so the statusline
+            # Condition cleared — restore the base state so the statusline
             # reflects the resolved state instead of staying stuck on the old
             # state string (e.g. "conflict" or "behind").
-            write_state(state.slot, state.branch, "running")
+            write_state(state.slot, state.branch, state.base_state)
 
 
 def check_failures(context: str, sha_runs: list, state: WatchState) -> None:
@@ -840,6 +854,101 @@ def repo_info() -> tuple[str, str, str]:
     return owner, repo, default_branch
 
 
+def count_repo_workflows(owner: str, repo: str, token: str) -> int | None:
+    """Return how many workflows the repo has registered, or None if unknown.
+
+    ``GET /actions/workflows`` reports every workflow GitHub knows about for
+    the repo (``total_count``), including disabled ones. Returns None on ANY
+    error or unexpected payload — callers MUST treat None as "unknown" and
+    fall back to the normal wait/timeout path, never as "no CI".
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/workflows?per_page=1"
+    try:
+        resp = requests.get(url, headers=_gh_headers(token), timeout=10)
+        if resp.status_code != 200:
+            print(
+                f"[warn] count_repo_workflows HTTP {resp.status_code}",
+                file=sys.stderr,
+            )
+            return None
+        data = resp.json()
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] count_repo_workflows failed: {e}", file=sys.stderr)
+        return None
+    if not isinstance(data, dict):
+        return None
+    total = data.get("total_count")
+    if not isinstance(total, int) or isinstance(total, bool):
+        return None
+    return total
+
+
+def ref_has_workflow_files(owner: str, repo: str, ref: str, token: str) -> bool | None:
+    """Whether ``ref`` contains at least one ``.github/workflows/*.y[a]ml`` file.
+
+    404 means the directory does not exist on that ref -> False. Any other
+    error or unexpected payload -> None ("unknown"), so callers fall back to
+    the normal wait/timeout path.
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/contents/.github/workflows?ref={ref}"
+    try:
+        resp = requests.get(url, headers=_gh_headers(token), timeout=10)
+        if resp.status_code == 404:
+            return False
+        if resp.status_code != 200:
+            print(
+                f"[warn] ref_has_workflow_files {ref} HTTP {resp.status_code}",
+                file=sys.stderr,
+            )
+            return None
+        entries = resp.json()
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] ref_has_workflow_files {ref} failed: {e}", file=sys.stderr)
+        return None
+    if not isinstance(entries, list):
+        return None
+    return any(
+        isinstance(e, dict)
+        and e.get("type") == "file"
+        and str(e.get("name", "")).endswith((".yml", ".yaml"))
+        for e in entries
+    )
+
+
+def detect_no_ci_configured(
+    owner: str, repo: str, branch: str, default_branch: str, token: str
+) -> bool:
+    """True only when a CI run is STRUCTURALLY impossible for this repo.
+
+    Three independent signals must all agree, and every one of them fails
+    toward False (keep waiting) when it cannot be read:
+
+      1. ``/actions/workflows`` reports total_count == 0 — GitHub has no
+         workflow registered for the repo at all.
+      2. The watched branch has no ``.github/workflows/*.y[a]ml`` file. A PR
+         that INTRODUCES the first workflow would run it from the head ref,
+         so the repo-level count alone is not enough.
+      3. The default branch has no workflow file either (covers post-merge
+         CI on the default branch).
+
+    This is deliberately NOT the same as "no run has appeared yet": a repo
+    with workflows that simply haven't triggered/queued still goes through the
+    normal SHA_RUNS_EMPTY_MAX / MAIN_WAIT_MAX paths. Only zero workflow files
+    makes a run impossible forever, which is what justifies short-circuiting
+    both waiting phases.
+    """
+    total = count_repo_workflows(owner, repo, token)
+    if total is None or total > 0:
+        return False
+    # dict.fromkeys de-dupes while keeping order (branch == default_branch when
+    # watching main directly).
+    for ref in dict.fromkeys((branch, default_branch)):
+        has_files = ref_has_workflow_files(owner, repo, ref, token)
+        if has_files is None or has_files:
+            return False
+    return True
+
+
 def get_remote_head_sha(branch: str) -> str | None:
     """Return current SHA of origin/<branch> via ``git ls-remote``.
 
@@ -944,6 +1053,32 @@ def watch(
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
+    # --- One-shot "is there any CI at all?" probe ---
+    # Done once, right after the state file exists and the signal handlers are
+    # installed, and NEVER re-queried in the loop: workflow files can't appear
+    # mid-watch in a way that matters (a push that adds one also creates runs,
+    # which the normal path handles). A repo with zero workflow files can never
+    # produce a run, so waiting SHA_RUNS_EMPTY_MAX (2 min) on the branch and
+    # MAIN_WAIT_MAX (5 min) after the merge only delays an answer we already
+    # have. One notification here replaces both waits.
+    state.no_ci_configured = detect_no_ci_configured(
+        owner, repo, branch, default_branch, gh_token_value()
+    )
+    if state.no_ci_configured:
+        state.base_state = "no-ci-configured"
+        write_state(slot, branch, state.base_state)
+        notify(
+            f"No CI configured in {owner}/{repo} — zero workflow files, so no "
+            f"checks can run for {branch}. Nothing to wait for; safe to merge. "
+            f"Still watching for the merge itself."
+        )
+        print(
+            f"[ci_watch] no workflow files in {owner}/{repo} — skipping every "
+            f"CI wait; watching for merge/close only.",
+            file=sys.stderr,
+            flush=True,
+        )
+
     iter_count = 0
     last_heartbeat_iter = 0
     while True:
@@ -996,7 +1131,9 @@ def watch(
         if not state.merged and is_merged(fresh_pr) and merge_commit_oid:
             state.merged = True
             state.merge_commit_sha = merge_commit_oid
-            write_state(slot, branch, "merging")
+            write_state(
+                slot, branch, state.base_state if state.no_ci_configured else "merging"
+            )
             # If behind/conflict/fail was reported in a previous iteration,
             # the merge supersedes it — send a corrective note so the user
             # knows the earlier alert was a transient race, not a real
@@ -1045,6 +1182,21 @@ def watch(
 
         # --- Merged path: track main CI for the merge commit ---
         if state.merged:
+            # No workflow files anywhere in the repo: the merge commit can never
+            # get a run, so skip the whole main-CI wait (NO_MAIN_CI_GRACE /
+            # MAIN_WAIT_MAX) and finish on the merge itself. The merge
+            # notification already went out one branch above.
+            if state.no_ci_configured:
+                write_state(slot, branch, "no-ci-configured")
+                state.keep_state_file = True
+                print(
+                    f"Merge of '{branch}' observed and {owner}/{repo} has no "
+                    f"workflow files — no main CI can run. Exiting.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+
             # Refresh mtime so statusline freshness gate doesn't drop us.
             write_state(slot, branch, "merging")
 
@@ -1073,21 +1225,46 @@ def watch(
             if not sha_runs:
                 # Only count toward timeout once the merge commit is visible
                 # on the default branch — otherwise eventual consistency would
-                # race us into a false 5-min timeout.
-                commit_url = (
-                    f"{GITHUB_API}/repos/{owner}/{repo}/commits/"
-                    f"{state.merge_commit_sha}"
-                )
-                try:
-                    resp = requests.get(
-                        commit_url,
-                        headers=_gh_headers(gh_token_value()),
-                        timeout=10,
+                # race us into a false 5-min timeout. Visibility is sticky: a
+                # merge commit that GitHub has already shown us can't become
+                # un-merged, so once True we skip the re-fetch entirely
+                # instead of re-polling this endpoint (uncached, unlike every
+                # other fetch in this loop) every second for the rest of the
+                # watch. That also means a later transient failure/rate-limit
+                # on this call can no longer erase main_wait_iterations
+                # progress — previously it did, which could defer the
+                # 5-minute MAIN_WAIT_MAX timeout by hours if this fetch got
+                # flaky (e.g. from several concurrent ci_watch processes
+                # sharing the same GitHub rate limit).
+                if not state.merge_commit_visible:
+                    commit_url = (
+                        f"{GITHUB_API}/repos/{owner}/{repo}/commits/"
+                        f"{state.merge_commit_sha}"
                     )
-                    visible = resp.status_code == 200
-                except Exception:
-                    visible = False
-                if visible:
+                    try:
+                        resp = requests.get(
+                            commit_url,
+                            headers=_gh_headers(gh_token_value()),
+                            timeout=10,
+                        )
+                        if resp.status_code == 200:
+                            state.merge_commit_visible = True
+                        else:
+                            print(
+                                f"[warn] commit visibility check for "
+                                f"{state.merge_commit_sha[:8]} returned "
+                                f"HTTP {resp.status_code}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        print(
+                            f"[warn] commit visibility check for "
+                            f"{state.merge_commit_sha[:8]} failed: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                if state.merge_commit_visible:
                     state.main_wait_iterations += 1
                     # A SUCCESSFUL fetch that returns zero workflow runs on the
                     # default branch means the repo has no CI on main, so the
@@ -1132,8 +1309,6 @@ def watch(
                             flush=True,
                         )
                         return
-                else:
-                    state.main_wait_iterations = 0
                 time.sleep(POLL_INTERVAL)
                 continue
 
@@ -1165,9 +1340,6 @@ def watch(
         # (PR fetched successfully), checks proceed normally.
         pr_data_available = not pr_fetch_failed
 
-        runs_data, _ = api_get(runs_url, state.runs_cache, gh_token_value())
-        all_runs = (runs_data or {}).get("workflow_runs", [])
-
         if pr_data_available:
             check_pr_condition(
                 is_conflicting(pr_detail or pr),
@@ -1193,6 +1365,19 @@ def watch(
                     f"the branch.",
                     "behind",
                 )
+
+        # --- No CI configured: nothing to poll for ---
+        # The repo has zero workflow files, so the runs endpoint can only ever
+        # return an empty list. Skip it, and skip every CI-specific wait
+        # (SHA_RUNS_EMPTY_MAX no-runs grace, pass/fail detection,
+        # stuck-pending). Conflict/behind alerts above still run — they matter
+        # for merging — and the loop stays alive to confirm the merge or close.
+        if state.no_ci_configured:
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        runs_data, _ = api_get(runs_url, state.runs_cache, gh_token_value())
+        all_runs = (runs_data or {}).get("workflow_runs", [])
 
         if not all_runs:
             # Zero workflow_runs for this branch. Either the repo genuinely has
@@ -1245,7 +1430,7 @@ def watch(
         state.sha_runs_empty_count = 0
         if state.reported_no_runs:
             state.reported_no_runs = False
-            write_state(slot, branch, "running")
+            write_state(slot, branch, state.base_state)
 
         # Detect rerun on same SHA: a workflow we previously counted as terminal
         # has been replaced by a non-completed run (different id, same name).
@@ -1261,7 +1446,7 @@ def watch(
             state.reported_fail = False
             state.reported_pass = False
             state.terminal_run_ids = set()
-            write_state(slot, branch, "running")
+            write_state(slot, branch, state.base_state)
 
         # Only fire branch failure/pass notifications when we have fresh PR
         # data confirming the PR is still open.  Without it, the PR might

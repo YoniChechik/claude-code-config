@@ -177,6 +177,7 @@ def run_watch(
     max_sleeps: int = 3,
     strict_policy: bool = False,
     real_notify: bool = False,
+    no_ci_configured: bool = False,
 ) -> dict:
     """Drive ``ci_watch.watch`` for ``max_sleeps`` iterations.
 
@@ -190,6 +191,10 @@ def run_watch(
     ``real_notify`` keeps recording every message BUT also lets the real
     ``notify`` run, so a caller holding ``capsys`` can compare the recorded
     messages against what actually reached stdout.
+
+    ``no_ci_configured`` stubs the one-shot ``detect_no_ci_configured`` probe so
+    tests never hit the real workflows/contents endpoints; it defaults to False
+    (a repo that DOES have workflow files), the normal case.
     """
     fake_sleep, _ = make_sleep_breaker(max_sleeps)
 
@@ -213,6 +218,9 @@ def run_watch(
             ci_watch,
             "get_strict_required_status_checks_policy",
             return_value=strict_policy,
+        ),
+        patch.object(
+            ci_watch, "detect_no_ci_configured", return_value=no_ci_configured
         ),
         patch.object(ci_watch.requests, "get") as commit_get,
     ):
@@ -631,6 +639,180 @@ def test_no_ci_suppressed_when_pr_blocked(tmp_path):
     )
     assert out["state_value"] != "no-ci"
     assert not any("no CI" in m for m in out["notify_calls"])
+
+
+# ---------------------------------------------------------------------------
+# "no CI configured at all" detection (zero workflow files in the repo)
+# ---------------------------------------------------------------------------
+
+
+def _fake_resp(status: int, payload: Any = None) -> MagicMock:
+    resp = MagicMock(status_code=status)
+    resp.json.return_value = payload
+    return resp
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (200, {"total_count": 0, "workflows": []}, 0),
+        (200, {"total_count": 3, "workflows": []}, 3),
+        (200, {"workflows": []}, None),  # no total_count -> unknown
+        (200, ["not", "a", "dict"], None),
+        (403, {"message": "rate limited"}, None),
+        (500, None, None),
+    ],
+)
+def test_count_repo_workflows(status, payload, expected):
+    with patch.object(
+        ci_watch.requests, "get", return_value=_fake_resp(status, payload)
+    ):
+        assert ci_watch.count_repo_workflows("o", "r", "tk") == expected
+
+
+def test_count_repo_workflows_network_error_is_unknown():
+    with patch.object(ci_watch.requests, "get", side_effect=OSError("boom")):
+        assert ci_watch.count_repo_workflows("o", "r", "tk") is None
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (404, {"message": "Not Found"}, False),  # no .github/workflows dir
+        (200, [{"type": "file", "name": "ci.yml"}], True),
+        (200, [{"type": "file", "name": "ci.yaml"}], True),
+        (200, [], False),  # empty dir
+        (200, [{"type": "file", "name": "README.md"}], False),
+        (200, [{"type": "dir", "name": "nested"}], False),
+        (200, {"type": "file", "name": "workflows"}, None),  # unexpected shape
+        (500, None, None),
+    ],
+)
+def test_ref_has_workflow_files(status, payload, expected):
+    with patch.object(
+        ci_watch.requests, "get", return_value=_fake_resp(status, payload)
+    ):
+        assert ci_watch.ref_has_workflow_files("o", "r", "feat", "tk") is expected
+
+
+@pytest.mark.parametrize(
+    ("total", "branch_files", "main_files", "expected"),
+    [
+        # Only case that claims no-CI: zero registered workflows AND no workflow
+        # file on either ref.
+        (0, False, False, True),
+        # Repo has workflows registered -> a run can appear; keep waiting.
+        (2, False, False, False),
+        # PR that INTRODUCES the first workflow: head ref has the file, so its
+        # own checks will run.
+        (0, True, False, False),
+        # Default branch has one (e.g. head ref deletes it) -> main CI can run.
+        (0, False, True, False),
+        # Unknown signals always fail toward "keep waiting".
+        (None, False, False, False),
+        (0, None, False, False),
+        (0, False, None, False),
+    ],
+)
+def test_detect_no_ci_configured(total, branch_files, main_files, expected):
+    per_ref = {"feat": branch_files, "main": main_files}
+    with (
+        patch.object(ci_watch, "count_repo_workflows", return_value=total),
+        patch.object(
+            ci_watch,
+            "ref_has_workflow_files",
+            side_effect=lambda o, r, ref, tk: per_ref[ref],
+        ),
+    ):
+        assert (
+            ci_watch.detect_no_ci_configured("o", "r", "feat", "main", "tk") is expected
+        )
+
+
+def test_detect_no_ci_configured_checks_each_ref_once():
+    """The probe must not re-query the same ref twice when branch == default."""
+    calls: list[str] = []
+
+    def record(_o, _r, ref, _tk):
+        calls.append(ref)
+        return False
+
+    with (
+        patch.object(ci_watch, "count_repo_workflows", return_value=0),
+        patch.object(ci_watch, "ref_has_workflow_files", side_effect=record),
+    ):
+        assert ci_watch.detect_no_ci_configured("o", "r", "main", "main", "tk") is True
+    assert calls == ["main"]
+
+
+def test_no_ci_configured_flags_immediately_and_skips_branch_polling(tmp_path):
+    """Zero workflow files -> 'no-ci-configured' on the first iteration.
+
+    Even with an open PR whose mergeable_state is BLOCKED (which normally means
+    "required checks pending, keep waiting"), there is nothing to wait for: the
+    runs endpoint must never be polled and the 2-min no-runs grace must never
+    be entered.
+    """
+    pr = [
+        {
+            "html_url": "u",
+            "number": 1,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "blocked",
+        }
+    ]
+    urls: list[str] = []
+    routed = make_api_get(pr=pr)
+
+    def recording(url, cache, token):
+        urls.append(url)
+        return routed(url, cache, token)
+
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=recording,
+        no_ci_configured=True,
+        max_sleeps=3,
+    )
+    assert out["state_value"] == "no-ci-configured"
+    assert any("No CI configured" in m for m in out["notify_calls"])
+    assert not any("/actions/runs" in u for u in urls)
+
+
+def test_no_ci_configured_exits_on_merge_without_waiting_for_main_ci(tmp_path):
+    """A merge in a repo with no workflow files ends the watch immediately.
+
+    The merge itself is still reported (that is the useful signal), but the
+    main-CI phase — NO_MAIN_CI_GRACE and the 5-min MAIN_WAIT_MAX — is skipped
+    entirely, so the default-branch runs endpoint is never polled.
+    """
+    pr = [
+        {
+            "html_url": "u",
+            "number": 7,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    urls: list[str] = []
+    routed = make_api_get(pr=pr)
+
+    def recording(url, cache, token):
+        urls.append(url)
+        return routed(url, cache, token)
+
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=recording,
+        no_ci_configured=True,
+        max_sleeps=ci_watch.MAIN_WAIT_MAX,
+    )
+    assert out["state_value"] == "no-ci-configured"
+    assert any("merged to main" in m for m in out["notify_calls"])
+    assert not any("branch=main" in u for u in urls)
 
 
 def test_no_main_ci_state(tmp_path):
