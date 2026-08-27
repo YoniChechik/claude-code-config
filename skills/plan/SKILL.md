@@ -66,6 +66,7 @@ Create `plan-$FEATURE_NAME.md` **in the current working directory** (the feature
 - Tasks should be as independent as possible, with minimal dependencies between them.
 - Tasks should be actionable and specific, not vague or high-level.
 - No human in the loop. You can ask/search for relevant CLIs or MCPs.
+- Analyze dependencies between tasks. Group tasks with no dependency on each other and mark them as a **Parallel Group** (e.g. "Parallel Group A: Task 1, Task 2") so they run as parallel subagents instead of serially. Keep dependent tasks in sequence after the group they depend on.
 
 ## Codex critique pass
 

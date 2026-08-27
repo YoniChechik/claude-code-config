@@ -15,9 +15,12 @@ Creates a git worktree for isolated feature development. Handles new features, e
 ## Process
 
 ### Step 1: Parse Feature Description
-- Decide on feature name based on description
+- Check whether the description names a Linear ticket (a `linear.app/.../issue/TEAM-123` URL, or a bare `TEAM-123`-style id).
+  - If so, call `mcp__linear__get_issue` for that issue and read its `gitBranchName` field. On success, use it as the feature name instead of deriving one from the description — this keeps the branch in the exact shape Linear's GitHub integration expects, so pushing/opening a PR from it auto-transitions the ticket to "In Progress" and assigns it to the pushing user's git identity.
+  - If no ticket is named, or the lookup fails, fall through to the description-based naming below.
+- Decide on feature name based on description (fallback, or when no Linear ticket applies)
 - Convert feature name to kebab-case for branch naming
-- Feature name must NOT contain `/`. If the chosen name has a prefix like `feat/`, `fix/`, `chore/`, etc., strip everything up to and including the last `/` (e.g. `feat/add-login` → `add-login`). The final name must be a flat kebab-case string with no slashes.
+- Feature name must NOT contain `/`. If the chosen name has a prefix like `feat/`, `fix/`, `chore/`, etc. (this also covers Linear's own team-prefixed `gitBranchName`, e.g. `yoni/paper-179-...`), strip everything up to and including the last `/` (e.g. `feat/add-login` → `add-login`, `yoni/paper-179-change-app-access` → `paper-179-change-app-access`). The final name must be a flat kebab-case string with no slashes.
 
 ### Step 2: Run the worktree script
 ```bash

@@ -199,6 +199,14 @@
   "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Trusted internal domains: activate.sunsay.com, activate-staging.sunsay.com (Sunsay's own subscription-activation subdomains, backed by website's Next.js app), mail.google.com (Yoni's own Gmail, used to read order-confirmation/activation emails during Shopify subscription E2E testing)"
+    ]
+  },
   "voiceEnabled": true,
-  "disableBypassPermissionsMode": false
+  "disableBypassPermissionsMode": false,
+  "agentPushNotifEnabled": true,
+  "inputNeededNotifEnabled": true
 }

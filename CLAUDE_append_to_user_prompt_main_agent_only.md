@@ -24,3 +24,6 @@
 For short and easy tasks, use sonnet.
 The default setup for all subagents is opus (claude-opus) with effort high — mainly for long coding sessions.
 A SUBAGENT CAN **NOT** SPIN ANOTHER SUBAGENT INSIDE IT! MAX 1 LAYER DEEP
+
+## Parallelism
+Default to parallel work. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
