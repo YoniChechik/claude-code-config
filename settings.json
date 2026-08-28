@@ -152,14 +152,6 @@
             "command": "bash $HOME/.claude/scripts/user_prompt_submit.sh"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/reset__color.sh"
-          }
-        ]
       }
     ],
     "PermissionRequest": [

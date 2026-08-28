@@ -311,7 +311,7 @@ assert_process_alive() {
 
 @test "skill: launches ci_watch.py with the branch as its only argument" {
     run cat "$SKILL_MD"
-    assert_contains "uv run ~/.claude/scripts/ci_watch.py '<BRANCH>'" "$output"
+    assert_contains "uv run ~/.claude/skills/ci-watcher/ci_watch.py '<BRANCH>'" "$output"
     # Port / session-token args, the webhook port tool, and the kill flag are
     # all gone.
     assert_not_contains '"$BRANCH" "$PORT"' "$output"

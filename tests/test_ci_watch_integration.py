@@ -26,8 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Make the scripts dir importable.
-SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
+# Make the ci-watcher skill dir importable.
+SCRIPTS_DIR = Path(__file__).parent.parent / "skills" / "ci-watcher"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ci_watch

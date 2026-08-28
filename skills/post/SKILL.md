@@ -26,11 +26,11 @@ Instruct the fix agent to:
 ## Step 3: Lint, Format, Test, Ship
 After the fix agent is done, run the quality check script to auto-format and lint:
 ```bash
-~/.claude/scripts/quality_check.sh --fix
+~/.claude/skills/post/quality_check.sh --fix
 ```
 Then verify no errors remain:
 ```bash
-~/.claude/scripts/quality_check.sh
+~/.claude/skills/post/quality_check.sh
 ```
 If errors remain, read the files and fix manually, then re-run until clean.
 

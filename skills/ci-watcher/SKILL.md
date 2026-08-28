@@ -142,7 +142,7 @@ Then make a single `Monitor` call:
 - `command` (template — `<DIR>`, `<SESSION>` and `<BRANCH>` are placeholders you
   replace with the literal values, NOT shell variables):
 
-  `cd '<DIR>' && exec env CLAUDE_CODE_SESSION_ID='<SESSION>' uv run ~/.claude/scripts/ci_watch.py '<BRANCH>' 2>>'/tmp/ci_watch_<SESSION>.log'`
+  `cd '<DIR>' && exec env CLAUDE_CODE_SESSION_ID='<SESSION>' uv run ~/.claude/skills/ci-watcher/ci_watch.py '<BRANCH>' 2>>'/tmp/ci_watch_<SESSION>.log'`
 
 - `description`: `CI status for branch <BRANCH>`
 - `persistent`: `true`
@@ -151,7 +151,7 @@ Then make a single `Monitor` call:
 Fully substituted example — this is the shape the tool call must have:
 
 ```
-cd '/Users/me/code/myrepo' && exec env CLAUDE_CODE_SESSION_ID='4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11' uv run ~/.claude/scripts/ci_watch.py 'feat/my-branch' 2>>'/tmp/ci_watch_4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11.log'
+cd '/Users/me/code/myrepo' && exec env CLAUDE_CODE_SESSION_ID='4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11' uv run ~/.claude/skills/ci-watcher/ci_watch.py 'feat/my-branch' 2>>'/tmp/ci_watch_4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11.log'
 ```
 
 Never pass the template through verbatim. A shell expands an unset `$DIR` to the
