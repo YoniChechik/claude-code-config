@@ -1,6 +1,6 @@
 ---
 name: "next-steps"
-description: "Surface every open end blocking work — next steps, open tickets, and pending decisions — as a list of 3-sentence items grouped under Open Ends. Ends by offering to walk through them one by one. Use when the user asks 'what's next', 'next steps', 'open ends', 'what decisions are left', 'what do you need from me', or /next-steps."
+description: "Surface every OPEN end blocking work — next actions, open tickets, pending decisions — as a short numbered list (title, one-line description, one-line why-it's-open, short recommendation) grouped under Open Ends. Never lists what's already done. Ends by offering to walk through them one by one. Use when the user asks 'what's next', 'next steps', 'open ends', 'what decisions are left', 'what do you need from me', or /next-steps."
 ---
 
 # Next Steps
@@ -24,18 +24,20 @@ Order: anything blocking a running subagent, CI, or a deploy goes first. Cosmeti
 
 If there are truly no open ends, say so in one line instead of forcing a list.
 
-## Step 2: Write each item as 3 sentences
+## Step 2: Write each item short, numbered
 
-Under one heading "Open Ends", write exactly 3 sentences per item:
-1. What it is, concretely — the file, ticket, or step.
-2. Why it's open — blocked on what, or what breaks if skipped.
-3. What happens next, or the recommended default if there is one.
+Under one heading "Open Ends", number every item (1, 2, 3…). Each item gets exactly, on as few lines as possible:
+- **Title** — a few words naming it.
+- One-line description — the concrete file, ticket, or step.
+- One-line explanation of why it's open — blocked on what, or what breaks if skipped.
+- A short recommendation — the default to take if the user just says "go".
 
-No sub-headers per item, no sub-bullets, no tables. Plain words, no preamble.
+No 3-sentence prose, no sub-headers, no sub-bullets, no tables. Only OPEN items — never mention what's already done or already answered; this is not a changelog.
 
 ## Step 3: Offer to walk through them
 
 After the list, ask exactly one question: "Want to go over them one by one?"
 
-- Yes → invoke the `one-by-one` skill on this list (it formats each item with `adhd-structure`).
+- Yes → invoke the `one-by-one` skill on this list.
 - No → stop; let the user act on whichever item(s) they choose.
+- If the user's own request already asked for "next steps" and "one by one" together, skip this question and go straight into the `one-by-one` walkthrough.
