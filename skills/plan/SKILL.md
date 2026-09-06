@@ -78,3 +78,7 @@ After the plan file is written, run a second-opinion pass before terminating:
 - **Apply**: Make surgical edits to the plan `.md` for accepted changes — do not rewrite wholesale.
 - **Done**: Tell the user the plan was critiqued by Codex and updated, and point them to the final file.
 
+## Presenting the plan to the user
+
+When talking the plan through with the user in chat (not the `plan-*.md` file itself), format each task using the `adhd-structure` skill: 1-line summary, then a 5-line version, then deeper detail only on request.
+

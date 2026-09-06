@@ -12,3 +12,7 @@ Summarize what was accomplished on the current branch, grouped by **logical task
 "$ARGUMENTS"
 
 If provided, treat it as the base branch to diff against. Otherwise default to `main`.
+
+## Pacing
+
+For a long list of tasks, offer to walk through them one at a time using the one-by-one skill.

@@ -128,6 +128,10 @@ After the review subagent writes `review.md`, get a second opinion from Codex:
 
 The skill ends with the merged `review.md`. Do NOT fix anything — fixing is a separate, single-writer phase.
 
+## Presenting findings to the user
+
+When talking review findings through with the user in chat (not the `review.md` file itself), format each finding using the `adhd-structure` skill: 1-line summary, then a 5-line version, then deeper detail only on request.
+
 ## Important Notes
 
 - **Be thorough and skeptical** - better to catch issues now than in production
