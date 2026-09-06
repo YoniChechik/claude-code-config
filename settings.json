@@ -3,7 +3,9 @@
   "env": {
     "ENABLE_TOOL_SEARCH": "true",
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
-    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": "60000"
+    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": "60000",
+    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "300000",
+    "API_TIMEOUT_MS": "300000"
   },
   "includeCoAuthoredBy": false,
   "includeGitInstructions": false,
@@ -191,6 +193,8 @@
   "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
   "autoMode": {
     "environment": [
       "$defaults",
@@ -199,6 +203,5 @@
   },
   "voiceEnabled": true,
   "disableBypassPermissionsMode": false,
-  "agentPushNotifEnabled": true,
-  "inputNeededNotifEnabled": true
+  "feedbackDrafts": "off"
 }
