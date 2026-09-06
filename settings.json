@@ -97,6 +97,16 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/scripts/post_tool_use__pr_ci_reminder.sh",
+            "suppressOutput": true
+          }
+        ]
       }
     ],
     "PreToolUse": [
