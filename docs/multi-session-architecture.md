@@ -124,7 +124,7 @@ All CI watcher state lives in `/tmp/` and is keyed on the full session UUID:
 
 ```
 /tmp/ci_watch_state_<slot>      writer: ci_watch.py     reader: status_line.sh
-/tmp/ci_watch_lock_<slot>       writer/reader: ci_watch.py (PID lockfile)
+/tmp/ci_watch_lock_<slot>       writer/reader: ci_watch.py (flock'd, holds the owner's PID)
 /tmp/ci_watch_pr_<slot>         writer: ci_watch.py     reader: status_line.sh
 /tmp/ci_watch_<slot>.log        writer: redirected STDERR only    readers: humans (tail -f)
                                 (stdout is the Monitor event stream, not the log)
@@ -175,10 +175,12 @@ slow reader never observes partial content.
    error to stderr and stderr no longer reaches `TaskOutput`.
 3. Watcher reads `$CLAUDE_CODE_SESSION_ID` → `slot`. If unset, exits 2 to
    stderr immediately.
-4. Watcher takes the lock at `/tmp/ci_watch_lock_<slot>`. If a stale
-   predecessor with the same slot exists (i.e. the same session re-ran
+4. Watcher takes an `flock` on `/tmp/ci_watch_lock_<slot>` and writes its PID
+   into it. If a live predecessor holds that lock (i.e. the same session re-ran
    `/ci-watcher`), it's SIGTERM'd — escalating to SIGKILL if it has not exited
-   within 10s — and only then does the new watcher claim the lock.
+   within 10s — and the new watcher retries; the kernel frees the lock the
+   moment the predecessor dies. A predecessor that survives both signals keeps
+   the slot, and the newcomer exits 3 rather than run a second watcher on it.
 5. Watcher writes `<branch>:running` to the state file, registers an `atexit`
    cleanup that unlinks state/pr/lock, and enters its main loop.
 
@@ -296,13 +298,13 @@ different Monitor tasks.
 
 ## Quick reference
 
-| Question                                           | Answer                                                                                                                                              |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Where does the slot come from?                     | The full `CLAUDE_CODE_SESSION_ID` env var (a UUID minted by the Claude Code harness per session).                                                   |
-| How does `/ci-watcher` get it?                     | Reads `$CLAUDE_CODE_SESSION_ID` from the Bash-tool subshell environment.                                                                            |
-| How does the watcher get it?                       | Reads `$CLAUDE_CODE_SESSION_ID`, set explicitly by the `Monitor` command via `env`. Exits 2 if unset.                                               |
-| How does `status_line.sh` get it?                  | Parses `.session_id` from its hook payload — env vars are unavailable in the status-line context.                                                   |
-| What's the state-file key?                         | `slot = $CLAUDE_CODE_SESSION_ID` (full UUID).                                                                                                       |
-| What's the state-file content?                     | A single line `<branch>:<state>` (e.g. `feat/auth:passed`).                                                                                         |
-| What stops two watchers from colliding?            | PID-file lock at `/tmp/ci_watch_lock_<slot>`. Disjoint paths across sessions; in-session re-launch evicts the predecessor by SIGTERM, then SIGKILL. |
-| What stops the watcher from outliving the session? | Monitor's `persistent: true` task ends when the session ends; `TaskStop` ends it early.                                                             |
+| Question                                           | Answer                                                                                                                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Where does the slot come from?                     | The full `CLAUDE_CODE_SESSION_ID` env var (a UUID minted by the Claude Code harness per session).                                                                                                                  |
+| How does `/ci-watcher` get it?                     | Reads `$CLAUDE_CODE_SESSION_ID` from the Bash-tool subshell environment.                                                                                                                                           |
+| How does the watcher get it?                       | Reads `$CLAUDE_CODE_SESSION_ID`, set explicitly by the `Monitor` command via `env`. Exits 2 if unset.                                                                                                              |
+| How does `status_line.sh` get it?                  | Parses `.session_id` from its hook payload — env vars are unavailable in the status-line context.                                                                                                                  |
+| What's the state-file key?                         | `slot = $CLAUDE_CODE_SESSION_ID` (full UUID).                                                                                                                                                                      |
+| What's the state-file content?                     | A single line `<branch>:<state>` (e.g. `feat/auth:passed`).                                                                                                                                                        |
+| What stops two watchers from colliding?            | `flock` on `/tmp/ci_watch_lock_<slot>` — kernel-arbitrated, and released automatically when the holder dies. Disjoint paths across sessions; in-session re-launch evicts the predecessor by SIGTERM, then SIGKILL. |
+| What stops the watcher from outliving the session? | Monitor's `persistent: true` task ends when the session ends; `TaskStop` ends it early.                                                                                                                            |

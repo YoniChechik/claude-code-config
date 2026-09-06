@@ -24,9 +24,10 @@ State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
                                   a stdout write has failed — the watcher runs
                                   on but its notifications reach nobody
     /tmp/ci_watch_pr_{slot}       PR JSON cache for status_line.sh
-    /tmp/ci_watch_lock_{slot}     PID lock; also the liveness oracle the
-                                  /ci-watcher skill uses to decide whether a
-                                  stored Monitor task id is stale
+    /tmp/ci_watch_lock_{slot}     flock'd slot lock, holding the owner's pid;
+                                  also the liveness oracle the /ci-watcher
+                                  skill uses to decide whether a stored Monitor
+                                  task id is stale
     /tmp/ci_watch_task_{slot}     Monitor task id; written by the /ci-watcher
                                   skill, not by this script
     /tmp/ci_watch_{slot}.log      this process's stderr, redirected by the
@@ -44,6 +45,7 @@ Exit conditions:
 from __future__ import annotations
 
 import atexit
+import fcntl
 import json
 import os
 import signal
@@ -71,6 +73,12 @@ NO_MAIN_CI_GRACE = 30  # 30 * 1s = 30s
 # must remain un-emitted (with all emitted checks already completed) before we
 # fire the STUCK_PENDING_REQUIRED_CHECKS notification.
 STUCK_PENDING_MIN_ITERS = 60
+# Bounded retries for the flock claim. Exclusivity itself needs no retries —
+# the kernel hands the flock to exactly one process — so these only cover the
+# two transient cases: a live predecessor that has to be evicted first, and a
+# lockfile unlinked out from under the fd we locked. A genuinely unkillable
+# holder must not spin us forever, hence a bound.
+LOCK_ACQUIRE_ATTEMPTS = 5
 
 # Module-level base dir for state files. Tests override this.
 TMP_DIR = "/tmp"
@@ -579,6 +587,15 @@ def write_pr_cache(slot: str, data: dict) -> None:
 
 # --- Lock handling ---
 
+# The open fd whose flock() IS this process's claim on its slot, and the slot it
+# was taken for. Never closed while the watcher runs: the kernel holds the flock
+# for as long as this fd lives and releases it the instant the process dies, for
+# ANY reason — clean exit, SIGKILL, crash. That is what makes the lock
+# self-healing, and it is also the only authority on "do we hold the slot": the
+# pid inside the lockfile is a hint for outside readers, never the arbiter.
+_LOCK_FD: int | None = None
+_LOCK_SLOT: str | None = None
+
 
 def _wait_for_exit(pid: int, seconds: int) -> bool:
     """Poll ``pid`` at 1s intervals for up to ``seconds``. True once it is gone.
@@ -608,69 +625,169 @@ def _is_ci_watch_pid(pid: int) -> bool:
     return "ci_watch" in result.stdout
 
 
-def acquire_lock(slot: str) -> None:
-    """Kill any stale predecessor and take the lock for this slot.
+def _read_lock_pid(lock_path: Path) -> int | None:
+    """The pid recorded in ``lock_path``, or None if missing or garbled."""
+    try:
+        return int(lock_path.read_text().strip())
+    except (OSError, ValueError):
+        return None
 
-    SIGTERM, then SIGKILL if the predecessor ignores it. Writing our pid while
+
+def _evict_lock_holder(lock_path: Path, slot: str) -> int | None:
+    """Stop the watcher named by ``lock_path``. Returns the pid it handled.
+
+    SIGTERM, then SIGKILL if the predecessor ignores it. Claiming the slot while
     the old watcher is still running would put TWO watchers on one slot, both
     writing the same state and PR-cache files, until the loser finally exits.
     """
-    lock_path = _lock_path(slot)
-    if lock_path.exists():
-        try:
-            old_pid = int(lock_path.read_text().strip())
-            if _is_ci_watch_pid(old_pid):
+    old_pid = _read_lock_pid(lock_path)
+    if old_pid is None:
+        return None
+    try:
+        if _is_ci_watch_pid(old_pid):
+            try:
+                os.kill(old_pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            # Re-check identity after the wait: the predecessor may have
+            # exited and the OS recycled its pid for an unrelated process,
+            # which SIGKILL must never hit.
+            if not _wait_for_exit(old_pid, 10) and _is_ci_watch_pid(old_pid):
+                # SIGTERM went unanswered for 10s (handler wedged, process
+                # stuck in a syscall). Escalate rather than start a second
+                # watcher on this slot.
                 try:
-                    os.kill(old_pid, signal.SIGTERM)
+                    os.kill(old_pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
                     pass
-                # Re-check identity after the wait: the predecessor may have
-                # exited and the OS recycled its pid for an unrelated process,
-                # which SIGKILL must never hit.
-                if not _wait_for_exit(old_pid, 10) and _is_ci_watch_pid(old_pid):
-                    # SIGTERM went unanswered for 10s (handler wedged, process
-                    # stuck in a syscall). Escalate rather than start a second
-                    # watcher on this slot.
-                    try:
-                        os.kill(old_pid, signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-                    if not _wait_for_exit(old_pid, 2):
-                        # Same rule as the SIGTERM timeout above: a stuck
-                        # predecessor must never block a relaunch forever. Warn
-                        # loudly and take the lock anyway — release_lock's pid
-                        # guard stops the loser unlinking our lockfile.
-                        print(
-                            f"[warn] acquire_lock: pid {old_pid} survived "
-                            f"SIGTERM+SIGKILL; taking the lock anyway — two "
-                            f"watchers may share slot {slot}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-        except (ValueError, ProcessLookupError, PermissionError):
-            pass
-    lock_path.write_text(str(os.getpid()))
+                if not _wait_for_exit(old_pid, 2):
+                    # Nothing more we can do to it. Its flock lives as long as
+                    # it does, so the caller will retry, then give up rather
+                    # than start a second watcher on the slot.
+                    print(
+                        f"[warn] acquire_lock: pid {old_pid} survived "
+                        f"SIGTERM+SIGKILL; it still holds slot {slot}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+    except (ProcessLookupError, PermissionError):
+        pass
+    return old_pid
+
+
+def _claim_lock_fd(lock_path: Path) -> int | None:
+    """Take the flock on ``lock_path``, or return None if we cannot have it.
+
+    The open is a plain ``O_CREAT`` — every contender may open the file, and
+    that is fine, because creating it claims nothing. ``flock`` is the arbiter:
+    the kernel grants it to exactly one open file description.
+
+    None means one of two things, both handled the same way by the caller:
+    someone else currently holds the lock, or the file we locked is no longer
+    the file at ``lock_path`` (a predecessor's ``release_lock`` unlinks it, and
+    a lock on a detached inode guards nothing — the next acquirer would create
+    a fresh file and lock that one instead).
+    """
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    try:
+        live = os.stat(lock_path).st_ino == os.fstat(fd).st_ino
+    except OSError:
+        live = False
+    if not live:
+        os.close(fd)
+        return None
+    return fd
+
+
+def acquire_lock(slot: str) -> None:
+    """Evict any stale predecessor and take the lock for this slot.
+
+    ``fcntl.flock`` decides who owns the slot. It is atomic across processes,
+    and the kernel drops it as soon as the holder dies, so a crashed or
+    SIGKILL'd watcher never leaves the slot wedged and no contender ever has to
+    guess whether the recorded pid is still alive.
+
+    A contender that finds the lock taken evicts the recorded holder (SIGTERM,
+    then SIGKILL) and retries: the holder's flock is released the instant it
+    exits. After ``LOCK_ACQUIRE_ATTEMPTS`` the process exits (``SystemExit``)
+    instead of starting a second watcher on a slot someone else holds.
+    """
+    global _LOCK_FD, _LOCK_SLOT
+    lock_path = _lock_path(slot)
+    for _ in range(LOCK_ACQUIRE_ATTEMPTS):
+        fd = _claim_lock_fd(lock_path)
+        if fd is None:
+            _evict_lock_holder(lock_path, slot)
+            # Small bounded backoff before retrying: without it, a recorded
+            # pid that's empty/garbled/not ci_watch skips straight to a retry
+            # with zero delay, so a legitimate new owner that is merely
+            # between taking the flock and this same stamp sequence could
+            # burn through every attempt and exit(3) spuriously instead of
+            # succeeding once that owner is done.
+            time.sleep(0.2)
+            continue
+        _LOCK_FD = fd
+        _LOCK_SLOT = slot
+        # Stamp our pid while holding the lock, and get it on disk before
+        # returning: readers (status_line.sh, the /ci-watcher skill) must never
+        # see a predecessor's pid — or an empty file — for a slot that has
+        # already changed hands.
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, str(os.getpid()).encode())
+        os.fsync(fd)
+        return
+    print(
+        f"[warn] acquire_lock: could not claim slot {slot} in "
+        f"{LOCK_ACQUIRE_ATTEMPTS} attempts (held by pid "
+        f"{_read_lock_pid(lock_path)}); exiting instead of running a "
+        f"second watcher",
+        file=sys.stderr,
+        flush=True,
+    )
+    raise SystemExit(3)
 
 
 def _holds_lock(slot: str) -> bool:
-    """True if the lockfile on disk still records OUR pid."""
-    try:
-        return int(_lock_path(slot).read_text().strip()) == os.getpid()
-    except (OSError, ValueError):
-        return False
+    """True while THIS process still holds the flock for ``slot``.
+
+    Process-local state, not a re-read of the lockfile: the pid on disk can
+    already belong to a successor, and comparing against it is a
+    read-then-act race. Holding the flock is the fact that matters, and only
+    one process can hold it at a time.
+    """
+    return _LOCK_FD is not None and _LOCK_SLOT == slot
 
 
 def release_lock(slot: str) -> None:
-    """Drop the lock, but only if it still holds OUR pid.
+    """Drop the lock, but only if WE are the holder.
 
-    ``acquire_lock`` gives up waiting for a predecessor after 10s and writes its
-    own pid anyway; a predecessor that exits later would otherwise unlink the
-    SUCCESSOR's lockfile. The /ci-watcher skill reads that file as its only
+    A watcher that lost its slot to a successor (or never took it) must not
+    unlink the lockfile: the /ci-watcher skill reads that file as its only
     liveness oracle, so a false DEAD would make it launch a second watcher.
+
+    The unlink runs before the flock is released, so a contender can only ever
+    win the lock on a file that is either still ours or already gone — never on
+    a lockfile that outlives its owner.
     """
-    if _holds_lock(slot):
+    global _LOCK_FD, _LOCK_SLOT
+    if not _holds_lock(slot):
+        return
+    try:
+        _lock_path(slot).unlink(missing_ok=True)
+    except OSError:
+        pass
+    fd = _LOCK_FD
+    _LOCK_FD = None
+    _LOCK_SLOT = None
+    if fd is not None:
         try:
-            _lock_path(slot).unlink(missing_ok=True)
+            os.close(fd)
         except OSError:
             pass
 
@@ -1158,9 +1275,10 @@ def watch(
     write_state(slot, branch, "running")
 
     def cleanup() -> None:
-        # Same pid guard as release_lock: acquire_lock can take a slot whose
-        # predecessor never died, so a late-exiting predecessor must not wipe
-        # the SUCCESSOR's live state file and PR cache.
+        # Same guard as release_lock: only the process that actually holds the
+        # flock owns this slot's files, so a watcher that lost the slot (or
+        # never took it) must not wipe the holder's live state file and PR
+        # cache.
         if not state.keep_state_file and _holds_lock(slot):
             _state_path(slot).unlink(missing_ok=True)
             _pr_path(slot).unlink(missing_ok=True)

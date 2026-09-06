@@ -16,11 +16,13 @@ iterations.
 from __future__ import annotations
 
 import ast
+import fcntl
 import json
 import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -47,6 +49,29 @@ def _reset_monitor_detached_state():
     yield
     ci_watch._MONITOR_DETACHED_AT = None
     ci_watch._LAST_STATE = None
+
+
+def _drop_lock_fd():
+    if ci_watch._LOCK_FD is not None:
+        try:
+            os.close(ci_watch._LOCK_FD)
+        except OSError:
+            pass
+    ci_watch._LOCK_FD = None
+    ci_watch._LOCK_SLOT = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_lock_state():
+    """``acquire_lock`` keeps its flock fd for the life of the process by design.
+
+    That is right for a watcher and wrong for a test session: one test taking
+    the lock for real would hold it for every later test, and the fd would leak.
+    Drop the fd and both module globals around each test.
+    """
+    _drop_lock_fd()
+    yield
+    _drop_lock_fd()
 
 
 # ---------------------------------------------------------------------------
@@ -1468,14 +1493,26 @@ def test_every_print_outside_notify_targets_stderr():
         "stdout is reserved for notify()"
     )
 
-    # print() is not the only way onto stdout.
+    # print() is not the only way onto stdout. ``os.write`` is legitimate on a
+    # descriptor of our own (acquire_lock stamps its pid into the lock fd that
+    # way), so it counts as an offender only when the target could be stdout:
+    # the literal fd 1, or any name that mentions stdout.
+    def _targets_stdout(node: ast.Call) -> bool:
+        func = ast.unparse(node.func)
+        if func == "sys.stdout.write":
+            return True
+        if func != "os.write":
+            return False
+        target = ast.unparse(node.args[0]) if node.args else ""
+        return target == "1" or "stdout" in target
+
     direct_writes = [
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and ast.unparse(node.func) in ("sys.stdout.write", "os.write")
         and id(node) not in inside_notify
+        and _targets_stdout(node)
     ]
     assert direct_writes == [], (
         f"direct stdout write at ci_watch.py lines {direct_writes} — "
@@ -1599,106 +1636,330 @@ def test_stdout_equals_the_notifications_for(scenario, tmp_path, capsys):
 
 def _acquire_lock_against_predecessor(
     tmp_path, dies_on: int | None, pid_recycled: bool = False
-):
+) -> dict:
     """Run ``acquire_lock`` against a fake live predecessor.
 
-    ``dies_on`` is the signal number that makes the fake exit (None = it
-    survives everything). ``pid_recycled`` makes every ``ps`` lookup after the
-    first one report an unrelated process on that pid. Returns
-    (signals_sent, lockfile_contents).
+    The fake holds a REAL ``flock`` on the real lockfile, taken on its own file
+    descriptor, so ``acquire_lock`` meets the same kernel refusal a second
+    watcher process would. ``dies_on`` is the signal number that makes the fake
+    exit (None = it survives everything); dying drops its flock, exactly as the
+    kernel does when a process goes away. ``pid_recycled`` makes every ``ps``
+    lookup after the first one report an unrelated process on that pid.
+
+    Returns {"sent": signals sent, "lock": lockfile text, "code": exit code}.
     """
     old_pid = os.getpid() + 12345
     sent: list[int] = []
     alive = {"v": True}
 
-    def fake_kill(pid: int, sig: int) -> None:
-        assert pid == old_pid
-        if sig == 0:
-            if alive["v"]:
-                return
-            raise ProcessLookupError
-        sent.append(sig)
-        if sig == dies_on:
-            alive["v"] = False
-
-    ps_calls = {"n": 0}
-
-    def fake_ps(*args, **kwargs):
-        ps_calls["n"] += 1
-        if pid_recycled and ps_calls["n"] > 1:
-            return MagicMock(stdout="/usr/bin/some-unrelated-process\n")
-        return MagicMock(stdout="uv run ci_watch.py feat")
-
-    with (
-        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
-        patch.object(ci_watch.os, "kill", side_effect=fake_kill),
-        patch.object(ci_watch.subprocess, "run", side_effect=fake_ps),
-        patch.object(ci_watch.time, "sleep"),
-    ):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
         # Inside the patch: _lock_path reads TMP_DIR at call time.
         lock = Path(ci_watch._lock_path("slot-1"))
-        lock.write_text(str(old_pid))
-        ci_watch.acquire_lock("slot-1")
-    return sent, lock.read_text()
+        holder_fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.write(holder_fd, str(old_pid).encode())
+
+            def fake_kill(pid: int, sig: int) -> None:
+                assert pid == old_pid
+                if sig == 0:
+                    if alive["v"]:
+                        return
+                    raise ProcessLookupError
+                sent.append(sig)
+                if sig == dies_on:
+                    alive["v"] = False
+                    fcntl.flock(holder_fd, fcntl.LOCK_UN)
+
+            ps_calls = {"n": 0}
+
+            def fake_ps(*args, **kwargs):
+                ps_calls["n"] += 1
+                if pid_recycled and ps_calls["n"] > 1:
+                    return MagicMock(stdout="/usr/bin/some-unrelated-process\n")
+                return MagicMock(stdout="uv run ci_watch.py feat")
+
+            code = None
+            with (
+                patch.object(ci_watch.os, "kill", side_effect=fake_kill),
+                patch.object(ci_watch.subprocess, "run", side_effect=fake_ps),
+                patch.object(ci_watch.time, "sleep"),
+            ):
+                try:
+                    ci_watch.acquire_lock("slot-1")
+                except SystemExit as exc:
+                    code = exc.code
+            contents = lock.read_text() if lock.exists() else None
+        finally:
+            os.close(holder_fd)
+    return {"sent": sent, "lock": contents, "code": code}
 
 
 def test_acquire_lock_sigkills_a_predecessor_that_ignores_sigterm(tmp_path):
     """Two watchers on one slot both write the same state and PR-cache files.
 
-    Taking the lock while the predecessor is still alive is what creates that
-    window, so SIGTERM must escalate to SIGKILL before the pid is overwritten.
+    The predecessor's flock is what keeps the successor out, and only its death
+    drops that flock — so SIGTERM must escalate to SIGKILL, or the relaunch
+    never gets the slot.
     """
-    sent, lock_contents = _acquire_lock_against_predecessor(
-        tmp_path, dies_on=signal.SIGKILL
+    out = _acquire_lock_against_predecessor(tmp_path, dies_on=signal.SIGKILL)
+    assert out["sent"] == [signal.SIGTERM, signal.SIGKILL]
+    assert out["lock"] == str(os.getpid())
+    assert out["code"] is None
+
+
+def test_acquire_lock_gives_up_on_a_predecessor_that_survives_sigkill(tmp_path, capsys):
+    """A predecessor that outlives SIGKILL keeps its flock, so the slot is not
+    ours to take. Exiting is the only safe answer — the old code took the lock
+    anyway and put two watchers on one slot.
+    """
+    out = _acquire_lock_against_predecessor(tmp_path, dies_on=None)
+    assert (
+        out["sent"] == [signal.SIGTERM, signal.SIGKILL] * ci_watch.LOCK_ACQUIRE_ATTEMPTS
     )
-    assert sent == [signal.SIGTERM, signal.SIGKILL]
-    assert lock_contents == str(os.getpid())
-
-
-def test_acquire_lock_takes_the_lock_even_if_the_predecessor_survives(tmp_path, capsys):
-    """A wedged predecessor must never block a relaunch forever — same rule the
-    SIGTERM timeout already followed. We warn on stderr and proceed."""
-    sent, lock_contents = _acquire_lock_against_predecessor(tmp_path, dies_on=None)
-    assert sent == [signal.SIGTERM, signal.SIGKILL]
-    assert lock_contents == str(os.getpid())
+    assert out["code"] == 3
+    assert out["lock"] == str(os.getpid() + 12345), "the holder's pid must survive"
     captured = capsys.readouterr()
     assert "survived SIGTERM+SIGKILL" in captured.err
+    assert "could not claim slot" in captured.err
     assert captured.out == "", "the warning belongs on stderr, not the event stream"
 
 
 def test_acquire_lock_does_not_sigkill_a_predecessor_that_exits_on_sigterm(tmp_path):
-    sent, lock_contents = _acquire_lock_against_predecessor(
-        tmp_path, dies_on=signal.SIGTERM
-    )
-    assert sent == [signal.SIGTERM]
-    assert lock_contents == str(os.getpid())
+    out = _acquire_lock_against_predecessor(tmp_path, dies_on=signal.SIGTERM)
+    assert out["sent"] == [signal.SIGTERM]
+    assert out["lock"] == str(os.getpid())
+    assert out["code"] is None
 
 
 def test_acquire_lock_does_not_sigkill_a_recycled_pid(tmp_path):
     """The predecessor may exit during the 10s SIGTERM wait and the OS may hand
     its pid to an unrelated process. SIGKILL must never hit that process, so the
     identity check runs again right before escalating."""
-    sent, lock_contents = _acquire_lock_against_predecessor(
-        tmp_path, dies_on=None, pid_recycled=True
+    out = _acquire_lock_against_predecessor(tmp_path, dies_on=None, pid_recycled=True)
+    assert out["sent"] == [signal.SIGTERM]
+    assert out["code"] == 3
+
+
+def test_acquire_lock_claims_a_free_slot(tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        ci_watch.acquire_lock("slot-1")
+        assert ci_watch._holds_lock("slot-1")
+    assert lock.read_text() == str(os.getpid())
+
+
+def test_acquire_lock_takes_a_slot_whose_recorded_pid_is_dead(tmp_path):
+    """A watcher killed with SIGKILL leaves its lockfile behind, pid and all.
+
+    The kernel already dropped its flock, so the slot is free: the successor
+    must take it straight away, with no signals sent to whatever now owns that
+    pid number.
+    """
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch.os, "kill") as kill,
+    ):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        lock.write_text("999999")
+        ci_watch.acquire_lock("slot-1")
+    assert kill.call_count == 0, "no eviction is needed for a lock nobody holds"
+    assert lock.read_text() == str(os.getpid())
+
+
+def test_acquire_lock_gives_up_after_a_bounded_number_of_attempts(tmp_path, capsys):
+    """A holder we cannot identify (so cannot evict) must not spin us forever."""
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        lock = Path(ci_watch._lock_path("slot-1"))
+        holder_fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.write(holder_fd, b"999999")
+            with (
+                patch.object(ci_watch, "_is_ci_watch_pid", return_value=False),
+                pytest.raises(SystemExit) as exc,
+            ):
+                ci_watch.acquire_lock("slot-1")
+        finally:
+            os.close(holder_fd)
+    assert exc.value.code == 3
+    assert not ci_watch._holds_lock("slot-1")
+    assert "could not claim slot" in capsys.readouterr().err
+
+
+# --- Real concurrency -------------------------------------------------------
+#
+# The worker below is run as several real OS processes racing for one slot.
+# Nothing about the lock is mocked: they call the real acquire_lock, so the
+# kernel arbitrates exactly as it does in production.
+#
+# Its command line must not contain "ci_watch" — _is_ci_watch_pid greps `ps`
+# output, and a worker that looks like a watcher would be SIGTERM'd by the next
+# contender instead of being left to hold its lock. Everything therefore comes
+# in through the environment, and the test asserts the command line stays clean.
+
+_LOCK_WORKER = """
+import os
+import sys
+import time
+
+sys.path.insert(0, os.environ["LOCKTEST_SKILL_DIR"])
+import ci_watch
+
+ci_watch.TMP_DIR = os.environ["LOCKTEST_TMP_DIR"]
+SLOT = os.environ["LOCKTEST_SLOT"]
+
+
+def record(result):
+    tmp = os.environ["LOCKTEST_OUT"] + ".part"
+    with open(tmp, "w") as f:
+        f.write(result)
+    os.replace(tmp, os.environ["LOCKTEST_OUT"])
+
+
+def log(line):
+    with open(os.environ["LOCKTEST_LOG"], "a") as f:
+        f.write(line + "\\n")
+
+
+if os.environ["LOCKTEST_MODE"] == "hold":
+    # One shot at the lock, then hold it until the parent has collected every
+    # worker's verdict. Exactly one worker may report WON.
+    try:
+        ci_watch.acquire_lock(SLOT)
+    except SystemExit:
+        record("LOST")
+        sys.exit(0)
+    record("WON")
+    for _ in range(600):
+        if os.path.exists(os.environ["LOCKTEST_RELEASE"]):
+            break
+        time.sleep(0.05)
+    ci_watch.release_lock(SLOT)
+else:
+    # Keep retrying until the slot is ours, hold it briefly, hand it on. The
+    # ENTER/EXIT pairs in the log must never interleave.
+    for _ in range(400):
+        try:
+            ci_watch.acquire_lock(SLOT)
+            break
+        except SystemExit:
+            time.sleep(0.02)
+    else:
+        sys.exit(1)
+    log("ENTER %d" % os.getpid())
+    time.sleep(0.03)
+    log("EXIT %d" % os.getpid())
+    ci_watch.release_lock(SLOT)
+"""
+
+_LOCK_WORKERS = 4
+
+
+def _spawn_lock_workers(tmp_path, mode: str, extra_env: dict | None = None):
+    """Start ``_LOCK_WORKERS`` real processes racing for one slot."""
+    worker = tmp_path / "worker.py"
+    worker.write_text(_LOCK_WORKER)
+    cmd = [sys.executable, str(worker)]
+    assert "ci_watch" not in " ".join(cmd), (
+        "a worker that looks like a watcher would be evicted by its rivals"
     )
-    assert sent == [signal.SIGTERM]
-    assert lock_contents == str(os.getpid())
+    procs = []
+    for i in range(_LOCK_WORKERS):
+        env = {
+            **os.environ,
+            "LOCKTEST_SKILL_DIR": str(SCRIPTS_DIR),
+            "LOCKTEST_TMP_DIR": str(tmp_path),
+            "LOCKTEST_SLOT": "race",
+            "LOCKTEST_MODE": mode,
+            "LOCKTEST_OUT": str(tmp_path / f"out-{i}"),
+            "LOCKTEST_LOG": str(tmp_path / "log"),
+            **(extra_env or {}),
+        }
+        procs.append(
+            subprocess.Popen(
+                cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+        )
+    return procs
+
+
+def _finish_lock_workers(procs, timeout: float = 60.0):
+    for proc in procs:
+        _, err = proc.communicate(timeout=timeout)
+        assert proc.returncode == 0, err.decode()
+
+
+def test_acquire_lock_is_exclusive_across_real_processes(tmp_path):
+    """Four processes go for the same free slot at once; one may have it.
+
+    This is the case the previous design got wrong: every contender unlinked
+    the lockfile before creating its own, so a contender could delete a rival's
+    already-won claim and then "win" the empty path itself. Only a real race
+    between real processes shows that — a mocked FileExistsError cannot.
+    """
+    procs = _spawn_lock_workers(
+        tmp_path, "hold", {"LOCKTEST_RELEASE": str(tmp_path / "release")}
+    )
+    try:
+        outs = [tmp_path / f"out-{i}" for i in range(_LOCK_WORKERS)]
+        for _ in range(300):
+            results = [p.read_text() for p in outs if p.exists()]
+            if len(results) == _LOCK_WORKERS:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"workers did not all report: {results}")
+        assert results.count("WON") == 1, results
+        assert results.count("LOST") == _LOCK_WORKERS - 1, results
+        lock = Path(tmp_path / "ci_watch_lock_race")
+        assert lock.read_text().isdigit(), "the winner's pid must be on disk"
+    finally:
+        (tmp_path / "release").write_text("go")
+        _finish_lock_workers(procs)
+
+
+def test_acquire_lock_hands_the_slot_over_without_overlap(tmp_path):
+    """Same race, but every worker keeps retrying until it gets the slot.
+
+    Each writes ENTER and EXIT around its turn. Two workers holding the lock at
+    once would interleave those lines; perfect nesting is the proof they never
+    did — and it also exercises the handover, where the holder unlinks the
+    lockfile a rival already has open.
+    """
+    procs = _spawn_lock_workers(tmp_path, "handoff")
+    _finish_lock_workers(procs)
+
+    lines = (tmp_path / "log").read_text().split()
+    events = [(lines[i], lines[i + 1]) for i in range(0, len(lines), 2)]
+    assert len(events) == _LOCK_WORKERS * 2, events
+    holder = None
+    for kind, pid in events:
+        if kind == "ENTER":
+            assert holder is None, f"pid {pid} entered while {holder} held: {events}"
+            holder = pid
+        else:
+            assert kind == "EXIT" and holder == pid, events
+            holder = None
+    assert holder is None
+    assert len({pid for _, pid in events}) == _LOCK_WORKERS
+    assert not (tmp_path / "ci_watch_lock_race").exists()
 
 
 def test_release_lock_drops_our_own_lockfile(tmp_path):
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
         lock = Path(ci_watch._lock_path("slot-1"))
-        lock.write_text(str(os.getpid()))
+        ci_watch.acquire_lock("slot-1")
         ci_watch.release_lock("slot-1")
+        assert not ci_watch._holds_lock("slot-1")
     assert not lock.exists()
 
 
-def test_release_lock_leaves_a_successors_lockfile_alone(tmp_path):
-    """A predecessor that exits after ``acquire_lock`` gave up waiting must not
-    unlink the successor's lockfile.
+def test_release_lock_leaves_a_holders_lockfile_alone(tmp_path):
+    """A watcher that never owned the slot must not unlink its lockfile.
 
     The /ci-watcher skill treats that file as its only liveness oracle, so a
-    false DEAD makes it launch a second watcher on the same slot.
+    false DEAD makes it launch a second watcher.
     """
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
         lock = Path(ci_watch._lock_path("slot-1"))
@@ -1708,12 +1969,70 @@ def test_release_lock_leaves_a_successors_lockfile_alone(tmp_path):
 
 
 @pytest.mark.parametrize("content", ["", "not-a-pid"])
-def test_release_lock_tolerates_a_garbled_lockfile(content, tmp_path):
+def test_release_lock_ignores_the_recorded_pid(content, tmp_path):
+    """Holding the flock is what makes the slot ours, not the file's contents.
+
+    A truncated or garbled write must not strand the lockfile: the /ci-watcher
+    skill would read it as a live watcher forever.
+    """
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
         lock = Path(ci_watch._lock_path("slot-1"))
+        ci_watch.acquire_lock("slot-1")
         lock.write_text(content)
-        ci_watch.release_lock("slot-1")  # must not raise
-    assert lock.exists()
+        ci_watch.release_lock("slot-1")
+    assert not lock.exists()
+
+
+def _captured_cleanup(tmp_path):
+    """The ``cleanup`` closure that ``watch()`` registers with atexit.
+
+    ``cleanup`` is reachable only through a real ``watch()`` run, so the loop is
+    driven for one iteration and the registration is intercepted — which also
+    keeps the handler from firing later, at interpreter exit.
+    """
+    with patch.object(ci_watch.atexit, "register") as register:
+        run_watch(str(tmp_path), api_get_side_effect=make_api_get(), max_sleeps=1)
+    return register.call_args.args[0]
+
+
+def _lock_slot_files(tmp_path, lock_pid: int):
+    """State file, PR cache and lockfile for slot ``feat``, all present."""
+    state = Path(ci_watch._state_path("feat"))
+    pr = Path(ci_watch._pr_path("feat"))
+    lock = Path(ci_watch._lock_path("feat"))
+    state.write_text("feat:running")
+    pr.write_text("{}")
+    lock.write_text(str(lock_pid))
+    return state, pr, lock
+
+
+def test_cleanup_leaves_a_holders_state_files_alone(tmp_path):
+    """A watcher that lost the race (or was never the holder) must not wipe the
+    live state file and PR cache the real holder is writing — the /ci-watcher
+    skill reads both as the session's CI status.
+    """
+    cleanup = _captured_cleanup(tmp_path)
+    holder_pid = os.getpid() + 1
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        state, pr, lock = _lock_slot_files(tmp_path, holder_pid)
+        cleanup()
+    assert state.read_text() == "feat:running"
+    assert pr.read_text() == "{}"
+    assert lock.read_text() == str(holder_pid)
+
+
+def test_cleanup_wipes_the_slot_while_we_still_hold_the_lock(tmp_path):
+    """The other half of the guard: a watcher that still owns the slot must
+    clear its own files, or a stale "running" state outlives the process.
+    """
+    cleanup = _captured_cleanup(tmp_path)
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        state, pr, lock = _lock_slot_files(tmp_path, os.getpid())
+        ci_watch.acquire_lock("feat")
+        cleanup()
+    assert not state.exists()
+    assert not pr.exists()
+    assert not lock.exists()
 
 
 def test_main_aborts_without_session_id(monkeypatch, capsys):
