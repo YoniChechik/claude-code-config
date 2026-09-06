@@ -76,5 +76,6 @@ After the plan file is written, run a second-opinion pass before terminating:
 - **Triage**: Separate valid points from noise; note any items that are open questions for the user rather than direct fixes.
 - **Propose**: Present a short bulleted list of proposed plan changes. Use AskUserQuestion for concrete accept/reject choices; otherwise plain text.
 - **Apply**: Make surgical edits to the plan `.md` for accepted changes — do not rewrite wholesale.
+- **Sync session name**: Invoke the `/session-name` skill, passing a short proposed name derived from the feature just planned (e.g. `$FEATURE_NAME` from Step 2, or a short label distilled from the plan's TLDR) as its `$ARGUMENTS`. This keeps the session's displayed name in sync with the feature just planned. `/session-name` handles its own orchestrator-confirmation flow if this runs inside a subagent — no separate ping is needed here.
 - **Done**: Tell the user the plan was critiqued by Codex and updated, and point them to the final file.
 

@@ -56,10 +56,35 @@ _set_tab_rgb() {
         "$r" "$g" "$b" > "$target_tty" 2>/dev/null || true
 }
 
+# Close every open file descriptor above stderr (fd 0/1/2) in the CURRENT
+# shell. Meant to be the first statement inside a detached background
+# subshell, so a forked cleanup/playback job releases whatever EXTRA
+# descriptors it inherited from its caller (a bats test's own captured pipe,
+# a hook's inherited fd) rather than holding them open for as long as the
+# background job runs. Without this a caller with such a descriptor open can
+# never see EOF on it — e.g. a test's FIFO writer stays "open" because a
+# detached 10s cleanup sleep still holds a copy, long after the caller closed
+# its own. Best-effort: any failure to close a given fd is swallowed.
+_close_extra_fds() {
+    local fd_path fd
+    for fd_path in /dev/fd/*; do
+        fd="${fd_path##*/}"
+        # Skip stdin/stdout/stderr, and skip any non-numeric entry — which is
+        # what `fd` holds when /dev/fd does not exist and the glob stays
+        # unexpanded as the literal "*". Everything reaching `eval` is
+        # therefore a plain fd number above 2.
+        case "$fd" in
+            ''|0|1|2|*[!0-9]*) continue ;;
+        esac
+        eval "exec ${fd}>&-" 2>/dev/null
+    done
+    return 0
+}
+
 # Schedule removal of a dedup lockdir after the window so the next genuine
 # event chimes again. Detached so the hook returns immediately.
 _schedule_lockdir_cleanup() {
-    ( sleep "$_DEDUP_WINDOW_SECONDS"; rmdir "$1" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+    ( _close_extra_fds; sleep "$_DEDUP_WINDOW_SECONDS"; rmdir "$1" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
     disown 2>/dev/null || true
 }
 
@@ -149,9 +174,90 @@ tab_state() {
 # Play the attention chime (Glass.aiff) detached, if afplay is available.
 _play_chime_sound() {
     if command -v afplay >/dev/null 2>&1; then
-        afplay /System/Library/Sounds/Glass.aiff </dev/null >/dev/null 2>&1 &
+        ( _close_extra_fds; afplay /System/Library/Sounds/Glass.aiff ) </dev/null >/dev/null 2>&1 &
         disown
     fi
+}
+
+# --- Session name (the /session-name skill's per-session label) --------------
+# THE single implementation of the sanitize-and-cap contract every session-name
+# site shares: this file, scripts/status_line.sh (which sources this file), and
+# skills/session-name/SKILL.md (which also sources this file). Do not re-inline
+# a copy anywhere — the whole point is that there is exactly one of these.
+#
+# Contract: drop C0 control bytes (0x00-0x1F, which covers raw ESC/BEL/newline/
+# tab), DEL (0x7F), C1 (0x80-0x9F), and the backslash character; trim
+# leading/trailing whitespace; cap at 35 Unicode CODEPOINTS — never a bash
+# byte-slice like ${name:0:35}, which can split a multi-byte UTF-8 character.
+#
+# Backslash is stripped because stripping raw control bytes alone is NOT
+# enough: any renderer that expands backslash escapes (printf '%b', echo -e)
+# turns purely-printable text such as `\033]0;PWNED\007` back into a genuine
+# escape sequence. Removing 0x5C closes that at the source, independently of
+# what each consumer does at print time.
+#
+# The value reaches python on STDIN as raw bytes, never as an argv string.
+# argv would (a) exceed ARG_MAX on an oversized sidecar file, which aborts the
+# caller, and (b) decode invalid UTF-8 with surrogateescape, yielding lone
+# surrogates that raise UnicodeEncodeError on output. Decoding the bytes here
+# with errors="ignore" drops malformed bytes cleanly instead.
+_sanitize_and_cap() {
+    local raw="$1"
+    # Fast path, zero forks: a short plain-ASCII label carrying no backslash
+    # and no edge whitespace is already in its final form. status_line.sh calls
+    # this on a ~1/second poll, so avoiding a python start-up here is worth the
+    # extra branch. `local LC_ALL=C` makes the range a pure BYTE test (and is
+    # restored on return), so every multi-byte or invalid byte takes the slow
+    # path below rather than being wrongly waved through.
+    local LC_ALL=C
+    case "$raw" in
+        *[!\ -~]* | *\\* | " "* | *" ") ;;
+        *) if [ "${#raw}" -le 35 ]; then printf '%s' "$raw"; return 0; fi ;;
+    esac
+    # Bytes in on stdin, bytes out on stdout: neither direction goes through a
+    # locale-dependent text encoder, so the LC_ALL=C set above for the fast-path
+    # test cannot make a multi-byte result unprintable.
+    printf '%s' "$raw" | python3 -c '
+import sys
+s = sys.stdin.buffer.read().decode("utf-8", "ignore")
+s = "".join(
+    ch for ch in s
+    if not (ord(ch) < 0x20 or ord(ch) == 0x7F or 0x80 <= ord(ch) <= 0x9F or ch == "\\")
+)
+sys.stdout.buffer.write(s.strip()[:35].encode("utf-8"))
+' 2>/dev/null || true
+}
+
+# Echo the sanitized+capped session name stored for session id $1 (the
+# `/session-name` skill's sidecar at
+# "${CLAUDE_NOTIFY_TMP_DIR}/session_name_<session_id>").
+#
+# NO fallback of any kind: a missing session id, a missing/empty/non-regular
+# sidecar file, or a name that sanitizes down to nothing all echo nothing
+# (empty, exit 0). The caller must then skip the title/segment entirely rather
+# than substituting a git branch, a worktree name, or any other value.
+_session_name_read() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || return 0
+    local path="${CLAUDE_NOTIFY_TMP_DIR}/session_name_${session_id}"
+    # Regular files only. The path is predictable and lives in a shared /tmp,
+    # so a FIFO or socket planted there would block `cat` (and with it the
+    # 1s-interval status-line poll) forever.
+    [ -f "$path" ] || return 0
+    # Byte cap taken BEFORE the value is handed to anything else, so a runaway
+    # or corrupt multi-megabyte sidecar degrades to a truncated name instead of
+    # being slurped into memory on every poll. 512 bytes is far more than 35
+    # codepoints can ever need (4 bytes maximum per codepoint).
+    local raw
+    raw=$(head -c 512 "$path" 2>/dev/null || true)
+    [ -n "$raw" ] || return 0
+    _sanitize_and_cap "$raw"
+}
+
+# The title to paint for THIS session: the current session's stored name, or
+# nothing at all. Callers must not emit an OSC title write when it is empty.
+_display_title() {
+    _session_name_read "${CLAUDE_CODE_SESSION_ID:-}"
 }
 
 # GREEN tab + single chime + "waiting" title: the fully-settled, needs-
@@ -191,9 +297,11 @@ notify_user_attention() {
         _play_chime_sound
     fi
 
-    local branch
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-repo")
-    printf '\033]0;%s\007' "$branch" > "$target_tty" 2>/dev/null || true
+    local title
+    title=$(_display_title)
+    if [ -n "$title" ]; then
+        printf '\033]0;%s\007' "$title" > "$target_tty" 2>/dev/null || true
+    fi
 }
 
 # Play the attention chime UNCONDITIONALLY (bypasses the dedup guard). Used by
