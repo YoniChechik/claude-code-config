@@ -27,3 +27,6 @@ A SUBAGENT CAN **NOT** SPIN ANOTHER SUBAGENT INSIDE IT! MAX 1 LAYER DEEP
 
 ## Parallelism
 Default to parallel work. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
+
+## Session naming
+Run the `/session-name` skill now, at the start of this session. Re-run it any time the task changes, since the label should always match what the session is currently doing.
