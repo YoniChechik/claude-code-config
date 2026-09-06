@@ -695,6 +695,7 @@ _bg_agents_log() {
 #   (3) the CI watcher process is ALIVE (lockfile PID + kill -0 + args match).
 # Returns 1 (non-active) when the state file is missing/empty, the watcher is
 # dead (so a stale "running" from a crashed watcher can never pin blue), the
+# watcher is alive but its notification channel is gone (monitor-detached), the
 # branch mismatches, or the state is terminal.
 ci_is_active() {
     local slot="${CLAUDE_CODE_SESSION_ID:-}"
@@ -713,6 +714,16 @@ ci_is_active() {
     if [ "$stored_branch" = "$raw" ]; then
         return 1
     fi
+
+    # (0) ci_watch.py appends ":monitor-detached@<epoch>" once its stdout writes
+    # start failing. The process lives on, but nothing it finds will ever be
+    # reported, so it is NOT "background work in progress": folding it into the
+    # active bucket would paint the tab blue and swallow the chime while the CI
+    # result silently goes nowhere. status_line.sh renders the distinct
+    # "ci notifications lost" label for the same marker.
+    case "$state_only" in
+        *:monitor-detached@*) return 1 ;;
+    esac
 
     # (1) Only "running" / "merging" count as actively running.
     case "$state_only" in

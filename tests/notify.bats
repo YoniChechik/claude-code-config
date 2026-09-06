@@ -160,6 +160,17 @@ stub_branch() {
     [ "$status" -eq 0 ]
 }
 
+@test "ci_is_active: NON-active when the notification channel is gone" {
+    # Alive + running, but ci_watch.py's stdout writes are failing, so no CI
+    # result will ever be reported. Counting it as active would pin the tab blue
+    # and swallow the chime while nothing is left to tell the user anything.
+    stub_branch "feat-x"
+    write_state "feat-x:running:monitor-detached@1757000000"
+    write_lock "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -ne 0 ]
+}
+
 @test "ci_is_active: NON-active when state file missing" {
     stub_branch "feat-x"
     write_lock "$(spawn_fake_watcher)"

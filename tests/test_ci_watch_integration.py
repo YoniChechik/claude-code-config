@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,22 @@ SCRIPTS_DIR = Path(__file__).parent.parent / "skills" / "ci-watcher"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ci_watch
+
+
+@pytest.fixture(autouse=True)
+def _reset_monitor_detached_state():
+    """The monitor-detached marker is sticky for the process lifetime by design.
+
+    That is right for a watcher and wrong for a test session: one test tripping
+    a broken stdout would otherwise append the marker to every later test's
+    state file. Reset both module globals around each test.
+    """
+    ci_watch._MONITOR_DETACHED_AT = None
+    ci_watch._LAST_STATE = None
+    yield
+    ci_watch._MONITOR_DETACHED_AT = None
+    ci_watch._LAST_STATE = None
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -1320,6 +1337,68 @@ def test_notify_survives_a_dead_stdout():
         ci_watch.notify("CI PASSED on branch feat")  # must not raise
 
 
+def test_notify_records_a_dead_channel_in_the_state_file(tmp_path):
+    """A dropped notification must leave a durable trace.
+
+    Without it, "watcher alive and reporting" and "watcher alive but every
+    notification is going nowhere" look identical to the pid-liveness check that
+    SKILL.md, ci_is_active and status_line.sh all rely on.
+    """
+
+    class BrokenStdout:
+        def write(self, s: str) -> int:
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self) -> None:
+            pass
+
+    state_file = tmp_path / "ci_watch_state_slot-1"
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.write_state("slot-1", "feat", "running")
+        assert state_file.read_text() == "feat:running"
+
+        with patch.object(ci_watch.sys, "stdout", BrokenStdout()):
+            ci_watch.notify("CI PASSED on branch feat")
+
+        marked = state_file.read_text()
+        assert marked.startswith("feat:running:monitor-detached@")
+        assert int(marked.rsplit("@", 1)[1]) > 0
+
+        # Sticky: a later state write keeps carrying the marker, and a stdout
+        # write that happens to succeed does NOT clear it.
+        ci_watch.notify("CI PASSED on branch feat")
+        ci_watch.write_state("slot-1", "feat", "passed")
+        assert state_file.read_text().startswith("feat:passed:monitor-detached@")
+
+
+def test_notify_survives_stdout_and_stderr_dying_together(tmp_path):
+    """Monitor's auto-detach closes BOTH pipes, not just stdout.
+
+    The stderr warning inside the failed-stdout handler would then raise a
+    second OSError out of ``notify`` and kill the watcher — the exact death the
+    handler exists to prevent. The marker must still land on disk.
+    """
+
+    class BrokenStream:
+        def write(self, s: str) -> int:
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self) -> None:
+            raise BrokenPipeError(32, "Broken pipe")
+
+    state_file = tmp_path / "ci_watch_state_slot-1"
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.write_state("slot-1", "feat", "running")
+
+        with (
+            patch.object(ci_watch.sys, "stdout", BrokenStream()),
+            patch.object(ci_watch.sys, "stderr", BrokenStream()),
+        ):
+            ci_watch.notify("CI PASSED on branch feat")  # must not raise
+
+        assert state_file.read_text().startswith("feat:running:monitor-detached@")
+
+
 def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, capsys):
     """The longest notification the watcher emits (STUCK_PENDING_REQUIRED_CHECKS,
     ~20 lines) must land on stdout byte-for-byte, with the diagnostics that the
@@ -1516,6 +1595,94 @@ def test_stdout_equals_the_notifications_for(scenario, tmp_path, capsys):
         assert captured.out == ""
     else:
         assert out["notify_calls"], f"{scenario} should emit a notification"
+
+
+def _acquire_lock_against_predecessor(
+    tmp_path, dies_on: int | None, pid_recycled: bool = False
+):
+    """Run ``acquire_lock`` against a fake live predecessor.
+
+    ``dies_on`` is the signal number that makes the fake exit (None = it
+    survives everything). ``pid_recycled`` makes every ``ps`` lookup after the
+    first one report an unrelated process on that pid. Returns
+    (signals_sent, lockfile_contents).
+    """
+    old_pid = os.getpid() + 12345
+    sent: list[int] = []
+    alive = {"v": True}
+
+    def fake_kill(pid: int, sig: int) -> None:
+        assert pid == old_pid
+        if sig == 0:
+            if alive["v"]:
+                return
+            raise ProcessLookupError
+        sent.append(sig)
+        if sig == dies_on:
+            alive["v"] = False
+
+    ps_calls = {"n": 0}
+
+    def fake_ps(*args, **kwargs):
+        ps_calls["n"] += 1
+        if pid_recycled and ps_calls["n"] > 1:
+            return MagicMock(stdout="/usr/bin/some-unrelated-process\n")
+        return MagicMock(stdout="uv run ci_watch.py feat")
+
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch.os, "kill", side_effect=fake_kill),
+        patch.object(ci_watch.subprocess, "run", side_effect=fake_ps),
+        patch.object(ci_watch.time, "sleep"),
+    ):
+        # Inside the patch: _lock_path reads TMP_DIR at call time.
+        lock = Path(ci_watch._lock_path("slot-1"))
+        lock.write_text(str(old_pid))
+        ci_watch.acquire_lock("slot-1")
+    return sent, lock.read_text()
+
+
+def test_acquire_lock_sigkills_a_predecessor_that_ignores_sigterm(tmp_path):
+    """Two watchers on one slot both write the same state and PR-cache files.
+
+    Taking the lock while the predecessor is still alive is what creates that
+    window, so SIGTERM must escalate to SIGKILL before the pid is overwritten.
+    """
+    sent, lock_contents = _acquire_lock_against_predecessor(
+        tmp_path, dies_on=signal.SIGKILL
+    )
+    assert sent == [signal.SIGTERM, signal.SIGKILL]
+    assert lock_contents == str(os.getpid())
+
+
+def test_acquire_lock_takes_the_lock_even_if_the_predecessor_survives(tmp_path, capsys):
+    """A wedged predecessor must never block a relaunch forever — same rule the
+    SIGTERM timeout already followed. We warn on stderr and proceed."""
+    sent, lock_contents = _acquire_lock_against_predecessor(tmp_path, dies_on=None)
+    assert sent == [signal.SIGTERM, signal.SIGKILL]
+    assert lock_contents == str(os.getpid())
+    captured = capsys.readouterr()
+    assert "survived SIGTERM+SIGKILL" in captured.err
+    assert captured.out == "", "the warning belongs on stderr, not the event stream"
+
+
+def test_acquire_lock_does_not_sigkill_a_predecessor_that_exits_on_sigterm(tmp_path):
+    sent, lock_contents = _acquire_lock_against_predecessor(
+        tmp_path, dies_on=signal.SIGTERM
+    )
+    assert sent == [signal.SIGTERM]
+    assert lock_contents == str(os.getpid())
+
+
+def test_acquire_lock_does_not_sigkill_a_recycled_pid(tmp_path):
+    """The predecessor may exit during the 10s SIGTERM wait and the OS may hand
+    its pid to an unrelated process. SIGKILL must never hit that process, so the
+    identity check runs again right before escalating."""
+    sent, lock_contents = _acquire_lock_against_predecessor(
+        tmp_path, dies_on=None, pid_recycled=True
+    )
+    assert sent == [signal.SIGTERM]
+    assert lock_contents == str(os.getpid())
 
 
 def test_release_lock_drops_our_own_lockfile(tmp_path):

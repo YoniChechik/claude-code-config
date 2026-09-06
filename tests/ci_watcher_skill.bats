@@ -24,6 +24,7 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../skills/ci-watcher/SKILL.md"
 setup() {
     export CLAUDE_CODE_SESSION_ID="testsess"
     LOCK="$BATS_TEST_TMPDIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+    STATE="$BATS_TEST_TMPDIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
     TASK="$BATS_TEST_TMPDIR/ci_watch_task_${CLAUDE_CODE_SESSION_ID}"
     # PIDs go to a FILE, not a shell array: every call site is
     # `$(spawn_fake_watcher)`, so an array append inside that command
@@ -118,6 +119,35 @@ assert_process_alive() {
     pid="$(spawn_fake_watcher)"
     assert_process_alive "$pid"
     printf '%s' "$pid" > "$LOCK"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ "$output" = "ALIVE $pid" ]
+}
+
+@test "liveness: MUTE when the watcher is alive but its notifications are lost" {
+    # ci_watch.py appends ":monitor-detached@<epoch>" after a failed stdout
+    # write. Reporting that as plain ALIVE hides a watcher that will never
+    # report another CI result.
+    local script pid
+    script="$(extract_block 'ps -p "$PID" -o args=')"
+    pid="$(spawn_fake_watcher)"
+    assert_process_alive "$pid"
+    printf '%s' "$pid" > "$LOCK"
+    printf '%s' 'feat-x:running:monitor-detached@1757000000' > "$STATE"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ "$output" = "MUTE $pid" ]
+}
+
+@test "liveness: ALIVE when the state file carries no detached marker" {
+    local script pid
+    script="$(extract_block 'ps -p "$PID" -o args=')"
+    pid="$(spawn_fake_watcher)"
+    assert_process_alive "$pid"
+    printf '%s' "$pid" > "$LOCK"
+    printf '%s' 'feat-x:running' > "$STATE"
 
     run bash "$script"
     [ "$status" -eq 0 ]

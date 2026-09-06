@@ -179,6 +179,17 @@ if [ -n "$slot" ]; then
       ci_state_only="$_ci_state_raw"
     fi
 
+    # ci_watch.py appends ":monitor-detached@<epoch>" once its stdout writes
+    # start failing: the process still polls CI, but every notification it
+    # emits is dropped. Strip the field so the state value still matches below.
+    _ci_detached=false
+    case "$ci_state_only" in
+      *:monitor-detached@*)
+        _ci_detached=true
+        ci_state_only="${ci_state_only%%:monitor-detached@*}"
+        ;;
+    esac
+
     # For terminal states, no watcher is expected — show result forever.
     # For active states, verify the watcher process is still alive.
     _watcher_alive=false
@@ -198,6 +209,9 @@ if [ -n "$slot" ]; then
 
     if [[ "$_watcher_alive" == false && -n "$ci_state_only" ]]; then
       ci_display="${red}⚠ ci watcher died${reset}"
+    elif [[ "$_ci_detached" == true ]]; then
+      # Alive, but mute: distinct from both "died" and a plain running state.
+      ci_display="${red}⚠ ci notifications lost — restart watcher${reset}"
     else
       ci_state="$ci_state_only"
       if [ "$ci_state" = "passed" ] && [ -f "$pr_cache_file" ]; then

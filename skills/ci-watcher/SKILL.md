@@ -41,11 +41,16 @@ if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
 fi
 # Read the PID the watcher wrote into its lockfile, then confirm that PID is
 # still a live ci_watch process (ps args must contain "ci_watch"). Prints
-# ALIVE or DEAD.
+# ALIVE, MUTE (alive, but its notifications reach nobody) or DEAD.
 LOCK="/tmp/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+STATE="/tmp/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
 PID=$(cat "$LOCK" 2>/dev/null || echo "")
 if [[ -n "$PID" ]] && ps -p "$PID" -o args= 2>/dev/null | grep -q ci_watch; then
-    echo "ALIVE $PID"
+    if grep -q ':monitor-detached@' "$STATE" 2>/dev/null; then
+        echo "MUTE $PID"
+    else
+        echo "ALIVE $PID"
+    fi
 else
     echo "DEAD"
 fi
@@ -55,6 +60,10 @@ Then:
 - **DEAD** — the stored task id is stale. Call `TaskStop` on it anyway (best
   effort). A "task not found" / "already finished" error is EXPECTED here: ignore
   it, do NOT treat it as a launch failure. Then delete the task-id file.
+- **MUTE `<PID>`** — the process runs but its stdout writes fail, so no CI
+  result will ever reach you again. Treat it exactly like **ALIVE** here, then
+  relaunch it (step 2) and tell the user why; a relaunch is not a Claude-
+  initiated kill.
 - **ALIVE** — call `TaskStop` on the id for real, then confirm both the Monitor
   task reports stopped AND the PID from the lockfile is gone: re-run the check
   above at 1s intervals, **at most 10 times**. The loop is bounded on purpose —

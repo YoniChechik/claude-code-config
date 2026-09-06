@@ -19,7 +19,10 @@ Args (positional):
     BRANCH         branch to watch
 
 State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
-    /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line)
+    /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line), plus a
+                                  ":monitor-detached@<epoch>" third field once
+                                  a stdout write has failed — the watcher runs
+                                  on but its notifications reach nobody
     /tmp/ci_watch_pr_{slot}       PR JSON cache for status_line.sh
     /tmp/ci_watch_lock_{slot}     PID lock; also the liveness oracle the
                                   /ci-watcher skill uses to decide whether a
@@ -72,6 +75,11 @@ STUCK_PENDING_MIN_ITERS = 60
 # Module-level base dir for state files. Tests override this.
 TMP_DIR = "/tmp"
 
+# Third field appended to the state file once stdout writes start failing, as
+# "<branch>:<state>:monitor-detached@<epoch>". Readers (status_line.sh,
+# _notify.sh, SKILL.md's liveness check) strip it before matching the state.
+MONITOR_DETACHED_FIELD = "monitor-detached"
+
 GITHUB_API = "https://api.github.com"
 
 
@@ -119,6 +127,20 @@ def api_get(url: str, cache: ApiCache, token: str) -> tuple[Any, bool]:
         return cache.data, False
 
 
+def _log_stderr(message: str) -> None:
+    """Write one diagnostic line to stderr, dropping it if stderr is gone.
+
+    Monitor's auto-detach closes BOTH pipes, so the stderr write inside a failed
+    stdout write's handler can raise a second ``OSError`` and take the watcher
+    down — exactly the death the handler exists to prevent. Every stderr write on
+    a notification-failure path goes through here.
+    """
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except OSError:
+        pass
+
+
 def notify(message: str) -> None:
     """Emit one notification as a single stdout write.
 
@@ -129,12 +151,17 @@ def notify(message: str) -> None:
     Best-effort: a dead reader (Monitor's auto-stop on high event volume, a
     closed pipe) must never take the watcher process down with it. The CRITICAL
     RULE of the /ci-watcher skill is that nothing kills this process by
-    accident, so a failed write is dropped, not raised.
+    accident, so a failed write is dropped, not raised — but it IS recorded in
+    the state file, so "alive and reporting" stays distinguishable from "alive
+    and shouting into a closed pipe".
     """
     try:
         print(message, flush=True)
     except OSError as e:
-        print(f"[warn] notify failed: {e}", file=sys.stderr, flush=True)
+        # Marker FIRST: stderr may be closed too, so anything written before the
+        # marker is a chance to die with the failure unrecorded.
+        _mark_monitor_detached()
+        _log_stderr(f"[warn] notify failed: {e}")
 
 
 # --- gh CLI fallbacks (used only on rare events) ---
@@ -478,14 +505,32 @@ def _lock_path(slot: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
 
 
+# Epoch of the FIRST failed stdout write, or None while the notification
+# channel still works. Sticky by design — see _mark_monitor_detached.
+_MONITOR_DETACHED_AT: float | None = None
+# (slot, branch, value) of the last write_state. notify() only receives a
+# message, so this is how it re-stamps the right state file when a write fails.
+_LAST_STATE: tuple[str, str, str] | None = None
+
+
 def write_state(slot: str, branch: str, value: str) -> None:
-    """Atomic write of '<branch>:<state>'."""
-    print(f"[ci_watch] write_state -> {value!r}", file=sys.stderr, flush=True)
+    """Atomic write of '<branch>:<state>'.
+
+    Once the notification channel has been seen broken, a third field
+    ':monitor-detached@<epoch>' is appended so every state write keeps carrying
+    the marker.
+    """
+    global _LAST_STATE
+    _LAST_STATE = (slot, branch, value)
+    _log_stderr(f"[ci_watch] write_state -> {value!r}")
+    line = f"{branch}:{value}"
+    if _MONITOR_DETACHED_AT is not None:
+        line = f"{line}:{MONITOR_DETACHED_FIELD}@{int(_MONITOR_DETACHED_AT)}"
     path = _state_path(slot)
     fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{slot}.", dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(f"{branch}:{value}")
+            f.write(line)
         os.replace(tmp, path)
     except Exception:
         try:
@@ -493,6 +538,28 @@ def write_state(slot: str, branch: str, value: str) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def _mark_monitor_detached() -> None:
+    """Persist "our notifications reach nobody" into the state file.
+
+    Sticky, never cleared on a later successful write: Monitor auto-stops a task
+    on its own side, which a plain ``print`` cannot detect, so a write that
+    happens not to raise is no proof the channel came back — only an operator
+    restart is. Same one-way-transition discipline as merge_commit_visible.
+    """
+    global _MONITOR_DETACHED_AT
+    if _MONITOR_DETACHED_AT is not None:
+        return
+    _MONITOR_DETACHED_AT = time.time()
+    if _LAST_STATE is None:
+        # No state written yet; the first write_state will carry the marker.
+        return
+    slot, branch, value = _LAST_STATE
+    try:
+        write_state(slot, branch, value)
+    except OSError as e:
+        _log_stderr(f"[warn] could not persist monitor-detached marker: {e}")
 
 
 def write_pr_cache(slot: str, data: dict) -> None:
@@ -513,32 +580,84 @@ def write_pr_cache(slot: str, data: dict) -> None:
 # --- Lock handling ---
 
 
+def _wait_for_exit(pid: int, seconds: int) -> bool:
+    """Poll ``pid`` at 1s intervals for up to ``seconds``. True once it is gone.
+
+    ``PermissionError`` means the pid is alive but owned by someone we cannot
+    signal — reported as "still there", since we can do nothing more to it.
+    """
+    for i in range(seconds + 1):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        if i < seconds:
+            time.sleep(1)
+    return False
+
+
+def _is_ci_watch_pid(pid: int) -> bool:
+    """True if ``pid`` currently runs a ci_watch process."""
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "args="],
+        capture_output=True,
+        text=True,
+    )
+    return "ci_watch" in result.stdout
+
+
 def acquire_lock(slot: str) -> None:
-    """Kill any stale predecessor and take the lock for this slot."""
+    """Kill any stale predecessor and take the lock for this slot.
+
+    SIGTERM, then SIGKILL if the predecessor ignores it. Writing our pid while
+    the old watcher is still running would put TWO watchers on one slot, both
+    writing the same state and PR-cache files, until the loser finally exits.
+    """
     lock_path = _lock_path(slot)
     if lock_path.exists():
         try:
             old_pid = int(lock_path.read_text().strip())
-            result = subprocess.run(
-                ["ps", "-p", str(old_pid), "-o", "args="],
-                capture_output=True,
-                text=True,
-            )
-            if "ci_watch" in result.stdout:
+            if _is_ci_watch_pid(old_pid):
                 try:
                     os.kill(old_pid, signal.SIGTERM)
                 except (ProcessLookupError, PermissionError):
                     pass
-                # Poll for exit, max 10s.
-                for _ in range(10):
+                # Re-check identity after the wait: the predecessor may have
+                # exited and the OS recycled its pid for an unrelated process,
+                # which SIGKILL must never hit.
+                if not _wait_for_exit(old_pid, 10) and _is_ci_watch_pid(old_pid):
+                    # SIGTERM went unanswered for 10s (handler wedged, process
+                    # stuck in a syscall). Escalate rather than start a second
+                    # watcher on this slot.
                     try:
-                        os.kill(old_pid, 0)
-                    except ProcessLookupError:
-                        break
-                    time.sleep(1)
+                        os.kill(old_pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    if not _wait_for_exit(old_pid, 2):
+                        # Same rule as the SIGTERM timeout above: a stuck
+                        # predecessor must never block a relaunch forever. Warn
+                        # loudly and take the lock anyway — release_lock's pid
+                        # guard stops the loser unlinking our lockfile.
+                        print(
+                            f"[warn] acquire_lock: pid {old_pid} survived "
+                            f"SIGTERM+SIGKILL; taking the lock anyway — two "
+                            f"watchers may share slot {slot}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
         except (ValueError, ProcessLookupError, PermissionError):
             pass
     lock_path.write_text(str(os.getpid()))
+
+
+def _holds_lock(slot: str) -> bool:
+    """True if the lockfile on disk still records OUR pid."""
+    try:
+        return int(_lock_path(slot).read_text().strip()) == os.getpid()
+    except (OSError, ValueError):
+        return False
 
 
 def release_lock(slot: str) -> None:
@@ -549,12 +668,11 @@ def release_lock(slot: str) -> None:
     SUCCESSOR's lockfile. The /ci-watcher skill reads that file as its only
     liveness oracle, so a false DEAD would make it launch a second watcher.
     """
-    lock_path = _lock_path(slot)
-    try:
-        if int(lock_path.read_text().strip()) == os.getpid():
-            lock_path.unlink(missing_ok=True)
-    except (OSError, ValueError):
-        pass
+    if _holds_lock(slot):
+        try:
+            _lock_path(slot).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # --- State container ---
@@ -1040,7 +1158,10 @@ def watch(
     write_state(slot, branch, "running")
 
     def cleanup() -> None:
-        if not state.keep_state_file:
+        # Same pid guard as release_lock: acquire_lock can take a slot whose
+        # predecessor never died, so a late-exiting predecessor must not wipe
+        # the SUCCESSOR's live state file and PR cache.
+        if not state.keep_state_file and _holds_lock(slot):
             _state_path(slot).unlink(missing_ok=True)
             _pr_path(slot).unlink(missing_ok=True)
         release_lock(slot)
