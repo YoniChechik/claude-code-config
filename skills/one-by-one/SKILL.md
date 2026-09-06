@@ -14,9 +14,9 @@ Pace a multi-item answer. One item per turn. Every item is numbered, start to fi
 2. Numbered list of item names only — no content yet.
 3. Stop. Wait for "next" or "go".
 4. On "go", write that item using the adhd-structure format (1-line summary → 5-line version → deeper detail on request). Keep its number in view (e.g. "Item 2 of 5").
-5. If the item needs a decision, end it with a short recommendation and the lowest-effort way to answer (see "Claude's questions").
+5. If the item is a real decision/question, end it with a short recommendation and the lowest-effort way to answer (see "Claude's questions"). If the item is purely informational (nothing to decide), skip the recommendation entirely — just present the information.
 6. End the item with: "Say 'next' for the next one" — or, if it asked a question, with that question instead.
-7. Anything else — pushback, a question, "explain more" — means stay on this item. Answer it directly. Advance only on "next"/"go", or a reply that clearly resolves a question this item asked.
+7. Anything else — pushback, a question, "explain more" — means stay on this item. Answer it directly. "Next" is the only advance word; saying it closes the current item AS-IS (whatever state it's in after the discussion — accepted, revised, whatever was last said) and moves to the next one. There is no separate accept-then-advance step: reaching "next" IS the approval, nothing more to confirm.
 
 ## Claude's questions
 
@@ -31,6 +31,8 @@ Good: "1) tests too  2) docs only  3) both (recommended — say 'go')"
 ## Log, don't act
 
 Never act on an answer while items remain unresolved. Log each answer as it comes in and move to the next item. Apply everything only after every item in the walkthrough has been answered.
+
+This applies to ANYTHING that surfaces mid-walkthrough, not just answers to the item on screen — a request to edit an unrelated file, change a setting, fix this very skill, or do some other one-off task. Log it as a queued action exactly like a new item (see "New items mid-walkthrough") and say so in one line, then continue the walkthrough. Do not act on it immediately, even if it looks small or purely mechanical — the whole point of deferring is that the user is mid-flow on the list and shouldn't be interrupted by a side-effect landing out of order. Act on it only in the "Wrapping up" pass, unless the user explicitly says to do it right now (e.g. "do this immediately," "don't wait").
 
 ## Reprint the pending question
 
