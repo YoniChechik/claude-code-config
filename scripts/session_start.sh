@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unified startup hook: git sync, worktree cleanup (merged-branch + stale >2d). Silent, always exits 0.
+# Unified startup hook: git sync, worktree cleanup (merged-branch + stale >4d). Silent, always exits 0.
 
 git_root=$(git rev-parse --show-toplevel 2>/dev/null) || true
 if [[ -z "$git_root" ]]; then
@@ -30,6 +30,36 @@ git rev-parse --verify --quiet main >/dev/null 2>&1 || default_branch="master"
 # even if a directory was deleted by hand.
 git worktree prune 2>/dev/null || true
 
+# Shared 4-day age cutoff, used both below (merged-branch cleanup) and by the
+# stale-worktree pass further down, so both paths agree on "how old is old".
+age_cutoff=$(( $(date +%s) - 4*24*60*60 ))
+
+# Returns (echoes) the last-touched epoch time for a worktree: the newer of
+# its last commit time and the mtime of any uncommitted/untracked file in it.
+# Echoes 0 when it cannot be determined at all (no commits, no dirty files,
+# `git log` failed) so callers can fail closed instead of guessing.
+worktree_last_touched() {
+    local path="$1"
+    local last_commit last_touched status f _orig m entry
+    last_commit=$(git -C "$path" log -1 --format=%ct 2>/dev/null)
+    last_touched="${last_commit:-0}"
+
+    # -z gives NUL-delimited records (safe for spaces); a rename/copy record is
+    # "XY new-path\0orig-path\0" — skip the extra orig-path token, stat new-path.
+    while IFS= read -r -d '' entry; do
+        status="${entry:0:2}"
+        f="${entry:3}"
+        if [[ "$status" == *R* || "$status" == *C* ]]; then
+            IFS= read -r -d '' _orig
+        fi
+        [[ -z "$f" ]] && continue
+        m=$(stat -f "%m" "${path}/${f}" 2>/dev/null) || continue
+        (( m > last_touched )) && last_touched="$m"
+    done < <(git -C "$path" status --porcelain -z 2>/dev/null)
+
+    echo "$last_touched"
+}
+
 # Parse `git worktree list --porcelain`: records are blank-line separated, with a
 # `worktree <abs-path>` line and (unless detached) a `branch refs/heads/<name>` line.
 wt_path=""
@@ -45,6 +75,15 @@ process_worktree() {
         return
     fi
 
+    # Age gate: a worktree younger than 4 days old is never removed here, no
+    # matter its merge/PR state or whether it has uncommitted changes — age
+    # overrides dirtiness. Once it's 4+ days old, fall through to the
+    # merge/PR checks below, which CAN delete it even if still dirty.
+    last_touched=$(worktree_last_touched "$wt_path")
+    if [[ "$last_touched" == "0" || "$last_touched" -gt "$age_cutoff" ]]; then
+        return
+    fi
+
     if git ls-remote --heads origin "$wt_branch" 2>/dev/null | grep -qF "refs/heads/$wt_branch"; then
         return
     fi
@@ -55,7 +94,16 @@ process_worktree() {
     # Safe to drop if EITHER its commits are already ancestors of the local
     # default branch (merged), OR its PR was closed without merging on GitHub
     # (abandoned). If neither can be confirmed, leave it alone.
-    if ! git merge-base --is-ancestor "$wt_branch" "$default_branch" 2>/dev/null; then
+    #
+    # `merge-base --is-ancestor` is trivially true for a BRAND-NEW branch that
+    # hasn't diverged from main yet (0 commits ahead) — it's the same commit,
+    # so it looks "merged" even though nothing was ever merged. That false
+    # positive is what destroyed several genuinely fresh, in-progress worktrees
+    # (confirmed live, 2026-08-30). Only trust the ancestor check once the
+    # branch has actually diverged; a branch with 0 commits ahead must fall
+    # through to the PR-state check like any other unconfirmed case.
+    ahead_count=$(git rev-list --count "$default_branch".."$wt_branch" 2>/dev/null || echo 0)
+    if [[ "$ahead_count" == "0" ]] || ! git merge-base --is-ancestor "$wt_branch" "$default_branch" 2>/dev/null; then
         pr_state=$(cd "$git_root" && gh pr view "$wt_branch" --json state -q .state 2>/dev/null)
         if [[ "$pr_state" != "MERGED" && "$pr_state" != "CLOSED" ]]; then
             return
@@ -81,12 +129,12 @@ process_worktree
 # Removing a worktree can leave its branch behind; prune the admin files again.
 git worktree prune 2>/dev/null || true
 
-# --- Stale worktree cleanup (untouched >2 days) ---
+# --- Stale worktree cleanup (untouched >4 days) ---
 # Beyond the "branch deleted upstream" check above, also drop any worktree
 # `git worktree list` reports (wherever it lives on disk) that has had no
-# commits and no uncommitted file changes in over 2 days — abandoned
+# commits and no uncommitted file changes in over 4 days — abandoned
 # agent/feature worktrees that would otherwise sit around eating disk space.
-stale_cutoff=$(( $(date +%s) - 2*24*60*60 ))
+# Reuses the same `age_cutoff` (4 days) computed above for process_worktree.
 cwd_real=$(pwd -P)
 
 wt_path=""
@@ -101,10 +149,10 @@ process_stale_worktree() {
 
     # Broken worktree admin metadata ("not a git repository"): git can't be
     # trusted to tell us about commits or uncommitted changes here, so fall
-    # back to raw filesystem mtimes with a longer, more conservative 3-day
-    # cutoff before treating it as abandoned enough to delete outright.
+    # back to raw filesystem mtimes with the same 4-day cutoff before treating
+    # it as abandoned enough to delete outright.
     if ! git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
-        broken_cutoff_str=$(date -v-3d "+%Y-%m-%d %H:%M:%S")
+        broken_cutoff_str=$(date -v-4d "+%Y-%m-%d %H:%M:%S")
         # Skip node_modules/.next/build caches — their mtimes reflect tooling
         # churn, not real edits, and would mask genuinely abandoned worktrees.
         if find "$wt_path" \( -name node_modules -o -name .next -o -name dist -o -name build -o -name .venv \) -prune -o -type f -newermt "$broken_cutoff_str" -print -quit 2>/dev/null | grep -q .; then
@@ -114,21 +162,7 @@ process_stale_worktree() {
         return
     fi
 
-    last_commit=$(git -C "$wt_path" log -1 --format=%ct 2>/dev/null)
-    last_touched="${last_commit:-0}"
-
-    # -z gives NUL-delimited records (safe for spaces); a rename/copy record is
-    # "XY new-path\0orig-path\0" — skip the extra orig-path token, stat new-path.
-    while IFS= read -r -d '' entry; do
-        status="${entry:0:2}"
-        f="${entry:3}"
-        if [[ "$status" == *R* || "$status" == *C* ]]; then
-            IFS= read -r -d '' _orig
-        fi
-        [[ -z "$f" ]] && continue
-        m=$(stat -f "%m" "${wt_path}/${f}" 2>/dev/null) || continue
-        (( m > last_touched )) && last_touched="$m"
-    done < <(git -C "$wt_path" status --porcelain -z 2>/dev/null)
+    last_touched=$(worktree_last_touched "$wt_path")
 
     # Could not determine any timestamp (no commits, no dirty files, and git log
     # failed) — fail closed and keep it rather than guessing a cutoff-equal value.
@@ -136,7 +170,7 @@ process_stale_worktree() {
         return
     fi
 
-    (( last_touched > stale_cutoff )) && return
+    (( last_touched > age_cutoff )) && return
 
     git worktree remove --force "$wt_path" 2>/dev/null || rm -rf "$wt_path" 2>/dev/null || true
 }
