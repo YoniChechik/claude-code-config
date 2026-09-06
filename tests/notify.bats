@@ -335,9 +335,10 @@ stub_branch() {
     assert_not_contains "waiting" "$output"
 }
 
-@test "notify_user_attention: emits green RGB (0/255/0) and a plain branch-name title" {
+@test "notify_user_attention: emits green RGB (0/255/0) and uses the session-name sidecar as the title" {
     redirect_tty_to_file
     stub_branch "feat-x"
+    printf 'my session' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
     # No arg => legacy unconditional-green path (no background-work gating).
     notify_user_attention >/dev/null 2>&1
     close_tty_capture
@@ -345,9 +346,100 @@ stub_branch() {
     assert_contains "6;1;bg;red;brightness;0" "$output"
     assert_contains "6;1;bg;green;brightness;255" "$output"
     assert_contains "6;1;bg;blue;brightness;0" "$output"
-    # Title is the plain branch name — no "waiting", no emoji decorations.
-    assert_contains "]0;feat-x" "$output"
+    # Title is the sidecar value verbatim — never the branch name.
+    assert_contains "]0;my session" "$output"
+    assert_not_contains "]0;feat-x" "$output"
     assert_not_contains "waiting" "$output"
+}
+
+@test "notify_user_attention: strips embedded control bytes from the sidecar name before emitting the title" {
+    redirect_tty_to_file
+    # C0 (tab, newline, ESC, BEL), DEL (0x7f) and C1 (U+009B) all get stripped.
+    printf 'a\tb\nc\x1bd\x07e\x7ff\xc2\x9bg' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    # The stripped, contiguous name reaches the title with none of the raw
+    # control bytes surviving in between.
+    assert_contains "]0;abcdefg" "$output"
+    # Exactly ONE title sequence: no second, injected OSC alongside it.
+    [ "$(grep -c ']0;' <<< "$output")" -eq 1 ]
+}
+
+@test "notify_user_attention: backslash-escape TEXT in the name emits no second OSC sequence" {
+    redirect_tty_to_file
+    # Purely printable payload — zero raw control bytes, so the control-byte
+    # filter alone never saw it. The backslashes must be gone by title time.
+    printf '%s' 'proj\033]0;PWNED\007' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "]0;proj033]0;PWNED007" "$output"
+    assert_not_contains "\\" "$output"
+}
+
+@test "notify_user_attention: caps the title at 35 codepoints, not 35 bytes" {
+    redirect_tty_to_file
+    python3 -c 'print("\U0001F600"*40, end="")' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    # Exactly 35 whole emoji — never 35 bytes, never a split character.
+    assert_contains "]0;$(python3 -c 'print("\U0001F600"*35, end="")')" "$output"
+    assert_not_contains "$(python3 -c 'print("\U0001F600"*36, end="")')" "$output"
+}
+
+@test "notify_user_attention: no sidecar file -> no title OSC escape emitted at all" {
+    redirect_tty_to_file
+    stub_branch "feat-x"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "6;1;bg;green;brightness;255" "$output"
+    # No title sequence at all — no branch-name fallback, no blank title.
+    assert_not_contains "]0;" "$output"
+}
+
+@test "notify_user_attention: an empty sidecar file -> no title OSC escape" {
+    redirect_tty_to_file
+    : > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_not_contains "]0;" "$output"
+}
+
+@test "notify_user_attention: a name that sanitizes to nothing -> no title OSC escape" {
+    redirect_tty_to_file
+    printf '  \t\n \x1b\x07  ' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    # An empty title write would CLEAR the tab title; emit nothing instead.
+    assert_not_contains "]0;" "$output"
+}
+
+@test "notify_user_attention: an empty CLAUDE_CODE_SESSION_ID -> no title OSC escape" {
+    redirect_tty_to_file
+    printf 'orphan name' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_"
+    export CLAUDE_CODE_SESSION_ID=""
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    # The empty-suffix path must never be read as a fallback.
+    assert_not_contains "]0;" "$output"
+    assert_not_contains "orphan name" "$output"
+}
+
+@test "notify_user_attention: another session's sidecar name never leaks into this title" {
+    redirect_tty_to_file
+    printf 'other session' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_othersess"
+    printf 'my session' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
+    notify_user_attention >/dev/null 2>&1
+    close_tty_capture
+    output="$(cat "$TTY_CAPTURE")"
+    assert_contains "]0;my session" "$output"
+    assert_not_contains "other session" "$output"
 }
 
 @test "set_blue_bar: does NOT create a dedup lock (background state never chimes)" {

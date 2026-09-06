@@ -3,12 +3,26 @@ set -euo pipefail
 
 trap 'echo "(status error)"' ERR
 
-blue="\033[38;2;30;102;245m"
-yellow="\033[38;2;223;142;29m"
-magenta="\033[38;2;136;57;239m"
-red="\033[38;2;214;40;40m"
-green="\033[38;2;64;160;43m"
-reset="\033[0m"
+# Shared helpers: _session_name_read / _sanitize_and_cap (the single
+# implementation of the session-name sanitize-and-cap contract). Sourcing only
+# defines functions, so it costs no subprocess on this ~1/second hot path.
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
+
+# Colors are expanded ONCE, here, via $'...' ANSI-C quoting — never left as
+# literal "\033" text for a `printf '%b'` at the end to convert. That final %b
+# would also re-expand backslash sequences sitting inside INTERPOLATED data
+# (a session name, an org name, a PR url), turning printable text such as
+# `\033]0;PWNED\007` into a genuine terminal escape sequence. With the escapes
+# already real here, the output stage is a plain `printf '%s'` that treats
+# every interpolated value as inert text.
+blue=$'\033[38;2;30;102;245m'
+yellow=$'\033[38;2;223;142;29m'
+magenta=$'\033[38;2;136;57;239m'
+red=$'\033[38;2;214;40;40m'
+green=$'\033[38;2;64;160;43m'
+reset=$'\033[0m'
+newline=$'\n'
 
 input=$(cat)
 if ! parsed=$(printf '%s' "$input" | jq -r '
@@ -19,7 +33,7 @@ if ! parsed=$(printf '%s' "$input" | jq -r '
   (.rate_limits.five_hour.resets_at // ""),
   (.session_id // "")
 ' 2>/dev/null); then
-  printf '%b' "${red}(status_line.sh: json parse error)${reset}"
+  printf '%s' "${red}(status_line.sh: json parse error)${reset}"
   exit 0
 fi
 
@@ -59,6 +73,18 @@ fi
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 slot="$session_id"
 
+# Session name: read from the per-session sidecar file written by the
+# /session-name skill (~/.claude/skills/session-name/SKILL.md). This file is
+# the only source of truth for the session-name segment below — no fallback
+# to the hook payload's native session_name field, worktree name, or branch.
+#
+# Keyed on this payload's own .session_id, so `_session_name_read` is called
+# with an explicit slot rather than via _display_title's CLAUDE_CODE_SESSION_ID.
+# `|| true` keeps a helper failure of any kind (broken python3, unreadable
+# file) to "no segment shown" instead of aborting the whole status line under
+# the `set -e` / ERR trap above.
+session_name=$(_session_name_read "$slot" 2>/dev/null || true)
+
 dirty_marker=""
 if [ -n "$branch" ]; then
   if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
@@ -66,15 +92,21 @@ if [ -n "$branch" ]; then
   fi
 fi
 
-# Build a short display: "repo-name / worktree-name" or just "repo-name"
+# Build a short display: "repo-name / session-name" or just "repo-name".
+# The session-name segment comes solely from the sidecar file read above —
+# no fallback to worktree/branch name when it's absent or empty.
 if [[ "$dir" == *"/.claude/worktrees/"* ]]; then
   repo_name=$(echo "$dir" | sed 's|/\.claude/worktrees/.*||' | xargs basename)
-  worktree_name=$(echo "$dir" | sed 's|.*/\.claude/worktrees/||' | cut -d'/' -f1)
-  display_dir="${repo_name} / ${worktree_name}"
 else
   # Try to get the git repo root name, fall back to basename of dir
   repo_root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")
-  display_dir=$(basename "$repo_root")
+  repo_name=$(basename "$repo_root")
+fi
+
+if [ -n "$session_name" ]; then
+  display_dir="${repo_name} / ${session_name}"
+else
+  display_dir="${repo_name}"
 fi
 
 # Line 1: path + dirty marker + optional context
@@ -115,25 +147,6 @@ if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
   fi
 fi
 
-# Line 2: warnings (only if in a git repo)
-warning=""
-if [ -n "$branch" ]; then
-  in_worktree=false
-  if [[ "$dir" == *"/.claude/worktrees/"* ]]; then
-    in_worktree=true
-  fi
-
-  if [ "$in_worktree" = false ] && [ "$branch" != "main" ]; then
-    warning="\n${red}⚠ Not in a worktree but branch is \"${branch}\" (not main)${reset}"
-  elif [ "$in_worktree" = true ]; then
-    # Extract worktree dir name: the directory right after .claude/worktrees/
-    worktree_dir=$(echo "$dir" | sed 's|.*/\.claude/worktrees/||' | cut -d'/' -f1)
-    if [ "$worktree_dir" != "$branch" ]; then
-      warning="\n${red}⚠ Worktree dir \"${worktree_dir}\" but branch is \"${branch}\"${reset}"
-    fi
-  fi
-fi
-
 # Line 3: clickable PR link (if branch has an open PR)
 # Read from the cache file written by ci_watch.py — no gh call here.
 pr_line=""
@@ -150,7 +163,9 @@ if [ -n "$slot" ]; then
     pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null)
     pr_state=$(printf '%s' "$pr_json" | jq -r '.state // ""' 2>/dev/null)
     if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] && [ -n "$pr_number" ] && [ "$pr_number" != "null" ] && [ "$pr_state" = "OPEN" ]; then
-      pr_line="\e]8;;${pr_url}\aPR #${pr_number}\e]8;;\a"
+      # OSC 8 hyperlink, with the escapes already expanded (see the color note
+      # at the top) so the render stage never has to interpret backslashes.
+      pr_line=$'\033]8;;'"${pr_url}"$'\a'"PR #${pr_number}"$'\033]8;;\a'
     fi
   fi
 
@@ -218,14 +233,16 @@ if [ -n "$slot" ]; then
   fi
 fi
 
-output="${status}${warning}"
+output="${status}"
 if [ -n "$info_line" ]; then
-  output="${output}\n${info_line}"
+  output="${output}${newline}${info_line}"
 fi
 if [ -n "$org_line" ]; then
-  output="${output}\n${org_line}"
+  output="${output}${newline}${org_line}"
 fi
 if [ -n "$pr_line" ]; then
-  output="${output}\n${pr_line}"
+  output="${output}${newline}${pr_line}"
 fi
-printf '%b' "$output"
+# '%s', never '%b': every escape in $output is already a real byte, and %b
+# would re-interpret backslash text carried in interpolated values.
+printf '%s' "$output"
