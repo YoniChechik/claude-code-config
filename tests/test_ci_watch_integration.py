@@ -807,6 +807,39 @@ def test_count_repo_workflows_network_error_is_unknown():
         assert ci_watch.count_repo_workflows("o", "r", "tk") is None
 
 
+# GitHub lists its own "dynamic" workflows (Copilot review, Dependabot, pages)
+# alongside real ones. They are not files in the repo and never run for a
+# pushed branch, so they must not count as CI.
+_DYNAMIC_COPILOT = {
+    "name": "Copilot code review",
+    "path": "dynamic/copilot-pull-request-reviewer/copilot-pull-request-reviewer",
+}
+_DYNAMIC_PAGES = {"name": "pages-build-deployment", "path": "dynamic/pages/pages"}
+_REAL_CI = {"name": "CI", "path": ".github/workflows/ci.yml"}
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        # The reported bug: a repo with zero workflow files still reports
+        # total_count=1 because of the dynamic Copilot reviewer.
+        ({"total_count": 1, "workflows": [_DYNAMIC_COPILOT]}, 0),
+        ({"total_count": 2, "workflows": [_DYNAMIC_COPILOT, _DYNAMIC_PAGES]}, 0),
+        ({"total_count": 2, "workflows": [_DYNAMIC_COPILOT, _REAL_CI]}, 1),
+        ({"total_count": 1, "workflows": [_REAL_CI]}, 1),
+        # More workflows than the page holds -> cannot classify -> fail toward
+        # "CI exists" so the watcher keeps waiting instead of claiming no-CI.
+        ({"total_count": 500, "workflows": [_DYNAMIC_COPILOT]}, 500),
+        # Missing/!list workflows array -> unknown.
+        ({"total_count": 1}, None),
+        ({"total_count": 1, "workflows": {}}, None),
+    ],
+)
+def test_count_repo_workflows_ignores_dynamic_workflows(payload, expected):
+    with patch.object(ci_watch.requests, "get", return_value=_fake_resp(200, payload)):
+        assert ci_watch.count_repo_workflows("o", "r", "tk") == expected
+
+
 @pytest.mark.parametrize(
     ("status", "payload", "expected"),
     [
@@ -875,6 +908,26 @@ def test_detect_no_ci_configured_checks_each_ref_once():
     ):
         assert ci_watch.detect_no_ci_configured("o", "r", "main", "main", "tk") is True
     assert calls == ["main"]
+
+
+def test_detect_no_ci_configured_over_http_with_only_dynamic_workflows():
+    """Regression: a repo whose ONLY workflow is a GitHub dynamic one has no CI.
+
+    Driven through the real HTTP layer — the bug lived in count_repo_workflows,
+    so stubbing it out is exactly the seam that hid the failure. Watching such a
+    repo used to leave the watcher silently polling forever instead of firing
+    the no-CI notification.
+    """
+
+    def fake_get(url, **_kwargs):
+        if "/actions/workflows" in url:
+            return _fake_resp(200, {"total_count": 1, "workflows": [_DYNAMIC_COPILOT]})
+        if "/contents/.github/workflows" in url:
+            return _fake_resp(404, {"message": "Not Found"})
+        raise AssertionError(f"unexpected url {url}")
+
+    with patch.object(ci_watch.requests, "get", side_effect=fake_get):
+        assert ci_watch.detect_no_ci_configured("o", "r", "feat", "main", "tk") is True
 
 
 def test_no_ci_configured_flags_immediately_and_skips_branch_polling(tmp_path):

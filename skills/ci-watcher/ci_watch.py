@@ -126,6 +126,11 @@ MONITOR_DETACHED_FIELD = "monitor-detached"
 
 GITHUB_API = "https://api.github.com"
 
+# Path prefix of a workflow that is a real file in the repo. GitHub also lists
+# its own "dynamic" workflows (Copilot review, Dependabot, pages) under a
+# "dynamic/" path; those are not repo files and never run for a pushed branch.
+WORKFLOW_FILE_PREFIX = ".github/workflows/"
+
 
 # --- HTTP / API helpers ---
 
@@ -1276,14 +1281,23 @@ def repo_info() -> tuple[str, str, str]:
 
 
 def count_repo_workflows(owner: str, repo: str, token: str) -> int | None:
-    """Return how many workflows the repo has registered, or None if unknown.
+    """Return how many REAL workflow files the repo has, or None if unknown.
 
     ``GET /actions/workflows`` reports every workflow GitHub knows about for
-    the repo (``total_count``), including disabled ones. Returns None on ANY
-    error or unexpected payload — callers MUST treat None as "unknown" and
-    fall back to the normal wait/timeout path, never as "no CI".
+    the repo, including disabled ones — and also GitHub's own *dynamic*
+    workflows, which are not files in the repo at all: Copilot code review,
+    Dependabot updates, pages-build-deployment. Those carry a synthetic
+    ``path`` under ``dynamic/`` instead of ``.github/workflows/``, and they
+    never produce a run for a pushed branch. Counting them made
+    ``total_count`` non-zero for a repo with zero workflow files, which vetoed
+    detect_no_ci_configured and left the watcher polling forever in silence.
+    So count only entries whose ``path`` lives in ``.github/workflows/``.
+
+    Returns None on ANY error or unexpected payload — callers MUST treat None
+    as "unknown" and fall back to the normal wait/timeout path, never as
+    "no CI".
     """
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/workflows?per_page=1"
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/workflows?per_page=100"
     try:
         resp = requests.get(url, headers=_gh_headers(token), timeout=10)
         if resp.status_code != 200:
@@ -1301,7 +1315,19 @@ def count_repo_workflows(owner: str, repo: str, token: str) -> int | None:
     total = data.get("total_count")
     if not isinstance(total, int) or isinstance(total, bool):
         return None
-    return total
+    workflows = data.get("workflows")
+    if not isinstance(workflows, list):
+        return None
+    # More workflows than this page holds: we cannot classify the rest, so fail
+    # toward "CI exists" (keep waiting) rather than risk a false "no CI".
+    if total > len(workflows):
+        return total
+    return sum(
+        1
+        for w in workflows
+        if isinstance(w, dict)
+        and str(w.get("path", "")).startswith(WORKFLOW_FILE_PREFIX)
+    )
 
 
 def ref_has_workflow_files(owner: str, repo: str, ref: str, token: str) -> bool | None:
