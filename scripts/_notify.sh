@@ -689,63 +689,104 @@ _bg_agents_log() {
         >> "$logfile" 2>/dev/null || true
 }
 
-# Return 0 (CI actively running) ONLY when ALL hold, checked in this order:
-#   (1) the state value is "running" or "merging",
-#   (2) the stored <branch> prefix matches the current git branch,
-#   (3) the CI watcher process is ALIVE (lockfile PID + kill -0 + args match).
-# Returns 1 (non-active) when the state file is missing/empty, the watcher is
-# dead (so a stale "running" from a crashed watcher can never pin blue), the
-# watcher is alive but its notification channel is gone (monitor-detached), the
-# branch mismatches, or the state is terminal.
+# --- CI watcher slots -------------------------------------------------------
+# One session runs one watcher PER BRANCH, and every /tmp file of a watcher is
+# keyed on that watcher's SLOT:
+#   SLOT = "<session id>_<branch slug>-<identity hash>"
+# The identity hash is the first 10 hex chars of sha256("<owner>/<repo>#<branch>").
+# It, not the readable branch slug, is what makes the slot unique — folding in
+# owner/repo is what stops two worktrees of DIFFERENT repos that share a branch
+# name from sharing a slot.
+
+# The readable branch slug: every BYTE outside [A-Za-z0-9._-] becomes "_",
+# capped at 40 bytes. LC_ALL=C forces tr and cut into byte mode so this matches
+# ci_watch.py's sanitize_branch() exactly — a codepoint-vs-byte disagreement on
+# a non-ASCII branch name would desync the two languages' slots.
+_ci_slug() {
+    printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40
+}
+
+# Build a full SLOT. Args: <session id> <owner/repo> <branch>.
+_ci_slot() {
+    local session_id="$1" name_with_owner="$2" branch="$3"
+    local identity_hash
+    identity_hash=$(printf '%s' "${name_with_owner}#${branch}" \
+        | shasum -a 256 | cut -c1-10)
+    printf '%s_%s-%s' "$session_id" "$(_ci_slug "$branch")" "$identity_hash"
+}
+
+# Echo the path of every EXISTING ci_watch state file belonging to session $1,
+# one per line — i.e. one line per watcher the session is currently running.
+# THE single discovery implementation: ci_is_active below and status_line.sh
+# both call this, so "which watchers does this session have" is defined once.
+_ci_watch_session_state_files() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || return 0
+    local f
+    # `nullglob` is deliberately NOT set (it is global shell state and this file
+    # is sourced into other scripts): with no match bash leaves the pattern
+    # literal, so the -e guard is what drops it.
+    for f in "${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${session_id}"_*; do
+        [ -e "$f" ] || continue
+        printf '%s\n' "$f"
+    done
+    return 0
+}
+
+# Return 0 (CI actively running) when ANY watcher of this session satisfies ALL
+# of:
+#   (1) its state value is "running" or "merging",
+#   (2) its state carries no ":monitor-detached@" marker,
+#   (3) its OWN lockfile names a live ci_watch PID.
+# Returns 1 (non-active) when the session has no state file at all, or every
+# watcher it has is dead (so a stale "running" from a crashed watcher can never
+# pin the tab blue), mute, or in a terminal state.
+#
+# There is deliberately NO branch-match test against the cwd: a session can now
+# watch several branches at once, and any of them still running is "background
+# work in progress" for the tab-colour signal, whatever the shell's cwd is on.
 ci_is_active() {
-    local slot="${CLAUDE_CODE_SESSION_ID:-}"
-    [ -n "$slot" ] || return 1
+    local session_id="${CLAUDE_CODE_SESSION_ID:-}"
+    [ -n "$session_id" ] || return 1
 
-    # Read the atomically-written "<branch>:<state>" line. cat handles the
-    # missing-file case; the empty-string guard below covers missing/empty.
-    local state_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${slot}"
-    local raw
-    raw=$(cat "$state_file" 2>/dev/null || true)
-    [ -n "$raw" ] || return 1
+    local state_file raw state_only slot lock_file watcher_pid
+    while IFS= read -r state_file; do
+        [ -n "$state_file" ] || continue
+        # The atomically-written "<branch>:<state>" line. cat covers the
+        # missing-file case; the empty guard covers missing and empty alike.
+        raw=$(cat "$state_file" 2>/dev/null || true)
+        [ -n "$raw" ] || continue
+        # No colon means no branch prefix, so the line is not a usable state.
+        case "$raw" in
+            *:*) state_only="${raw#*:}" ;;
+            *) continue ;;
+        esac
 
-    # Split "<branch>:<state>". If there is no colon, there is no branch prefix.
-    local stored_branch="${raw%%:*}"
-    local state_only="${raw#*:}"
-    if [ "$stored_branch" = "$raw" ]; then
-        return 1
-    fi
+        # ci_watch.py appends ":monitor-detached@<epoch>" once its stdout writes
+        # start failing. The process lives on, but nothing it finds will ever be
+        # reported, so it is NOT "background work in progress": folding it into
+        # the active bucket would paint the tab blue and swallow the chime while
+        # the CI result silently goes nowhere. status_line.sh renders the
+        # distinct "ci notifications lost" label for the same marker.
+        case "$state_only" in
+            *:monitor-detached@*) continue ;;
+        esac
 
-    # (0) ci_watch.py appends ":monitor-detached@<epoch>" once its stdout writes
-    # start failing. The process lives on, but nothing it finds will ever be
-    # reported, so it is NOT "background work in progress": folding it into the
-    # active bucket would paint the tab blue and swallow the chime while the CI
-    # result silently goes nowhere. status_line.sh renders the distinct
-    # "ci notifications lost" label for the same marker.
-    case "$state_only" in
-        *:monitor-detached@*) return 1 ;;
-    esac
+        case "$state_only" in
+            running|merging) ;;
+            *) continue ;;
+        esac
 
-    # (1) Only "running" / "merging" count as actively running.
-    case "$state_only" in
-        running|merging) ;;
-        *) return 1 ;;
-    esac
-
-    # (2) Branch prefix must match the current git branch.
-    local cur_branch
-    cur_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    [ -n "$cur_branch" ] || return 1
-    [ "$stored_branch" = "$cur_branch" ] || return 1
-
-    # (3) Watcher must be alive — reuse the status_line.sh liveness approach:
-    # read the PID from the lockfile, kill -0 it, and confirm its args mention
-    # ci_watch (so a recycled PID owned by an unrelated process can't pass).
-    local lock_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_lock_${slot}"
-    local watcher_pid
-    watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
-    if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
-       && ps -p "$watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
-        return 0
-    fi
+        # Liveness is per-slot: read the PID from THIS watcher's lockfile,
+        # kill -0 it, and confirm its args mention ci_watch (so a recycled PID
+        # owned by an unrelated process can't pass).
+        slot="${state_file##*/ci_watch_state_}"
+        lock_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_lock_${slot}"
+        watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
+        if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
+           && ps -p "$watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
+            return 0
+        fi
+    done < <(_ci_watch_session_state_files "$session_id")
     return 1
 }
