@@ -4,7 +4,7 @@
 #
 # The skill is prose, but Claude runs these blocks verbatim. A snippet that is
 # syntactically broken, or that reports a dead watcher as ALIVE, silently turns
-# into "TaskStop on a stale id" or "two watchers on one session".
+# into "TaskStop on a stale id" or "two watchers on one slot".
 #
 # Strategy:
 #   - Each block is EXTRACTED from SKILL.md by a marker string, so what runs is
@@ -14,18 +14,33 @@
 #     read or write the real /tmp files of a live watcher.
 #   - Liveness uses a REAL alive process (exec -a ci_watch_fake sleep) against a
 #     guaranteed-dead PID, so the real ps/grep logic runs unmocked.
+#   - `gh` is stubbed on PATH: the slot block shells out to `gh repo view` for
+#     the owner/repo half of the identity, and the suite must not hit the network.
 #
 # Assertions go through helper functions, never a bare `[[ ... ]]`: bash does
 # not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
 # non-final `[[ ... ]]` and reports the test as ok.
 
 SKILL_MD="${BATS_TEST_DIRNAME}/../skills/ci-watcher/SKILL.md"
+CI_WATCH_PY="${BATS_TEST_DIRNAME}/../skills/ci-watcher/ci_watch.py"
 
 setup() {
     export CLAUDE_CODE_SESSION_ID="testsess"
-    LOCK="$BATS_TEST_TMPDIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
-    STATE="$BATS_TEST_TMPDIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
-    TASK="$BATS_TEST_TMPDIR/ci_watch_task_${CLAUDE_CODE_SESSION_ID}"
+    # The branch every fixture is keyed on, and the slot that follows from it.
+    # The slot text itself is arbitrary here — only the "slot" tests below
+    # assert how it is DERIVED; the rest just need one consistent key.
+    BRANCH="feat-x"
+    export SLOT="${CLAUDE_CODE_SESSION_ID}_feat-x-0123456789"
+    LOCK="$BATS_TEST_TMPDIR/ci_watch_lock_${SLOT}"
+    STATE="$BATS_TEST_TMPDIR/ci_watch_state_${SLOT}"
+    TASK="$BATS_TEST_TMPDIR/ci_watch_task_${SLOT}"
+
+    # `gh repo view --json nameWithOwner -q .nameWithOwner` -> "o/r", offline.
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nprintf %%s "o/r"\n' > "$BATS_TEST_TMPDIR/bin/gh"
+    chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+    export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+
     # PIDs go to a FILE, not a shell array: every call site is
     # `$(spawn_fake_watcher)`, so an array append inside that command
     # substitution happens in a subshell and never reaches teardown.
@@ -55,7 +70,10 @@ assert_not_contains() {
 }
 
 # Extract the first ```bash fenced block of SKILL.md that contains $1, rewrite
-# its /tmp/ paths into the per-test tmpdir, and write it to a runnable script.
+# its /tmp/ paths into the per-test tmpdir and its ~/.claude/scripts/_notify.sh
+# source path into THIS checkout's copy, then write it to a runnable script.
+# Both rewrites exist for the same reason: the block must never read the real
+# /tmp or the installed ~/.claude, only what this worktree ships.
 # Echoes the script path.
 extract_block() {
     local marker="$1"
@@ -67,7 +85,10 @@ extract_block() {
             inblock = 0; next
         }
         inblock { buf = buf $0 "\n" }
-    ' "$SKILL_MD" | sed "s#/tmp/#${BATS_TEST_TMPDIR}/#g" > "$out"
+    ' "$SKILL_MD" \
+        | sed "s#/tmp/#${BATS_TEST_TMPDIR}/#g" \
+        | sed "s#~/.claude/scripts/_notify.sh#${BATS_TEST_DIRNAME}/../scripts/_notify.sh#g" \
+        > "$out"
     # A marker that no longer matches would silently produce an empty script
     # and make every assertion below pass vacuously.
     if [ ! -s "$out" ]; then
@@ -107,6 +128,197 @@ assert_process_alive() {
         return 1
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# The slot block: SESSION + branch + owner/repo -> SLOT
+# ---------------------------------------------------------------------------
+
+@test "slot: derives exactly what ci_watch.py's slot_for derives" {
+    # The launcher and the watcher compute the slot INDEPENDENTLY, in two
+    # languages. If they ever disagree the launcher writes its task id, log and
+    # liveness checks against files no watcher will ever touch — with nothing
+    # failing loudly. A non-ASCII branch is the case that separates a byte-mode
+    # implementation from a codepoint-mode one.
+    local script actual expected
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='féat/ü' bash "$script"
+    [ "$status" -eq 0 ]
+    actual="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    expected="$(cd "${BATS_TEST_DIRNAME}/.." && uv run --quiet --with requests \
+        python -c '
+import sys
+sys.path.insert(0, "skills/ci-watcher")
+import ci_watch
+print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
+')"
+    [ -n "$expected" ]
+    [ "$actual" = "$expected" ]
+}
+
+@test "slot: two branches of one session get different slots" {
+    local script slot_a slot_b
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='feat/a' bash "$script"
+    slot_a="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    run env BRANCH='feat/b' bash "$script"
+    slot_b="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    [ -n "$slot_a" ]
+    [ "$slot_a" != "$slot_b" ]
+}
+
+@test "slot: a slug collision is separated by the identity hash" {
+    # `feat/a` and `feat_a` sanitize to the same readable slug. Only the hash
+    # keeps their slots apart — which is the entire reason the hash is there.
+    local script slot_a slot_b
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='feat/a' bash "$script"
+    slot_a="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    run env BRANCH='feat_a' bash "$script"
+    slot_b="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    [ "$slot_a" != "$slot_b" ]
+}
+
+@test "slot: the same branch in two repos gets different slots" {
+    # One session can `cd` between worktrees of different repos, and two repos
+    # can both have a branch called `main`.
+    local script slot_a slot_b
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='main' bash "$script"
+    slot_a="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    printf '#!/bin/sh\nprintf %%s "o/other-repo"\n' > "$BATS_TEST_TMPDIR/bin/gh"
+    run env BRANCH='main' bash "$script"
+    slot_b="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    [ "$slot_a" != "$slot_b" ]
+}
+
+@test "slot: reports session, cwd and NONE when there is no previous task id" {
+    local script expected_dir
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    # Run from a DIFFERENT directory than the test's own cwd: comparing the
+    # snippet's `pwd` against the test's `pwd` would be true by construction.
+    expected_dir="$(cd "$BATS_TEST_TMPDIR" && pwd)"
+    cd "$BATS_TEST_TMPDIR"
+
+    run env BRANCH='feat-x' bash "$script"
+    [ "$status" -eq 0 ]
+    assert_contains "SESSION=testsess" "$output"
+    assert_contains "DIR=$expected_dir" "$output"
+    assert_contains "NONE" "$output"
+}
+
+@test "slot: surfaces the task id of THIS branch's previous launch" {
+    local script slot
+    script="$(extract_block 'cannot key the ci watcher files')"
+    run env BRANCH='feat-x' bash "$script"
+    slot="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    printf 'task_old' > "$BATS_TEST_TMPDIR/ci_watch_task_${slot}"
+
+    run env BRANCH='feat-x' bash "$script"
+    [ "$status" -eq 0 ]
+    assert_contains "task_old" "$output"
+}
+
+@test "slot: another branch's task id is NOT surfaced" {
+    # The whole point of the per-branch slot: relaunching feat-x must not pick
+    # up (and then TaskStop) the watcher that is running for feat-y.
+    local script slot_y
+    script="$(extract_block 'cannot key the ci watcher files')"
+    run env BRANCH='feat-y' bash "$script"
+    slot_y="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    printf 'task_other_branch' > "$BATS_TEST_TMPDIR/ci_watch_task_${slot_y}"
+
+    run env BRANCH='feat-x' bash "$script"
+    [ "$status" -eq 0 ]
+    assert_not_contains "task_other_branch" "$output"
+    assert_contains "NONE" "$output"
+}
+
+@test "slot: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
+    # Without the guard every path collapses to /tmp/ci_watch_*_ and one session
+    # would read (or stop) another session's watcher.
+    local script
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env -u CLAUDE_CODE_SESSION_ID BRANCH='feat-x' bash "$script"
+    [ "$status" -eq 1 ]
+    assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
+}
+
+@test "slot: a padded branch name derives the SAME slot as the bare one" {
+    # ci_watch.py strips its branch argument. If bash did not, a pasted branch
+    # name with a trailing space would key the launcher's files on a slot the
+    # watcher itself never computes, and every liveness check would miss it.
+    local script slot_padded slot_bare
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='  feat/x ' bash "$script"
+    [ "$status" -eq 0 ]
+    slot_padded="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    assert_contains "BRANCH=feat/x" "$output"
+
+    run env BRANCH='feat/x' bash "$script"
+    slot_bare="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    [ -n "$slot_bare" ]
+    [ "$slot_padded" = "$slot_bare" ]
+}
+
+@test "slot: a padded branch derives what ci_watch.py derives for the stripped one" {
+    local script actual expected
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='feat/x   ' bash "$script"
+    [ "$status" -eq 0 ]
+    actual="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    expected="$(cd "${BATS_TEST_DIRNAME}/.." && uv run --quiet --with requests \
+        python -c '
+import sys
+sys.path.insert(0, "skills/ci-watcher")
+import ci_watch
+print(ci_watch.slot_for("testsess", "o", "r", "feat/x"))
+')"
+    [ -n "$expected" ]
+    [ "$actual" = "$expected" ]
+}
+
+@test "slot: fails loudly when the identity hash cannot be computed" {
+    # An empty hash would build a slot no watcher ever owns: `stop` would report
+    # "nothing to stop" for a live watcher, and launch would skip eviction.
+    local script
+    script="$(extract_block 'cannot key the ci watcher files')"
+    # Shadow shasum with a failing stub, the way a minimal image without perl
+    # would behave.
+    printf '#!/bin/sh\nexit 127\n' > "$BATS_TEST_TMPDIR/bin/shasum"
+    chmod +x "$BATS_TEST_TMPDIR/bin/shasum"
+
+    run env BRANCH='feat-x' bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "identity hash" "$output"
+}
+
+@test "slot: fails loudly when no branch can be resolved" {
+    # `git branch --show-current` prints nothing on a detached HEAD. Continuing
+    # would key every file on an empty branch slug.
+    local script
+    script="$(extract_block 'cannot key the ci watcher files')"
+    # A directory that is not a git repo, so the fallback resolves to nothing.
+    mkdir -p "$BATS_TEST_TMPDIR/notarepo"
+    cd "$BATS_TEST_TMPDIR/notarepo"
+
+    run env -u BRANCH bash "$script"
+    [ "$status" -eq 1 ]
+    assert_contains "no branch resolved" "$output"
 }
 
 # ---------------------------------------------------------------------------
@@ -205,15 +417,31 @@ assert_process_alive() {
     [ "$output" = "DEAD" ]
 }
 
-@test "liveness: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
+@test "liveness: reads only its OWN slot's lockfile" {
+    # A live watcher on ANOTHER branch must not make this branch's dead watcher
+    # look alive — that would suppress the relaunch that step 2 owes the user.
+    local script pid other_slot
+    script="$(extract_block 'ps -p "$PID" -o args=')"
+    pid="$(spawn_fake_watcher)"
+    assert_process_alive "$pid"
+    other_slot="${CLAUDE_CODE_SESSION_ID}_feat-y-9876543210"
+    printf '%s' "$pid" > "$BATS_TEST_TMPDIR/ci_watch_lock_${other_slot}"
+    rm -f "$LOCK"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ "$output" = "DEAD" ]
+}
+
+@test "liveness: fails loudly when SLOT is unset" {
     # Without the guard the path collapses to /tmp/ci_watch_lock_ and the check
-    # reports another session's watcher (or none) as this session's state.
+    # reports some other watcher's state as this branch's.
     local script
     script="$(extract_block 'ps -p "$PID" -o args=')"
 
-    run env -u CLAUDE_CODE_SESSION_ID bash "$script"
+    run env -u SLOT bash "$script"
     [ "$status" -eq 1 ]
-    assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
+    assert_contains "SLOT is unset" "$output"
 }
 
 @test "liveness: DEAD when the lockfile holds garbage instead of a pid" {
@@ -227,86 +455,86 @@ assert_process_alive() {
 }
 
 # ---------------------------------------------------------------------------
-# step 0: stop subcommand
+# step 0: stop-all discovery
 # ---------------------------------------------------------------------------
 
-@test "stop: prints NONE when no watcher was ever launched in this session" {
+@test "stop-all: prints nothing when the session has no watchers" {
     local script
-    script="$(extract_block 'cannot stop ci watcher')"
-    rm -f "$TASK"
+    script="$(extract_block 'cannot enumerate ci watchers')"
 
     run bash "$script"
     [ "$status" -eq 0 ]
-    [ "$output" = "NONE" ]
+    [ -z "$output" ]
 }
 
-@test "stop: prints the stored task id when one exists" {
+@test "stop-all: finds a watcher through its task-id file" {
     local script
-    script="$(extract_block 'cannot stop ci watcher')"
-    printf 'task_abc123' > "$TASK"
+    script="$(extract_block 'cannot enumerate ci watchers')"
+    printf 'task_a' > "$BATS_TEST_TMPDIR/ci_watch_task_${SLOT}"
 
     run bash "$script"
     [ "$status" -eq 0 ]
-    [ "$output" = "task_abc123" ]
+    [ "$output" = "$SLOT" ]
 }
 
-@test "stop: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
-    # Without the guard the paths would collapse to /tmp/ci_watch_task_ and one
-    # session could stop another session's watcher.
+@test "stop-all: finds a watcher whose task-id file is missing, via lock or state" {
+    # The task-id file can be reaped from /tmp, or never written at all if the
+    # session died between Monitor returning and the id being persisted. A
+    # task-id-only enumeration would leave that watcher running forever.
+    local script slot_lock slot_state
+    script="$(extract_block 'cannot enumerate ci watchers')"
+    slot_lock="${CLAUDE_CODE_SESSION_ID}_feat-lock-1111111111"
+    slot_state="${CLAUDE_CODE_SESSION_ID}_feat-state-2222222222"
+    printf '4242' > "$BATS_TEST_TMPDIR/ci_watch_lock_${slot_lock}"
+    printf 'feat-state:running' > "$BATS_TEST_TMPDIR/ci_watch_state_${slot_state}"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    assert_contains "$slot_lock" "$output"
+    assert_contains "$slot_state" "$output"
+}
+
+@test "stop-all: reports each slot exactly once across all three sources" {
+    local script line_count
+    script="$(extract_block 'cannot enumerate ci watchers')"
+    printf 'task_a' > "$BATS_TEST_TMPDIR/ci_watch_task_${SLOT}"
+    printf '4242' > "$BATS_TEST_TMPDIR/ci_watch_lock_${SLOT}"
+    printf 'feat-x:running' > "$BATS_TEST_TMPDIR/ci_watch_state_${SLOT}"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    line_count="$(printf '%s\n' "$output" | grep -c .)"
+    [ "$line_count" -eq 1 ]
+    [ "$output" = "$SLOT" ]
+}
+
+@test "stop-all: ignores another session's watchers" {
     local script
-    script="$(extract_block 'cannot stop ci watcher')"
+    script="$(extract_block 'cannot enumerate ci watchers')"
+    printf 'task_other' > "$BATS_TEST_TMPDIR/ci_watch_task_othersess_feat-z-3333333333"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "stop-all: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
+    # Without the guard the glob widens to every session's files and stop-all
+    # would kill watchers belonging to other terminals.
+    local script
+    script="$(extract_block 'cannot enumerate ci watchers')"
 
     run env -u CLAUDE_CODE_SESSION_ID bash "$script"
     [ "$status" -eq 1 ]
     assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
-}
-
-# ---------------------------------------------------------------------------
-# step 2: launch
-# ---------------------------------------------------------------------------
-
-@test "launch: reports session, cwd and NONE when there is no previous task id" {
-    local script expected_dir
-    script="$(extract_block 'cannot launch ci watcher')"
-    rm -f "$TASK"
-
-    # Run from a DIFFERENT directory than the test's own cwd: comparing the
-    # snippet's `pwd` against the test's `pwd` would be true by construction.
-    expected_dir="$(cd "$BATS_TEST_TMPDIR" && pwd)"
-    cd "$BATS_TEST_TMPDIR"
-
-    run bash "$script"
-    [ "$status" -eq 0 ]
-    assert_contains "SESSION=testsess" "$output"
-    assert_contains "DIR=$expected_dir" "$output"
-    assert_contains "NONE" "$output"
-}
-
-@test "launch: fails loudly when CLAUDE_CODE_SESSION_ID is unset" {
-    local script
-    script="$(extract_block 'cannot launch ci watcher')"
-
-    run env -u CLAUDE_CODE_SESSION_ID bash "$script"
-    [ "$status" -eq 1 ]
-    assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
-}
-
-@test "launch: surfaces a previous task id so it can be stopped first" {
-    local script
-    script="$(extract_block 'cannot launch ci watcher')"
-    printf 'task_old' > "$TASK"
-
-    run bash "$script"
-    [ "$status" -eq 0 ]
-    assert_contains "task_old" "$output"
 }
 
 # ---------------------------------------------------------------------------
 # task-id persistence
 # ---------------------------------------------------------------------------
 
-@test "task-id write: lands atomically with no newline and no leftover .tmp" {
-    local script
+@test "task-id write: lands atomically with no newline and no leftover temp file" {
+    local script leftovers
     script="$(extract_block '<TASK_ID>')"
     # The block ships a placeholder; substitute a realistic id to run it.
     sed -i.orig 's/<TASK_ID>/task_xyz789/' "$script"
@@ -320,10 +548,28 @@ assert_process_alive() {
     # reader passes to TaskStop.
     run wc -c < "$TASK"
     [ "$(echo "$output" | tr -d ' ')" = "11" ]
-    [ ! -e "${TASK}.tmp" ]
+    # mktemp names are unpredictable, so assert on the shape instead of one path.
+    leftovers="$(ls -a "$BATS_TEST_TMPDIR" | grep -c "^\.ci_watch_tmp_task\." || true)"
+    [ "$leftovers" -eq 0 ]
 }
 
-@test "task-id write: overwrites the id of a previous launch" {
+@test "task-id write: the temp name is invisible to the stop-all glob" {
+    # stop-all enumerates "/tmp/ci_watch_task_<SESSION>_*". A temp file named
+    # after the task file would be enumerated as a phantom slot mid-launch.
+    local script enum
+    script="$(extract_block '<TASK_ID>')"
+    sed -i.orig 's/<TASK_ID>/task_xyz789/' "$script"
+    run bash "$script"
+    [ "$status" -eq 0 ]
+
+    enum="$(extract_block 'cannot enumerate ci watchers')"
+    run bash "$enum"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
+    assert_contains "$SLOT" "$output"
+}
+
+@test "task-id write: overwrites the id of a previous launch on the same slot" {
     local script
     printf 'task_old' > "$TASK"
     script="$(extract_block '<TASK_ID>')"
@@ -333,6 +579,30 @@ assert_process_alive() {
     [ "$status" -eq 0 ]
     run cat "$TASK"
     [ "$output" = "task_new" ]
+}
+
+@test "task-id write: leaves another branch's task id untouched" {
+    local script other_slot
+    other_slot="${CLAUDE_CODE_SESSION_ID}_feat-y-9876543210"
+    printf 'task_other' > "$BATS_TEST_TMPDIR/ci_watch_task_${other_slot}"
+    script="$(extract_block '<TASK_ID>')"
+    sed -i.orig 's/<TASK_ID>/task_new/' "$script"
+
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    run cat "$BATS_TEST_TMPDIR/ci_watch_task_${other_slot}"
+    [ "$output" = "task_other" ]
+}
+
+@test "task-id write: uses a unique temp name, not a fixed .tmp suffix" {
+    # Two near-simultaneous launches for one slot would otherwise write and
+    # rename the very same "<file>.tmp" path, and one could publish the other's
+    # half-written id. The name must also stay outside the "ci_watch_task_"
+    # namespace that stop-all globs.
+    run cat "$SKILL_MD"
+    assert_contains 'mktemp "/tmp/.ci_watch_tmp_task.XXXXXX"' "$output"
+    assert_not_contains 'mktemp "${TASK_FILE}' "$output"
+    assert_not_contains 'ci_watch_task_${CLAUDE_CODE_SESSION_ID}.tmp' "$output"
 }
 
 # ---------------------------------------------------------------------------
@@ -368,9 +638,70 @@ assert_process_alive() {
     # Without exec, TaskStop kills a parent shell and orphans the watcher.
     assert_contains "&& exec env CLAUDE_CODE_SESSION_ID=" "$output"
     assert_contains '`persistent`: `true`' "$output"
+    # The log is keyed on the per-branch SLOT: two watchers of one session must
+    # not append their diagnostics to a single shared log file.
+    assert_contains "2>>'/tmp/ci_watch_<SLOT>.log'" "$output"
+    assert_not_contains "2>>'/tmp/ci_watch_<SESSION>.log'" "$output"
     # stdout IS the notification stream. Redirecting it (&>> or 1>>) would make
     # every notification vanish with no test failing.
-    assert_contains "2>>'/tmp/ci_watch_<SESSION>.log'" "$output"
     assert_not_contains '&>>' "$output"
     assert_not_contains '1>>' "$output"
+}
+
+@test "skill: no file path is keyed on the bare session id any more" {
+    # The old single-slot scheme is REPLACED, not kept alongside: a leftover
+    # /tmp/ci_watch_state_${CLAUDE_CODE_SESSION_ID} path would read a file no
+    # watcher writes.
+    run cat "$SKILL_MD"
+    assert_not_contains 'ci_watch_state_${CLAUDE_CODE_SESSION_ID}"' "$output"
+    assert_not_contains 'ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"' "$output"
+    assert_not_contains 'ci_watch_task_${CLAUDE_CODE_SESSION_ID}"' "$output"
+    assert_not_contains 'ci_watch_pr_${CLAUDE_CODE_SESSION_ID}"' "$output"
+}
+
+@test "skill: derives the slot through _notify.sh, never a second inline copy" {
+    # Two bash copies of the hash pipeline would drift apart with nothing
+    # failing, and the copy the skill EXECUTES is the one that matters.
+    run cat "$SKILL_MD"
+    assert_contains 'source ~/.claude/scripts/_notify.sh' "$output"
+    assert_contains '_ci_slot "$CLAUDE_CODE_SESSION_ID"' "$output"
+    assert_not_contains 'shasum -a 256' "$output"
+    assert_not_contains "tr -c 'A-Za-z0-9._-'" "$output"
+}
+
+# ---------------------------------------------------------------------------
+# The `:?` guards on the two blocks that are run with variables preset
+# ---------------------------------------------------------------------------
+
+@test "kill by PID: refuses to run with no PID" {
+    # Without the guard this block runs `kill ""`.
+    local script
+    script="$(extract_block 'run the liveness check first')"
+    run env -u PID bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "run the liveness check first" "$output"
+}
+
+@test "task-id removal: refuses to run with no SLOT" {
+    # Without the guard this block is `rm -f /tmp/ci_watch_task_` — harmless by
+    # luck today, and one careless edit away from a glob.
+    local script
+    script="$(extract_block 'rm -f "/tmp/ci_watch_task_')"
+    run env -u SLOT bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "run the slot block first" "$output"
+}
+
+@test "task-id removal: removes ONLY this slot's task file" {
+    local script other
+    other="$BATS_TEST_TMPDIR/ci_watch_task_${CLAUDE_CODE_SESSION_ID}_feat-y-9876543210"
+    printf 'task_other' > "$other"
+    printf 'task_mine' > "$TASK"
+
+    script="$(extract_block 'rm -f "/tmp/ci_watch_task_')"
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TASK" ]
+    run cat "$other"
+    [ "$output" = "task_other" ]
 }

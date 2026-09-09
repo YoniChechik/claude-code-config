@@ -18,7 +18,11 @@ Uses GitHub REST API directly with ETag conditional requests so we can poll at
 Args (positional):
     BRANCH         branch to watch
 
-State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
+State files. Per-watcher files are keyed on
+``{slot} = {CLAUDE_CODE_SESSION_ID}_{sanitize_branch(branch)}-{identity_hash}``,
+where ``identity_hash`` is the first 10 hex chars of
+``sha256("<owner>/<repo>#<branch>")``. One session therefore runs one watcher
+per branch, and two repos that share a branch name never collide:
     /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line), plus a
                                   ":monitor-detached@<epoch>" third field once
                                   a stdout write has failed — the watcher runs
@@ -33,6 +37,22 @@ State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
     /tmp/ci_watch_{slot}.log      this process's stderr, redirected by the
                                   Monitor command line
 
+One file is session-level, with NO branch component, shared by every watcher
+of the session:
+    /tmp/ci_watch_finished_{session_id}
+                                  JSON Lines, one PR per line
+                                  ({"number", "repo", "url", "ts"}), appended
+                                  once at the rising edge of "merged-passed".
+                                  Never deleted by any cleanup path, so it is
+                                  BOUNDED AT RENDER TIME instead: status_line.sh
+                                  reads only the last 200 lines, dedupes on
+                                  (repo, number) and shows the 10 newest.
+
+Temp files written by write_state / write_pr_cache use the ".ci_watch_tmp_"
+prefix, NOT the slot name: readers discover watchers with the glob
+"ci_watch_state_<session>_*", and a temp file that matched it would render as a
+phantom dead watcher.
+
 Exit conditions:
     - branch not found on remote (1)
     - PR merged and main CI resolved for the merge commit (0)
@@ -46,8 +66,10 @@ from __future__ import annotations
 
 import atexit
 import fcntl
+import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -83,12 +105,31 @@ LOCK_ACQUIRE_ATTEMPTS = 5
 # Module-level base dir for state files. Tests override this.
 TMP_DIR = "/tmp"
 
+# Every char outside this set is replaced by "_" in the readable slug prefix.
+_SLUG_UNSAFE_RE = re.compile(rb"[^A-Za-z0-9._-]")
+# Readable-prefix cap. The identity hash, not this prefix, guarantees
+# uniqueness, so truncation here is free.
+SLUG_MAX_LEN = 40
+# Length of the hex identity hash appended to the slug.
+IDENTITY_HASH_LEN = 10
+# Prefix for the temp files write_state/write_pr_cache rename into place. It
+# must NOT start with "ci_watch_", because readers discover watchers with the
+# glob "ci_watch_state_<session>_*": a temp file that matched would be read as
+# a phantom extra watcher whose lock file does not exist, and rendered as
+# "⚠ ci watcher died" next to the healthy row it was spawned from.
+TMP_WRITE_PREFIX = ".ci_watch_tmp_"
+
 # Third field appended to the state file once stdout writes start failing, as
 # "<branch>:<state>:monitor-detached@<epoch>". Readers (status_line.sh,
 # _notify.sh, SKILL.md's liveness check) strip it before matching the state.
 MONITOR_DETACHED_FIELD = "monitor-detached"
 
 GITHUB_API = "https://api.github.com"
+
+# Path prefix of a workflow that is a real file in the repo. GitHub also lists
+# its own "dynamic" workflows (Copilot review, Dependabot, pages) under a
+# "dynamic/" path; those are not repo files and never run for a pushed branch.
+WORKFLOW_FILE_PREFIX = ".github/workflows/"
 
 
 # --- HTTP / API helpers ---
@@ -181,6 +222,7 @@ def get_failed_job_names(run_id: int) -> list[str]:
         ["gh", "run", "view", str(run_id), "--json", "jobs"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         return []
@@ -201,6 +243,7 @@ def has_pending_checks(branch: str) -> bool:
         ["gh", "pr", "checks", branch, "--json", "bucket"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         return False
@@ -233,6 +276,7 @@ def _get_branch_rules(owner: str, repo: str, default_branch: str) -> list | None
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         print(f"[warn] _get_branch_rules gh api failed: {e}", file=sys.stderr)
@@ -321,6 +365,7 @@ def get_emitted_check_names(pr_number: int) -> tuple[set[str], bool]:
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         print(f"[warn] get_emitted_check_names gh failed: {e}", file=sys.stderr)
@@ -483,8 +528,12 @@ def get_sha_runs(all_runs: list, sha: str) -> list:
     return list(by_name.values())
 
 
-def make_pr_cache(pr: dict) -> dict:
-    """Build the JSON shape that status_line.sh expects."""
+def make_pr_cache(pr: dict, owner: str, repo: str) -> dict:
+    """Build the JSON shape that status_line.sh expects.
+
+    ``repoUrl`` + ``mergeCommit.oid`` are what status_line.sh turns into the
+    "post merge" hyperlink (``<repoUrl>/commit/<oid>/checks``).
+    """
     state = pr.get("state", "")
     return {
         "url": pr.get("html_url", ""),
@@ -495,7 +544,40 @@ def make_pr_cache(pr: dict) -> dict:
         "mergeCommit": (
             {"oid": pr["merge_commit_sha"]} if pr.get("merge_commit_sha") else None
         ),
+        "repoUrl": f"https://github.com/{owner}/{repo}",
     }
+
+
+# --- Slot naming ---
+
+
+def sanitize_branch(branch: str) -> str:
+    """Readable, filename-safe prefix for ``branch``.
+
+    Substitution and truncation both run on the UTF-8 BYTES, matching
+    ``_notify.sh``'s ``LC_ALL=C tr -c 'A-Za-z0-9._-' '_'``. A codepoint-based
+    version would disagree with bash on any non-ASCII branch name, and the two
+    languages must derive the identical slot.
+    """
+    return _SLUG_UNSAFE_RE.sub(b"_", branch.encode())[:SLUG_MAX_LEN].decode("ascii")
+
+
+def _identity_hash(owner: str, repo: str, branch: str) -> str:
+    """Short hash of ``"<owner>/<repo>#<branch>"`` — the uniqueness guarantee.
+
+    Branch text alone is not a watcher identity: one session can `cd` between
+    worktrees of different repos, and two repos can legitimately have the same
+    branch name.
+    """
+    identity = f"{owner}/{repo}#{branch}"
+    return hashlib.sha256(identity.encode()).hexdigest()[:IDENTITY_HASH_LEN]
+
+
+def slot_for(session_id: str, owner: str, repo: str, branch: str) -> str:
+    """The per-watcher file key: ``<session>_<branch slug>-<identity hash>``."""
+    return (
+        f"{session_id}_{sanitize_branch(branch)}-{_identity_hash(owner, repo, branch)}"
+    )
 
 
 # --- File writers ---
@@ -511,6 +593,72 @@ def _pr_path(slot: str) -> Path:
 
 def _lock_path(slot: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
+
+
+def _finished_path(session_id: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_finished_{session_id}"
+
+
+def append_finished_pr(
+    session_id: str, repo_full: str, pr_number: int, pr_url: str
+) -> None:
+    """Append one finished-PR JSON line to the session-level finished file.
+
+    ``os.write`` on an ``O_APPEND`` fd, not Python's buffered ``write``, so the
+    line reaches the file as ONE syscall — several watchers of the same session
+    append concurrently. No temp-file/rename dance: the file is append-only, so
+    there is nothing to replace.
+
+    ``repo_full`` ("<owner>/<repo>") is part of the record because PR numbers
+    are repo-LOCAL: one session watches branches across several repos, so
+    render-time dedup must key on (repo, number), never on the number alone.
+
+    Duplicates are NOT suppressed here. Doing so would need a read-before-write
+    and reintroduce the cross-process race this design avoids; status_line.sh
+    dedupes at render time instead.
+
+    BEST EFFORT: every failure is logged and swallowed. The caller writes the
+    "merged-passed" state and fires the CI-PASSED notification straight after,
+    and losing one finished-list entry is far cheaper than losing both of those
+    plus the whole watcher process to an ``OSError`` from a full ``/tmp``.
+    """
+    line = (
+        json.dumps(
+            {
+                "number": pr_number,
+                "repo": repo_full,
+                "url": pr_url,
+                "ts": time.time(),
+            }
+        )
+        + "\n"
+    )
+    try:
+        # O_NOFOLLOW: the path is predictable and lives in a shared /tmp, so a
+        # symlink planted there would redirect the append to another file.
+        fd = os.open(
+            _finished_path(session_id),
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW,
+            0o644,
+        )
+    except OSError as e:
+        _log_stderr(f"[warn] could not open the finished-PR file: {e}")
+        return
+    try:
+        payload = line.encode()
+        written = os.write(fd, payload)
+        if written != len(payload):
+            # A short write leaves a line with no trailing newline, so the NEXT
+            # watcher's append concatenates onto it and BOTH records are lost.
+            # Log it rather than assume the "one syscall" guarantee held.
+            _log_stderr(
+                f"[warn] short write to the finished-PR file "
+                f"({written}/{len(payload)} bytes)"
+            )
+    except OSError as e:
+        _log_stderr(f"[warn] could not append to the finished-PR file: {e}")
+    finally:
+        os.close(fd)
 
 
 # Epoch of the FIRST failed stdout write, or None while the notification
@@ -535,7 +683,10 @@ def write_state(slot: str, branch: str, value: str) -> None:
     if _MONITOR_DETACHED_AT is not None:
         line = f"{line}:{MONITOR_DETACHED_FIELD}@{int(_MONITOR_DETACHED_AT)}"
     path = _state_path(slot)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_state_{slot}.", dir=TMP_DIR)
+    # TMP_WRITE_PREFIX, never "ci_watch_state_<slot>.": readers glob
+    # "ci_watch_state_<session>_*", so a temp file named after the slot would be
+    # discovered as a second, lock-less watcher and rendered as "died".
+    fd, tmp = tempfile.mkstemp(prefix=TMP_WRITE_PREFIX, dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
             f.write(line)
@@ -572,7 +723,8 @@ def _mark_monitor_detached() -> None:
 
 def write_pr_cache(slot: str, data: dict) -> None:
     path = _pr_path(slot)
-    fd, tmp = tempfile.mkstemp(prefix=f"ci_watch_pr_{slot}.", dir=TMP_DIR)
+    # See write_state: the temp name must never match a discovery glob.
+    fd, tmp = tempfile.mkstemp(prefix=TMP_WRITE_PREFIX, dir=TMP_DIR)
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -621,15 +773,20 @@ def _is_ci_watch_pid(pid: int) -> bool:
         ["ps", "-p", str(pid), "-o", "args="],
         capture_output=True,
         text=True,
+        check=False,
     )
     return "ci_watch" in result.stdout
 
 
 def _read_lock_pid(lock_path: Path) -> int | None:
-    """The pid recorded in ``lock_path``, or None if missing or garbled."""
+    """The pid recorded in ``lock_path``, or None if missing or garbled.
+
+    Only the FIRST line is parsed: acquire_lock writes the pid at offset 0 and
+    truncates afterwards, so a longer predecessor's tail can briefly follow it.
+    """
     try:
-        return int(lock_path.read_text().strip())
-    except (OSError, ValueError):
+        return int(lock_path.read_text().splitlines()[0].strip())
+    except (OSError, ValueError, IndexError):
         return None
 
 
@@ -737,9 +894,16 @@ def acquire_lock(slot: str) -> None:
         # returning: readers (status_line.sh, the /ci-watcher skill) must never
         # see a predecessor's pid — or an empty file — for a slot that has
         # already changed hands.
-        os.ftruncate(fd, 0)
-        os.lseek(fd, 0, os.SEEK_SET)
-        os.write(fd, str(os.getpid()).encode())
+        # Write FIRST, truncate to the written length after — never the other
+        # way round. Readers do not take the flock, so a truncate-then-write
+        # order leaves a window in which they see an EMPTY file and conclude
+        # DEAD. Writing at offset 0 keeps a valid pid at the head of the file at
+        # every instant; the pid is newline-TERMINATED and every reader takes
+        # only the first line, so a longer predecessor's leftover tail is
+        # ignored during the microseconds before the truncate lands.
+        pid_bytes = f"{os.getpid()}\n".encode()
+        os.pwrite(fd, pid_bytes, 0)
+        os.ftruncate(fd, len(pid_bytes))
         os.fsync(fd)
         return
     print(
@@ -799,10 +963,22 @@ class WatchState:
     """All mutable state for a single watch() invocation."""
 
     def __init__(
-        self, branch: str, slot: str, latest_sha: str, default_branch: str
+        self,
+        branch: str,
+        slot: str,
+        session_id: str,
+        repo_full: str,
+        latest_sha: str,
+        default_branch: str,
     ) -> None:
         self.branch = branch
         self.slot = slot
+        # Kept alongside `slot` because the finished-PR file is session-level:
+        # every watcher of one session appends to the same file.
+        self.session_id = session_id
+        # "<owner>/<repo>". Stamped into every finished-PR record: PR numbers
+        # are repo-local, so the renderer cannot dedupe on the number alone.
+        self.repo_full = repo_full
         self.latest_sha = latest_sha
         self.default_branch = default_branch
 
@@ -1007,7 +1183,12 @@ def check_failures(context: str, sha_runs: list, state: WatchState) -> None:
 
 
 def check_all_passed(
-    context: str, sha_runs: list, state: WatchState, mergeable_state: str
+    context: str,
+    sha_runs: list,
+    state: WatchState,
+    mergeable_state: str,
+    pr_number: int | None = None,
+    pr_url: str = "",
 ) -> None:
     """Fire the CI-passed notification once when every run is completed+success/skipped."""
     if not sha_runs:
@@ -1035,6 +1216,16 @@ def check_all_passed(
         return
 
     if context == "main":
+        # Finished-file entry FIRST, state second. status_line.sh hides every
+        # "merged-passed" row (the PR belongs to the finished list from here on),
+        # so a crash between the two writes must not be able to leave the PR out
+        # of both. This order makes the worst case a duplicate line, which the
+        # renderer dedupes, instead of a PR that vanishes from the status line.
+        # append_finished_pr swallows its own I/O errors for the same reason: a
+        # failure THERE must never stop the state write and the notification
+        # below, which is the outcome this ordering exists to prevent.
+        if pr_number is not None:
+            append_finished_pr(state.session_id, state.repo_full, pr_number, pr_url)
         write_state(state.slot, state.branch, "merged-passed")
         notify(
             f"CI PASSED on {state.default_branch} after merge of branch {state.branch}"
@@ -1090,14 +1281,23 @@ def repo_info() -> tuple[str, str, str]:
 
 
 def count_repo_workflows(owner: str, repo: str, token: str) -> int | None:
-    """Return how many workflows the repo has registered, or None if unknown.
+    """Return how many REAL workflow files the repo has, or None if unknown.
 
     ``GET /actions/workflows`` reports every workflow GitHub knows about for
-    the repo (``total_count``), including disabled ones. Returns None on ANY
-    error or unexpected payload — callers MUST treat None as "unknown" and
-    fall back to the normal wait/timeout path, never as "no CI".
+    the repo, including disabled ones — and also GitHub's own *dynamic*
+    workflows, which are not files in the repo at all: Copilot code review,
+    Dependabot updates, pages-build-deployment. Those carry a synthetic
+    ``path`` under ``dynamic/`` instead of ``.github/workflows/``, and they
+    never produce a run for a pushed branch. Counting them made
+    ``total_count`` non-zero for a repo with zero workflow files, which vetoed
+    detect_no_ci_configured and left the watcher polling forever in silence.
+    So count only entries whose ``path`` lives in ``.github/workflows/``.
+
+    Returns None on ANY error or unexpected payload — callers MUST treat None
+    as "unknown" and fall back to the normal wait/timeout path, never as
+    "no CI".
     """
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/workflows?per_page=1"
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/workflows?per_page=100"
     try:
         resp = requests.get(url, headers=_gh_headers(token), timeout=10)
         if resp.status_code != 200:
@@ -1115,7 +1315,19 @@ def count_repo_workflows(owner: str, repo: str, token: str) -> int | None:
     total = data.get("total_count")
     if not isinstance(total, int) or isinstance(total, bool):
         return None
-    return total
+    workflows = data.get("workflows")
+    if not isinstance(workflows, list):
+        return None
+    # More workflows than this page holds: we cannot classify the rest, so fail
+    # toward "CI exists" (keep waiting) rather than risk a false "no CI".
+    if total > len(workflows):
+        return total
+    return sum(
+        1
+        for w in workflows
+        if isinstance(w, dict)
+        and str(w.get("path", "")).startswith(WORKFLOW_FILE_PREFIX)
+    )
 
 
 def ref_has_workflow_files(owner: str, repo: str, ref: str, token: str) -> bool | None:
@@ -1196,6 +1408,7 @@ def get_remote_head_sha(branch: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if result.returncode != 0:
             return None
@@ -1245,13 +1458,16 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
 def watch(
     branch: str,
     slot: str,
+    session_id: str,
     owner: str,
     repo: str,
     default_branch: str,
     latest_sha: str,
 ) -> None:
     """Run the CI watch loop until a terminal condition fires."""
-    state = WatchState(branch, slot, latest_sha, default_branch)
+    state = WatchState(
+        branch, slot, session_id, f"{owner}/{repo}", latest_sha, default_branch
+    )
 
     runs_url = (
         f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs?branch={branch}&per_page=100"
@@ -1357,9 +1573,10 @@ def watch(
             pr_detail = pr
 
         if pr:
-            write_pr_cache(slot, make_pr_cache(pr_detail or pr))
+            write_pr_cache(slot, make_pr_cache(pr_detail or pr, owner, repo))
 
         merge_commit_oid = get_merge_commit_sha(pr_detail or pr)
+        pr_html_url = (pr_detail or pr).get("html_url", "")
         mergeable_state = (pr_detail or pr).get("mergeable_state", "").upper()
 
         # --- Detect merged ---
@@ -1553,7 +1770,9 @@ def watch(
 
             state.main_wait_iterations = 0
             check_failures("main", sha_runs, state)
-            check_all_passed("main", sha_runs, state, mergeable_state)
+            check_all_passed(
+                "main", sha_runs, state, mergeable_state, pr_number, pr_html_url
+            )
 
             if state.reported_main_pass or state.reported_main_fail:
                 print(
@@ -1749,8 +1968,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    slot = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-    if not slot:
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
         print(
             "Error: CLAUDE_CODE_SESSION_ID is unset. ci_watch must be launched "
             "from a Claude Code Bash subshell so the harness injects it.",
@@ -1758,13 +1977,29 @@ def main() -> None:
         )
         sys.exit(2)
 
+    # Both shell out to `gh` with check=True. They run BEFORE the lock (the slot
+    # needs owner/repo), so a `gh` failure here would otherwise surface as a raw
+    # traceback in the log file with no state file and no lock ever created —
+    # the "dead on arrival, message only in the log" trap the skill warns about.
+    try:
+        token = gh_token_value()
+        owner, repo, default_branch = repo_info()
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as e:
+        print(
+            f"Error: could not resolve the repo through `gh` ({e}). "
+            "Check `gh auth status` and that this is a GitHub repo.",
+            file=sys.stderr,
+        )
+        sys.exit(4)
+    # owner/repo must be resolved BEFORE the lock: the slot is per-branch AND
+    # per-repo, so a session watching two branches (or the same branch in two
+    # worktrees) takes two disjoint locks instead of evicting itself.
+    slot = slot_for(session_id, owner, repo, branch)
     acquire_lock(slot)
 
-    token = gh_token_value()
-    owner, repo, default_branch = repo_info()
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(branch, slot, owner, repo, default_branch, latest_sha)
+    watch(branch, slot, session_id, owner, repo, default_branch, latest_sha)
 
 
 if __name__ == "__main__":

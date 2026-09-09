@@ -99,13 +99,26 @@ line_notification_no_ts() {
         "$AGENT_ID" "$1"
 }
 
+# A session runs one watcher PER BRANCH, so every CI fixture is keyed on that
+# branch's SLOT. The hash half is arbitrary here — ci_is_active discovers slots
+# by globbing, it never recomputes one.
+slot_for_branch() {
+    printf '%s_%s-0123456789' "${CLAUDE_CODE_SESSION_ID}" "$1"
+}
+
+# Write "<branch>:<state>" ($2) into branch $1's state file.
+write_ci_state() {
+    printf '%s' "$2" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "$1")"
+}
+
+# Spawn a live fake watcher and record its PID in branch $1's lockfile.
 spawn_fake_watcher() {
     # 3>&- so bats does not sit waiting on its own fd 3 after the last test
     # reports; the sleep only has to outlive one ci_is_active call.
     bash -c 'exec -a ci_watch_fake sleep 3' </dev/null >/dev/null 2>&1 3>&- &
     WPID=$!
     disown 2>/dev/null || true
-    printf '%s' "$WPID" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$WPID" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_$(slot_for_branch "$1")"
 }
 
 run_hook() {
@@ -134,10 +147,33 @@ dedup_lock_count() {
 
 @test "stop decision: BLUE path when CI actively running (no chime)" {
     write_idle_transcript
-    printf '%s' "${CUR_BRANCH}:running" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
-    spawn_fake_watcher
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:running"
+    spawn_fake_watcher "$CUR_BRANCH"
     run_hook
     [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: BLUE path when a DIFFERENT branch's watcher is running" {
+    # One session can watch several branches at once. The cwd's own branch has
+    # no watcher here, but another branch's is still running — that is
+    # background work in progress, so the tab must stay blue and not chime.
+    # (Before the multi-watcher change, ci_is_active required the stored branch
+    # to match the cwd's, and this case chimed while CI was still running.)
+    write_idle_transcript
+    write_ci_state "feat-elsewhere" "feat-elsewhere:running"
+    spawn_fake_watcher "feat-elsewhere"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN when the only OTHER-branch watcher is dead" {
+    # The dropped branch-match must not become "any state file anywhere pins
+    # blue": a stale running state from a crashed watcher still has to chime.
+    write_idle_transcript
+    write_ci_state "feat-elsewhere" "feat-elsewhere:running"
+    printf '999999' > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_$(slot_for_branch feat-elsewhere)"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
 }
 
 @test "stop decision: BLUE path when background agent still active (no chime)" {
@@ -149,8 +185,8 @@ dedup_lock_count() {
 
 @test "stop decision: GREEN path when CI reached a terminal state (passed)" {
     write_idle_transcript
-    printf '%s' "${CUR_BRANCH}:passed" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
-    spawn_fake_watcher
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:passed"
+    spawn_fake_watcher "$CUR_BRANCH"
     run_hook
     [ "$(dedup_lock_count)" -ge 1 ]
 }

@@ -126,36 +126,174 @@ close_tty_capture() {
     return 1
 }
 
+# A session runs one watcher PER BRANCH, so every fixture is keyed on a SLOT.
+# The slot text is arbitrary here; only the _ci_slug / _ci_slot tests below
+# assert how a real one is derived.
+slot_for_branch() {
+    printf '%s_%s-0123456789' "${CLAUDE_CODE_SESSION_ID}" "$1"
+}
+
+# Write "<branch>:<state>" for branch $1 with state line $2.
 write_state() {
-    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$2" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "$1")"
 }
 
+# Write lock PID $2 for branch $1.
 write_lock() {
-    printf '%s' "$1" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}"
+    printf '%s' "$2" > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_$(slot_for_branch "$1")"
 }
 
-# Force ci_is_active to see a deterministic "current branch" by stubbing git.
-stub_branch() {
-    local branch="$1"
-    eval "git() { if [ \"\$1 \$2\" = 'rev-parse --abbrev-ref' ]; then printf '%s\n' '$branch'; else command git \"\$@\"; fi; }"
+# ---------------------------------------------------------------------------
+# _ci_slug / _ci_slot — the bash half of the slot contract
+# ---------------------------------------------------------------------------
+
+@test "_ci_slug: leaves an already-safe branch name alone" {
+    run _ci_slug "feat-x.1_2"
+    [ "$output" = "feat-x.1_2" ]
+}
+
+@test "_ci_slug: replaces every unsafe character with an underscore" {
+    run _ci_slug 'feat/a:b c&d'
+    [ "$output" = "feat_a_b_c_d" ]
+}
+
+@test "_ci_slug: truncates to 40 bytes" {
+    local long
+    long="$(printf 'x%.0s' {1..200})"
+    run _ci_slug "$long"
+    [ "${#output}" -eq 40 ]
+}
+
+@test "_ci_slug: substitutes per BYTE, matching ci_watch.py's sanitize_branch" {
+    # ci_watch.py works on the UTF-8 bytes. A locale-aware tr here would emit a
+    # different slug for a non-ASCII branch, and the launcher and the watcher
+    # would key on different files with nothing failing loudly.
+    run _ci_slug 'féat/ü'
+    [ "$output" = "f__at___" ]
+}
+
+@test "_ci_slot: matches ci_watch.py's slot_for exactly" {
+    local expected
+    expected="$(cd "${BATS_TEST_DIRNAME}/.." && uv run --quiet --with requests \
+        python -c '
+import sys
+sys.path.insert(0, "skills/ci-watcher")
+import ci_watch
+print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
+')"
+    [ -n "$expected" ]
+    run _ci_slot "testsess" "o/r" 'féat/ü'
+    [ "$output" = "$expected" ]
+}
+
+@test "_ci_slot: the same branch in two repos gets different slots" {
+    local a b
+    a="$(_ci_slot "testsess" "o/repo-a" "main")"
+    b="$(_ci_slot "testsess" "o/repo-b" "main")"
+    [ "$a" != "$b" ]
+}
+
+@test "_ci_slot: fails loudly when the hash cannot be computed" {
+    # shasum is a perl script, not a coreutils binary, and is absent on many
+    # minimal images. An empty hash would build a slot no watcher ever owns.
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nexit 127\n' > "$BATS_TEST_TMPDIR/bin/shasum"
+    chmod +x "$BATS_TEST_TMPDIR/bin/shasum"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH" run _ci_slot "testsess" "o/r" "main"
+    [ "$status" -ne 0 ]
+    assert_contains "identity hash" "$output"
+}
+
+# ---------------------------------------------------------------------------
+# _ci_watch_session_state_files — the one discovery implementation
+# ---------------------------------------------------------------------------
+
+@test "_ci_watch_session_state_files: prints nothing when the session has none" {
+    run _ci_watch_session_state_files "testsess"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "_ci_watch_session_state_files: prints one path per watcher" {
+    write_state "feat-a" "feat-a:running"
+    write_state "feat-b" "feat-b:merging"
+    run _ci_watch_session_state_files "testsess"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 2 ]
+    assert_contains "ci_watch_state_testsess_feat-a-" "$output"
+    assert_contains "ci_watch_state_testsess_feat-b-" "$output"
+}
+
+@test "_ci_watch_session_state_files: ignores another session's watchers" {
+    printf 'x:running' > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_othersess_feat-a-0123456789"
+    run _ci_watch_session_state_files "testsess"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "_ci_watch_session_state_files: prints nothing for an empty session id" {
+    run _ci_watch_session_state_files ""
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "_ci_watch_session_state_files: a FIFO at a state path is never listed" {
+    # These paths are predictable and live in a shared /tmp. A FIFO planted at
+    # one of them would block the `cat` of every consumer — the 1s status-line
+    # poll and ci_is_active inside the Stop hook — forever.
+    mkfifo "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_testsess_feat-fifo-0123456789"
+    write_state "feat-a" "feat-a:running"
+    run _ci_watch_session_state_files "testsess"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
+    assert_contains "feat-a-" "$output"
+    assert_not_contains "feat-fifo" "$output"
+}
+
+@test "_ci_watch_session_state_files: a write_state temp file is never listed" {
+    # write_state renames a temp file into place. A temp name matching this glob
+    # would be discovered as a lock-less watcher and reported as a death.
+    write_state "feat-a" "feat-a:running"
+    printf 'feat-a:running' \
+        > "$CLAUDE_NOTIFY_TMP_DIR/.ci_watch_tmp_testsess_feat-a-0123456789.aB3xYz"
+    run _ci_watch_session_state_files "testsess"
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------
 # ci_is_active
 # ---------------------------------------------------------------------------
 
-@test "ci_is_active: ACTIVE when watcher alive + state running + branch matches" {
-    stub_branch "feat-x"
-    write_state "feat-x:running"
-    write_lock "$(spawn_fake_watcher)"
+@test "ci_is_active: ACTIVE when watcher alive + state running" {
+    write_state "feat-x" "feat-x:running"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -eq 0 ]
 }
 
 @test "ci_is_active: ACTIVE for merging state too" {
-    stub_branch "feat-x"
-    write_state "feat-x:merging"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "feat-x:merging"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -eq 0 ]
+}
+
+@test "ci_is_active: ACTIVE when ANY of several watchers is running" {
+    # A session can watch several branches at once. One of them still running
+    # is background work in progress, whatever the other ones are doing.
+    write_state "feat-a" "feat-a:passed"
+    write_lock "feat-a" "$(dead_pid)"
+    write_state "feat-b" "feat-b:running"
+    write_lock "feat-b" "$(spawn_fake_watcher)"
+    run ci_is_active
+    [ "$status" -eq 0 ]
+}
+
+@test "ci_is_active: ACTIVE for a watcher on a DIFFERENT branch than the cwd" {
+    # The branch-match requirement is gone on purpose: with several concurrent
+    # PRs the shell's cwd says nothing about whether background CI is running.
+    write_state "some-other-branch" "some-other-branch:running"
+    write_lock "some-other-branch" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -eq 0 ]
 }
@@ -164,104 +302,94 @@ stub_branch() {
     # Alive + running, but ci_watch.py's stdout writes are failing, so no CI
     # result will ever be reported. Counting it as active would pin the tab blue
     # and swallow the chime while nothing is left to tell the user anything.
-    stub_branch "feat-x"
-    write_state "feat-x:running:monitor-detached@1757000000"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "feat-x:running:monitor-detached@1757000000"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when state file missing" {
-    stub_branch "feat-x"
-    write_lock "$(spawn_fake_watcher)"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when state file empty" {
-    stub_branch "feat-x"
-    write_state ""
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" ""
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when state has no branch prefix (no colon)" {
-    stub_branch "feat-x"
-    write_state "running"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "running"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active for terminal state passed" {
-    stub_branch "feat-x"
-    write_state "feat-x:passed"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "feat-x:passed"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active for terminal state failed" {
-    stub_branch "feat-x"
-    write_state "feat-x:failed"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "feat-x:failed"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active for terminal state merged-passed" {
-    stub_branch "feat-x"
-    write_state "feat-x:merged-passed"
-    write_lock "$(spawn_fake_watcher)"
-    run ci_is_active
-    [ "$status" -ne 0 ]
-}
-
-@test "ci_is_active: NON-active when branch mismatches" {
-    stub_branch "other-branch"
-    write_state "feat-x:running"
-    write_lock "$(spawn_fake_watcher)"
+    write_state "feat-x" "feat-x:merged-passed"
+    write_lock "feat-x" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when watcher PID is dead (stale running)" {
-    stub_branch "feat-x"
-    write_state "feat-x:running"
-    write_lock "$(dead_pid)"
+    write_state "feat-x" "feat-x:running"
+    write_lock "feat-x" "$(dead_pid)"
+    run ci_is_active
+    [ "$status" -ne 0 ]
+}
+
+@test "ci_is_active: NON-active when another SLOT's watcher is the live one" {
+    # Liveness is per-slot: a live watcher for feat-b must not make feat-a's
+    # stale "running" state count as active.
+    write_state "feat-a" "feat-a:running"
+    write_lock "feat-a" "$(dead_pid)"
+    write_lock "feat-b" "$(spawn_fake_watcher)"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when lockfile missing" {
-    stub_branch "feat-x"
-    write_state "feat-x:running"
+    write_state "feat-x" "feat-x:running"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when lockfile is present but empty (truncated)" {
-    stub_branch "feat-x"
-    write_state "feat-x:running"
+    write_state "feat-x" "feat-x:running"
     # A crashed/half-written watcher can leave an empty lockfile: no PID to
     # kill -0, so liveness must fail rather than error out.
-    write_lock ""
+    write_lock "feat-x" ""
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when PID alive but args don't mention ci_watch" {
-    stub_branch "feat-x"
-    write_state "feat-x:running"
+    write_state "feat-x" "feat-x:running"
     # $$ is the bats test process — alive, but its argv is not ci_watch.
-    write_lock "$$"
+    write_lock "feat-x" "$$"
     run ci_is_active
     [ "$status" -ne 0 ]
 }
 
 @test "ci_is_active: NON-active when CLAUDE_CODE_SESSION_ID is empty" {
-    stub_branch "feat-x"
     export CLAUDE_CODE_SESSION_ID=""
     run ci_is_active
     [ "$status" -ne 0 ]
@@ -348,7 +476,6 @@ stub_branch() {
 
 @test "notify_user_attention: emits green RGB (0/255/0) and uses the session-name sidecar as the title" {
     redirect_tty_to_file
-    stub_branch "feat-x"
     printf 'my session' > "$CLAUDE_NOTIFY_TMP_DIR/session_name_${CLAUDE_CODE_SESSION_ID}"
     # No arg => legacy unconditional-green path (no background-work gating).
     notify_user_attention >/dev/null 2>&1
@@ -402,7 +529,6 @@ stub_branch() {
 
 @test "notify_user_attention: no sidecar file -> no title OSC escape emitted at all" {
     redirect_tty_to_file
-    stub_branch "feat-x"
     notify_user_attention >/dev/null 2>&1
     close_tty_capture
     output="$(cat "$TTY_CAPTURE")"
