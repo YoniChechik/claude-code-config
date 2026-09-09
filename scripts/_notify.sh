@@ -703,15 +703,31 @@ _bg_agents_log() {
 # ci_watch.py's sanitize_branch() exactly — a codepoint-vs-byte disagreement on
 # a non-ASCII branch name would desync the two languages' slots.
 _ci_slug() {
-    printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40
+    # The $( ) strips cut's line terminator, so the slug carries no trailing
+    # newline for a caller that does not wrap it in a command substitution of
+    # its own. tr has already turned any real newline into "_".
+    printf '%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40)"
 }
 
 # Build a full SLOT. Args: <session id> <owner/repo> <branch>.
+# THE single bash implementation: skills/ci-watcher/SKILL.md sources this file
+# and calls this function. Do not re-inline the pipeline anywhere.
 _ci_slot() {
     local session_id="$1" name_with_owner="$2" branch="$3"
     local identity_hash
     identity_hash=$(printf '%s' "${name_with_owner}#${branch}" \
         | shasum -a 256 | cut -c1-10)
+    # Validate rather than trust: shasum is a perl script, not a coreutils
+    # binary, and is absent on many minimal images. An empty hash would build a
+    # slot no watcher ever owns, and every liveness check, stop and launch would
+    # then target files that do not exist — silently.
+    case "$identity_hash" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+        *)
+            echo "Error: could not compute the ci watcher identity hash (is shasum installed?)." >&2
+            return 1
+            ;;
+    esac
     printf '%s_%s-%s' "$session_id" "$(_ci_slug "$branch")" "$identity_hash"
 }
 
@@ -727,7 +743,11 @@ _ci_watch_session_state_files() {
     # is sourced into other scripts): with no match bash leaves the pattern
     # literal, so the -e guard is what drops it.
     for f in "${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${session_id}"_*; do
-        [ -e "$f" ] || continue
+        # REGULAR files only, never -e. These paths are predictable and live in
+        # a shared /tmp, so a FIFO planted at one of them would block the `cat`
+        # of every consumer — the 1s status-line poll and ci_is_active inside
+        # the Stop hook — forever. -f also drops an unmatched literal glob.
+        [ -f "$f" ] || continue
         printf '%s\n' "$f"
     done
     return 0
@@ -782,7 +802,11 @@ ci_is_active() {
         # owned by an unrelated process can't pass).
         slot="${state_file##*/ci_watch_state_}"
         lock_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_lock_${slot}"
-        watcher_pid=$(cat "$lock_file" 2>/dev/null || true)
+        # First line only, and a regular file only: acquire_lock writes the pid
+        # at offset 0 and truncates afterwards, so a longer predecessor's tail
+        # can briefly follow it.
+        [ -f "$lock_file" ] || continue
+        watcher_pid=$(head -n 1 "$lock_file" 2>/dev/null || true)
         if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null \
            && ps -p "$watcher_pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
             return 0

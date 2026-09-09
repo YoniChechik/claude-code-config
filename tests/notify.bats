@@ -193,6 +193,17 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
     [ "$a" != "$b" ]
 }
 
+@test "_ci_slot: fails loudly when the hash cannot be computed" {
+    # shasum is a perl script, not a coreutils binary, and is absent on many
+    # minimal images. An empty hash would build a slot no watcher ever owns.
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nexit 127\n' > "$BATS_TEST_TMPDIR/bin/shasum"
+    chmod +x "$BATS_TEST_TMPDIR/bin/shasum"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH" run _ci_slot "testsess" "o/r" "main"
+    [ "$status" -ne 0 ]
+    assert_contains "identity hash" "$output"
+}
+
 # ---------------------------------------------------------------------------
 # _ci_watch_session_state_files — the one discovery implementation
 # ---------------------------------------------------------------------------
@@ -224,6 +235,29 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
     run _ci_watch_session_state_files ""
     [ "$status" -eq 0 ]
     [ -z "$output" ]
+}
+
+@test "_ci_watch_session_state_files: a FIFO at a state path is never listed" {
+    # These paths are predictable and live in a shared /tmp. A FIFO planted at
+    # one of them would block the `cat` of every consumer — the 1s status-line
+    # poll and ci_is_active inside the Stop hook — forever.
+    mkfifo "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_testsess_feat-fifo-0123456789"
+    write_state "feat-a" "feat-a:running"
+    run _ci_watch_session_state_files "testsess"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
+    assert_contains "feat-a-" "$output"
+    assert_not_contains "feat-fifo" "$output"
+}
+
+@test "_ci_watch_session_state_files: a write_state temp file is never listed" {
+    # write_state renames a temp file into place. A temp name matching this glob
+    # would be discovered as a lock-less watcher and reported as a death.
+    write_state "feat-a" "feat-a:running"
+    printf 'feat-a:running' \
+        > "$CLAUDE_NOTIFY_TMP_DIR/.ci_watch_tmp_testsess_feat-a-0123456789.aB3xYz"
+    run _ci_watch_session_state_files "testsess"
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------

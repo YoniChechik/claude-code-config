@@ -42,13 +42,26 @@ The hash, not the readable prefix, is what makes the slot unique. `owner/repo`
 is folded in because a branch name alone is not a watcher identity: one session
 can `cd` between worktrees of two repos that both have a branch called `main`.
 
+`_ci_slot` in `~/.claude/scripts/_notify.sh` is THE single bash implementation
+of this recipe, and the block below sources that file and calls it. Never
+re-inline the `shasum` / `tr` / `cut` pipeline here — a second bash copy would
+drift from the one the tests cross-check against `ci_watch.py`.
+
 One more file is SESSION-level, with no branch component:
 `/tmp/ci_watch_finished_<SESSION>` collects every PR that merged AND went green
 on post-merge CI. `ci_watch.py` appends to it; `status_line.sh` renders it. No
 path in this skill writes or deletes it.
 
 Run this block FIRST in every flow below — launch, `stop`, and `stop <branch>`.
-Run it from the repo directory whose branch you are targeting:
+Run it from the repo directory whose branch you are targeting: `owner/repo` is
+resolved with `gh repo view` from the CURRENT directory, so `stop <branch>` run
+from repo A can never derive the slot of a watcher launched in repo B. It would
+report "nothing to stop" for a watcher that is very much alive. Use
+`/ci-watcher stop-all` when you cannot reach the right repo directory.
+
+The block prints the branch it resolved (`BRANCH=`). Use THAT value everywhere
+below — it is whitespace-stripped, exactly as `ci_watch.py` strips its own
+branch argument, and an unstripped copy would hash to a different slot:
 
 ```bash
 # Guard: without a session id every path collapses to /tmp/ci_watch_*_ and one
@@ -61,21 +74,24 @@ fi
 # Inline a user-supplied branch as a SINGLE-quoted literal (BRANCH='feat/x'),
 # never through double quotes — see the quoting rule in step 2.
 BRANCH="${BRANCH:-$(git branch --show-current)}"
+# Strip leading/trailing whitespace, exactly as ci_watch.py does to sys.argv[1].
+# A pasted branch name with a trailing space would otherwise hash HERE to a slot
+# the watcher itself never computes, and every liveness check would miss it.
+BRANCH="${BRANCH#"${BRANCH%%[![:space:]]*}"}"
+BRANCH="${BRANCH%"${BRANCH##*[![:space:]]}"}"
 if [[ -z "$BRANCH" ]]; then
     echo "Error: no branch resolved; cannot key the ci watcher files." >&2
     exit 1
 fi
-# owner/repo is part of the identity, so two worktrees of different repos that
-# share a branch name still get two distinct slots.
-IDENTITY="$(gh repo view --json nameWithOwner -q .nameWithOwner)#${BRANCH}"
-# The hash — not the readable prefix below — is what guarantees uniqueness.
-IDENTITY_HASH=$(printf '%s' "$IDENTITY" | shasum -a 256 | cut -c1-10)
-# Readable prefix: every BYTE outside [A-Za-z0-9._-] becomes _, capped at 40.
-# LC_ALL=C keeps tr and cut in byte mode, so this matches ci_watch.py's
-# sanitize_branch() exactly even for a non-ASCII branch name.
-BRANCH_SLUG="$(printf '%s' "$BRANCH" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40)-${IDENTITY_HASH}"
-SLOT="${CLAUDE_CODE_SESSION_ID}_${BRANCH_SLUG}"
+# THE single bash implementation of the slot recipe. owner/repo is part of the
+# identity, so two worktrees of different repos that share a branch name still
+# get two distinct slots. _ci_slot fails loudly if the hash cannot be computed.
+# shellcheck source=/dev/null
+source ~/.claude/scripts/_notify.sh
+SLOT=$(_ci_slot "$CLAUDE_CODE_SESSION_ID" \
+    "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$BRANCH") || exit 1
 echo "SESSION=${CLAUDE_CODE_SESSION_ID}"
+echo "BRANCH=${BRANCH}"
 echo "DIR=$(pwd)"
 echo "SLOT=${SLOT}"
 # Monitor task id for THIS slot only, or NONE. Other branches' watchers in the
@@ -105,7 +121,9 @@ fi
 # ALIVE, MUTE (alive, but its notifications reach nobody) or DEAD.
 LOCK="/tmp/ci_watch_lock_${SLOT}"
 STATE="/tmp/ci_watch_state_${SLOT}"
-PID=$(cat "$LOCK" 2>/dev/null || echo "")
+# First line only: ci_watch.py writes its pid at offset 0 and truncates right
+# after, so a longer predecessor's tail can briefly follow the live pid.
+PID=$(head -n 1 "$LOCK" 2>/dev/null || echo "")
 if [[ -n "$PID" ]] && ps -p "$PID" -o args= 2>/dev/null | grep -q ci_watch; then
     if grep -q ':monitor-detached@' "$STATE" 2>/dev/null; then
         echo "MUTE $PID"
@@ -191,8 +209,9 @@ fi
 for kind in task lock state; do
     for f in "/tmp/ci_watch_${kind}_${CLAUDE_CODE_SESSION_ID}"_*; do
         # An unmatched glob stays literal in bash, so skip anything that is not
-        # a real file rather than echoing the pattern as a slot.
-        [ -e "$f" ] || continue
+        # a REGULAR file rather than echoing the pattern as a slot. -f (not -e)
+        # also keeps a FIFO planted in the shared /tmp out of the list.
+        [ -f "$f" ] || continue
         printf '%s\n' "${f##*/ci_watch_${kind}_}"
     done
 done | sort -u
@@ -286,14 +305,23 @@ sees a half-written id:
 # name is per-invocation unique (mktemp), NOT a fixed ".tmp" suffix: two
 # near-simultaneous launches for the same slot would otherwise write and rename
 # the very same temp path and one could publish the other's half-written id.
+# The temp name must also NOT start with "ci_watch_task_": `stop-all` globs
+# "/tmp/ci_watch_task_<SESSION>_*", and a temp file caught by that glob would be
+# enumerated as a phantom slot.
 TASK_FILE="/tmp/ci_watch_task_${SLOT:?run the slot block first}"
-TASK_TMP=$(mktemp "${TASK_FILE}.XXXXXX")
+TASK_TMP=$(mktemp "/tmp/.ci_watch_tmp_task.XXXXXX")
 printf '%s' "<TASK_ID>" > "$TASK_TMP" && mv "$TASK_TMP" "$TASK_FILE"
 ```
 
 Persist the id BEFORE verifying the launch, never after: a watcher that is alive
 but slow to appear must still be stoppable, and an id pointing at a dead task is
 handled by the stale-task-id logic above.
+
+Ordering hazard, for two launches racing on ONE slot: the rename is
+last-writer-wins, while `acquire_lock` inside `ci_watch.py` lets exactly one
+watcher survive. The loser's shell can therefore publish a DEAD task id over the
+winner's. That is recoverable — a later `stop` finds the pid still alive and
+reports it — but never launch two watchers for one branch on purpose.
 
 Finally, confirm the watcher actually came up. `ci_watch.py` can die within a
 second (branch not on the remote, missing `gh` auth, `uv` resolution failure),
@@ -333,5 +361,10 @@ reuse the merged one.
 
 Once the post-merge CI goes green, `ci_watch.py` appends that PR to
 `/tmp/ci_watch_finished_<SESSION>` and the status line moves it from its own
-`PR #N | post merge: …` row into the shared `finished PRs: …` row, which grows
-for the life of the session.
+`PR #N | post merge: …` row into the shared `finished PRs: …` row.
+
+Nothing ever prunes those files, so the status line bounds them at RENDER time:
+it reads only the last 200 lines of the finished file, dedupes on
+`(repo, number)` and shows the 10 newest PRs; and it keeps at most 5 rows for
+watchers that have already exited (newest first, by state-file mtime). Rows of
+watchers that are still running are never dropped.

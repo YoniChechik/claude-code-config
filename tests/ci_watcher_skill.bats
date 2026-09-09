@@ -70,7 +70,10 @@ assert_not_contains() {
 }
 
 # Extract the first ```bash fenced block of SKILL.md that contains $1, rewrite
-# its /tmp/ paths into the per-test tmpdir, and write it to a runnable script.
+# its /tmp/ paths into the per-test tmpdir and its ~/.claude/scripts/_notify.sh
+# source path into THIS checkout's copy, then write it to a runnable script.
+# Both rewrites exist for the same reason: the block must never read the real
+# /tmp or the installed ~/.claude, only what this worktree ships.
 # Echoes the script path.
 extract_block() {
     local marker="$1"
@@ -82,7 +85,10 @@ extract_block() {
             inblock = 0; next
         }
         inblock { buf = buf $0 "\n" }
-    ' "$SKILL_MD" | sed "s#/tmp/#${BATS_TEST_TMPDIR}/#g" > "$out"
+    ' "$SKILL_MD" \
+        | sed "s#/tmp/#${BATS_TEST_TMPDIR}/#g" \
+        | sed "s#~/.claude/scripts/_notify.sh#${BATS_TEST_DIRNAME}/../scripts/_notify.sh#g" \
+        > "$out"
     # A marker that no longer matches would silently produce an empty script
     # and make every assertion below pass vacuously.
     if [ ! -s "$out" ]; then
@@ -246,6 +252,59 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
     run env -u CLAUDE_CODE_SESSION_ID BRANCH='feat-x' bash "$script"
     [ "$status" -eq 1 ]
     assert_contains "CLAUDE_CODE_SESSION_ID is unset" "$output"
+}
+
+@test "slot: a padded branch name derives the SAME slot as the bare one" {
+    # ci_watch.py strips its branch argument. If bash did not, a pasted branch
+    # name with a trailing space would key the launcher's files on a slot the
+    # watcher itself never computes, and every liveness check would miss it.
+    local script slot_padded slot_bare
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='  feat/x ' bash "$script"
+    [ "$status" -eq 0 ]
+    slot_padded="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+    assert_contains "BRANCH=feat/x" "$output"
+
+    run env BRANCH='feat/x' bash "$script"
+    slot_bare="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    [ -n "$slot_bare" ]
+    [ "$slot_padded" = "$slot_bare" ]
+}
+
+@test "slot: a padded branch derives what ci_watch.py derives for the stripped one" {
+    local script actual expected
+    script="$(extract_block 'cannot key the ci watcher files')"
+
+    run env BRANCH='feat/x   ' bash "$script"
+    [ "$status" -eq 0 ]
+    actual="$(printf '%s\n' "$output" | sed -n 's/^SLOT=//p')"
+
+    expected="$(cd "${BATS_TEST_DIRNAME}/.." && uv run --quiet --with requests \
+        python -c '
+import sys
+sys.path.insert(0, "skills/ci-watcher")
+import ci_watch
+print(ci_watch.slot_for("testsess", "o", "r", "feat/x"))
+')"
+    [ -n "$expected" ]
+    [ "$actual" = "$expected" ]
+}
+
+@test "slot: fails loudly when the identity hash cannot be computed" {
+    # An empty hash would build a slot no watcher ever owns: `stop` would report
+    # "nothing to stop" for a live watcher, and launch would skip eviction.
+    local script
+    script="$(extract_block 'cannot key the ci watcher files')"
+    # Shadow shasum with a failing stub, the way a minimal image without perl
+    # would behave.
+    printf '#!/bin/sh\nexit 127\n' > "$BATS_TEST_TMPDIR/bin/shasum"
+    chmod +x "$BATS_TEST_TMPDIR/bin/shasum"
+
+    run env BRANCH='feat-x' bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "identity hash" "$output"
 }
 
 @test "slot: fails loudly when no branch can be resolved" {
@@ -490,8 +549,24 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
     run wc -c < "$TASK"
     [ "$(echo "$output" | tr -d ' ')" = "11" ]
     # mktemp names are unpredictable, so assert on the shape instead of one path.
-    leftovers="$(ls "$BATS_TEST_TMPDIR" | grep -c "^ci_watch_task_${SLOT}\." || true)"
+    leftovers="$(ls -a "$BATS_TEST_TMPDIR" | grep -c "^\.ci_watch_tmp_task\." || true)"
     [ "$leftovers" -eq 0 ]
+}
+
+@test "task-id write: the temp name is invisible to the stop-all glob" {
+    # stop-all enumerates "/tmp/ci_watch_task_<SESSION>_*". A temp file named
+    # after the task file would be enumerated as a phantom slot mid-launch.
+    local script enum
+    script="$(extract_block '<TASK_ID>')"
+    sed -i.orig 's/<TASK_ID>/task_xyz789/' "$script"
+    run bash "$script"
+    [ "$status" -eq 0 ]
+
+    enum="$(extract_block 'cannot enumerate ci watchers')"
+    run bash "$enum"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
+    assert_contains "$SLOT" "$output"
 }
 
 @test "task-id write: overwrites the id of a previous launch on the same slot" {
@@ -522,9 +597,11 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
 @test "task-id write: uses a unique temp name, not a fixed .tmp suffix" {
     # Two near-simultaneous launches for one slot would otherwise write and
     # rename the very same "<file>.tmp" path, and one could publish the other's
-    # half-written id.
+    # half-written id. The name must also stay outside the "ci_watch_task_"
+    # namespace that stop-all globs.
     run cat "$SKILL_MD"
-    assert_contains 'mktemp "${TASK_FILE}.XXXXXX"' "$output"
+    assert_contains 'mktemp "/tmp/.ci_watch_tmp_task.XXXXXX"' "$output"
+    assert_not_contains 'mktemp "${TASK_FILE}' "$output"
     assert_not_contains 'ci_watch_task_${CLAUDE_CODE_SESSION_ID}.tmp' "$output"
 }
 
@@ -582,11 +659,49 @@ print(ci_watch.slot_for("testsess", "o", "r", "féat/ü"))
     assert_not_contains 'ci_watch_pr_${CLAUDE_CODE_SESSION_ID}"' "$output"
 }
 
-@test "skill: ci_watch.py exposes the slot helpers the skill mirrors" {
-    # The skill's inline bash reimplements slot_for. If the python side ever
-    # renames or drops these, the two halves silently drift apart.
-    run cat "$CI_WATCH_PY"
-    assert_contains "def sanitize_branch(" "$output"
-    assert_contains "def slot_for(" "$output"
-    assert_contains "def append_finished_pr(" "$output"
+@test "skill: derives the slot through _notify.sh, never a second inline copy" {
+    # Two bash copies of the hash pipeline would drift apart with nothing
+    # failing, and the copy the skill EXECUTES is the one that matters.
+    run cat "$SKILL_MD"
+    assert_contains 'source ~/.claude/scripts/_notify.sh' "$output"
+    assert_contains '_ci_slot "$CLAUDE_CODE_SESSION_ID"' "$output"
+    assert_not_contains 'shasum -a 256' "$output"
+    assert_not_contains "tr -c 'A-Za-z0-9._-'" "$output"
+}
+
+# ---------------------------------------------------------------------------
+# The `:?` guards on the two blocks that are run with variables preset
+# ---------------------------------------------------------------------------
+
+@test "kill by PID: refuses to run with no PID" {
+    # Without the guard this block runs `kill ""`.
+    local script
+    script="$(extract_block 'run the liveness check first')"
+    run env -u PID bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "run the liveness check first" "$output"
+}
+
+@test "task-id removal: refuses to run with no SLOT" {
+    # Without the guard this block is `rm -f /tmp/ci_watch_task_` — harmless by
+    # luck today, and one careless edit away from a glob.
+    local script
+    script="$(extract_block 'rm -f "/tmp/ci_watch_task_')"
+    run env -u SLOT bash "$script"
+    [ "$status" -ne 0 ]
+    assert_contains "run the slot block first" "$output"
+}
+
+@test "task-id removal: removes ONLY this slot's task file" {
+    local script other
+    other="$BATS_TEST_TMPDIR/ci_watch_task_${CLAUDE_CODE_SESSION_ID}_feat-y-9876543210"
+    printf 'task_other' > "$other"
+    printf 'task_mine' > "$TASK"
+
+    script="$(extract_block 'rm -f "/tmp/ci_watch_task_')"
+    run bash "$script"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TASK" ]
+    run cat "$other"
+    [ "$output" = "task_other" ]
 }

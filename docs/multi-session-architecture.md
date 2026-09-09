@@ -191,9 +191,14 @@ legitimately have same-named branches. Hashing `"<owner>/<repo>#<branch>"`
 answers all of that; the readable slug survives only so a human reading `/tmp`
 can tell the files apart.
 
+**Exactly two implementations, one per language.** `_ci_slug()`/`_ci_slot()` in
+`_notify.sh` are THE bash implementation: `SKILL.md` sources `_notify.sh` and
+calls `_ci_slot`, it does not re-inline the pipeline. A third copy would drift
+from the two the tests cross-check against each other.
+
 **Why byte mode on both sides.** `sanitize_branch()` in `ci_watch.py` substitutes
-and truncates on the UTF-8 bytes; `_ci_slug()` in `_notify.sh` (and the same
-pipeline inlined in `SKILL.md`) uses `LC_ALL=C tr -c 'A-Za-z0-9._-' '_'` and
+and truncates on the UTF-8 bytes; `_ci_slug()` in `_notify.sh` uses
+`LC_ALL=C tr -c 'A-Za-z0-9._-' '_'` and
 `LC_ALL=C cut -c1-40`. A codepoint-vs-byte mismatch on a non-ASCII branch name
 would make the writer and the launcher key on different files. The hash is
 computed over the raw identity's UTF-8 bytes in both languages for the same
@@ -223,8 +228,13 @@ commit at that URL, so no run-id tracking is needed.
 
 Atomic writes: every per-watcher file is written via
 `tempfile.mkstemp + os.replace` so a slow reader never observes partial content.
-The finished-PR file is the one exception, and for a different reason — see
-below.
+Those temp files are named `.ci_watch_tmp_XXXX`, NOT after the slot: readers
+discover watchers with the glob `ci_watch_state_<session>_*`, and a temp file
+caught by that glob would be read as a second, lock-less watcher and rendered as
+`⚠ ci watcher died` next to the healthy row it came from. The same rule applies
+to the skill's task-id temp file, which must stay out of `ci_watch_task_*`.
+The finished-PR file is the one exception to the rename dance, and for a
+different reason — see below.
 
 ---
 
@@ -257,16 +267,29 @@ has nothing to replace, so there is no temp-file/rename dance and no
 read-modify-write window.
 
 **Newest-first and dedup happen at RENDER time,** in `status_line.sh`, not at
-write time: entries are sorted by `ts` descending and deduplicated by `number`
-keeping the largest `ts`. Physically prepending, or checking for a duplicate
-before appending, would each reintroduce the cross-process race the append-only
-design exists to avoid. A relaunched watcher on an already-finished PR therefore
-appends a second line by design. The reader parses each line on its own and
-SKIPS one that fails to parse, which covers a torn write from a killed process.
+write time: entries are sorted by `ts` descending and deduplicated by
+`(repo, number)` keeping the largest `ts`. The repo is part of the key because
+PR numbers are repo-LOCAL — one session watches branches across several repos,
+and `#42` in two repos are two different PRs. Physically prepending, or checking
+for a duplicate before appending, would each reintroduce the cross-process race
+the append-only design exists to avoid. A relaunched watcher on an
+already-finished PR therefore appends a second line by design. Unparseable lines
+are dropped inside a single `jq` pass, which covers a torn write from a killed
+process.
+
+**Best effort on the write side.** `append_finished_pr()` logs and swallows every
+I/O error. The caller writes the `merged-passed` state and fires the CI-PASSED
+notification straight after it, and an exception escaping would kill the watcher
+before both — the exact "PR vanishes from every list" outcome the write ordering
+exists to prevent.
 
 **Lifetime.** No cleanup path deletes it — not `atexit`, not `/ci-watcher stop`,
-not `stop-all`. It grows for as long as `/tmp` keeps it, which in practice is
-the life of the session, though nothing actively enforces that boundary.
+not `stop-all`. It is BOUNDED AT RENDER TIME instead: `status_line.sh` reads only
+the last 200 lines (`MAX_FINISHED_LINES`) and shows the 10 newest PRs
+(`MAX_FINISHED_PRS`), so neither the parse cost nor the row width grows with the
+length of the session. Pruning the file itself would mean a read-modify-write of
+a file several watchers append to concurrently, which is what the whole design
+avoids.
 
 ---
 
@@ -282,9 +305,11 @@ the life of the session, though nothing actively enforces that boundary.
 2. Calls `Monitor({command, persistent: true})` with the session id, repo dir,
    and branch inlined into the command as single-quoted literals, and stderr
    appended to `/tmp/ci_watch_<SLOT>.log`. The skill then writes the returned
-   task id to `/tmp/ci_watch_task_<SLOT>` atomically (an `mktemp`-unique temp
-   file + `mv`; a fixed `.tmp` suffix would let two near-simultaneous launches
-   for one slot clobber each other), and only afterwards polls the lockfile (1s,
+   task id to `/tmp/ci_watch_task_<SLOT>` atomically (an `mktemp`-unique
+   `/tmp/.ci_watch_tmp_task.XXXXXX` + `mv`; a fixed `.tmp` suffix would let two
+   near-simultaneous launches for one slot clobber each other, and a name inside
+   `ci_watch_task_*` would show up in `stop-all`'s enumeration), and only
+   afterwards polls the lockfile (1s,
    max 10 tries) to confirm the watcher actually came up. Persisting before
    verifying is deliberate: a watcher that is alive but slow to appear must
    still be stoppable. On a `DEAD` verdict the skill shows the tail of the log,
@@ -295,7 +320,11 @@ the life of the session, though nothing actively enforces that boundary.
    `slot_for(session_id, owner, repo, branch)` — before taking any lock, so the
    lock it takes is the per-branch one.
 4. Watcher takes an `flock` on `/tmp/ci_watch_lock_<SLOT>` and writes its PID
-   into it. If a live predecessor holds that lock — which now means the same
+   into it — written at offset 0 FIRST and truncated afterwards, never the other
+   way round, because no reader takes the flock and a truncate-first order would
+   let one see an empty file and report `DEAD`. The PID is newline-terminated
+   and every reader takes only the first line, so a longer predecessor's
+   leftover tail is ignored. If a live predecessor holds that lock — which now means the same
    session re-ran `/ci-watcher` **for the same branch in the same repo** — it's
    SIGTERM'd, escalating to SIGKILL if it has not exited within 10s, and the new
    watcher retries; the kernel frees the lock the moment the predecessor dies. A
@@ -368,6 +397,14 @@ session id, so stop always worked; this keeps that property.
    `finished PRs: #12, #7`, newest first, each number hyperlinked to its PR. The
    line is omitted entirely when the file is missing, empty, or every line fails
    to parse.
+
+**Two render caps.** Nothing prunes the files on disk, so the bounds live in the
+renderer. Rows of watchers that have EXITED on a documented terminal condition
+(`closed`, `timeout`, `no-main-ci`, `no-ci-configured`, `merged-failed`) — plus
+rows of watchers that died — are capped at 5 (`MAX_TERMINAL_ROWS`), ordered by
+state-file mtime so the oldest are the ones dropped. Rows of watchers that are
+still running are never dropped. The finished-PR row is capped as described
+above.
 
 ### Self-cleanup
 
@@ -469,10 +506,10 @@ different Monitor tasks.
   carry the session id, orphans never collide with new watchers.
 
 - **The finished-PR file is never cleaned up, by anything.** By design (a
-  session's finished list must survive every watcher that produced it), but it
-  means the file lives until `/tmp` is cleared. It is small — one short JSON
-  line per finished PR — and duplicate lines from watcher relaunches are
-  collapsed at render time, so the cost is bounded in practice.
+  session's finished list must survive every watcher that produced it), so the
+  file lives until `/tmp` is cleared. It is small — one short JSON line per
+  finished PR — and the renderer reads only its last 200 lines and shows at most
+  10 PRs, so neither the poll cost nor the row width grows without bound.
 
 - **N concurrent watchers per session is untested at scale.** N `Monitor` tasks
   and N `ci_watch.py` processes in one session is new territory. There is no

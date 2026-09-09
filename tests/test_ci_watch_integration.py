@@ -676,7 +676,7 @@ def test_behind_not_reported_when_not_strict(tmp_path):
 
 def test_new_sha_resets_state(tmp_path):
     """A run with a new headSha resets the reported_pass/fail flags."""
-    state = ci_watch.WatchState("br", "br", "sess", "old-sha", "main")
+    state = ci_watch.WatchState("br", "br", "sess", "o/r", "old-sha", "main")
     state.reported_pass = True
     state.reported_fail = True
     state.reported_no_runs = True
@@ -1332,6 +1332,47 @@ def test_write_pr_cache(tmp_path):
         assert data == {"url": "u", "state": "OPEN"}
 
 
+def test_write_state_temp_file_never_matches_the_discovery_glob(tmp_path):
+    """Readers glob "ci_watch_state_<session>_*" to find a session's watchers.
+
+    A temp file caught by that glob is read as a second, lock-less watcher and
+    rendered as "ci watcher died" next to the healthy row it came from — and
+    write_state runs once per second while a PR is merging.
+    """
+    slot = "sess_feat-a-0123456789"
+    # Freeze the rename so the temp file is still on disk to inspect.
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch.os, "replace"),
+    ):
+        ci_watch.write_state(slot, "feat-a", "merging")
+    stray = sorted(p.name for p in tmp_path.glob("ci_watch_state_sess_*"))
+    assert stray == []
+    assert len(list(tmp_path.glob(".ci_watch_tmp_*"))) == 1
+
+
+def test_write_pr_cache_temp_file_never_matches_the_discovery_glob(tmp_path):
+    slot = "sess_feat-a-0123456789"
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch.os, "replace"),
+    ):
+        ci_watch.write_pr_cache(slot, {"url": "u"})
+    assert sorted(p.name for p in tmp_path.glob("ci_watch_pr_sess_*")) == []
+
+
+def test_append_finished_pr_refuses_to_follow_a_symlink(tmp_path):
+    """The path is predictable and lives in a shared /tmp, so a symlink planted
+    there would redirect the append to whatever it points at.
+    """
+    target = tmp_path / "victim"
+    target.write_text("untouched")
+    (tmp_path / "ci_watch_finished_sess").symlink_to(target)
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.append_finished_pr("sess", "o/r", 42, "u42")
+    assert target.read_text() == "untouched"
+
+
 def _finished_entries(tmp_path, session_id: str = "sess") -> list[dict]:
     """Parsed contents of the session's finished-PR file (empty when absent)."""
     path = Path(tmp_path) / f"ci_watch_finished_{session_id}"
@@ -1342,7 +1383,7 @@ def _finished_entries(tmp_path, session_id: str = "sess") -> list[dict]:
 
 def test_append_finished_pr_writes_one_json_line(tmp_path):
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
-        ci_watch.append_finished_pr("sess", 42, "https://github.com/o/r/pull/42")
+        ci_watch.append_finished_pr("sess", "o/r", 42, "https://github.com/o/r/pull/42")
     raw = (tmp_path / "ci_watch_finished_sess").read_text()
     # Exactly one line, newline-terminated: the renderer parses line by line.
     assert raw.endswith("\n")
@@ -1351,12 +1392,78 @@ def test_append_finished_pr_writes_one_json_line(tmp_path):
     assert entry["number"] == 42
     assert entry["url"] == "https://github.com/o/r/pull/42"
     assert isinstance(entry["ts"], float)
+    # The repo is what makes the renderer's dedup key correct: PR numbers are
+    # repo-local, and one session watches branches across several repos.
+    assert entry["repo"] == "o/r"
+
+
+def test_append_finished_pr_survives_an_unwritable_file(tmp_path):
+    """A failure HERE must not propagate.
+
+    The caller writes the "merged-passed" state and fires the CI-PASSED
+    notification straight after this call. An OSError escaping would kill the
+    watcher before both — exactly the "PR vanishes from every list" outcome the
+    write ordering exists to prevent.
+    """
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch.os, "open", side_effect=OSError("no space left")),
+    ):
+        ci_watch.append_finished_pr("sess", "o/r", 42, "u42")
+    assert _finished_entries(tmp_path) == []
+
+
+def test_check_all_passed_main_notifies_even_when_the_append_fails(tmp_path):
+    """The notification and the terminal state are the load-bearing half."""
+    # A DIRECTORY at the finished-file path: a real, unfakeable open() failure
+    # that leaves write_state's own temp-file open() working normally.
+    (tmp_path / "ci_watch_finished_sess").mkdir()
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "notify") as notify_mock,
+    ):
+        state = ci_watch.WatchState("feat", "feat", "sess", "o/r", "sha", "main")
+        ci_watch.check_all_passed("main", _passing_main_runs(), state, "CLEAN", 42, "u")
+    assert notify_mock.call_count == 1
+    assert (tmp_path / "ci_watch_state_feat").read_text() == "feat:merged-passed"
+    assert state.reported_main_pass is True
+
+
+def test_append_finished_pr_is_atomic_across_concurrent_writers(tmp_path):
+    """The design rests on ONE os.write to an O_APPEND fd.
+
+    Several watchers of one session append to this file with no lock between
+    them, so the guarantee has to hold across real processes, not just within
+    one.
+    """
+    writers = 8
+    per_writer = 25
+    pids = []
+    for w in range(writers):
+        pid = os.fork()
+        if pid == 0:  # child
+            try:
+                ci_watch.TMP_DIR = str(tmp_path)
+                for i in range(per_writer):
+                    ci_watch.append_finished_pr(
+                        "sess", "o/r", w * per_writer + i, "u" * 200
+                    )
+            finally:
+                os._exit(0)
+        pids.append(pid)
+    for pid in pids:
+        assert os.waitpid(pid, 0)[1] == 0
+
+    lines = (tmp_path / "ci_watch_finished_sess").read_text().splitlines()
+    assert len(lines) == writers * per_writer
+    numbers = sorted(json.loads(line)["number"] for line in lines)
+    assert numbers == list(range(writers * per_writer))
 
 
 def test_append_finished_pr_appends_instead_of_overwriting(tmp_path):
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
-        ci_watch.append_finished_pr("sess", 1, "u1")
-        ci_watch.append_finished_pr("sess", 2, "u2")
+        ci_watch.append_finished_pr("sess", "o/r", 1, "u1")
+        ci_watch.append_finished_pr("sess", "o/r", 2, "u2")
     entries = _finished_entries(tmp_path)
     assert [e["number"] for e in entries] == [1, 2]
 
@@ -1368,7 +1475,7 @@ def test_append_finished_pr_keeps_a_pre_existing_file(tmp_path):
     path = tmp_path / "ci_watch_finished_sess"
     path.write_text('{"number": 7, "url": "u7", "ts": 1.0}\n')
     with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
-        ci_watch.append_finished_pr("sess", 8, "u8")
+        ci_watch.append_finished_pr("sess", "o/r", 8, "u8")
     assert [e["number"] for e in _finished_entries(tmp_path)] == [7, 8]
 
 
@@ -1384,7 +1491,7 @@ def test_check_all_passed_main_records_the_finished_pr_once(tmp_path):
         patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
         patch.object(ci_watch, "notify") as notify_mock,
     ):
-        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        state = ci_watch.WatchState("feat", "feat", "sess", "o/r", "sha", "main")
         for _ in range(2):
             ci_watch.check_all_passed(
                 "main",
@@ -1413,7 +1520,7 @@ def test_finished_pr_is_recorded_before_the_merged_passed_state_write(tmp_path):
         patch.object(ci_watch, "notify"),
         patch.object(ci_watch, "write_state", side_effect=OSError("disk full")),
     ):
-        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        state = ci_watch.WatchState("feat", "feat", "sess", "o/r", "sha", "main")
         with pytest.raises(OSError):
             ci_watch.check_all_passed(
                 "main", _passing_main_runs(), state, "CLEAN", 42, "u42"
@@ -1431,7 +1538,7 @@ def test_branch_pass_does_not_touch_the_finished_file(tmp_path):
         patch.object(ci_watch, "has_pending_checks", return_value=False),
         patch.object(ci_watch, "get_remote_head_sha", return_value=None),
     ):
-        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        state = ci_watch.WatchState("feat", "feat", "sess", "o/r", "sha", "main")
         ci_watch.check_all_passed(
             "branch", _passing_main_runs(), state, "CLEAN", 42, "u42"
         )
@@ -1687,7 +1794,7 @@ def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, ca
     ~20 lines) must land on stdout byte-for-byte, with the diagnostics that the
     same call path writes going to stderr.
     """
-    state = ci_watch.WatchState("feat", "feat", "sess", "sha-old", "main")
+    state = ci_watch.WatchState("feat", "feat", "sess", "o/r", "sha-old", "main")
     stuck = frozenset({"build / test", "lint"})
     state.stuck_pending_names = stuck
     state.stuck_pending_iters = ci_watch.STUCK_PENDING_MIN_ITERS - 1
@@ -1947,7 +2054,10 @@ def _acquire_lock_against_predecessor(
                     ci_watch.acquire_lock("slot-1")
                 except SystemExit as exc:
                     code = exc.code
-            contents = lock.read_text() if lock.exists() else None
+            # First line only: acquire_lock writes a newline-TERMINATED pid at
+            # offset 0 so a reader never sees an empty file mid-update.
+            raw = lock.read_text() if lock.exists() else None
+            contents = raw.splitlines()[0] if raw else raw
         finally:
             os.close(holder_fd)
     return {"sent": sent, "lock": contents, "code": code}
@@ -2004,7 +2114,7 @@ def test_acquire_lock_claims_a_free_slot(tmp_path):
         lock = Path(ci_watch._lock_path("slot-1"))
         ci_watch.acquire_lock("slot-1")
         assert ci_watch._holds_lock("slot-1")
-    assert lock.read_text() == str(os.getpid())
+    assert lock.read_text().splitlines()[0] == str(os.getpid())
 
 
 def test_acquire_lock_takes_a_slot_whose_recorded_pid_is_dead(tmp_path):
@@ -2022,7 +2132,7 @@ def test_acquire_lock_takes_a_slot_whose_recorded_pid_is_dead(tmp_path):
         lock.write_text("999999")
         ci_watch.acquire_lock("slot-1")
     assert kill.call_count == 0, "no eviction is needed for a lock nobody holds"
-    assert lock.read_text() == str(os.getpid())
+    assert lock.read_text().splitlines()[0] == str(os.getpid())
 
 
 def test_acquire_lock_gives_up_after_a_bounded_number_of_attempts(tmp_path, capsys):
@@ -2171,7 +2281,9 @@ def test_acquire_lock_is_exclusive_across_real_processes(tmp_path):
         assert results.count("WON") == 1, results
         assert results.count("LOST") == _LOCK_WORKERS - 1, results
         lock = Path(tmp_path / "ci_watch_lock_race")
-        assert lock.read_text().isdigit(), "the winner's pid must be on disk"
+        assert lock.read_text().splitlines()[0].isdigit(), (
+            "the winner's pid must be on disk"
+        )
     finally:
         (tmp_path / "release").write_text("go")
         _finish_lock_workers(procs)
@@ -2223,7 +2335,7 @@ def test_release_lock_leaves_a_holders_lockfile_alone(tmp_path):
         lock = Path(ci_watch._lock_path("slot-1"))
         lock.write_text(str(os.getpid() + 1))
         ci_watch.release_lock("slot-1")
-    assert lock.read_text() == str(os.getpid() + 1)
+    assert lock.read_text().splitlines()[0] == str(os.getpid() + 1)
 
 
 @pytest.mark.parametrize("content", ["", "not-a-pid"])
@@ -2276,7 +2388,7 @@ def test_cleanup_leaves_a_holders_state_files_alone(tmp_path):
         cleanup()
     assert state.read_text() == "feat:running"
     assert pr.read_text() == "{}"
-    assert lock.read_text() == str(holder_pid)
+    assert lock.read_text().splitlines()[0] == str(holder_pid)
 
 
 def test_cleanup_wipes_the_slot_while_we_still_hold_the_lock(tmp_path):

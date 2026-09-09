@@ -24,8 +24,14 @@ green=$'\033[38;2;64;160;43m'
 reset=$'\033[0m'
 newline=$'\n'
 # Field separator for the finished-PR records built below. A literal tab, so
-# `sort -t` and `awk -F` agree with the `read` that consumes them.
+# `sort -t` and `awk -F` agree on it. NOT usable with `read`: bash collapses a
+# RUN of IFS-whitespace delimiters (space, tab, newline) into one, so an empty
+# field between two tabs would silently disappear and shift every field after
+# it. Anything `read` has to split uses $us instead.
 tab=$'\t'
+# ASCII Unit Separator: a non-whitespace IFS, so `read` treats every occurrence
+# as its own delimiter and preserves empty fields.
+us=$'\037'
 
 input=$(cat)
 if ! parsed=$(printf '%s' "$input" | jq -r '
@@ -152,6 +158,20 @@ fi
 # --- Lines 3+: one row per CI watcher, then the session's finished PRs -------
 # A session can run several watchers at once — one per branch — so this renders
 # one row per watcher, all read from the files ci_watch.py writes. No gh call.
+#
+# Two render caps keep this bounded. Nothing on disk is ever pruned (the
+# watchers are the only writers and they must never read-modify-write a shared
+# file), so the BOUNDS LIVE HERE:
+#   * MAX_TERMINAL_ROWS — a watcher that reached a terminal state keeps its
+#     state file forever, so without a cap a long session grows one permanent
+#     row per branch it ever watched. Live watchers are never dropped; only the
+#     oldest terminal rows are, ordered by state-file mtime.
+#   * MAX_FINISHED_LINES / MAX_FINISHED_PRS — the finished-PR file is
+#     append-only and never deleted, so both the parse cost and the row width
+#     would otherwise grow with the length of the session.
+MAX_TERMINAL_ROWS=5
+MAX_FINISHED_LINES=200
+MAX_FINISHED_PRS=10
 
 # The literal words "post merge", hyperlinked to GitHub's check list for the
 # merge commit. Args: <repoUrl> <merge commit oid>. Falls back to plain text
@@ -167,8 +187,10 @@ post_merge_label() {
   return 0
 }
 
-# Render ONE watcher's row from its slot ($1). Echoes the row, or nothing at all
-# when the row must be hidden.
+# Render ONE watcher's row from its slot ($1). Echoes "<kind><TAB><row>", where
+# kind is "active" (a watcher is still expected to update this row) or
+# "terminal" (nothing will ever change it again, so the caller may cap it away).
+# Echoes nothing at all when the row must be hidden.
 render_ci_row() {
   local one_slot="$1"
   local state_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${one_slot}"
@@ -203,13 +225,18 @@ render_ci_row() {
   fi
 
   # PR metadata. Absent until the watcher has actually found a PR.
-  local pr_json="" pr_url="" pr_number="" repo_url="" merge_oid="" pr_part=""
+  # ONE jq for every field, not one per field: this runs per watcher on a
+  # ~1/second poll, and each extra call is its own fork+exec. The fields are
+  # joined on $us and every separator/newline inside a value is replaced first,
+  # so the split below cannot be confused by the record's own content.
+  local pr_fields="" pr_url="" pr_number="" repo_url="" merge_oid="" merge_state="" pr_part=""
   if [ -f "$pr_cache_file" ]; then
-    pr_json=$(cat "$pr_cache_file" 2>/dev/null || echo "")
-    pr_url=$(printf '%s' "$pr_json" | jq -r '.url // ""' 2>/dev/null || echo "")
-    pr_number=$(printf '%s' "$pr_json" | jq -r '.number // ""' 2>/dev/null || echo "")
-    repo_url=$(printf '%s' "$pr_json" | jq -r '.repoUrl // ""' 2>/dev/null || echo "")
-    merge_oid=$(printf '%s' "$pr_json" | jq -r '.mergeCommit.oid // ""' 2>/dev/null || echo "")
+    pr_fields=$(jq -r '
+      [(.url // ""), (.number // ""), (.repoUrl // ""),
+       (.mergeCommit.oid // ""), (.mergeStateStatus // "")]
+      | map(tostring | gsub("[\u001f\n\t]"; " ")) | join("\u001f")' \
+      "$pr_cache_file" 2>/dev/null || true)
+    IFS="$us" read -r pr_url pr_number repo_url merge_oid merge_state <<< "$pr_fields" || true
   fi
   if [ -n "$pr_url" ] && [ "$pr_url" != "null" ] \
      && [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
@@ -218,15 +245,31 @@ render_ci_row() {
     pr_part=$'\033]8;;'"${pr_url}"$'\a'"PR #${pr_number}"$'\033]8;;\a'
   fi
 
-  # For terminal states no watcher is expected — show the result forever. For
-  # active states, this slot's OWN lockfile decides whether it is still alive.
-  local alive=false pid
+  # Terminal states are the watcher's DOCUMENTED exits (see the ci-watcher
+  # SKILL.md): no watcher is expected any more, so the result is shown as-is,
+  # never as a death. For every other state this slot's OWN lockfile decides
+  # whether the watcher is still alive.
+  local alive=false kind=active pid
   case "$state_only" in
-    passed|failed|merged-failed|timeout|no-ci|no-main-ci|no-ci-configured)
+    # ci_watch.py EXITS on these and deliberately keeps its state file, so the
+    # row is final and the cap above may drop it once it is old enough.
+    merged-failed|timeout|no-main-ci|no-ci-configured|closed)
+      alive=true
+      kind=terminal
+      ;;
+    # Reported results the watcher keeps polling past (it waits for the merge),
+    # so no "died" label — but the row is still live and never capped away.
+    passed|failed|no-ci)
       alive=true
       ;;
     *)
-      pid=$(cat "$lock_file" 2>/dev/null || true)
+      # First line only, and a regular file only: acquire_lock writes the pid at
+      # offset 0 then truncates, and a FIFO planted here would block `cat`.
+      if [ -f "$lock_file" ]; then
+        pid=$(head -n 1 "$lock_file" 2>/dev/null || true)
+      else
+        pid=""
+      fi
       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
          && ps -p "$pid" -o args= 2>/dev/null | grep -q "ci_watch"; then
         alive=true
@@ -234,16 +277,17 @@ render_ci_row() {
       ;;
   esac
 
-  local ci_display="" ci_state merge_state
+  local ci_display="" ci_state
   if [ "$alive" = false ] && [ -n "$state_only" ]; then
+    # The watcher should still be running but is gone — a crash, not an exit.
     ci_display="${red}⚠ ci watcher died${reset}"
+    kind=terminal
   elif [ "$detached" = true ]; then
     # Alive, but mute: distinct from both "died" and a plain running state.
     ci_display="${red}⚠ ci notifications lost — restart watcher${reset}"
   else
     ci_state="$state_only"
-    if [ "$ci_state" = "passed" ] && [ -n "$pr_json" ]; then
-      merge_state=$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null || echo "")
+    if [ "$ci_state" = "passed" ]; then
       case "$merge_state" in
         BEHIND)              ci_state="behind" ;;
         DIRTY|CONFLICTING)   ci_state="conflict" ;;
@@ -260,6 +304,10 @@ render_ci_row() {
       no-main-ci)    ci_display="${green}ci: no main ci${reset}" ;;
       no-ci-configured) ci_display="${green}ci: no CI configured — safe to merge${reset}" ;;
       timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
+      # The PR was closed without a merge. That is a DOCUMENTED watcher exit,
+      # not a crash, so it must never render as "ci watcher died".
+      closed)        ci_display="${yellow}pr: closed${reset}" ;;
+      stuck-pending) ci_display="${yellow}⚠ checks stuck pending${reset}" ;;
       # Post-merge states carry a "post merge" label instead of "ci", linked to
       # GitHub's check list for the merge commit.
       merging)       ci_display="${yellow}$(post_merge_label "$repo_url" "$merge_oid"): running${reset}" ;;
@@ -268,13 +316,16 @@ render_ci_row() {
     esac
   fi
 
+  local row=""
   if [ -n "$ci_display" ] && [ -n "$pr_part" ]; then
-    printf '%s' "${pr_part} | ${ci_display}"
+    row="${pr_part} | ${ci_display}"
   elif [ -n "$ci_display" ]; then
-    printf '%s' "$ci_display"
+    row="$ci_display"
   elif [ -n "$pr_part" ]; then
-    printf '%s' "$pr_part"
+    row="$pr_part"
   fi
+  [ -n "$row" ] || return 0
+  printf '%s%s%s' "$kind" "$tab" "$row"
   return 0
 }
 
@@ -287,35 +338,51 @@ render_finished_prs() {
   local file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_finished_${session_id}"
   [ -f "$file" ] || return 0
 
-  # Parse each line on its own so a torn write from a killed watcher is SKIPPED
-  # rather than aborting the whole row. jq emits "<ts>\t<number>\t<url>".
-  local entries="" line parsed
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    parsed=$(printf '%s' "$line" | jq -r '
-      select(type == "object")
-      | select((.number | type) == "number")
-      | select((.ts | type) == "number")
-      | select((.url | type) == "string")
-      | "\(.ts)\t\(.number)\t\(.url)"' 2>/dev/null || true)
-    [ -n "$parsed" ] || continue
-    entries="${entries}${parsed}${newline}"
-  done < "$file"
+  # ONE jq for the whole file, not one per line: this file is append-only and
+  # never pruned, so a per-line fork would grow with the length of the session
+  # on a ~1/second poll. `fromjson?` drops an unparseable line INSIDE jq, which
+  # keeps the same tolerance for a torn write from a killed watcher. Only the
+  # last MAX_FINISHED_LINES are read, so the parse cost is bounded too. @tsv
+  # escapes any tab or newline inside a value, so the split below cannot be
+  # confused by the record's own content.
+  local entries
+  entries=$(tail -n "$MAX_FINISHED_LINES" "$file" 2>/dev/null | jq -R -r '
+    fromjson?
+    | select(type == "object")
+    | select((.number | type) == "number")
+    | select((.repo | type) == "string" and .repo != "")
+    | select((.ts | type) == "number")
+    | select((.url | type) == "string")
+    | [.ts, .number, .repo, .url] | @tsv' 2>/dev/null || true)
   [ -n "$entries" ] || return 0
 
-  # Dedupe by PR number keeping the newest ts (relaunching a watcher on an
-  # already-finished PR appends a second line for it), then order newest first.
+  # Dedupe on (repo, number), NEVER on the number alone: PR numbers are
+  # repo-local and one session watches branches across several repos, so #42 in
+  # two repos are two different PRs. The duplicate this drops is the relaunch
+  # case — the same watcher finishing the same PR twice — and the newest ts
+  # wins. Then order newest first, with the PR number as a tiebreak so two
+  # entries written in the same clock tick still have a defined order.
   local sorted
-  sorted=$(printf '%s' "$entries" \
-    | sort -t"$tab" -k2,2n -k1,1nr \
-    | awk -F"$tab" '!seen[$2]++' \
-    | sort -t"$tab" -k1,1nr || true)
+  sorted=$(printf '%s\n' "$entries" \
+    | sort -t"$tab" -k3,3 -k2,2n -k1,1nr \
+    | awk -F"$tab" '!seen[$3 SUBSEP $2]++' \
+    | sort -t"$tab" -k1,1nr -k2,2n \
+    | head -n "$MAX_FINISHED_PRS" || true)
   [ -n "$sorted" ] || return 0
 
+  # ts, number and repo are all guaranteed non-empty by the jq filter above, and
+  # the url is LAST, so bash's collapsing of consecutive tabs cannot shift a
+  # value into the wrong variable here — an empty url simply reads back empty.
   local out="" number url link
-  while IFS="$tab" read -r _ number url; do
+  while IFS="$tab" read -r _ number _ url; do
     [ -n "$number" ] || continue
-    link=$'\033]8;;'"${url}"$'\a'"#${number}"$'\033]8;;\a'
+    if [ -n "$url" ]; then
+      link=$'\033]8;;'"${url}"$'\a'"#${number}"$'\033]8;;\a'
+    else
+      # The PR fetch failed on the iteration that recorded this entry, so there
+      # is no target. An OSC 8 link to an empty url is worse than plain text.
+      link="#${number}"
+    fi
     if [ -n "$out" ]; then
       out="${out}, ${link}"
     else
@@ -331,13 +398,47 @@ pr_lines=()
 if [ -n "$session_id" ]; then
   # Discovery goes through _notify.sh's shared helper, so "which watchers does
   # this session have" is defined in exactly one place.
+  _state_files=()
   while IFS= read -r _state_file; do
     [ -n "$_state_file" ] || continue
-    _row=$(render_ci_row "${_state_file##*/ci_watch_state_}")
-    if [ -n "$_row" ]; then
-      pr_lines+=("$_row")
-    fi
+    _state_files+=("$_state_file")
   done < <(_ci_watch_session_state_files "$session_id")
+
+  # One `ls -t` fork orders every slot by state-file mtime, newest first, so the
+  # most recently active watcher renders at the top and the MAX_TERMINAL_ROWS
+  # cap below drops the OLDEST finished rows. Slot names hold only a UUID and
+  # [A-Za-z0-9._-], so no name can contain a newline and break this loop.
+  _ordered=()
+  if [ "${#_state_files[@]}" -gt 0 ]; then
+    while IFS= read -r _state_file; do
+      [ -n "$_state_file" ] || continue
+      _ordered+=("$_state_file")
+    done < <(ls -t "${_state_files[@]}" 2>/dev/null || printf '%s\n' "${_state_files[@]}")
+  fi
+
+  # Live rows always render; terminal rows are capped, so a long session cannot
+  # accumulate one permanent row per branch it ever watched.
+  _active_rows=()
+  _terminal_rows=()
+  for _state_file in ${_ordered[@]+"${_ordered[@]}"}; do
+    _out=$(render_ci_row "${_state_file##*/ci_watch_state_}")
+    [ -n "$_out" ] || continue
+    _kind="${_out%%"$tab"*}"
+    _row="${_out#*"$tab"}"
+    if [ "$_kind" = "terminal" ]; then
+      if [ "${#_terminal_rows[@]}" -lt "$MAX_TERMINAL_ROWS" ]; then
+        _terminal_rows+=("$_row")
+      fi
+    else
+      _active_rows+=("$_row")
+    fi
+  done
+  for _row in ${_active_rows[@]+"${_active_rows[@]}"}; do
+    pr_lines+=("$_row")
+  done
+  for _row in ${_terminal_rows[@]+"${_terminal_rows[@]}"}; do
+    pr_lines+=("$_row")
+  done
 
   _finished_row=$(render_finished_prs "$session_id")
   if [ -n "$_finished_row" ]; then
