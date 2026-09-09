@@ -6,5 +6,5 @@ description: "Ping the user with an audible chime, green iTerm2 tab color, and a
 Run the one-liner below to alert the user. If orchestration mode is on, dispatch it via a subagent Bash call; otherwise run it directly in the current Bash tool. No other steps.
 
 ```bash
-bash -c 'source /Users/yonichechik/.claude/scripts/_notify.sh && notify_user_attention'
+bash -c 'source ~/.claude/scripts/_notify.sh && notify_user_attention'
 ```

@@ -27,16 +27,14 @@ ask() {
     # silent. notify_user_attention writes to the user's tty (not stdout), so
     # this is safe to call before the JSON decision is printed below.
     #
-    # Called with NO transcript ON PURPOSE. The argument is what enables the
-    # background-work gate that paints BLUE and swallows the chime, and this
-    # prompt BLOCKS: nothing moves until the user answers it. A live Monitor,
-    # backgrounded Bash or CI watcher does not make the session less stuck, so
-    # "needs attention" always wins here — green + chime, unconditionally.
+    # This prompt BLOCKS: nothing moves until the user answers it, so it takes
+    # the blocking entry point, which never checks for background work. The rule
+    # and its reasoning live at notify_user_attention_blocking in _notify.sh.
     # Resolved relative to THIS script, never as an absolute /Users/... path: a
     # worktree copy of the guard must use its own _notify.sh, or the tests dispatch
     # one checkout's hook against another checkout's helpers.
     source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
-    notify_user_attention
+    notify_user_attention_blocking
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
     exit 0
 }
