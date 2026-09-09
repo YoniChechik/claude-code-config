@@ -18,7 +18,11 @@ Uses GitHub REST API directly with ETag conditional requests so we can poll at
 Args (positional):
     BRANCH         branch to watch
 
-State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
+State files. Per-watcher files are keyed on
+``{slot} = {CLAUDE_CODE_SESSION_ID}_{sanitize_branch(branch)}-{identity_hash}``,
+where ``identity_hash`` is the first 10 hex chars of
+``sha256("<owner>/<repo>#<branch>")``. One session therefore runs one watcher
+per branch, and two repos that share a branch name never collide:
     /tmp/ci_watch_state_{slot}    "<branch>:<state>" (single line), plus a
                                   ":monitor-detached@<epoch>" third field once
                                   a stdout write has failed — the watcher runs
@@ -33,6 +37,15 @@ State files (keyed by CLAUDE_CODE_SESSION_ID, full UUID):
     /tmp/ci_watch_{slot}.log      this process's stderr, redirected by the
                                   Monitor command line
 
+One file is session-level, with NO branch component, shared by every watcher
+of the session:
+    /tmp/ci_watch_finished_{session_id}
+                                  JSON Lines, one PR per line
+                                  ({"number", "url", "ts"}), appended once at
+                                  the rising edge of "merged-passed". Never
+                                  deleted by any cleanup path; status_line.sh
+                                  dedupes and sorts it at render time.
+
 Exit conditions:
     - branch not found on remote (1)
     - PR merged and main CI resolved for the merge commit (0)
@@ -46,8 +59,10 @@ from __future__ import annotations
 
 import atexit
 import fcntl
+import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -483,8 +498,12 @@ def get_sha_runs(all_runs: list, sha: str) -> list:
     return list(by_name.values())
 
 
-def make_pr_cache(pr: dict) -> dict:
-    """Build the JSON shape that status_line.sh expects."""
+def make_pr_cache(pr: dict, owner: str, repo: str) -> dict:
+    """Build the JSON shape that status_line.sh expects.
+
+    ``repoUrl`` + ``mergeCommit.oid`` are what status_line.sh turns into the
+    "post merge" hyperlink (``<repoUrl>/commit/<oid>/checks``).
+    """
     state = pr.get("state", "")
     return {
         "url": pr.get("html_url", ""),
@@ -495,7 +514,48 @@ def make_pr_cache(pr: dict) -> dict:
         "mergeCommit": (
             {"oid": pr["merge_commit_sha"]} if pr.get("merge_commit_sha") else None
         ),
+        "repoUrl": f"https://github.com/{owner}/{repo}",
     }
+
+
+# --- Slot naming ---
+
+# Every char outside this set is replaced by "_" in the readable slug prefix.
+_SLUG_UNSAFE_RE = re.compile(rb"[^A-Za-z0-9._-]")
+# Readable-prefix cap. The identity hash, not this prefix, guarantees
+# uniqueness, so truncation here is free.
+SLUG_MAX_LEN = 40
+# Length of the hex identity hash appended to the slug.
+IDENTITY_HASH_LEN = 10
+
+
+def sanitize_branch(branch: str) -> str:
+    """Readable, filename-safe prefix for ``branch``.
+
+    Substitution and truncation both run on the UTF-8 BYTES, matching
+    ``_notify.sh``'s ``LC_ALL=C tr -c 'A-Za-z0-9._-' '_'``. A codepoint-based
+    version would disagree with bash on any non-ASCII branch name, and the two
+    languages must derive the identical slot.
+    """
+    return _SLUG_UNSAFE_RE.sub(b"_", branch.encode())[:SLUG_MAX_LEN].decode("ascii")
+
+
+def identity_hash(owner: str, repo: str, branch: str) -> str:
+    """Short hash of ``"<owner>/<repo>#<branch>"`` — the uniqueness guarantee.
+
+    Branch text alone is not a watcher identity: one session can `cd` between
+    worktrees of different repos, and two repos can legitimately have the same
+    branch name.
+    """
+    identity = f"{owner}/{repo}#{branch}"
+    return hashlib.sha256(identity.encode()).hexdigest()[:IDENTITY_HASH_LEN]
+
+
+def slot_for(session_id: str, owner: str, repo: str, branch: str) -> str:
+    """The per-watcher file key: ``<session>_<branch slug>-<identity hash>``."""
+    return (
+        f"{session_id}_{sanitize_branch(branch)}-{identity_hash(owner, repo, branch)}"
+    )
 
 
 # --- File writers ---
@@ -511,6 +571,32 @@ def _pr_path(slot: str) -> Path:
 
 def _lock_path(slot: str) -> Path:
     return Path(TMP_DIR) / f"ci_watch_lock_{slot}"
+
+
+def _finished_path(session_id: str) -> Path:
+    return Path(TMP_DIR) / f"ci_watch_finished_{session_id}"
+
+
+def append_finished_pr(session_id: str, pr_number: int, pr_url: str) -> None:
+    """Append one finished-PR JSON line to the session-level finished file.
+
+    ``os.write`` on an ``O_APPEND`` fd, not Python's buffered ``write``, so the
+    line reaches the file as ONE syscall — several watchers of the same session
+    append concurrently. No temp-file/rename dance: the file is append-only, so
+    there is nothing to replace.
+
+    Duplicates are NOT suppressed here. Doing so would need a read-before-write
+    and reintroduce the cross-process race this design avoids; status_line.sh
+    dedupes by PR number at render time instead.
+    """
+    line = json.dumps({"number": pr_number, "url": pr_url, "ts": time.time()}) + "\n"
+    fd = os.open(
+        _finished_path(session_id), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644
+    )
+    try:
+        os.write(fd, line.encode())
+    finally:
+        os.close(fd)
 
 
 # Epoch of the FIRST failed stdout write, or None while the notification
@@ -799,10 +885,18 @@ class WatchState:
     """All mutable state for a single watch() invocation."""
 
     def __init__(
-        self, branch: str, slot: str, latest_sha: str, default_branch: str
+        self,
+        branch: str,
+        slot: str,
+        session_id: str,
+        latest_sha: str,
+        default_branch: str,
     ) -> None:
         self.branch = branch
         self.slot = slot
+        # Kept alongside `slot` because the finished-PR file is session-level:
+        # every watcher of one session appends to the same file.
+        self.session_id = session_id
         self.latest_sha = latest_sha
         self.default_branch = default_branch
 
@@ -1007,7 +1101,12 @@ def check_failures(context: str, sha_runs: list, state: WatchState) -> None:
 
 
 def check_all_passed(
-    context: str, sha_runs: list, state: WatchState, mergeable_state: str
+    context: str,
+    sha_runs: list,
+    state: WatchState,
+    mergeable_state: str,
+    pr_number: int | None = None,
+    pr_url: str = "",
 ) -> None:
     """Fire the CI-passed notification once when every run is completed+success/skipped."""
     if not sha_runs:
@@ -1035,6 +1134,13 @@ def check_all_passed(
         return
 
     if context == "main":
+        # Finished-file entry FIRST, state second. status_line.sh hides every
+        # "merged-passed" row (the PR belongs to the finished list from here on),
+        # so a crash between the two writes must not be able to leave the PR out
+        # of both. This order makes the worst case a duplicate line, which the
+        # renderer dedupes, instead of a PR that vanishes from the status line.
+        if pr_number is not None:
+            append_finished_pr(state.session_id, pr_number, pr_url)
         write_state(state.slot, state.branch, "merged-passed")
         notify(
             f"CI PASSED on {state.default_branch} after merge of branch {state.branch}"
@@ -1245,13 +1351,14 @@ def resolve_branch_sha(owner: str, repo: str, branch: str, token: str) -> str:
 def watch(
     branch: str,
     slot: str,
+    session_id: str,
     owner: str,
     repo: str,
     default_branch: str,
     latest_sha: str,
 ) -> None:
     """Run the CI watch loop until a terminal condition fires."""
-    state = WatchState(branch, slot, latest_sha, default_branch)
+    state = WatchState(branch, slot, session_id, latest_sha, default_branch)
 
     runs_url = (
         f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs?branch={branch}&per_page=100"
@@ -1357,9 +1464,11 @@ def watch(
             pr_detail = pr
 
         if pr:
-            write_pr_cache(slot, make_pr_cache(pr_detail or pr))
+            write_pr_cache(slot, make_pr_cache(pr_detail or pr, owner, repo))
 
         merge_commit_oid = get_merge_commit_sha(pr_detail or pr)
+        pr_html_url = (pr_detail or pr).get("html_url", "")
+        (pr_detail or pr).get("html_url", "")
         mergeable_state = (pr_detail or pr).get("mergeable_state", "").upper()
 
         # --- Detect merged ---
@@ -1553,7 +1662,9 @@ def watch(
 
             state.main_wait_iterations = 0
             check_failures("main", sha_runs, state)
-            check_all_passed("main", sha_runs, state, mergeable_state)
+            check_all_passed(
+                "main", sha_runs, state, mergeable_state, pr_number, pr_html_url
+            )
 
             if state.reported_main_pass or state.reported_main_fail:
                 print(
@@ -1749,8 +1860,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    slot = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-    if not slot:
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
         print(
             "Error: CLAUDE_CODE_SESSION_ID is unset. ci_watch must be launched "
             "from a Claude Code Bash subshell so the harness injects it.",
@@ -1758,13 +1869,17 @@ def main() -> None:
         )
         sys.exit(2)
 
-    acquire_lock(slot)
-
     token = gh_token_value()
     owner, repo, default_branch = repo_info()
+    # owner/repo must be resolved BEFORE the lock: the slot is per-branch AND
+    # per-repo, so a session watching two branches (or the same branch in two
+    # worktrees) takes two disjoint locks instead of evicting itself.
+    slot = slot_for(session_id, owner, repo, branch)
+    acquire_lock(slot)
+
     latest_sha = resolve_branch_sha(owner, repo, branch, token)
 
-    watch(branch, slot, owner, repo, default_branch, latest_sha)
+    watch(branch, slot, session_id, owner, repo, default_branch, latest_sha)
 
 
 if __name__ == "__main__":

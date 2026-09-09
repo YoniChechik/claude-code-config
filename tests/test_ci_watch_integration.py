@@ -131,7 +131,7 @@ def test_make_pr_cache_state_uppercase():
         "mergeable_state": "clean",
         "merge_commit_sha": "deadbeef",
     }
-    cache = ci_watch.make_pr_cache(pr)
+    cache = ci_watch.make_pr_cache(pr, "the-owner", "the-repo")
     assert cache["state"] == "OPEN"
     assert cache["mergeStateStatus"] == "CLEAN"
     assert cache["mergeCommit"] == {"oid": "deadbeef"}
@@ -141,7 +141,7 @@ def test_make_pr_cache_state_uppercase():
 
 def test_make_pr_cache_no_merge_commit():
     pr = {"state": "open", "mergeable_state": ""}
-    cache = ci_watch.make_pr_cache(pr)
+    cache = ci_watch.make_pr_cache(pr, "the-owner", "the-repo")
     assert cache["mergeCommit"] is None
 
 
@@ -210,6 +210,7 @@ def make_sleep_breaker(max_calls: int):
 def run_watch(
     tmp_dir: str,
     branch: str = "feat",
+    session_id: str = "sess",
     owner: str = "o",
     repo: str = "r",
     default_branch: str = "main",
@@ -271,6 +272,7 @@ def run_watch(
             ci_watch.watch(
                 branch=branch,
                 slot=branch,
+                session_id=session_id,
                 owner=owner,
                 repo=repo,
                 default_branch=default_branch,
@@ -586,7 +588,7 @@ def test_behind_not_reported_when_not_strict(tmp_path):
 
 def test_new_sha_resets_state(tmp_path):
     """A run with a new headSha resets the reported_pass/fail flags."""
-    state = ci_watch.WatchState("br", "br", "old-sha", "main")
+    state = ci_watch.WatchState("br", "br", "sess", "old-sha", "main")
     state.reported_pass = True
     state.reported_fail = True
     state.reported_no_runs = True
@@ -903,6 +905,7 @@ def test_no_main_ci_state(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
+            session_id="sess",
             owner="o",
             repo="r",
             default_branch="main",
@@ -967,6 +970,7 @@ def test_transient_api_failure_does_not_flag_no_main_ci(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
+            session_id="sess",
             owner="o",
             repo="r",
             default_branch="main",
@@ -1030,6 +1034,7 @@ def test_timeout_state(tmp_path):
         ci_watch.watch(
             branch=branch,
             slot=branch,
+            session_id="sess",
             owner="o",
             repo="r",
             default_branch="main",
@@ -1293,6 +1298,7 @@ def test_stdout_carries_only_notifications(tmp_path, capsys):
             ci_watch.watch(
                 branch=branch,
                 slot=branch,
+                session_id="sess",
                 owner="o",
                 repo="r",
                 default_branch="main",
@@ -1429,7 +1435,7 @@ def test_stuck_pending_multiline_notification_reaches_stdout_intact(tmp_path, ca
     ~20 lines) must land on stdout byte-for-byte, with the diagnostics that the
     same call path writes going to stderr.
     """
-    state = ci_watch.WatchState("feat", "feat", "sha-old", "main")
+    state = ci_watch.WatchState("feat", "feat", "sess", "sha-old", "main")
     stuck = frozenset({"build / test", "lint"})
     state.stuck_pending_names = stuck
     state.stuck_pending_iters = ci_watch.STUCK_PENDING_MIN_ITERS - 1
@@ -2088,15 +2094,18 @@ def test_main_rejects_an_empty_branch(branch, monkeypatch, capsys):
 
 
 def test_main_passes_resolved_repo_context_to_watch(monkeypatch):
-    """``watch`` takes six same-typed positional strings. Nothing else pins
+    """``watch`` takes seven same-typed positional strings. Nothing else pins
     their order, so a transposition of ``owner``/``repo`` (or
     ``default_branch``/``latest_sha``) would ship green.
+
+    It also pins the slot: per-branch and per-repo, with the raw session id
+    still passed alongside it for the session-level finished-PR file.
     """
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "slot-1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
     monkeypatch.setattr(sys, "argv", ["ci_watch.py", "feat/x"])
 
     with (
-        patch.object(ci_watch, "acquire_lock"),
+        patch.object(ci_watch, "acquire_lock") as acquire_mock,
         patch.object(ci_watch, "gh_token_value", return_value="tok"),
         patch.object(
             ci_watch, "repo_info", return_value=("the-owner", "the-repo", "main")
@@ -2106,14 +2115,19 @@ def test_main_passes_resolved_repo_context_to_watch(monkeypatch):
     ):
         ci_watch.main()
 
+    expected_slot = ci_watch.slot_for("sess-1", "the-owner", "the-repo", "feat/x")
     assert watch_mock.call_args.args == (
         "feat/x",
-        "slot-1",
+        expected_slot,
+        "sess-1",
         "the-owner",
         "the-repo",
         "main",
         "sha-123",
     )
+    # The lock is taken on the per-branch slot, never on the bare session id —
+    # otherwise a second branch's watcher would evict the first.
+    assert acquire_mock.call_args.args == (expected_slot,)
 
 
 # ---------------------------------------------------------------------------
