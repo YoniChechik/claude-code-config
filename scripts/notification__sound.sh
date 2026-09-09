@@ -24,8 +24,12 @@ if [ "$TYPE" = "idle_prompt" ] || [ "$TYPE" = "task_completed" ] || [[ "$TYPE" =
     exit 0
 fi
 
-# Extract the transcript path so notify_user_attention can keep the tab BLUE
-# (not green) while a background agent/task or CI is still running.
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-
-notify_user_attention "$TRANSCRIPT"
+# Everything the filter above lets through is a prompt the user has to answer,
+# and this hook fires for the SAME logical moment as the PreToolUse permission /
+# AskUserQuestion hooks. Those take the blocking entry point, and so must this
+# one: the chime is deduped on a shared key, but the tab paint is NOT, so a
+# background-gated call here would land second on a coin flip and repaint the tab
+# BLUE over the GREEN they just painted — while the user is the one blocked.
+# Every notification type that genuinely reports background progress is already
+# suppressed above, so no surviving type wants that gate.
+notify_user_attention_blocking

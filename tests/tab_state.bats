@@ -54,6 +54,9 @@ setup() {
 
 teardown() {
     exec 9>&- || true
+    # WPID here, not only in the test body: a failing assertion above the inline
+    # kill would otherwise leak the fake watcher process for the rest of the run.
+    [ -n "${WPID:-}" ] && kill "$WPID" 2>/dev/null || true
     [ -n "${READER_PID:-}" ] && kill "$READER_PID" 2>/dev/null || true
 }
 
@@ -109,6 +112,7 @@ refute_emitted() {
 # third-party entries cannot affect tab colour.
 run_hooks() {
     local event="$1" tool="$2" payload="$3" cmd matcher
+    DISPATCHED=0
     # jq emits "*" for a group with no matcher: `read` strips LEADING IFS
     # whitespace and a TAB counts, so an empty first field would shift the
     # command into $matcher and silently dispatch nothing.
@@ -118,6 +122,27 @@ run_hooks() {
         if [ "$matcher" != "*" ] && [ -n "$tool" ]; then
             [[ "$tool" =~ ^($matcher)$ ]] || continue
         fi
+        # settings.json spells the hooks as "$HOME/.claude/scripts/...", which is
+        # the INSTALLED copy. Rewrite that prefix to the checkout the tests live
+        # in, or a run from a worktree silently exercises the installed scripts
+        # instead of the ones under test — and passes on code it never ran.
+        # Identical to the old substitution when the checkout IS ~/.claude.
+        cmd="${cmd//\$HOME\/.claude/$REPO_DIR}"
+        # HARD GUARD, the whole point of the rewrite above. The filter accepts any
+        # spelling of the path but the substitution only knows the literal
+        # "$HOME/.claude" one, so a settings.json entry written as "${HOME}/...",
+        # "~/..." or an absolute "/Users/<user>/.claude/..." would sail through
+        # unrewritten and run the INSTALLED scripts — the exact bug this branch
+        # fixed, re-entering through a different spelling, with a green suite.
+        # Failing loudly here turns that silent no-op back into a test failure.
+        case "$cmd" in
+            *"$REPO_DIR"*) ;;
+            *)
+                printf 'hook not rewritten to the checkout under test: %s\n' "$cmd" >&2
+                return 1
+                ;;
+        esac
+        DISPATCHED=$((DISPATCHED + 1))
         # cwd = repo so the hooks' internal `git rev-parse` resolves a branch.
         ( cd "$REPO_DIR" && printf '%s' "$payload" \
             | bash -c "${cmd//\$HOME/$HOME}" ) >/dev/null 2>&1
@@ -125,6 +150,10 @@ run_hooks() {
         .hooks[$e][]? as $g
         | $g.hooks[]?
         | [($g.matcher // "*"), .command] | @tsv' "$SETTINGS")
+    # A run that dispatched nothing asserts nothing. Every caller below expects at
+    # least one of this repo's hooks to fire for the event it names, so an empty
+    # dispatch is a broken wiring, not a passing test.
+    [ "$DISPATCHED" -gt 0 ]
 }
 
 payload() { jq -nc "$@"; }
@@ -143,6 +172,17 @@ write_active_agent_transcript() {
     printf '%s\n' '{"type":"user","timestamp":"2026-07-28T10:00:00.000Z","toolUseResult":{"status":"async_launched","agentId":"a0123456789abcdef"}}' > "$TRANSCRIPT"
 }
 
+# A Monitor task that was launched and never terminated -> background active.
+write_active_monitor_transcript() {
+    printf '%s\n' '{"type":"user","timestamp":"2026-09-03T15:56:41.415Z","toolUseResult":{"taskId":"bnk163hnc","timeoutMs":0,"persistent":true}}' > "$TRANSCRIPT"
+}
+
+# The chime proxy the other suites use: the green path claims a dedup lockdir,
+# the blue path never reaches a chime at all.
+dedup_lock_count() {
+    ls "$CLAUDE_NOTIFY_TMP_DIR" 2>/dev/null | grep -c notify_dedup || true
+}
+
 # The real destructive command from the reported session; the guard asks on it.
 GCLOUD_CMD='gcloud dns record-sets delete api.app.sunsay.com. --type=A --zone=sunsay-com --project=production-490411'
 
@@ -152,6 +192,118 @@ GCLOUD_CMD='gcloud dns record-sets delete api.app.sunsay.com. --type=A --zone=su
     run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
         '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
     assert_emitted "$GREEN_SEQ"
+}
+
+# ---------------------------------------------------------------------------
+# User-BLOCKING prompts override the background-work gate.
+#
+# A permission prompt, an AskUserQuestion and every Notification type that is not
+# a background/idle signal all stop the turn dead: nothing moves until the user
+# answers. A live Monitor / backgrounded Bash / CI watcher does not make the
+# session any less stuck, so none of these paths may take the blue no-chime
+# branch — all three call notify_user_attention_blocking. Only Stop keeps the
+# background-work gate.
+# ---------------------------------------------------------------------------
+
+@test "tab state: a permission ask paints GREEN even while a background agent is active" {
+    write_active_agent_transcript
+    mark
+    run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: a permission ask paints GREEN even while a Monitor task is running" {
+    write_active_monitor_transcript
+    mark
+    run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: an AskUserQuestion ping paints GREEN even while a Monitor task is running" {
+    write_active_monitor_transcript
+    mark
+    run_hooks PreToolUse AskUserQuestion "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",tool_input:{questions:[]},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: an AskUserQuestion ping paints GREEN even while CI is actively running" {
+    # ci_is_active is the other half of the gate; the override must clear both.
+    printf '%s' "ci-branch:running" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}_ci-branch-0123456789"
+    bash -c 'exec -a ci_watch_fake sleep 3' </dev/null >/dev/null 2>&1 3>&- &
+    WPID=$!
+    disown 2>/dev/null || true
+    printf '%s' "$WPID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}_ci-branch-0123456789"
+    write_idle_transcript
+    mark
+    run_hooks PreToolUse AskUserQuestion "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",tool_input:{questions:[]},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    # The chime is half of what this pins, and the CI gate is the path where it
+    # was most likely to be swallowed — assert it, not just the colour.
+    [ "$(dedup_lock_count)" -ge 1 ]
+    kill "$WPID" 2>/dev/null || true
+}
+
+@test "tab state: the paired Notification hook does not repaint a blocking prompt BLUE" {
+    # A permission prompt fires the PreToolUse guard AND a Notification hook for
+    # ONE logical moment. The chime is deduped on a shared key, but the tab paint
+    # is NOT — so while the guard painted GREEN, a background-gated Notification
+    # hook landing second used to repaint the tab BLUE with the user still
+    # blocked. Hook ordering between the two is not guaranteed, so this is a coin
+    # flip, not a rare race: both orders must end GREEN.
+    write_active_monitor_transcript
+    mark
+    run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
+    run_hooks Notification "" "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"Notification",notification_type:"permission_prompt",message:"Claude needs your permission",transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+}
+
+@test "tab state: the Notification hook alone paints GREEN while a Monitor task runs" {
+    # The reverse order of the pair above, and the case where the Notification
+    # hook is the ONLY painter: every type that survives the suppression filter
+    # in notification__sound.sh is a prompt the user has to answer.
+    write_active_monitor_transcript
+    mark
+    run_hooks Notification "" "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"Notification",notification_type:"permission_prompt",message:"Claude needs your permission",transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: every dispatched hook resolves into the checkout under test" {
+    # The guard inside run_hooks is what stops this whole suite from silently
+    # testing the INSTALLED ~/.claude scripts when it runs from a worktree — the
+    # bug this branch fixed. Assert it directly, and assert that the dispatch is
+    # not empty, so "nothing ran" can never read as a pass.
+    write_idle_transcript
+    run_hooks Stop "" "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"Stop",stop_hook_active:false,transcript_path:$t}')"
+    [ "$DISPATCHED" -gt 0 ]
+
+    # Now the negative half: a settings.json spelling the rewrite does NOT know
+    # must FAIL the run instead of quietly dispatching the installed copy.
+    SETTINGS="$BATS_TEST_TMPDIR/settings_other_spelling.json"
+    jq '.hooks.Stop = [{hooks:[{type:"command",command:"bash ~/.claude/scripts/stop__sound.sh"}]}]' \
+        "$REPO_DIR/settings.json" > "$SETTINGS"
+    run run_hooks Stop "" "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"Stop",stop_hook_active:false,transcript_path:$t}')"
+    [ "$status" -ne 0 ]
 }
 
 @test "tab state: GREEN is cleared once the asked-about tool completes" {

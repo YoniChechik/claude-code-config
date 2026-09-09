@@ -12,11 +12,6 @@
 
 INPUT=$(cat)
 
-# Transcript path from the hook payload — passed to notify_user_attention on the
-# ask path so the tab stays BLUE (not green) while a background agent/task or CI
-# is still running. Captured here at top level so it is in scope inside ask().
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 [ "$TOOL_NAME" = "Bash" ] || exit 0
 
@@ -31,8 +26,15 @@ ask() {
     # screen. Sourced lazily (only on the ask path) so allow/deny paths stay
     # silent. notify_user_attention writes to the user's tty (not stdout), so
     # this is safe to call before the JSON decision is printed below.
-    source /Users/yonichechik/.claude/scripts/_notify.sh
-    notify_user_attention "$TRANSCRIPT"
+    #
+    # This prompt BLOCKS: nothing moves until the user answers it, so it takes
+    # the blocking entry point, which never checks for background work. The rule
+    # and its reasoning live at notify_user_attention_blocking in _notify.sh.
+    # Resolved relative to THIS script, never as an absolute /Users/... path: a
+    # worktree copy of the guard must use its own _notify.sh, or the tests dispatch
+    # one checkout's hook against another checkout's helpers.
+    source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
+    notify_user_attention_blocking
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
     exit 0
 }

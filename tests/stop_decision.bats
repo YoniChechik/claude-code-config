@@ -57,10 +57,12 @@ line_launch() {
 }
 
 # A <task-notification> in its queue-operation form (top-level "content" string,
-# with the literal \n separators the real transcript carries). $2 is the status.
+# with the literal \n separators the real transcript carries).
+# $1 timestamp, $2 status, $3 task id (defaults to this file's one agent id, so
+# the agent-lifecycle tests read as a single agent's story).
 line_notification() {
     printf '{"type":"queue-operation","timestamp":"%s","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n</task-notification>"}\n' \
-        "$1" "$AGENT_ID" "$2"
+        "$1" "${3:-$AGENT_ID}" "$2"
 }
 
 # SendMessage result that restarts a stopped agent in the background. This is the
@@ -90,6 +92,32 @@ line_notification_tuid() {
 line_resume_msg() {
     printf '{"type":"user","timestamp":"%s","toolUseResult":{"success":true,"message":"%s"}}\n' \
         "$1" "$2"
+}
+
+# --- Non-agent background work -------------------------------------------
+# The transcript records THREE kinds of background launch, each with its own
+# result shape and NONE of them carrying "async_launched":
+# Counts are from the same corpus scan the comments in scripts/_notify.sh quote
+# (4196 local transcripts) — keep the two in step.
+#   Agent   -> toolUseResult.status == "async_launched"      (line_launch above)
+#   Monitor -> toolUseResult.taskId, alongside timeoutMs     (558 results)
+#   Bash    -> toolUseResult.backgroundTaskId (run_in_background:true, 622)
+# All three terminate through the SAME <task-notification> task-id namespace,
+# so only the activation side differs.
+MONITOR_TASK_ID="bnk163hnc"
+BG_BASH_TASK_ID="braju6wbj"
+
+# Monitor tool result: the launch marker for a Monitor-tracked background task.
+# Shape verified against a real ci-watcher Monitor launch.
+line_monitor_launch() {
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"taskId":"%s","timeoutMs":0,"persistent":true}}\n' \
+        "$1" "${2:-$MONITOR_TASK_ID}"
+}
+
+# Bash tool result for a run_in_background:true call.
+line_bg_bash_launch() {
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"%s"}}\n' \
+        "$1" "${2:-$BG_BASH_TASK_ID}"
 }
 
 # A <task-notification> with NO timestamp field of its own — it must inherit the
@@ -235,15 +263,246 @@ dedup_lock_count() {
 }
 
 @test "stop decision: BLUE for a status Claude Code never emits (no speculative terminals)" {
-    # The only statuses in the corpus are completed / failed / killed (plus the
-    # non-terminal running / in_progress / pending on TaskOutput). "stopped" was
-    # one of several invented names once listed as terminal, with zero
-    # occurrences across 2768 transcripts. Guessing on the terminal side is the
+    # The statuses actually emitted in <task-notification> blocks across the
+    # local corpus are completed / failed / stopped / killed, and TaskOutput's
+    # task.status carries only completed / failed / the non-terminal running.
+    # "finished" is not one of them. Guessing on the terminal side is the
     # false-GREEN direction: an invented name would clear a live agent.
     {
         line_launch       "2026-07-27T17:21:37.477Z"
-        line_notification "2026-07-27T17:54:33.752Z" "stopped"
+        line_notification "2026-07-27T17:54:33.752Z" "finished"
     } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN when a background task is stopped by TaskStop (status 'stopped')" {
+    # TaskStop on a Monitor / backgrounded-Bash task emits
+    # <status>stopped</status> ("Task ... was stopped by main session") — 39
+    # occurrences in the local corpus. It is terminal: leaving it out would pin
+    # the tab blue and silence the chime for the rest of the session.
+    {
+        line_monitor_launch   "2026-09-09T10:09:00.000Z"
+        line_notification     "2026-09-09T10:10:05.669Z" "stopped"   "$MONITOR_TASK_ID"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# Monitor tasks and backgrounded Bash commands (regression: the tab went GREEN
+# and chimed while either was still running)
+#
+# bg_agents_active only ever recognised the `Agent` tool's "async_launched"
+# marker and `SendMessage` resumes. A `Monitor` task and a Bash call with
+# run_in_background:true are background work too, but their launch results carry
+# taskId / backgroundTaskId and NO "async_launched" — so the whole-file needle
+# missed them, the detector reported 0 active, and every Stop chimed.
+# ---------------------------------------------------------------------------
+
+@test "stop decision: BLUE while a Monitor-tracked background task is running" {
+    line_monitor_launch "2026-09-03T15:56:41.415Z" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN once the Monitor task's stream has ended" {
+    {
+        line_monitor_launch   "2026-09-03T15:56:41.415Z"
+        line_notification     "2026-09-03T16:35:57.515Z" "completed" "$MONITOR_TASK_ID"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: BLUE while a backgrounded Bash command is running" {
+    line_bg_bash_launch "2026-08-12T08:46:30.693Z" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN once the backgrounded Bash command completes" {
+    {
+        line_bg_bash_launch   "2026-08-12T08:46:30.693Z"
+        line_notification     "2026-08-12T08:46:31.411Z" "completed" "$BG_BASH_TASK_ID"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: BLUE when a Monitor task outlives an agent that already finished" {
+    # Mixed workload: the agent is done, the monitor is not. Whole-session
+    # "anything still running" must win over the per-id agent bookkeeping.
+    {
+        line_launch           "2026-09-03T15:00:00.000Z"
+        line_notification     "2026-09-03T15:30:00.000Z" "completed"
+        line_monitor_launch   "2026-09-03T15:56:41.415Z"
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN when the only live Monitor is this session's own CI watcher and CI has settled" {
+    # The ci-watcher IS a persistent Monitor task that stays alive from launch
+    # until the PR's post-merge CI resolves. ci_is_active already models it
+    # correctly (blue only while the state is running/merging), so counting its
+    # Monitor task as generic background work would swallow the very chime that
+    # says "CI passed — come merge", for the whole life of the watcher.
+    # The ci-watcher skill persists that task id at ci_watch_task_<SLOT>.
+    printf '%s' "$MONITOR_TASK_ID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_task_$(slot_for_branch "$CUR_BRANCH")"
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:passed"
+    spawn_fake_watcher "$CUR_BRANCH"
+    line_monitor_launch "2026-09-03T15:56:41.415Z" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN for a lone TaskUpdate result (the cheap early-out never reaches python)" {
+    # The TaskUpdate (todo-list) tool ALSO returns a top-level "taskId" — an
+    # ordinal like "1", 338 of them in the local corpus. On its own it carries
+    # none of the marker words, so this pins the BASH early-out only: the python
+    # block never runs. The two guards inside python are pinned by the tests
+    # below, which put a real marker in the same file so the early-out cannot
+    # short-circuit them.
+    printf '%s\n' '{"type":"user","timestamp":"2026-08-10T18:45:34.597Z","toolUseResult":{"success":true,"taskId":"1","updatedFields":["status"],"statusChange":{"from":"pending","to":"in_progress"}}}' \
+        > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# The two independent guards on a Monitor launch: the "timeoutMs" KEY and the
+# BG_TASK_ID_RE id SHAPE. Every fixture below carries a real, already-terminated
+# marker so the bash early-out cannot settle the file before python runs — the
+# guards are therefore genuinely exercised, and dropping either one turns these
+# green cases blue.
+# ---------------------------------------------------------------------------
+
+@test "stop decision: GREEN when a TaskUpdate taskId sits beside a settled Monitor" {
+    # The Monitor pair supplies the "timeoutMs" marker and then clears itself, so
+    # python DOES run and has to reject the ordinal "1" on the key guard. Without
+    # that guard the ordinal becomes an id no notification can ever terminate,
+    # pinning the tab blue and killing the chime for the rest of the session.
+    {
+        line_monitor_launch "2026-09-03T15:56:41.415Z"
+        line_notification   "2026-09-03T16:35:57.515Z" "completed" "$MONITOR_TASK_ID"
+        printf '%s\n' '{"type":"user","timestamp":"2026-09-03T16:36:00.000Z","toolUseResult":{"success":true,"taskId":"1","updatedFields":["status"]}}'
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN when a timeoutMs result carries an ordinal taskId (shape guard)" {
+    # The key guard passes here — "timeoutMs" IS present — so only the id shape
+    # can reject this. It is the second, independent guard on the same
+    # distinction, and it is the ONLY guard the backgroundTaskId branch has.
+    printf '%s\n' '{"type":"user","timestamp":"2026-09-03T15:56:41.415Z","toolUseResult":{"taskId":"1","timeoutMs":0,"persistent":true}}' \
+        > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN when a bare b-shaped taskId carries no timeoutMs (key guard)" {
+    # Mirror image of the test above: the SHAPE is right but the Monitor key is
+    # missing, so only the key guard can reject it. The settled backgrounded-Bash
+    # pair supplies the marker that keeps python running.
+    {
+        line_bg_bash_launch "2026-08-12T08:46:30.693Z"
+        line_notification   "2026-08-12T08:46:31.411Z" "completed" "$BG_BASH_TASK_ID"
+        printf '%s\n' '{"type":"user","timestamp":"2026-08-12T08:46:32.000Z","toolUseResult":{"success":true,"taskId":"bzzz11yy2"}}'
+    } > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: GREEN for every malformed backgroundTaskId shape" {
+    # backgroundTaskId has NO key-guard companion, so BG_TASK_ID_RE is its only
+    # guard — a false positive here pins the tab blue forever, because nothing
+    # that is not a real task id can ever be named by a <task-notification>.
+    # A "backgroundTaskId" key is itself a marker word, so each of these defeats
+    # the bash early-out on its own and the python guard really is what decides.
+    #
+    # The trailing-newline case is the one that used to FAIL: re.match with a "$"
+    # anchor also matches just before a trailing newline, so "braju6wbj\n" was
+    # accepted as an id that no terminating notification could ever equal.
+    local bad
+    for bad in \
+        '"NOT-A-TASK-ID"' \
+        '"bNK163HNC"' \
+        '"bnk163h"' \
+        '"bnk163hnc1"' \
+        '""' \
+        '12345678' \
+        '"a0123456789abcdef"' \
+        '"braju6wbj\n"' \
+        '"\nbraju6wbj"'
+    do
+        rm -rf "$CLAUDE_NOTIFY_TMP_DIR"/notify_dedup_*
+        printf '{"type":"user","timestamp":"2026-08-12T08:46:30.693Z","toolUseResult":{"backgroundTaskId":%s}}\n' \
+            "$bad" > "$TRANSCRIPT"
+        run_hook
+        if [ "$(dedup_lock_count)" -lt 1 ]; then
+            printf 'backgroundTaskId %s was wrongly treated as a live task\n' "$bad" >&2
+            return 1
+        fi
+    done
+}
+
+@test "stop decision: GREEN for an agent-shaped taskId even with timeoutMs present" {
+    # The two id namespaces are separate: "a"+16 hex belongs to agents, "b"+8 to
+    # Monitor / backgrounded Bash. A Monitor result naming an agent id is not a
+    # Monitor launch, and treating it as one would double-count that agent.
+    printf '%s\n' '{"type":"user","timestamp":"2026-09-03T15:56:41.415Z","toolUseResult":{"taskId":"a0123456789abcdef","timeoutMs":0}}' \
+        > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: BLUE for a Monitor that is NOT the session's CI watcher" {
+    # The exclusion above must be keyed on the stored id, not on "any Monitor":
+    # a second, unrelated Monitor task is still real background work.
+    printf '%s' "$MONITOR_TASK_ID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_task_$(slot_for_branch "$CUR_BRANCH")"
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:passed"
+    line_monitor_launch "2026-09-03T15:56:41.415Z" "bzzz11yy2" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: BLUE when the ci_watch_task sidecar belongs to ANOTHER session" {
+    # Every ci_watch_task_<SLOT> file starts with the OWNING session's id, and the
+    # exclusion glob is scoped to this session's id for exactly that reason. A
+    # glob of ci_watch_task_* instead would let a leftover sidecar from a
+    # different session suppress THIS session's genuine Monitor and swallow the
+    # chime for the rest of the run.
+    printf '%s' "$MONITOR_TASK_ID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_task_othersession_branch-0123456789"
+    line_monitor_launch "2026-09-03T15:56:41.415Z" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: GREEN when the ci_watch_task sidecar ends in a newline" {
+    # The writer may append a newline. The helper strips whitespace before
+    # comparing, so the id must still match the transcript's Monitor id — without
+    # the strip the exclusion silently misses and the tab pins blue.
+    printf '%s\n' "$MONITOR_TASK_ID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_task_$(slot_for_branch "$CUR_BRANCH")"
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:passed"
+    line_monitor_launch "2026-09-03T15:56:41.415Z" > "$TRANSCRIPT"
+    run_hook
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "stop decision: BLUE when the ci_watch_task sidecar is empty" {
+    # An empty or whitespace-only sidecar names no watcher, so it must exclude
+    # nothing. Passing "" through would otherwise land an empty entry in the
+    # exclusion set — harmless today, but the direction that matters is that a
+    # real Monitor keeps counting.
+    : > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_task_$(slot_for_branch "$CUR_BRANCH")"
+    write_ci_state "$CUR_BRANCH" "${CUR_BRANCH}:passed"
+    line_monitor_launch "2026-09-03T15:56:41.415Z" > "$TRANSCRIPT"
     run_hook
     [ "$(dedup_lock_count)" -eq 0 ]
 }
@@ -383,6 +642,56 @@ dedup_lock_count() {
     run_hook
     wait "$APPENDER" 2>/dev/null || true
     [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: BLUE when a backgrounded Bash launch line lands AFTER the first read" {
+    # Same flush race as the Agent case: the result line carrying
+    # backgroundTaskId is appended after the assistant message that made the
+    # call. The tail holds a Bash tool_use with run_in_background:true and no
+    # result yet, which is what licenses the retry.
+    {
+        printf '%s\n' '{"type":"user","timestamp":"2026-08-12T08:46:29.000Z","message":{"content":"go"}}'
+        printf '%s\n' '{"type":"assistant","timestamp":"2026-08-12T08:46:30.000Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"toolu_x","input":{"command":"sleep 600","run_in_background":true}}]}}'
+    } > "$TRANSCRIPT"
+    ( sleep 1.2; line_bg_bash_launch "2026-08-12T08:46:30.693Z" >> "$TRANSCRIPT" ) \
+        </dev/null >/dev/null 2>&1 3>&- &
+    APPENDER=$!
+    run_hook
+    wait "$APPENDER" 2>/dev/null || true
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: BLUE when a Monitor launch line lands AFTER the first read" {
+    # The third producer of an activation marker, and the one the in-flight
+    # needle names by TOOL NAME rather than by an input field. Dropping Monitor
+    # from that needle would settle this Stop immediately and chime GREEN with the
+    # monitor about to start streaming.
+    {
+        printf '%s\n' '{"type":"user","timestamp":"2026-09-03T15:56:40.000Z","message":{"content":"go"}}'
+        printf '%s\n' '{"type":"assistant","timestamp":"2026-09-03T15:56:41.000Z","message":{"content":[{"type":"tool_use","name":"Monitor","id":"toolu_x","input":{"persistent":true}}]}}'
+    } > "$TRANSCRIPT"
+    ( sleep 1.2; line_monitor_launch "2026-09-03T15:56:41.415Z" >> "$TRANSCRIPT" ) \
+        </dev/null >/dev/null 2>&1 3>&- &
+    APPENDER=$!
+    run_hook
+    wait "$APPENDER" 2>/dev/null || true
+    [ "$(dedup_lock_count)" -eq 0 ]
+}
+
+@test "stop decision: an ORDINARY foreground Bash call in the tail costs no flush-race wait" {
+    # The in-flight gate must key on run_in_background, not on the Bash tool
+    # name: nearly every turn ends with a foreground Bash call, so matching the
+    # name alone would put the ~2s retry back on almost every idle Stop.
+    {
+        printf '%s\n' '{"type":"user","timestamp":"2026-08-12T08:46:29.000Z","message":{"content":"go"}}'
+        printf '%s\n' '{"type":"assistant","timestamp":"2026-08-12T08:46:30.000Z","message":{"content":[{"type":"tool_use","name":"Bash","id":"toolu_x","input":{"command":"ls"}}]}}'
+    } > "$TRANSCRIPT"
+    local start end
+    start=$(now_ms)
+    run_hook
+    end=$(now_ms)
+    [ "$(dedup_lock_count)" -ge 1 ]
+    [ "$((end - start))" -lt 1000 ]
 }
 
 @test "stop decision: a marker-free transcript settles in under 1s (no flush-race wait)" {

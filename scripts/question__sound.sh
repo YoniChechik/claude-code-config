@@ -2,10 +2,10 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
 
-# Read the AskUserQuestion hook payload and pull out the transcript path so
-# notify_user_attention keeps the tab BLUE (not green) while a background
-# agent/task or CI is still running.
-INPUT=$(cat)
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-
-notify_user_attention "$TRANSCRIPT"
+# PreToolUse hook for AskUserQuestion: green tab + chime + "waiting" title.
+#
+# A raised question BLOCKS — the turn does not continue until the user picks an
+# answer (settings.json even gives it a 10m timeout) — so this takes the
+# blocking entry point, which never checks for background work. The rule and its
+# reasoning live at notify_user_attention_blocking in _notify.sh.
+notify_user_attention_blocking
