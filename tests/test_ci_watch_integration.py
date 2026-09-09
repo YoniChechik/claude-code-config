@@ -145,6 +145,94 @@ def test_make_pr_cache_no_merge_commit():
     assert cache["mergeCommit"] is None
 
 
+def test_make_pr_cache_carries_the_repo_url():
+    """status_line.sh builds the "post merge" hyperlink from repoUrl +
+    mergeCommit.oid. Without repoUrl the label silently renders unlinked.
+    """
+    pr = {"state": "closed", "mergeable_state": "clean", "merge_commit_sha": "abc123"}
+    cache = ci_watch.make_pr_cache(pr, "the-owner", "the-repo")
+    assert cache["repoUrl"] == "https://github.com/the-owner/the-repo"
+    assert cache["mergeCommit"] == {"oid": "abc123"}
+
+
+# ---------------------------------------------------------------------------
+# Slot naming
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "branch,expected",
+    [
+        ("feat-x", "feat-x"),  # already safe: unchanged
+        ("main", "main"),
+        ("v1.2.3_rc", "v1.2.3_rc"),  # . and _ are in the safe set
+        ("feat/auth", "feat_auth"),  # slash
+        ("user:branch", "user_branch"),  # colon
+        ("a b&c;d$e`f", "a_b_c_d_e_f"),  # shell metacharacters
+        ("", ""),  # empty-safe: no crash, no padding
+    ],
+)
+def test_sanitize_branch(branch, expected):
+    assert ci_watch.sanitize_branch(branch) == expected
+
+
+def test_sanitize_branch_truncates_to_forty():
+    assert ci_watch.sanitize_branch("x" * 200) == "x" * 40
+
+
+def test_sanitize_branch_works_on_bytes_not_codepoints():
+    """The bash half (`LC_ALL=C tr` in _notify.sh / SKILL.md) substitutes per
+    BYTE. Substituting per codepoint here would give a different slug — and so a
+    different slot — for any non-ASCII branch name, and the launcher and the
+    watcher would key on different files.
+    """
+    # 'é' and 'ü' are two UTF-8 bytes each, so each becomes TWO underscores.
+    assert ci_watch.sanitize_branch("féat/ü") == "f__at___"
+
+
+def test_slot_for_separates_two_branches_of_one_session():
+    a = ci_watch.slot_for("sess", "o", "r", "feat/a")
+    b = ci_watch.slot_for("sess", "o", "r", "feat/b")
+    assert a != b
+    assert a.startswith("sess_")
+    assert b.startswith("sess_")
+
+
+def test_slot_for_separates_a_slug_collision():
+    """`feat/a` and `feat_a` share a slug. Only the identity hash keeps their
+    slots apart, which is the whole reason the hash exists.
+    """
+    assert ci_watch.sanitize_branch("feat/a") == ci_watch.sanitize_branch("feat_a")
+    assert ci_watch.slot_for("sess", "o", "r", "feat/a") != ci_watch.slot_for(
+        "sess", "o", "r", "feat_a"
+    )
+
+
+def test_slot_for_separates_the_same_branch_in_two_repos():
+    """One session can `cd` between worktrees of different repos, and two repos
+    can both have a branch called `main`.
+    """
+    assert ci_watch.slot_for("sess", "o", "repo-a", "main") != ci_watch.slot_for(
+        "sess", "o", "repo-b", "main"
+    )
+
+
+def test_slot_for_matches_the_documented_recipe():
+    """Pins the exact string shape the bash side must reproduce byte-for-byte:
+    "<session>_<slug>-<first 10 hex of sha256('<owner>/<repo>#<branch>')>".
+    """
+    import hashlib
+
+    digest = hashlib.sha256(b"o/r#feat/a").hexdigest()[:10]
+    assert ci_watch.slot_for("sess", "o", "r", "feat/a") == f"sess_feat_a-{digest}"
+
+
+def test_slot_length_stays_bounded():
+    slot = ci_watch.slot_for("s" * 36, "o" * 40, "r" * 40, "b" * 300)
+    # 36 session + 1 underscore + 40 slug + 1 hyphen + 10 hash.
+    assert len(slot) == 36 + 1 + 40 + 1 + 10
+
+
 # ---------------------------------------------------------------------------
 # ETag / api_get
 # ---------------------------------------------------------------------------
@@ -1242,6 +1330,170 @@ def test_write_pr_cache(tmp_path):
         ci_watch.write_pr_cache("br", {"url": "u", "state": "OPEN"})
         data = json.loads((tmp_path / "ci_watch_pr_br").read_text())
         assert data == {"url": "u", "state": "OPEN"}
+
+
+def _finished_entries(tmp_path, session_id: str = "sess") -> list[dict]:
+    """Parsed contents of the session's finished-PR file (empty when absent)."""
+    path = Path(tmp_path) / f"ci_watch_finished_{session_id}"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def test_append_finished_pr_writes_one_json_line(tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.append_finished_pr("sess", 42, "https://github.com/o/r/pull/42")
+    raw = (tmp_path / "ci_watch_finished_sess").read_text()
+    # Exactly one line, newline-terminated: the renderer parses line by line.
+    assert raw.endswith("\n")
+    assert raw.count("\n") == 1
+    entry = json.loads(raw)
+    assert entry["number"] == 42
+    assert entry["url"] == "https://github.com/o/r/pull/42"
+    assert isinstance(entry["ts"], float)
+
+
+def test_append_finished_pr_appends_instead_of_overwriting(tmp_path):
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.append_finished_pr("sess", 1, "u1")
+        ci_watch.append_finished_pr("sess", 2, "u2")
+    entries = _finished_entries(tmp_path)
+    assert [e["number"] for e in entries] == [1, 2]
+
+
+def test_append_finished_pr_keeps_a_pre_existing_file(tmp_path):
+    """Every watcher of a session appends to the same file, so a file written by
+    a sibling watcher (or a previous run) must be extended, never truncated.
+    """
+    path = tmp_path / "ci_watch_finished_sess"
+    path.write_text('{"number": 7, "url": "u7", "ts": 1.0}\n')
+    with patch.object(ci_watch, "TMP_DIR", str(tmp_path)):
+        ci_watch.append_finished_pr("sess", 8, "u8")
+    assert [e["number"] for e in _finished_entries(tmp_path)] == [7, 8]
+
+
+def _passing_main_runs() -> list[dict]:
+    return [{"id": 1, "name": "build", "status": "completed", "conclusion": "success"}]
+
+
+def test_check_all_passed_main_records_the_finished_pr_once(tmp_path):
+    """The finished entry rides the SAME rising edge as the CI-PASSED
+    notification, so a second poll must add neither a notification nor a line.
+    """
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "notify") as notify_mock,
+    ):
+        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        for _ in range(2):
+            ci_watch.check_all_passed(
+                "main",
+                _passing_main_runs(),
+                state,
+                "CLEAN",
+                42,
+                "https://github.com/o/r/pull/42",
+            )
+    entries = _finished_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["number"] == 42
+    assert entries[0]["url"] == "https://github.com/o/r/pull/42"
+    assert notify_mock.call_count == 1
+
+
+def test_finished_pr_is_recorded_before_the_merged_passed_state_write(tmp_path):
+    """Ordering is load-bearing. status_line.sh hides every merged-passed row
+    because the PR is meant to live in the finished list from then on, so a
+    crash between the two writes must not drop it from BOTH. Writing the
+    finished entry first makes the worst case a duplicate line, never a PR that
+    vanishes from the status line.
+    """
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "notify"),
+        patch.object(ci_watch, "write_state", side_effect=OSError("disk full")),
+    ):
+        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        with pytest.raises(OSError):
+            ci_watch.check_all_passed(
+                "main", _passing_main_runs(), state, "CLEAN", 42, "u42"
+            )
+    assert [e["number"] for e in _finished_entries(tmp_path)] == [42]
+
+
+def test_branch_pass_does_not_touch_the_finished_file(tmp_path):
+    """Only post-merge CI going green finishes a PR. A green branch build is not
+    that, and must not put the PR in the list.
+    """
+    with (
+        patch.object(ci_watch, "TMP_DIR", str(tmp_path)),
+        patch.object(ci_watch, "notify"),
+        patch.object(ci_watch, "has_pending_checks", return_value=False),
+        patch.object(ci_watch, "get_remote_head_sha", return_value=None),
+    ):
+        state = ci_watch.WatchState("feat", "feat", "sess", "sha", "main")
+        ci_watch.check_all_passed(
+            "branch", _passing_main_runs(), state, "CLEAN", 42, "u42"
+        )
+    assert state.reported_pass is True
+    assert not (tmp_path / "ci_watch_finished_sess").exists()
+
+
+def test_merge_tracking_records_the_finished_pr(tmp_path):
+    """End to end through the real watch loop: a merged PR whose main CI goes
+    green lands in the session-level finished file with its own number and URL.
+    """
+    pr = [
+        {
+            "html_url": "https://github.com/o/r/pull/77",
+            "number": 77,
+            "state": "closed",
+            "merged": True,
+            "mergeable_state": "clean",
+            "merge_commit_sha": "merge-sha",
+        }
+    ]
+    main_runs = {
+        "workflow_runs": [
+            {
+                "id": 50,
+                "name": "build",
+                "head_sha": "merge-sha",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+    }
+    out = run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr, main_runs=main_runs),
+        max_sleeps=10,
+    )
+    assert out["state_value"] == "merged-passed"
+    entries = _finished_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["number"] == 77
+    assert entries[0]["url"] == "https://github.com/o/r/pull/77"
+
+
+def test_watch_writes_the_repo_url_into_the_pr_cache(tmp_path):
+    pr = [
+        {
+            "html_url": "https://github.com/o/r/pull/5",
+            "number": 5,
+            "state": "open",
+            "merged": False,
+            "mergeable_state": "clean",
+        }
+    ]
+    run_watch(
+        str(tmp_path),
+        api_get_side_effect=make_api_get(pr=pr),
+        owner="the-owner",
+        repo="the-repo",
+    )
+    cached = json.loads((tmp_path / "ci_watch_pr_feat").read_text())
+    assert cached["repoUrl"] == "https://github.com/the-owner/the-repo"
 
 
 def test_notify_writes_one_stdout_line(capsys):
