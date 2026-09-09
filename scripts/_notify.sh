@@ -330,23 +330,35 @@ reset_tab_color() {
 # True (0) only when the tail of the transcript at $1 shows a background-capable
 # tool call whose result line has NOT landed yet — the one situation in which an
 # activation marker can still be in flight, so the one situation worth re-reading
-# the file for. `Agent` is the launch tool and `SendMessage` the resume tool (the
-# only two producers of an activation marker across the local corpus: 1314 and
-# 137 occurrences respectively, nothing else). Reaching this helper already means
+# the file for. The producers of an activation marker across the local corpus are
+# `Agent` (launch), `SendMessage` (resume), `Monitor` (task launch) and `Bash`
+# with run_in_background:true — nothing else. Reaching this helper already means
 # the whole-file marker grep missed, so a tool call sitting in the tail with no
 # marker anywhere is exactly the un-flushed-result case.
+#
+# Bash is matched on its run_in_background INPUT, never on the tool name: almost
+# every turn ends with an ordinary foreground Bash call, so matching the name
+# would put the bounded ~2s retry back on nearly every idle Stop.
 # tail keeps the check O(1) however large the transcript grows; 3 lines gives a
 # little slack for interleaved entries without inviting stale matches.
 _bg_launch_in_flight() {
-    tail -n 3 "$1" 2>/dev/null | grep -qE '"name":"(Agent|SendMessage)"'
+    tail -n 3 "$1" 2>/dev/null \
+        | grep -qE '"name":"(Agent|SendMessage|Monitor)"|"run_in_background":[[:space:]]*true'
 }
 
-# Returns 0 (true) if >=1 background agent is still running per the transcript
+# Returns 0 (true) if >=1 background task is still running per the transcript
 # at $1, else 1 (false). Fail-safe: empty/missing/unparseable transcript => false.
 #
+# "Background task" is every kind this harness can leave running past a Stop:
+# an async `Agent`, a `Monitor` task, and a `Bash` call with run_in_background.
+# All three terminate through the same <task-notification> task-id namespace;
+# only their ACTIVATION markers differ (see the python block below).
+#
 # Detection is a per-task-id LAST-EVENT-WINS state machine resolved in TIMESTAMP
-# order (not line order, not set subtraction). Four event kinds move an id:
+# order (not line order, not set subtraction). These event kinds move an id:
 #   - launch:  toolUseResult.status == "async_launched"          -> active
+#   - launch:  toolUseResult.taskId (Monitor)                    -> active
+#   - launch:  toolUseResult.backgroundTaskId (backgrounded Bash) -> active
 #   - resume:  a SendMessage toolUseResult whose message says the agent was
 #              "resumed ... in the background"                   -> active
 #   - stop:    a <task-notification> block with a terminal <status> -> terminated
@@ -372,7 +384,15 @@ bg_agents_active() {
     #     superset of it. Matching the longer literal (e.g. "in the background
     #     with your message") would early-out to green on any resume phrased
     #     without that exact tail.
-    local marker_re='async_launched|resumed'
+    #   - "timeoutMs" is the Monitor launch marker and "backgroundTaskId" the
+    #     backgrounded-Bash one, mirroring exactly what python keys on below.
+    #     Both are spelled out: the capital T in backgroundTaskId means a needle
+    #     of "taskId" does NOT match it. "timeoutMs" rather than "taskId" is what
+    #     keeps this cheap AND aligned — across all 4183 local transcripts
+    #     "timeoutMs" appears in Monitor results only (557), while a bare
+    #     "taskId" also matches every TaskUpdate result (338 of them), which
+    #     would spend a python scan on most ordinary turns.
+    local marker_re='async_launched|resumed|timeoutMs|backgroundTaskId'
 
     # --- Flush/read race. Claude Code appends the "async_launched" line
     # milliseconds AFTER the assistant message that launched the agent, and the
@@ -421,25 +441,39 @@ bg_agents_active() {
         return 1
     fi
 
-    # Count active background agents via the transcript scan (fail-open to 0).
+    # Monitor task ids of this session's ci watchers — handed to python so it can
+    # leave them to ci_is_active (see CI_WATCH_TASK_IDS there).
+    local ci_task_ids
+    ci_task_ids=$(_ci_watch_session_task_ids "${CLAUDE_CODE_SESSION_ID:-}")
+
+    # Count active background tasks via the transcript scan (fail-open to 0).
     # Python prints four space-separated counts: launched terminated resumed active.
     local count
-    count=$(python3 - "$transcript" <<'PYEOF' 2>/dev/null
+    count=$(python3 - "$transcript" "$ci_task_ids" <<'PYEOF' 2>/dev/null
 import sys, json, re, os
 
 transcript_path = sys.argv[1]
 debug = os.environ.get("CLAUDE_DEBUG_NOTIFY") == "1"
 
-# Any of these statuses means the agent is no longer running. An unrecognized
+# Monitor task ids belonging to THIS session's ci watchers, newline-separated on
+# argv[2] (see _ci_watch_session_task_ids). They are deliberately NOT treated as
+# generic background work — ci_is_active owns that decision.
+CI_WATCH_TASK_IDS = {
+    t for t in (sys.argv[2] if len(sys.argv) > 2 else "").split("\n") if t
+}
+
+# Any of these statuses means the task is no longer running. An unrecognized
 # status never clears an id, so a missing terminal status pins the tab blue and
-# silences the chime forever — which is why "failed" and "killed" (what TaskStop
-# emits) must be here alongside "completed".
-# This is exactly the set OBSERVED across the local corpus (~2.8k transcripts):
-# completed 2877, failed 265, killed 18 in <task-notification>, and
-# completed / running / in_progress / pending in TaskOutput's task.status.
+# silences the chime forever — which is why "failed", "killed" and "stopped"
+# (what TaskStop emits) must be here alongside "completed".
+# This is exactly the set OBSERVED across the local corpus (~4.2k transcripts):
+# completed 2984, failed 702, stopped 35, killed 15 in <task-notification>, and
+# completed / failed / running in TaskOutput's task.status. "stopped" is the
+# wording TaskStop uses on a Monitor / backgrounded-Bash task ("Task ... was
+# stopped by main session"); "killed" is the agent-side wording.
 # Nothing else is listed on purpose: guessing extra terminal names is the
-# false-GREEN direction (a status invented here could clear a live agent).
-TERMINAL_STATUSES = {"completed", "failed", "killed"}
+# false-GREEN direction (a status invented here could clear a live task).
+TERMINAL_STATUSES = {"completed", "failed", "killed", "stopped"}
 
 # agent IDs that were async-launched (toolUseResult.agentId)
 launched = set()
@@ -489,6 +523,13 @@ RESUME_ID_RE = re.compile(r'Agent "([^"]+)"')
 # blue forever (no notification would ever clear it), permanently silencing the
 # attention chime. Ignoring those keeps the failure direction safe.
 AGENT_ID_RE = re.compile(r"^a[0-9a-f]{16}$")
+
+# Monitor and backgrounded-Bash tasks use their OWN id namespace: "b" + 8
+# lowercase alphanumerics (e.g. bnk163hnc, braju6wbj). All 557 Monitor and 621
+# backgrounded-Bash launch ids in the local corpus have this shape, and no
+# TaskUpdate ordinal ("1", "2", ...) does — so it is the shape guard that keeps a
+# todo-list update from being mistaken for a running background task.
+BG_TASK_ID_RE = re.compile(r"^b[0-9a-z]{8}$")
 
 # Match <task-notification> blocks and pull out their <task-id> + <status>.
 # DOTALL so .*? crosses the literal "\n" inside the JSON-encoded string.
@@ -562,6 +603,46 @@ try:
                 if agent_id:
                     launched.add(agent_id)
                     events.append((key, agent_id, "active"))
+
+            # --- Monitor launches: the Monitor tool's result is
+            # {"taskId": ..., "timeoutMs": ..., "persistent": ...}. It carries NO
+            # "async_launched", so before this the tab went green and chimed the
+            # moment the launching turn ended, with the monitor still streaming.
+            #
+            # It is keyed on "timeoutMs", NOT on a bare "taskId": the TaskUpdate
+            # (todo-list) tool ALSO returns a top-level "taskId", an ordinal like
+            # "1" that no <task-notification> can ever terminate. Treating one of
+            # those as background work would pin the tab blue and kill the chime
+            # for the rest of the session. Across all 4183 local transcripts
+            # "timeoutMs" is Monitor-only (557 results, every one of them with a
+            # BG_TASK_ID_RE-shaped id), while "taskId" alone also matches 338
+            # TaskUpdate results, none of which are that shape. The id regex is
+            # the second, independent guard on the same distinction.
+            #
+            # EXCEPTION — this session's own ci-watcher monitors. A ci-watcher is
+            # a persistent Monitor that stays alive from launch until the PR's
+            # post-merge CI resolves, so counting it here would pin the tab blue
+            # for the watcher's whole life and swallow the very chime that says
+            # "CI passed — come merge". ci_is_active already models it correctly
+            # (blue only while the state is running/merging), so those ids are
+            # skipped and left entirely to that check.
+            #
+            # A backgrounded Bash call (run_in_background:true, or a foreground
+            # one that hit its timeout and was moved to the background) returns
+            # "backgroundTaskId" instead. Same story: no "async_launched", so it
+            # too was invisible to this detector. It gets no exception — every
+            # backgrounded shell command is work the user is waiting on.
+            if isinstance(tool_result, dict):
+                monitor_id = tool_result.get("taskId")
+                if "timeoutMs" in tool_result and isinstance(monitor_id, str) \
+                        and BG_TASK_ID_RE.match(monitor_id) \
+                        and monitor_id not in CI_WATCH_TASK_IDS:
+                    launched.add(monitor_id)
+                    events.append((key, monitor_id, "active"))
+                bash_id = tool_result.get("backgroundTaskId")
+                if isinstance(bash_id, str) and BG_TASK_ID_RE.match(bash_id):
+                    launched.add(bash_id)
+                    events.append((key, bash_id, "active"))
 
             # --- Resumes: a SendMessage result that restarted a stopped agent in
             # the background. This is an activation event with no async_launched
@@ -749,6 +830,34 @@ _ci_watch_session_state_files() {
         # the Stop hook — forever. -f also drops an unmatched literal glob.
         [ -f "$f" ] || continue
         printf '%s\n' "$f"
+    done
+    return 0
+}
+
+# Echo the `Monitor` task id of every ci watcher belonging to session $1, one per
+# line. The ci-watcher skill persists each watcher's task id at
+# "${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_task_<SLOT>", and every SLOT starts with the
+# session id, so this glob finds exactly this session's watchers.
+#
+# bg_agents_active uses it to EXCLUDE those monitors from generic background-work
+# detection: a ci watcher is a long-lived Monitor that outlives the CI run it is
+# reporting on, and ci_is_active is the check that knows when it is genuinely
+# busy. Without the exclusion the tab would stay blue — and the chime silent —
+# from the moment a watcher starts until it exits.
+_ci_watch_session_task_ids() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || return 0
+    local f id
+    # Same nullglob-free pattern as _ci_watch_session_state_files: the -f guard
+    # drops both an unmatched literal glob and any non-regular file planted at a
+    # predictable /tmp path (a FIFO there would block the read forever).
+    for f in "${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_task_${session_id}"_*; do
+        [ -f "$f" ] || continue
+        # A task id is a short token; the byte cap stops a corrupt sidecar from
+        # being slurped, and tr drops the trailing newline a writer may add.
+        id=$(head -c 64 "$f" 2>/dev/null | tr -d '[:space:]')
+        [ -n "$id" ] || continue
+        printf '%s\n' "$id"
     done
     return 0
 }
