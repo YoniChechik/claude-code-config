@@ -2,10 +2,13 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
 
-# Read the AskUserQuestion hook payload and pull out the transcript path so
-# notify_user_attention keeps the tab BLUE (not green) while a background
-# agent/task or CI is still running.
-INPUT=$(cat)
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-
-notify_user_attention "$TRANSCRIPT"
+# PreToolUse hook for AskUserQuestion: green tab + chime + "waiting" title.
+#
+# notify_user_attention is called with NO transcript ON PURPOSE. The argument is
+# what enables the background-work gate that paints BLUE and swallows the chime,
+# and a raised question BLOCKS: the turn does not continue until the user picks
+# an answer (settings.json even gives it a 10m timeout). A live Monitor,
+# backgrounded Bash or CI watcher does not make the session less stuck, so
+# "needs attention" always wins here — exactly as on the permission-guard's
+# `ask` path.
+notify_user_attention

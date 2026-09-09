@@ -118,6 +118,12 @@ run_hooks() {
         if [ "$matcher" != "*" ] && [ -n "$tool" ]; then
             [[ "$tool" =~ ^($matcher)$ ]] || continue
         fi
+        # settings.json spells the hooks as "$HOME/.claude/scripts/...", which is
+        # the INSTALLED copy. Rewrite that prefix to the checkout the tests live
+        # in, or a run from a worktree silently exercises the installed scripts
+        # instead of the ones under test — and passes on code it never ran.
+        # Identical to the old substitution when the checkout IS ~/.claude.
+        cmd="${cmd//\$HOME\/.claude/$REPO_DIR}"
         # cwd = repo so the hooks' internal `git rev-parse` resolves a branch.
         ( cd "$REPO_DIR" && printf '%s' "$payload" \
             | bash -c "${cmd//\$HOME/$HOME}" ) >/dev/null 2>&1
@@ -143,6 +149,17 @@ write_active_agent_transcript() {
     printf '%s\n' '{"type":"user","timestamp":"2026-07-28T10:00:00.000Z","toolUseResult":{"status":"async_launched","agentId":"a0123456789abcdef"}}' > "$TRANSCRIPT"
 }
 
+# A Monitor task that was launched and never terminated -> background active.
+write_active_monitor_transcript() {
+    printf '%s\n' '{"type":"user","timestamp":"2026-09-03T15:56:41.415Z","toolUseResult":{"taskId":"bnk163hnc","timeoutMs":0,"persistent":true}}' > "$TRANSCRIPT"
+}
+
+# The chime proxy the other suites use: the green path claims a dedup lockdir,
+# the blue path never reaches a chime at all.
+dedup_lock_count() {
+    ls "$CLAUDE_NOTIFY_TMP_DIR" 2>/dev/null | grep -c notify_dedup || true
+}
+
 # The real destructive command from the reported session; the guard asks on it.
 GCLOUD_CMD='gcloud dns record-sets delete api.app.sunsay.com. --type=A --zone=sunsay-com --project=production-490411'
 
@@ -152,6 +169,64 @@ GCLOUD_CMD='gcloud dns record-sets delete api.app.sunsay.com. --type=A --zone=su
     run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
         '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
     assert_emitted "$GREEN_SEQ"
+}
+
+# ---------------------------------------------------------------------------
+# User-BLOCKING prompts override the background-work gate.
+#
+# A permission prompt and an AskUserQuestion both stop the turn dead: nothing
+# moves until the user answers. A live Monitor / backgrounded Bash / CI watcher
+# does not make the session any less stuck, so these two paths must NEVER take
+# the blue no-chime branch — they call notify_user_attention with no transcript
+# at all. Only Stop and the generic Notification hook keep the gate.
+# ---------------------------------------------------------------------------
+
+@test "tab state: a permission ask paints GREEN even while a background agent is active" {
+    write_active_agent_transcript
+    mark
+    run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: a permission ask paints GREEN even while a Monitor task is running" {
+    write_active_monitor_transcript
+    mark
+    run_hooks PreToolUse Bash "$(payload --arg c "$GCLOUD_CMD" --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: an AskUserQuestion ping paints GREEN even while a Monitor task is running" {
+    write_active_monitor_transcript
+    mark
+    run_hooks PreToolUse AskUserQuestion "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",tool_input:{questions:[]},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    [ "$(dedup_lock_count)" -ge 1 ]
+}
+
+@test "tab state: an AskUserQuestion ping paints GREEN even while CI is actively running" {
+    # ci_is_active is the other half of the gate; the override must clear both.
+    printf '%s' "ci-branch:running" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_${CLAUDE_CODE_SESSION_ID}_ci-branch-0123456789"
+    bash -c 'exec -a ci_watch_fake sleep 3' </dev/null >/dev/null 2>&1 3>&- &
+    WPID=$!
+    disown 2>/dev/null || true
+    printf '%s' "$WPID" \
+        > "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_lock_${CLAUDE_CODE_SESSION_ID}_ci-branch-0123456789"
+    write_idle_transcript
+    mark
+    run_hooks PreToolUse AskUserQuestion "$(payload --arg t "$TRANSCRIPT" \
+        '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",tool_input:{questions:[]},transcript_path:$t}')"
+    assert_emitted "$GREEN_SEQ"
+    refute_emitted "$BLUE_SEQ"
+    kill "$WPID" 2>/dev/null || true
 }
 
 @test "tab state: GREEN is cleared once the asked-about tool completes" {
