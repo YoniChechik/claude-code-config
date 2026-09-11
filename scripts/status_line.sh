@@ -302,7 +302,22 @@ render_ci_row() {
       no-runs)       ci_display="${yellow}⚠ no runs${reset}" ;;
       no-ci)         ci_display="${green}ci: none${reset}" ;;
       no-main-ci)    ci_display="${green}ci: no main ci${reset}" ;;
-      no-ci-configured) ci_display="${green}ci: no CI configured — safe to merge${reset}" ;;
+      # "no-ci-configured" is written BOTH before the merge (there's nothing to
+      # wait for, so it's genuinely safe to merge) and after it (the watcher's
+      # documented exit once the merge is observed, since with zero workflow
+      # files there is no post-merge CI to wait for either). The state string
+      # alone can't tell those apart, but the cached PR's mergeCommit oid can:
+      # it's only ever populated once GitHub reports the PR as merged. Once
+      # present, "safe to merge" is stale advice for a PR that's already
+      # merged, so switch to the same post-merge label the merging/
+      # merged-failed rows use instead of re-checking gh live.
+      no-ci-configured)
+        if [ -n "$merge_oid" ] && [ "$merge_oid" != "null" ]; then
+          ci_display="${green}$(post_merge_label "$repo_url" "$merge_oid"): no CI configured${reset}"
+        else
+          ci_display="${green}ci: no CI configured — safe to merge${reset}"
+        fi
+        ;;
       timeout)       ci_display="${red}⚠ merge timeout${reset}" ;;
       # The PR was closed without a merge. That is a DOCUMENTED watcher exit,
       # not a crash, so it must never render as "ci watcher died".
