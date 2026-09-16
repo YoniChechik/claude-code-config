@@ -6,13 +6,25 @@ if [[ -z "$git_root" ]]; then
     exit 0
 fi
 
-# --- Single fetch with prune ---
-git fetch -p >/dev/null 2>&1 || true
+# --- Git sync ---
+# A linked worktree (git-dir under <common-dir>/worktrees/<name>) keeps the
+# original behavior: fetch, then ff-only-merge the current branch. The primary
+# checkout instead force-syncs to origin/main, discarding anything local not
+# on origin — intentional, no backup, so the base checkout of every repo a
+# session starts in always matches origin/main exactly.
+git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || true
 
-# --- Git merge --ff-only (using already-fetched data) ---
-current_branch=$(git branch --show-current 2>/dev/null)
-if [[ -n "$current_branch" ]] && git rev-parse --verify "origin/$current_branch" &>/dev/null; then
-    git merge --ff-only "origin/$current_branch" >/dev/null 2>&1 || true
+if [[ "$git_dir" == *"/worktrees/"* ]]; then
+    git fetch -p >/dev/null 2>&1 || true
+    current_branch=$(git branch --show-current 2>/dev/null)
+    if [[ -n "$current_branch" ]] && git rev-parse --verify "origin/$current_branch" &>/dev/null; then
+        git merge --ff-only "origin/$current_branch" >/dev/null 2>&1 || true
+    fi
+else
+    git checkout -f main >/dev/null 2>&1 || true
+    git fetch origin --prune >/dev/null 2>&1 || true
+    git reset --hard origin/main >/dev/null 2>&1 || true
+    git clean -fd >/dev/null 2>&1 || true
 fi
 
 # --- Worktree cleanup ---

@@ -10,18 +10,6 @@
 
 INPUT=$(cat)
 
-# Derive ~/.claude from the script's own location (robust: no HOME dependency, symlink-safe)
-# Script lives at ~/.claude/scripts/pre_tool_use__base_dir_protect.sh
-CLAUDE_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-# Skip protection for file_path operations targeting ~/.claude config repo.
-file_path_check=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-file_path_check="${file_path_check/#\~/$HOME}"
-if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$file_path_check" == "$CLAUDE_CONFIG_DIR"* ]]; then
-    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
-    exit 0
-fi
-
 tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
 # Strip every span of a shell command that is DATA rather than an executable command,
@@ -384,9 +372,6 @@ if [ "$tool_name" = "Bash" ]; then
             # feature worktrees from /create-worktree and harness agent worktrees.
             # Require a non-empty <name> component so the container dir itself stays protected.
             if echo "$effective_cwd" | grep -qE '/\.claude/worktrees/[^/]+(/|$)'; then
-                exit 0
-            fi
-            if [[ -n "$CLAUDE_CONFIG_DIR" ]] && [[ "$effective_cwd" == "$CLAUDE_CONFIG_DIR"* ]]; then
                 exit 0
             fi
         fi
