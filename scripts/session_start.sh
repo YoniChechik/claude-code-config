@@ -21,10 +21,16 @@ if [[ "$git_dir" == *"/worktrees/"* ]]; then
         git merge --ff-only "origin/$current_branch" >/dev/null 2>&1 || true
     fi
 else
-    git checkout -f main >/dev/null 2>&1 || true
-    git fetch origin --prune >/dev/null 2>&1 || true
-    git reset --hard origin/main >/dev/null 2>&1 || true
-    git clean -fd >/dev/null 2>&1 || true
+    # checkout -f main can fail (e.g. another worktree already has main checked
+    # out) — in that case do NOT continue, or reset --hard would land on
+    # whatever branch is actually checked out instead of main. Confirmed via
+    # `branch --show-current` too, in case checkout "succeeds" but a detached
+    # HEAD or some other state leaves us not actually on main.
+    if git checkout -f main >/dev/null 2>&1 && [[ "$(git branch --show-current 2>/dev/null)" == "main" ]]; then
+        git fetch origin --prune >/dev/null 2>&1 || true
+        git reset --hard origin/main >/dev/null 2>&1 || true
+        git clean -fd >/dev/null 2>&1 || true
+    fi
 fi
 
 # --- Worktree cleanup ---
