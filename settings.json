@@ -1,217 +1,301 @@
 {
-  "$schema": "https://www.schemastore.org/claude-code-settings.json",
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true",
-    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
-    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": "60000",
-    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "300000",
-    "API_TIMEOUT_MS": "300000"
-  },
-  "includeCoAuthoredBy": false,
-  "includeGitInstructions": false,
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "model": "sonnet",
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop__sound.sh"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/session_start.sh",
-            "async": true
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/session_start_main_agent_prompt.sh"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/notification__sound.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_tool_use__ruff.sh",
-            "timeout": 30,
-            "async": true
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_tool_use__eslint.sh",
-            "timeout": 30,
-            "async": true
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_tool_use__md_tables.sh",
-            "timeout": 30,
-            "async": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_tool_use__reset_color.sh",
-            "async": true
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/post_tool_use__pr_ci_reminder.sh",
-            "suppressOutput": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "EnterPlanMode|ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_tool_use__block_plan_mode.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Edit|Write|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_tool_use__base_dir_protect.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/pre_tool_use__permission_guard.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "rtk hook claude"
-          }
-        ]
-      },
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/question__sound.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/user_prompt_submit.sh"
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/permission_request.sh"
-          }
-        ]
-      }
-    ],
-    "StopFailure": [
-      {
-        "matcher": "rate_limit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/scripts/stop_failure__rate_limit.sh"
-          }
-        ]
-      }
-    ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/scripts/status_line.sh",
-    "refreshInterval": 1
-  },
-  "effortLevel": "high",
-  "askUserQuestionTimeout": "10m",
-  "tui": "fullscreen",
-  "voice": {
-    "enabled": true,
-    "mode": "hold"
-  },
-  "showThinkingSummaries": true,
-  "skipDangerousModePermissionPrompt": true,
-  "remoteControlAtStartup": true,
-  "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "autoMode": {
-    "environment": [
+  "$schema" : "https:\/\/www.schemastore.org\/claude-code-settings.json",
+  "agentPushNotifEnabled" : true,
+  "askUserQuestionTimeout" : "10m",
+  "autoMode" : {
+    "environment" : [
       "$defaults",
-      "Trusted internal domains: activate.sunsay.com, activate-staging.sunsay.com (Sunsay's own subscription-activation subdomains, backed by website's Next.js app), mail.google.com (Yoni's own Gmail, used to read order-confirmation/activation emails during Shopify subscription E2E testing)"
+      "Trusted internal domains: activate.sunsay.com, activate-staging.sunsay.com (Sunsay's own subscription-activation subdomains, backed by website's Next.js app), mail.google.com (Yoni's own Gmail, used to read order-confirmation\/activation emails during Shopify subscription E2E testing)"
     ]
   },
-  "voiceEnabled": true,
-  "disableBypassPermissionsMode": false,
-  "feedbackDrafts": "off"
+  "disableBypassPermissionsMode" : false,
+  "effortLevel" : "high",
+  "env" : {
+    "API_TIMEOUT_MS" : "300000",
+    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" : "60000",
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" : "1",
+    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS" : "300000",
+    "ENABLE_TOOL_SEARCH" : "true"
+  },
+  "feedbackDrafts" : "off",
+  "hooks" : {
+    "Notification" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/notification__sound.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/permission_request.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "PostToolUse" : [
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__ruff.sh",
+            "timeout" : 30,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Edit|Write"
+      },
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__eslint.sh",
+            "timeout" : 30,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Edit|Write"
+      },
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__md_tables.sh",
+            "timeout" : 30,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Edit|Write"
+      },
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__reset_color.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__pr_ci_reminder.sh",
+            "suppressOutput" : true,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/pre_tool_use__block_plan_mode.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "EnterPlanMode|ExitPlanMode"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/pre_tool_use__base_dir_protect.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash|Edit|Write|NotebookEdit"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/pre_tool_use__permission_guard.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "rtk hook claude",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/question__sound.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "AskUserQuestion"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "SessionEnd" : [
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart" : [
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/session_start.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "*"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/session_start_main_agent_prompt.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "*"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "Stop" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/stop__sound.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "StopFailure" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/stop_failure__rate_limit.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "rate_limit"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop" : [
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/user_prompt_submit.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
+            "type" : "command"
+          }
+        ]
+      }
+    ]
+  },
+  "includeCoAuthoredBy" : false,
+  "includeGitInstructions" : false,
+  "inputNeededNotifEnabled" : true,
+  "model" : "sonnet",
+  "permissions" : {
+    "defaultMode" : "bypassPermissions"
+  },
+  "remoteControlAtStartup" : true,
+  "showThinkingSummaries" : true,
+  "skipDangerousModePermissionPrompt" : true,
+  "statusLine" : {
+    "command" : "bash ~\/.claude\/scripts\/status_line.sh",
+    "refreshInterval" : 1,
+    "type" : "command"
+  },
+  "tui" : "fullscreen",
+  "voice" : {
+    "enabled" : true,
+    "mode" : "hold"
+  },
+  "voiceEnabled" : true
 }
