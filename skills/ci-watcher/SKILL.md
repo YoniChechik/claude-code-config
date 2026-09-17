@@ -365,6 +365,7 @@ Once the post-merge CI goes green, `ci_watch.py` appends that PR to
 
 Nothing ever prunes those files, so the status line bounds them at RENDER time:
 it reads only the last 200 lines of the finished file, dedupes on
-`(repo, number)` and shows the 10 newest PRs; and it keeps at most 5 rows for
-watchers that have already exited (newest first, by state-file mtime). Rows of
-watchers that are still running are never dropped.
+`(repo, number)` and shows the 10 newest PRs; and for watchers that have
+already exited it drops any row older than 30 minutes (by state-file mtime)
+outright, then keeps at most 5 of what remains (newest first). Rows of
+watchers that are still running are never dropped or aged out.

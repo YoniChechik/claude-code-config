@@ -159,16 +159,24 @@ fi
 # A session can run several watchers at once — one per branch — so this renders
 # one row per watcher, all read from the files ci_watch.py writes. No gh call.
 #
-# Two render caps keep this bounded. Nothing on disk is ever pruned (the
-# watchers are the only writers and they must never read-modify-write a shared
-# file), so the BOUNDS LIVE HERE:
-#   * MAX_TERMINAL_ROWS — a watcher that reached a terminal state keeps its
-#     state file forever, so without a cap a long session grows one permanent
-#     row per branch it ever watched. Live watchers are never dropped; only the
-#     oldest terminal rows are, ordered by state-file mtime.
+# Render caps keep this bounded. Nothing on disk is ever pruned (the watchers
+# are the only writers and they must never read-modify-write a shared file),
+# so the BOUNDS LIVE HERE:
+#   * TERMINAL_ROW_MAX_AGE_SECONDS — a watcher's terminal state (PR closed, no
+#     CI configured, post-merge CI resolved, ...) is a done fact: nothing will
+#     ever update that row again. Once it is this old it is dropped from the
+#     render ENTIRELY, not merely capped — a session that only ever merges a
+#     handful of PRs would otherwise show every one of their "post merge: ..."
+#     rows for the rest of the session, since MAX_TERMINAL_ROWS below only
+#     bounds the row COUNT, not their age. The state file itself is untouched;
+#     this is a render-time filter, same as every other cap here.
+#   * MAX_TERMINAL_ROWS — belt-and-suspenders on top of the age filter, for a
+#     session with many still-fresh terminal rows at once: only the newest
+#     (by state-file mtime) are shown. Live watchers are never dropped.
 #   * MAX_FINISHED_LINES / MAX_FINISHED_PRS — the finished-PR file is
 #     append-only and never deleted, so both the parse cost and the row width
 #     would otherwise grow with the length of the session.
+TERMINAL_ROW_MAX_AGE_SECONDS=1800
 MAX_TERMINAL_ROWS=5
 MAX_FINISHED_LINES=200
 MAX_FINISHED_PRS=10
@@ -431,8 +439,9 @@ if [ -n "$session_id" ]; then
     done < <(ls -t "${_state_files[@]}" 2>/dev/null || printf '%s\n' "${_state_files[@]}")
   fi
 
-  # Live rows always render; terminal rows are capped, so a long session cannot
-  # accumulate one permanent row per branch it ever watched.
+  # Live rows always render; terminal rows are aged out and capped, so a long
+  # session cannot accumulate one permanent row per branch it ever watched.
+  _now=$(date +%s)
   _active_rows=()
   _terminal_rows=()
   for _state_file in ${_ordered[@]+"${_ordered[@]}"}; do
@@ -441,6 +450,13 @@ if [ -n "$session_id" ]; then
     _kind="${_out%%"$tab"*}"
     _row="${_out#*"$tab"}"
     if [ "$_kind" = "terminal" ]; then
+      # Age filter first: a terminal row past its TTL is dropped outright,
+      # never merely pushed out by the count cap below. `stat` failing (file
+      # removed between the ls -t above and here) fails safe: age is huge, so
+      # the row is dropped rather than rendered with a bogus mtime.
+      _mtime=$(stat -f "%m" "$_state_file" 2>/dev/null || echo 0)
+      _age=$(( _now - _mtime ))
+      [ "$_age" -le "$TERMINAL_ROW_MAX_AGE_SECONDS" ] || continue
       if [ "${#_terminal_rows[@]}" -lt "$MAX_TERMINAL_ROWS" ]; then
         _terminal_rows+=("$_row")
       fi
