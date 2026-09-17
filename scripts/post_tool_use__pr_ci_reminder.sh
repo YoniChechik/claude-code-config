@@ -9,6 +9,18 @@
 
 # --- Step 1: read stdin once (can only be consumed a single time).
 input=$(cat)
+
+# --- Step 1.5: cheap early-exit, zero subprocesses, before the jq/git work
+# below. This hook's matcher in settings.json is a bare "Bash" — it runs on
+# EVERY Bash tool call, so the overwhelmingly common case is a command that
+# has nothing to do with `gh pr`. A plain bash `case` substring match on the
+# raw JSON text catches that case for free; only a command that could
+# possibly match Step 2's precise checks pays for the jq/grep/git forks below.
+case "$input" in
+    *"gh pr"* | *"createPullRequest"* | *"mergePullRequest"*) ;;
+    *) exit 0 ;;
+esac
+
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
 # --- Step 2: only react to PR create/merge, via the `gh pr` subcommand or

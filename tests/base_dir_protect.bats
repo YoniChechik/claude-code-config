@@ -372,3 +372,46 @@ git -C $BASE $C -m x
 EOF"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
+
+# =============================================================================
+# DENIED: prefix-wrapper bypasses of GIT_WRITE_PATTERN, closed by the shared
+# _shell_command_guard.sh normalization (_strip_leading_wrappers /
+# _strip_git_global_flags). Every one of these silently ALLOWED before that
+# library existed — this is the exact bypass list from the security review.
+# =============================================================================
+
+@test "deny: command builtin prefix on a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "command git $C -am y")"
+}
+
+@test "deny: git -c global flag before the subcommand" {
+    assert_decision DENY "$(bash_decide "$BASE" "git -c user.name=x $C -am y")"
+}
+
+@test "deny: git --no-pager global flag before the subcommand" {
+    assert_decision DENY "$(bash_decide "$BASE" "git --no-pager $C -am y")"
+}
+
+@test "deny: env builtin prefix on a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "env git $C -am y")"
+}
+
+@test "deny: backslash-escaped leading git" {
+    assert_decision DENY "$(bash_decide "$BASE" "\\git $C -am y")"
+}
+
+@test "deny: git --git-dir and --work-tree pointing elsewhere, cwd still the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git --git-dir=/tmp/other/.git --work-tree=/tmp/other $C -am y")"
+}
+
+@test "allow: command builtin prefix on a worktree-scoped git write still allowed" {
+    assert_decision ALLOW "$(bash_decide "$WT" "command git $C -m x")"
+}
+
+@test "allow: git -c global flag on a worktree-scoped git write still allowed" {
+    assert_decision ALLOW "$(bash_decide "$WT" "git -c user.name=x $C -m x")"
+}
+
+@test "allow: read-only git status survives command/env prefix stripping" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "command git status")"
+}

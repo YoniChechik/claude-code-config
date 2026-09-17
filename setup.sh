@@ -21,7 +21,7 @@ fi
 # file is gone, so a leftover entry makes every session start error out.
 # Python (not node) because uv/python is the only runtime this repo needs.
 # Guarded on uv: under `set -e` a missing uv would abort the whole installer
-# here and never reach the cc alias step below.
+# here and never reach the closing message below.
 if command -v uv >/dev/null 2>&1; then
   echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
   uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
@@ -74,4 +74,4 @@ fi
 
 echo ""
 echo "==> Done! Restart your shell or run: source ~/.zshrc"
-echo "    Then start Claude with: cc"
+echo "    Then start Claude with: claude"

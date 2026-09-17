@@ -13,9 +13,8 @@ Personal Claude Code configuration (hooks, commands, agents, settings).
 bash <(curl -fsSL https://raw.githubusercontent.com/YoniChechik/claude-code-config/main/setup.sh)
 ```
 
-This git-enables your existing `~/.claude` directory, removes the retired webhook MCP registration, and sets up the `cc` alias.
+This git-enables your existing `~/.claude` directory and removes the retired webhook MCP registration.
 
 ## What it does
 
 - **Sound notifications:** Hooks that play sounds when Claude needs attention.
-- **`cc` alias:** Launches Claude (`claude`).

@@ -14,6 +14,8 @@
 INPUT=$(cat)
 
 TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
+CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
+[ -n "$CWD" ] || CWD="$HOME"
 
 # ---------------------------------------------------------------------------
 # Helper: emit the allow decision and exit successfully
@@ -24,20 +26,60 @@ allow() {
 }
 
 # ---------------------------------------------------------------------------
+# Helper: canonicalize a path (resolving `..`/`.`/symlinks) before it is ever
+# pattern-matched against ".claude". Matching the RAW, unresolved text (as
+# this file used to) is a path-traversal bypass: `.../.claude/../../etc/hosts`
+# contains the substring "/.claude/" while actually pointing well outside it.
+# `~`/`$HOME`/`$CLAUDE_CONFIG_DIR` are expanded textually first, since the
+# hook only ever sees the command/path as literal text, never a real shell's
+# expansion of it.
+#
+# Uses python3's os.path.realpath rather than the platform `realpath`/
+# `readlink -f`: BSD realpath (macOS) refuses to resolve a path unless EVERY
+# component already exists on disk, which breaks the common case of a Write
+# to a file that doesn't exist yet. os.path.realpath resolves symlinks where
+# it can and lexically normalizes the rest, existing or not.
+_resolve_path() {
+    local base="$1" token="$2"
+    local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    token="${token/#\~/$HOME}"
+    token="${token/#\$HOME/$HOME}"
+    token="${token/#\$CLAUDE_CONFIG_DIR/$claude_dir}"
+    python3 -c '
+import os, sys
+base, p = sys.argv[1], sys.argv[2]
+if not os.path.isabs(p):
+    p = os.path.join(base, p)
+print(os.path.realpath(p))
+' "$base" "$token" 2>/dev/null
+}
+
+# Helper: is RESOLVED (already-canonicalized, per _resolve_path) a path under
+# a directory literally named `.claude`? Safe to substring-match here BECAUSE
+# the path has already had every `.`/`..`/symlink collapsed — there is no
+# traversal token left for a lookalike to hide behind.
+_is_under_claude_dir() {
+    case "$1" in
+        */.claude/*|*/.claude) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # Case 1 – File-editing tools: Edit, Write, NotebookEdit
 #
-# Allow when tool_input.file_path is under any /.claude/ directory or is
-# exactly /.claude (e.g. ~/.claude, /some/repo/.claude).
+# Allow when tool_input.file_path RESOLVES to somewhere under any /.claude/
+# directory or is exactly /.claude (e.g. ~/.claude, /some/repo/.claude).
 # ---------------------------------------------------------------------------
 case "$TOOL_NAME" in
     Edit|Write|NotebookEdit)
         FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
-        case "$FILE_PATH" in
-            # Matches paths like /home/user/.claude/foo or /home/user/.claude
-            */.claude/*|*/.claude)
+        if [ -n "$FILE_PATH" ]; then
+            RESOLVED_FILE_PATH=$(_resolve_path "$CWD" "$FILE_PATH")
+            if _is_under_claude_dir "$RESOLVED_FILE_PATH"; then
                 allow
-                ;;
-        esac
+            fi
+        fi
         ;;
 esac
 
@@ -84,25 +126,21 @@ if [ "$TOOL_NAME" = "Bash" ]; then
             # ----------------------------------------------------------------
             rm|rmdir)
                 REST=$(printf '%s' "$SEG" | awk '{$1=""; print substr($0,2)}')
-                SALL=1   # all path tokens for this segment are in .claude/
+                SALL=1   # all path tokens for this segment resolve inside .claude/
                 SANY=0   # at least one path token seen
 
                 for TOK in $REST; do
                     # Skip flag tokens like -rf, --recursive, etc.
                     case "$TOK" in -*) continue ;; esac
                     SANY=1
-                    case "$TOK" in
-                        */.claude/*|*/.claude|~/.claude*|'$HOME/.claude'*|'$CLAUDE_CONFIG_DIR'*)
-                            : # OK
-                            ;;
-                        *)
-                            SALL=0
-                            break
-                            ;;
-                    esac
+                    RESOLVED_TOK=$(_resolve_path "$CWD" "$TOK")
+                    if ! _is_under_claude_dir "$RESOLVED_TOK"; then
+                        SALL=0
+                        break
+                    fi
                 done
 
-                # Reject if no path tokens were found OR any token was outside .claude/
+                # Reject if no path tokens were found OR any token resolved outside .claude/
                 if [ "$SANY" != 1 ] || [ "$SALL" != 1 ]; then
                     ALL=0
                     break
@@ -110,11 +148,23 @@ if [ "$TOOL_NAME" = "Bash" ]; then
                 ;;
 
             # ----------------------------------------------------------------
-            # Read/inspect/navigate verbs: the segment must reference .claude/
-            # somewhere (covers quoted and variable-expanded paths)
+            # Read/inspect/navigate verbs: at least one non-flag token in the
+            # segment must RESOLVE to somewhere under .claude/ (covers quoted
+            # and ~/$HOME/$CLAUDE_CONFIG_DIR-prefixed paths, textually
+            # expanded by _resolve_path before canonicalization).
             # ----------------------------------------------------------------
             cat|ls|head|tail|wc|stat|find|grep|rg|jq|tree|file|mkdir|touch|mv|cp|tee)
-                if ! printf '%s' "$SEG" | grep -qE '(/\.claude(/|$|[[:space:]])|~/\.claude|\$HOME/\.claude|\$CLAUDE_CONFIG_DIR)'; then
+                REST=$(printf '%s' "$SEG" | awk '{$1=""; print substr($0,2)}')
+                SEG_HAS_CLAUDE_TOKEN=0
+                for TOK in $REST; do
+                    case "$TOK" in -*) continue ;; esac
+                    RESOLVED_TOK=$(_resolve_path "$CWD" "$TOK")
+                    if _is_under_claude_dir "$RESOLVED_TOK"; then
+                        SEG_HAS_CLAUDE_TOKEN=1
+                        break
+                    fi
+                done
+                if [ "$SEG_HAS_CLAUDE_TOKEN" != 1 ]; then
                     ALL=0
                     break
                 fi
