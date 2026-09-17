@@ -210,12 +210,15 @@ run_status_line() {
     assert_contains $'\033]8;;https://github.com/o/r/commit/deadbeef/checks\a' "$raw"
 }
 
-@test "merged-failed: labelled 'post merge' and linked too" {
+@test "merged-failed: a documented terminal exit, folded into the done line" {
+    # merged-failed is a DOCUMENTED ci_watch.py exit (main CI resolved, just
+    # unfavourably) so it collapses like every other terminal state, not a
+    # full "post merge: failed" row of its own.
     write_ci_state "feat-b" "feat-b:merged-failed"
     write_pr_cache "feat-b" 3012 "https://github.com/o/r/pull/3012" "deadbeef"
     run_status_line
-    assert_contains "PR #3012 | post merge: failed" "$plain"
-    assert_contains $'\033]8;;https://github.com/o/r/commit/deadbeef/checks\a' "$raw"
+    assert_not_contains "post merge: failed" "$plain"
+    assert_contains "done: #3012" "$plain"
 }
 
 @test "post merge stays readable when the merge commit is not cached yet" {
@@ -425,18 +428,20 @@ run_status_line() {
 }
 
 # ---------------------------------------------------------------------------
-# Row labels and the terminal-row cap
+# Row labels and the collapsed done-PRs line
 # ---------------------------------------------------------------------------
 
-@test "closed: reported as a closed PR, never as a dead watcher" {
+@test "closed: folded into the done line, never reported as a dead watcher" {
     # The watcher EXITS when a PR is closed without a merge — a documented
     # terminal condition, not a crash. Reporting it as a death sends the user
-    # hunting for a process that left on purpose.
+    # hunting for a process that left on purpose, and it must not linger as
+    # its own detail row either — it belongs in the collapsed done line.
     write_ci_state "feat-a" "feat-a:closed"
     write_pr_cache "feat-a" 3011 "https://github.com/o/r/pull/3011"
     run_status_line
-    assert_contains "PR #3011 | pr: closed" "$plain"
+    assert_not_contains "pr: closed" "$plain"
     assert_not_contains "died" "$plain"
+    assert_contains "done: #3011" "$plain"
 }
 
 @test "stuck-pending: renders its own label instead of a bare PR row" {
@@ -447,11 +452,11 @@ run_status_line() {
     assert_contains "PR #3011 | ⚠ checks stuck pending" "$plain"
 }
 
-@test "every terminal label renders its own text" {
+@test "every non-terminal state label renders its own text" {
+    # no-runs/no-ci are results the watcher keeps polling past, not documented
+    # exits, so they still get a full row of their own.
     local state label
-    for state in "no-runs:⚠ no runs" "no-ci:ci: none" \
-                 "no-main-ci:ci: no main ci" "timeout:⚠ merge timeout" \
-                 "no-ci-configured:ci: no CI configured — safe to merge"; do
+    for state in "no-runs:⚠ no runs" "no-ci:ci: none"; do
         setup
         write_ci_state "feat-a" "feat-a:${state%%:*}"
         label="${state#*:}"
@@ -459,6 +464,20 @@ run_status_line() {
         spawn_fake_watcher "feat-a"
         run_status_line
         assert_contains "$label" "$plain"
+        teardown
+    done
+}
+
+@test "every documented terminal state folds into the done line, not its own row" {
+    local state
+    for state in no-main-ci timeout no-ci-configured; do
+        setup
+        write_ci_state "feat-a" "feat-a:${state}"
+        write_pr_cache "feat-a" 3011 "https://github.com/o/r/pull/3011"
+        spawn_fake_watcher "feat-a"
+        run_status_line
+        assert_not_contains "PR #3011 |" "$plain"
+        assert_contains "done: #3011" "$plain"
         teardown
     done
 }
@@ -495,82 +514,75 @@ run_status_line() {
     assert_not_contains "|" "$plain"
 }
 
-@test "terminal rows are capped at 5, newest first" {
-    # Every terminal state file survives for the life of the session, so without
-    # a cap a session grows one permanent row per branch it ever watched. Space
-    # the writes within the TTL window (a few seconds apart, all well under 30
-    # minutes) so this test exercises the COUNT cap, not the age filter below.
-    local i
-    for i in 1 2 3 4 5 6 7; do
-        write_ci_state "feat-$i" "feat-$i:closed"
-        write_pr_cache "feat-$i" "$i" "https://github.com/o/r/pull/$i"
-        # Ordering is by state-file mtime, so space the writes apart: feat-7 is
-        # newest (10s ago), feat-1 is oldest (70s ago).
-        touch_seconds_ago \
-            "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "feat-$i")" \
-            "$(( (8 - i) * 10 ))"
-    done
+@test "multiple terminal PRs collapse into one done line with every number" {
+    write_ci_state "feat-1" "feat-1:closed"
+    write_pr_cache "feat-1" 1 "https://github.com/o/r/pull/1"
+    write_ci_state "feat-2" "feat-2:no-ci-configured"
+    write_pr_cache "feat-2" 2 "https://github.com/o/r/pull/2"
+    write_ci_state "feat-3" "feat-3:timeout"
+    write_pr_cache "feat-3" 3 "https://github.com/o/r/pull/3"
     run_status_line
-    [ "$(printf '%s\n' "$plain" | grep -c 'pr: closed')" -eq 5 ]
-    assert_contains "PR #7 | pr: closed" "$plain"
-    assert_not_contains "PR #1 " "$plain"
-    assert_not_contains "PR #2 " "$plain"
-}
-
-@test "a terminal row older than the TTL is dropped, not just capped" {
-    # "no-ci-configured", "closed", etc. are done facts once written — nothing
-    # will ever update them again. Past the TTL they must disappear entirely,
-    # not merely lose out to the count cap.
-    write_ci_state "feat-old" "feat-old:closed"
-    write_pr_cache "feat-old" 1 "https://github.com/o/r/pull/1"
-    touch_seconds_ago \
-        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-old)" 1900
-    run_status_line
-    assert_not_contains "PR #1" "$plain"
+    assert_contains "#1" "$plain"
+    assert_contains "#2" "$plain"
+    assert_contains "#3" "$plain"
+    # Exactly ONE line carries them, not one row apiece.
+    [ "$(printf '%s\n' "$plain" | grep -c '^done:')" -eq 1 ]
     assert_not_contains "pr: closed" "$plain"
 }
 
-@test "a terminal row within the TTL still renders" {
-    write_ci_state "feat-fresh" "feat-fresh:closed"
-    write_pr_cache "feat-fresh" 2 "https://github.com/o/r/pull/2"
-    touch_seconds_ago \
-        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-fresh)" 60
+@test "a mix of terminal and active PRs: active gets its own row, terminal is collapsed" {
+    write_ci_state "feat-live" "feat-live:running"
+    write_pr_cache "feat-live" 900 "https://github.com/o/r/pull/900"
+    spawn_fake_watcher "feat-live"
+    write_ci_state "feat-done" "feat-done:closed"
+    write_pr_cache "feat-done" 901 "https://github.com/o/r/pull/901"
     run_status_line
-    assert_contains "PR #2 | pr: closed" "$plain"
+    assert_contains "PR #900 | ci: running" "$plain"
+    assert_not_contains "PR #901" "$plain"
+    assert_contains "done: #901" "$plain"
 }
 
-@test "an aged-out terminal row is never counted against the count cap" {
-    # One row past the TTL, five within it: the cap must still show all 5
-    # fresh rows, not reserve a slot for the one that already disappeared.
-    write_ci_state "feat-ancient" "feat-ancient:closed"
-    write_pr_cache "feat-ancient" 99 "https://github.com/o/r/pull/99"
-    touch_seconds_ago \
-        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-ancient)" 3600
-    local i
-    for i in 1 2 3 4 5; do
-        write_ci_state "feat-$i" "feat-$i:closed"
-        write_pr_cache "feat-$i" "$i" "https://github.com/o/r/pull/$i"
-        touch_seconds_ago \
-            "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "feat-$i")" \
-            "$(( (6 - i) * 10 ))"
-    done
-    run_status_line
-    [ "$(printf '%s\n' "$plain" | grep -c 'pr: closed')" -eq 5 ]
-    assert_not_contains "PR #99" "$plain"
-}
-
-@test "live rows are never dropped by the terminal-row cap" {
-    local i
-    for i in 1 2 3 4 5 6 7; do
-        write_ci_state "old-$i" "old-$i:closed"
-        write_pr_cache "old-$i" "$i" "https://github.com/o/r/pull/$i"
-    done
+@test "an active-only render has no done line at all" {
     write_ci_state "feat-live" "feat-live:running"
     write_pr_cache "feat-live" 900 "https://github.com/o/r/pull/900"
     spawn_fake_watcher "feat-live"
     run_status_line
-    assert_contains "PR #900 | ci: running" "$plain"
-    [ "$(printf '%s\n' "$plain" | grep -c 'pr: closed')" -eq 5 ]
+    assert_not_contains "done:" "$plain"
+}
+
+@test "a terminal PR never expires, however old its state file is" {
+    # No time-based expiry: a fact recorded hours into a long session is just
+    # as valid at hour 10 as it was the instant it was written.
+    write_ci_state "feat-old" "feat-old:closed"
+    write_pr_cache "feat-old" 1 "https://github.com/o/r/pull/1"
+    touch_seconds_ago \
+        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-old)" 999999
+    run_status_line
+    assert_contains "done: #1" "$plain"
+}
+
+@test "the done line's PR numbers are OSC 8 hyperlinks to their PRs" {
+    write_ci_state "feat-a" "feat-a:closed"
+    write_pr_cache "feat-a" 3011 "https://github.com/o/r/pull/3011"
+    run_status_line
+    assert_contains $'\033]8;;https://github.com/o/r/pull/3011\a' "$raw"
+}
+
+@test "a terminal state with no PR cache falls back to the branch name" {
+    write_ci_state "feat-nopr" "feat-nopr:closed"
+    run_status_line
+    assert_contains "done: feat-nopr" "$plain"
+}
+
+@test "more than MAX_TERMINAL_SUMMARY_ITEMS terminal PRs fold into '+N more'" {
+    local i
+    for i in $(seq 1 15); do
+        write_ci_state "feat-$i" "feat-$i:closed"
+        write_pr_cache "feat-$i" "$i" "https://github.com/o/r/pull/$i"
+    done
+    run_status_line
+    assert_contains "+3 more" "$plain"
+    [ "$(printf '%s\n' "$plain" | grep -o '#[0-9]*' | wc -l | tr -d ' ')" -eq 12 ]
 }
 
 @test "renders correctly under bash 3.2, the macOS system bash" {

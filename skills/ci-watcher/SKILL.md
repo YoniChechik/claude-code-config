@@ -363,9 +363,24 @@ Once the post-merge CI goes green, `ci_watch.py` appends that PR to
 `/tmp/ci_watch_finished_<SESSION>` and the status line moves it from its own
 `PR #N | post merge: …` row into the shared `finished PRs: …` row.
 
-Nothing ever prunes those files, so the status line bounds them at RENDER time:
-it reads only the last 200 lines of the finished file, dedupes on
-`(repo, number)` and shows the 10 newest PRs; and for watchers that have
-already exited it drops any row older than 30 minutes (by state-file mtime)
-outright, then keeps at most 5 of what remains (newest first). Rows of
-watchers that are still running are never dropped or aged out.
+Every OTHER documented terminal exit (`closed`, `timeout`, `no-main-ci`,
+`no-ci-configured`, `merged-failed`) gets the same treatment, one level
+simpler: the instant `status_line.sh` sees the state file in one of these
+states, that PR's row disappears from the per-PR detail rows and its number
+is folded into one collapsed `done: #52, #53, #54` line instead — no separate
+file, no dedup step, just a render-time scan of that session's state files.
+It stays on that line for the rest of the session, however long that is.
+There is **no time-based expiry anywhere** in this rendering: a PR that
+finished 10 minutes into the session is exactly as finished 5 hours later, so
+nothing is ever dropped for being "too old". A watcher that dies without a documented exit (a crash, not a graceful stop,
+detected when its lockfile's pid is no longer alive) is a different case: it
+keeps its own `⚠ ci watcher died` row forever instead of collapsing, since a
+crash needs attention and never resolves itself.
+
+Nothing ever prunes the on-disk files, so the two remaining bounds are:
+the `finished PRs: …` row reads only the last 200 lines of its file, dedupes
+on `(repo, number)` and shows the 10 newest PRs; the `done: …` line has no
+count limit on which PRs qualify, only on how many are actually printed —
+past `MAX_TERMINAL_SUMMARY_ITEMS` (12) the newest are shown and the rest fold
+into a trailing `+N more`. Rows of watchers that are still running (or that
+died without a documented exit) are never dropped, capped, or aged out.
