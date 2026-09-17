@@ -18,6 +18,9 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 [ -n "$COMMAND" ] || exit 0
 
+# shellcheck source=./_shell_command_guard.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh"
+
 ask() {
     local reason="$1"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
@@ -32,19 +35,20 @@ deny() {
     exit 0
 }
 
-# Split the compound command on separators (;, &&, ||, |, newlines) into
-# individual segments. Each segment is matched independently against the
-# protected-pattern lists below — this closes the bypass where
-# `cd foo && gh pr merge ...` slipped through because the full command
-# string didn't start with `gh`.
+# Expand the compound command into every segment the pattern rules below
+# should independently consider: each ;/&/|/newline-split top-level piece
+# (closing the bypass where `cd foo && gh pr merge ...` slipped through
+# because the full command string didn't start with `gh`), PLUS — via
+# _shell_command_guard.sh — the unwrapped body of `eval`/`bash -c` pieces and
+# the content of every `$( )`/backtick substitution, with `command`/`env`/
+# backslash/`VAR=` prefixes already stripped from each. This closes bypasses
+# like `X=$(gh repo delete foo/bar)`, `eval "gh repo delete foo/bar"`,
+# `command gh repo delete foo/bar`, and `\gh repo delete foo/bar`.
 SEGMENTS=()
 while IFS= read -r seg; do
-    # Strip leading/trailing whitespace
-    seg="${seg#"${seg%%[![:space:]]*}"}"
-    seg="${seg%"${seg##*[![:space:]]}"}"
     [ -z "$seg" ] && continue
     SEGMENTS+=("$seg")
-done < <(echo "$COMMAND" | tr ';&|' '\n')
+done < <(_expand_segments "$COMMAND")
 
 # ---------------------------------------------------------------------------
 # gh — hard-deny for admin-gated commands. These bypass branch protections,
@@ -638,18 +642,23 @@ if [ "$PULUMI_SEG_FOUND" = "1" ]; then
     for segment in "${SEGMENTS[@]}"; do
         # Only consider segments that begin with `pulumi`.
         echo "$segment" | grep -qE '^\s*pulumi\s' || continue
+        # POSIX character classes, not \s (a GNU extension BSD/macOS sed does
+        # not support — the sed pipeline below silently no-oped on macOS
+        # before this fix, so `pulumi -C infra up` was never recognized as a
+        # write. pulumi_target_guard() above already uses this same
+        # [[:space:]] form for the identical reason.
         EFFECTIVE=$(echo "$segment" \
-            | sed 's/^\s*pulumi\s\+//' \
-            | sed 's/-C\s\+[^ ]\+\s*//g' \
-            | sed 's/--cwd\s\+[^ ]\+\s*//g' \
-            | sed 's/-s\s\+[^ ]\+\s*//g' \
-            | sed 's/--stack\s\+[^ ]\+\s*//g' \
-            | sed 's/--color\s\+[^ ]\+\s*//g' \
-            | sed 's/-v\s\+[^ ]\+\s*//g' \
-            | sed 's/--verbose\s\+[^ ]\+\s*//g' \
-            | sed 's/--[a-z-]*\s*//g' \
-            | sed 's/\s\+/ /g' \
-            | sed 's/^\s*//')
+            | sed -E 's/^[[:space:]]*pulumi[[:space:]]+//' \
+            | sed -E 's/-C[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/--cwd[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/-s[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/--stack[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/--color[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/-v[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/--verbose[[:space:]]+[^ ]+[[:space:]]*//g' \
+            | sed -E 's/--[a-z-]*[[:space:]]*//g' \
+            | sed -E 's/[[:space:]]+/ /g' \
+            | sed -E 's/^[[:space:]]*//')
         for subcmd in "${PULUMI_WRITE_SUBCMDS[@]}"; do
             if echo "$EFFECTIVE" | grep -qE "^${subcmd}(\s|$)"; then
                 ask "pulumi command requires confirmation."

@@ -227,15 +227,16 @@ run_cleanup() {
 }
 
 @test "setup.sh skips the cleanup instead of aborting when uv is missing" {
-    # set -euo pipefail would otherwise kill the installer before the cc alias.
+    # set -euo pipefail would otherwise kill the installer before it reaches
+    # the closing "Done!" message.
     run cat "$SETUP_SH"
     assert_contains 'if command -v uv >/dev/null 2>&1; then' "$output"
     assert_contains "Skipping webhook MCP cleanup: uv not found." "$output"
 }
 
-@test "setup.sh installs a plain cc alias with no dev-channel flag" {
-    run grep -c "^NEW_ALIAS=\"alias cc='claude'\"$" "$SETUP_SH"
-    [ "$output" = "1" ]
+@test "setup.sh no longer installs a cc alias (removed in PR #53)" {
+    run grep -c "alias cc=" "$SETUP_SH"
+    [ "$output" = "0" ]
 
     run cat "$SETUP_SH"
     assert_not_contains "dangerously-load-development-channels" "$output"
