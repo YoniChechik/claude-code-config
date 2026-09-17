@@ -128,6 +128,26 @@ run_hook_raw() {
         "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
 }
 
+@test "the emitted JSON has exactly hookSpecificOutput.{hookEventName,additionalContext} and nothing else" {
+    write_state "$SESSION" "$(( NOW - 3600 ))"
+    run_hook "$SESSION"
+    assert_equals 0 "$status"
+    local top_keys inner_keys
+    top_keys=$(printf '%s' "$output" | jq -S -c 'keys')
+    inner_keys=$(printf '%s' "$output" | jq -S -c '.hookSpecificOutput | keys')
+    # Pins that no decision/reason/systemMessage ever sneaks in alongside
+    # additionalContext -- this hook is model-facing only, never user-facing.
+    assert_equals '["hookSpecificOutput"]' "$top_keys"
+    assert_equals '["additionalContext","hookEventName"]' "$inner_keys"
+}
+
+@test "malformed non-JSON stdin drains cleanly and exits 0 without writing state" {
+    run_hook_raw 'not json at all { [ garbled'
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    assert_equals "" "$(ls "$CLAUDE_NOTIFY_TMP_DIR")"
+}
+
 # ---------------------------------------------------------------------------
 # settings.json wiring (cheap, so colocated here)
 # ---------------------------------------------------------------------------
