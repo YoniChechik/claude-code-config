@@ -51,6 +51,11 @@ slot_for_branch() {
     printf '%s_%s-0123456789' "$SESSION" "$1"
 }
 
+# Backdate a file's mtime by $2 seconds (BSD `date`/`touch`, macOS system tools).
+touch_seconds_ago() {
+    touch -t "$(date -v-"$2"S +%Y%m%d%H%M.%S)" "$1"
+}
+
 # A live process whose argv contains "ci_watch", recorded in branch $1's
 # lockfile so that slot renders as alive.
 spawn_fake_watcher() {
@@ -492,20 +497,66 @@ run_status_line() {
 
 @test "terminal rows are capped at 5, newest first" {
     # Every terminal state file survives for the life of the session, so without
-    # a cap a session grows one permanent row per branch it ever watched.
+    # a cap a session grows one permanent row per branch it ever watched. Space
+    # the writes within the TTL window (a few seconds apart, all well under 30
+    # minutes) so this test exercises the COUNT cap, not the age filter below.
     local i
     for i in 1 2 3 4 5 6 7; do
         write_ci_state "feat-$i" "feat-$i:closed"
         write_pr_cache "feat-$i" "$i" "https://github.com/o/r/pull/$i"
-        # Ordering is by state-file mtime, so space the writes apart.
-        touch -t "20260101120${i}.00" \
-            "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "feat-$i")"
+        # Ordering is by state-file mtime, so space the writes apart: feat-7 is
+        # newest (10s ago), feat-1 is oldest (70s ago).
+        touch_seconds_ago \
+            "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "feat-$i")" \
+            "$(( (8 - i) * 10 ))"
     done
     run_status_line
     [ "$(printf '%s\n' "$plain" | grep -c 'pr: closed')" -eq 5 ]
     assert_contains "PR #7 | pr: closed" "$plain"
     assert_not_contains "PR #1 " "$plain"
     assert_not_contains "PR #2 " "$plain"
+}
+
+@test "a terminal row older than the TTL is dropped, not just capped" {
+    # "no-ci-configured", "closed", etc. are done facts once written — nothing
+    # will ever update them again. Past the TTL they must disappear entirely,
+    # not merely lose out to the count cap.
+    write_ci_state "feat-old" "feat-old:closed"
+    write_pr_cache "feat-old" 1 "https://github.com/o/r/pull/1"
+    touch_seconds_ago \
+        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-old)" 1900
+    run_status_line
+    assert_not_contains "PR #1" "$plain"
+    assert_not_contains "pr: closed" "$plain"
+}
+
+@test "a terminal row within the TTL still renders" {
+    write_ci_state "feat-fresh" "feat-fresh:closed"
+    write_pr_cache "feat-fresh" 2 "https://github.com/o/r/pull/2"
+    touch_seconds_ago \
+        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-fresh)" 60
+    run_status_line
+    assert_contains "PR #2 | pr: closed" "$plain"
+}
+
+@test "an aged-out terminal row is never counted against the count cap" {
+    # One row past the TTL, five within it: the cap must still show all 5
+    # fresh rows, not reserve a slot for the one that already disappeared.
+    write_ci_state "feat-ancient" "feat-ancient:closed"
+    write_pr_cache "feat-ancient" 99 "https://github.com/o/r/pull/99"
+    touch_seconds_ago \
+        "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch feat-ancient)" 3600
+    local i
+    for i in 1 2 3 4 5; do
+        write_ci_state "feat-$i" "feat-$i:closed"
+        write_pr_cache "feat-$i" "$i" "https://github.com/o/r/pull/$i"
+        touch_seconds_ago \
+            "$CLAUDE_NOTIFY_TMP_DIR/ci_watch_state_$(slot_for_branch "feat-$i")" \
+            "$(( (6 - i) * 10 ))"
+    done
+    run_status_line
+    [ "$(printf '%s\n' "$plain" | grep -c 'pr: closed')" -eq 5 ]
+    assert_not_contains "PR #99" "$plain"
 }
 
 @test "live rows are never dropped by the terminal-row cap" {
