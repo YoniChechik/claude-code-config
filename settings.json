@@ -123,6 +123,17 @@
         "matcher" : "*"
       }
     ],
+    "Stop" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/stop__session_name_reminder.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "*"
+      }
+    ],
     "StopFailure" : [
       {
         "hooks" : [
