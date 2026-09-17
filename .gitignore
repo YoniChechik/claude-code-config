@@ -33,6 +33,7 @@
 **/.pytest_cache/
 **/.DS_Store
 quality-results/
+/skills/synced/
 
 # Feature worktrees live at <repo-root>/.claude/worktrees/<name>. In this repo the
 # root IS ~/.claude, so they land at ~/.claude/.claude/worktrees/ — already covered
