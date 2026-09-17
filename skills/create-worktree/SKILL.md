@@ -26,12 +26,12 @@ Creates a git worktree for isolated feature development. Handles new features, e
 ```bash
 bash ~/.claude/skills/create-worktree/create_worktree.sh "$FEATURE_NAME"
 ```
-This handles: fetching latest main from origin, branch detection (new / existing local / existing remote), `git worktree add` at `.claude/worktrees/$FEATURE_NAME`, branching off `origin/main` (never a stale local main), env symlinking, environment setup, and setting the terminal tab title to `$FEATURE_NAME` via an OSC escape sequence.
+This handles: fetching latest main from origin, branch detection (new / existing local / existing remote), `git worktree add` at `.claude/worktrees/$FEATURE_NAME`, branching off `origin/main` (never a stale local main), env symlinking, and environment setup. It does not set the cmux workspace title — that happens in Step 3 below.
 
 The script prints the worktree path (relative to the repo root) as its last stdout line.
 
 ### Step 3: Set the session name
-Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). This stores the session name in the sidecar file and refreshes the tab title through that mechanism, superseding the raw title seed `create_worktree.sh` wrote in Step 2.
+Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). This stores the session name in the sidecar file and sets the cmux workspace title via `cmux rename-workspace`.
 
 ### Step 4: Notify User
 Tell user:

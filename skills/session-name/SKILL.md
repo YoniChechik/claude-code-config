@@ -1,13 +1,13 @@
 ---
 name: "session-name"
-description: "Assign or update a short label describing what this Claude Code session is currently doing, stored in a per-session sidecar file so status_line.sh and the tab title can show it"
+description: "Assign or update a short label describing what this Claude Code session is currently doing, stored in a per-session sidecar file so status_line.sh and the cmux workspace title can show it"
 argument-hint: "[optional forced name]"
 ---
 
 Sets (or re-sets) the current session's display name: a short, human-readable
-label stored in a per-session sidecar file. `status_line.sh` and the tab-title
-mechanism read only this file — there is no fallback to the branch/worktree
-name or to Claude Code's own native `session_name` field. Safe to re-run any
+label stored in a per-session sidecar file. `status_line.sh` and the cmux
+workspace title read only this file — there is no fallback to the
+branch/worktree name or to Claude Code's own native `session_name` field. Safe to re-run any
 number of times in one session as the topic drifts; each run is a fresh
 decision, not a one-time setup step.
 
@@ -72,7 +72,7 @@ before comparing or writing.
 If the sanitized proposed name is **empty** (an all-whitespace, all-control-byte
 or all-backslash candidate), stop here: report the error to the user and write
 nothing. An empty sidecar means "no name" to both readers, so writing one would
-silently clear the status-line segment and blank the tab title instead of
+silently clear the status-line segment and blank the cmux workspace title instead of
 naming the session.
 
 ```bash
@@ -87,7 +87,7 @@ fi
 Compare the sanitized proposed name (Step 4) to the stored name (Step 2, which
 is already sanitized). If they are identical:
 
-- Make **no write**. Do not touch the sidecar file, do not re-emit the title
+- Make **no write**. Do not touch the sidecar file, do not re-emit the workspace title
   escape.
 - Tell the user the current session name still fits and stop here. This is a
   first-class, correct outcome — renaming is not mandatory just because this
@@ -140,20 +140,32 @@ if ! printf '%s' "$NAME" > "$tmp" || ! mv -f "$tmp" "$DEST"; then
 fi
 ```
 
-## Step 8: Re-emit the tab title immediately
+## Step 8: Rename the cmux workspace
 
-This call site is a live skill invocation, not a hook — it has no JSON-output
-channel, so it must write the OSC 0 escape straight to the tty, the same way
-`create_worktree.sh` does, rather than waiting for the next Stop/waiting event
-to pick up the change.
+Terminal OSC 0/2 title escapes have no effect on cmux's sidebar (verified
+empirically — cmux does not read them), so the workspace title is set through
+cmux's own CLI instead: `cmux rename-workspace`. It defaults to the current
+workspace via `$CMUX_WORKSPACE_ID` (auto-set in every cmux terminal), so no
+explicit `--workspace` flag is needed here.
 
-`_notify.sh` is already sourced from Step 2. `%s` is load-bearing: it prints
-`$NAME` as inert text, so nothing inside the name can be re-read as an escape.
+When `CMUX_WORKSPACE_ID` is unset (not running inside cmux — e.g. a plain
+terminal or an unrelated wrapper), skip the rename silently rather than
+erroring: the sidecar file written in Step 7 is still the source of truth for
+`status_line.sh`, so the session name is not lost, only the cmux sidebar
+label.
 
 ```bash
-target_tty=$(_resolve_target_tty)
-printf '\033]0;%s\007' "$NAME" > "$target_tty" 2>/dev/null || true
+if [[ -n "${CMUX_WORKSPACE_ID:-}" ]] && command -v cmux >/dev/null 2>&1; then
+    cmux rename-workspace -- "$NAME" 2>/dev/null || true
+fi
 ```
+
+Note: cmux's opt-in `automation.workspaceAutoNaming` setting (off by default;
+confirmed unset in this environment) drives its OWN turn-end AI naming of
+workspaces for supported agents including Claude Code. That is a separate,
+automatic mechanism gated on a live socket setting — this skill's explicit
+rename is independent of it and runs regardless of whether that setting is
+ever turned on.
 
 ## Step 9: Report
 

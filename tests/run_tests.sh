@@ -15,7 +15,7 @@ rc=0
 
 # --- bats (bash) -----------------------------------------------------------
 if command -v bats >/dev/null 2>&1; then
-    echo "== bats: notify / stop-decision logic =="
+    echo "== bats: shell hook/skill logic =="
     bats "$TESTS_DIR"/*.bats || rc=1
 else
     echo "!! bats not found — skipping bash tests (install: brew install bats-core)" >&2

@@ -87,10 +87,10 @@ branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 # to the hook payload's native session_name field, worktree name, or branch.
 #
 # Keyed on this payload's own .session_id, so `_session_name_read` is called
-# with an explicit session id rather than via _display_title's
-# CLAUDE_CODE_SESSION_ID. `|| true` keeps a helper failure of any kind (broken
-# python3, unreadable file) to "no segment shown" instead of aborting the whole
-# status line under the `set -e` / ERR trap above.
+# with an explicit session id rather than the ambient CLAUDE_CODE_SESSION_ID.
+# `|| true` keeps a helper failure of any kind (broken python3, unreadable
+# file) to "no segment shown" instead of aborting the whole status line under
+# the `set -e` / ERR trap above.
 session_name=$(_session_name_read "$session_id" 2>/dev/null || true)
 
 dirty_marker=""

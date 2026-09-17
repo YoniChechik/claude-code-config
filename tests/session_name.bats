@@ -167,15 +167,48 @@ run_status_line() {
     assert_equals "name for B" "$(_session_name_read "sess_b")"
 }
 
-@test "_display_title: reads the current session's name" {
-    write_sidecar "$CLAUDE_CODE_SESSION_ID" 'the title'
-    assert_equals "the title" "$(_display_title)"
+# ---------------------------------------------------------------------------
+# skills/session-name/SKILL.md Step 8 — the cmux rename-workspace gate.
+#
+# The skill's Step 8 shell snippet is not a standalone script (it lives inline
+# in markdown, executed by the agent), so it cannot be `source`d here. These
+# tests instead exercise the exact guard expression documented in Step 8:
+# only call `cmux` when CMUX_WORKSPACE_ID is set AND the `cmux` binary is on
+# PATH, and never fail when it is not (e.g. a plain terminal outside cmux).
+# ---------------------------------------------------------------------------
+
+# Mirrors SKILL.md Step 8 exactly. $1 is the name to rename to.
+_session_name_cmux_rename() {
+    if [[ -n "${CMUX_WORKSPACE_ID:-}" ]] && command -v cmux >/dev/null 2>&1; then
+        cmux rename-workspace -- "$1" 2>/dev/null || true
+    fi
 }
 
-@test "_display_title: an empty CLAUDE_CODE_SESSION_ID yields no title" {
-    write_sidecar "$CLAUDE_CODE_SESSION_ID" 'the title'
-    export CLAUDE_CODE_SESSION_ID=""
-    assert_equals "" "$(_display_title)"
+@test "session-name Step 8: calls cmux rename-workspace when CMUX_WORKSPACE_ID is set" {
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    CALL_LOG="$BATS_TEST_TMPDIR/cmux_calls.log"
+    cat > "$BATS_TEST_TMPDIR/bin/cmux" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$CALL_LOG"
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/bin/cmux"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH" CMUX_WORKSPACE_ID="ws1" \
+        bash -c 'source '"$NOTIFY_SH"'; '"$(declare -f _session_name_cmux_rename)"'; _session_name_cmux_rename "my session"'
+    assert_contains "rename-workspace -- my session" "$(cat "$CALL_LOG")"
+}
+
+@test "session-name Step 8: no-ops (no error) when CMUX_WORKSPACE_ID is unset" {
+    mkdir -p "$BATS_TEST_TMPDIR/bin2"
+    CALL_LOG="$BATS_TEST_TMPDIR/cmux_calls2.log"
+    cat > "$BATS_TEST_TMPDIR/bin2/cmux" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$CALL_LOG"
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/bin2/cmux"
+    run env PATH="$BATS_TEST_TMPDIR/bin2:$PATH" CMUX_WORKSPACE_ID="" \
+        bash -c "$(declare -f _session_name_cmux_rename); _session_name_cmux_rename 'my session'"
+    [ "$status" -eq 0 ]
+    [ ! -s "$CALL_LOG" ]
 }
 
 # ---------------------------------------------------------------------------
