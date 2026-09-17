@@ -111,13 +111,12 @@ argument, and no inter-process bookkeeping file exists.
 
 ### How each consumer gets the key
 
-| Component           | How it gets the key                                                                                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/ci-watcher` skill | Reads `$CLAUDE_CODE_SESSION_ID` (env var injected into the Bash-tool subshell), the target branch, and `gh repo view --json nameWithOwner` from cwd; derives `SLOT` itself.                            |
-| `ci_watch.py`       | Reads `$CLAUDE_CODE_SESSION_ID` (set explicitly by the Monitor command). Fails loud and exits 2 if unset. Derives `SLOT` from it plus `repo_info()` and its branch argument.                           |
-| `status_line.sh`    | Parses `.session_id` from the hook payload (env vars are not available in the status-line context), then DISCOVERS every slot by globbing `ci_watch_state_<session_id>_*`. It never recomputes a hash. |
-| `_notify.sh`        | Same discovery glob, through the shared `_ci_watch_session_state_files` helper, for `ci_is_active`.                                                                                                    |
-| `session_start.sh`  | Does not need it — the SessionStart hook no longer writes any session-identity files.                                                                                                                  |
+| Component           | How it gets the key                                                                                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/ci-watcher` skill | Reads `$CLAUDE_CODE_SESSION_ID` (env var injected into the Bash-tool subshell), the target branch, and `gh repo view --json nameWithOwner` from cwd; derives `SLOT` itself.                                                                                                  |
+| `ci_watch.py`       | Reads `$CLAUDE_CODE_SESSION_ID` (set explicitly by the Monitor command). Fails loud and exits 2 if unset. Derives `SLOT` from it plus `repo_info()` and its branch argument.                                                                                                 |
+| `status_line.sh`    | Parses `.session_id` from the hook payload (env vars are not available in the status-line context), then DISCOVERS every slot through `_notify.sh`'s shared `_ci_watch_session_state_files` helper, which globs `ci_watch_state_<session_id>_*`. It never recomputes a hash. |
+| `session_start.sh`  | Does not need it — the SessionStart hook no longer writes any session-identity files.                                                                                                                                                                                        |
 
 Note the asymmetry, and that it is deliberate: the two WRITERS (the skill and
 the watcher) compute a slot, which is why the hash must be byte-identical in
@@ -213,8 +212,8 @@ display when the user `cd`s to a different branch.
 Once a stdout write fails — Monitor auto-stopped the task, or the reader died —
 the watcher appends a third field: `<branch>:<state>:monitor-detached@<epoch>`.
 It is sticky for the life of the process, because nothing the writer can observe
-proves the channel came back. Readers (`status_line.sh`, `ci_is_active`, the
-skill's liveness check) strip the field before matching the state value and
+proves the channel came back. Readers (`status_line.sh`, the skill's liveness
+check) strip the field before matching the state value and
 report the watcher as alive-but-mute, not as healthy.
 
 State values: `running`, `passed`, `failed`, `conflict`, `behind`, `no-runs`,
@@ -440,8 +439,8 @@ status line:  PR #3011 | ci: running
 
 Launching watcher 2 does not read, stop, or overwrite ANY of watcher 1's files:
 the launch path's stale-task-id handling is scoped to `feat-b`'s own task-id
-file. `ci_is_active` reports active while EITHER is running, whatever branch the
-shell's cwd happens to be on.
+file. `status_line.sh` renders a row for EITHER watcher while it is running,
+whatever branch the shell's cwd happens to be on.
 
 ### Two windows, same repo, different branches
 

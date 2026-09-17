@@ -1785,7 +1785,7 @@ def test_notify_records_a_dead_channel_in_the_state_file(tmp_path):
 
     Without it, "watcher alive and reporting" and "watcher alive but every
     notification is going nowhere" look identical to the pid-liveness check that
-    SKILL.md, ci_is_active and status_line.sh all rely on.
+    SKILL.md and status_line.sh both rely on.
     """
 
     class BrokenStdout:

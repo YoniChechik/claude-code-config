@@ -72,18 +72,8 @@ cd "$WORKTREE_ABS"
 bash ~/.claude/skills/create-worktree/setup_project_env.sh
 cd "$REPO_ROOT"
 
-# Set the terminal tab title to the feature/branch name.
-# /rename is interactive-only and cannot be automated, so the tab title is the
-# achievable equivalent — it persists because CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
-# stops Claude from overwriting it.
-# Resolve the user's real TTY via _notify.sh's helper, since this script may run
-# from a subagent where stdout is not the terminal. The escape sequence must go
-# to the TTY, NEVER to stdout, because the final stdout line below (the worktree
-# path) is consumed by the caller.
-source ~/.claude/scripts/_notify.sh
-TITLE_TTY=$(_resolve_target_tty)
-# OSC 0 sets both icon+window title (respected by iTerm2 as the tab title),
-# matching the sequence used in _notify.sh for consistency.
-printf '\033]0;%s\007' "$FEATURE_NAME" > "$TITLE_TTY" 2>/dev/null || true
+# The cmux workspace title is set by the create-worktree SKILL's Step 3, which
+# invokes /session-name right after this script returns — that is the single
+# place the title gets written, via `cmux rename-workspace`. Nothing to do here.
 
 echo "$WORKTREE_REL"

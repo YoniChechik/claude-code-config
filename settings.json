@@ -13,43 +13,16 @@
   "env" : {
     "API_TIMEOUT_MS" : "300000",
     "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" : "60000",
-    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" : "1",
     "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS" : "300000",
     "ENABLE_TOOL_SEARCH" : "true"
   },
   "feedbackDrafts" : "off",
   "hooks" : {
-    "Notification" : [
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/notification__sound.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
-      }
-    ],
     "PermissionRequest" : [
       {
         "hooks" : [
           {
             "command" : "bash $HOME\/.claude\/scripts\/permission_request.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
             "type" : "command"
           }
         ]
@@ -92,29 +65,12 @@
       {
         "hooks" : [
           {
-            "async" : true,
-            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__reset_color.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
             "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__pr_ci_reminder.sh",
             "suppressOutput" : true,
             "type" : "command"
           }
         ],
         "matcher" : "Bash"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
       }
     ],
     "PreToolUse" : [
@@ -153,33 +109,6 @@
           }
         ],
         "matcher" : "Bash"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/question__sound.sh",
-            "type" : "command"
-          }
-        ],
-        "matcher" : "AskUserQuestion"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
-      }
-    ],
-    "SessionEnd" : [
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
       }
     ],
     "SessionStart" : [
@@ -201,32 +130,6 @@
           }
         ],
         "matcher" : "*"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
-      }
-    ],
-    "Stop" : [
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/stop__sound.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
       }
     ],
     "StopFailure" : [
@@ -238,42 +141,6 @@
           }
         ],
         "matcher" : "rate_limit"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
-      }
-    ],
-    "SubagentStop" : [
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit" : [
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/user_prompt_submit.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "\/Users\/yonichechik\/.config\/iterm2\/cc-status",
-            "type" : "command"
-          }
-        ]
       }
     ]
   },
