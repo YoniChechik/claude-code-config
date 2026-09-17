@@ -159,25 +159,28 @@ fi
 # A session can run several watchers at once — one per branch — so this renders
 # one row per watcher, all read from the files ci_watch.py writes. No gh call.
 #
-# Render caps keep this bounded. Nothing on disk is ever pruned (the watchers
-# are the only writers and they must never read-modify-write a shared file),
-# so the BOUNDS LIVE HERE:
-#   * TERMINAL_ROW_MAX_AGE_SECONDS — a watcher's terminal state (PR closed, no
-#     CI configured, post-merge CI resolved, ...) is a done fact: nothing will
-#     ever update that row again. Once it is this old it is dropped from the
-#     render ENTIRELY, not merely capped — a session that only ever merges a
-#     handful of PRs would otherwise show every one of their "post merge: ..."
-#     rows for the rest of the session, since MAX_TERMINAL_ROWS below only
-#     bounds the row COUNT, not their age. The state file itself is untouched;
-#     this is a render-time filter, same as every other cap here.
-#   * MAX_TERMINAL_ROWS — belt-and-suspenders on top of the age filter, for a
-#     session with many still-fresh terminal rows at once: only the newest
-#     (by state-file mtime) are shown. Live watchers are never dropped.
+# No time-based expiry anywhere below. A watcher's terminal state (PR closed,
+# no CI configured, post-merge CI resolved, a crashed watcher, ...) is a done
+# fact the instant it is written — nothing will ever update that row again —
+# so it moves OUT of the per-PR detail rows and INTO one collapsed summary
+# line ("done: #52, #53") right away, and stays there for the rest of the
+# session, however long that is. There is deliberately no age filter: a PR
+# that finished 10 minutes into the session is exactly as finished 5 hours
+# later, so dropping it after some TTL would just delete information for no
+# reason. Still-watching (non-terminal) PRs are unaffected and keep rendering
+# as their own full detail row.
+#
+# Render caps that remain:
+#   * MAX_TERMINAL_SUMMARY_ITEMS — the collapsed summary line is still ONE
+#     line regardless of how many PRs are in it, so there is no need to drop
+#     any of them to keep the ROW COUNT bounded. This instead bounds the
+#     LINE WIDTH for a session that finishes an unusually large number of
+#     PRs: past this many entries, the newest are listed and the rest are
+#     folded into a trailing "+N more".
 #   * MAX_FINISHED_LINES / MAX_FINISHED_PRS — the finished-PR file is
 #     append-only and never deleted, so both the parse cost and the row width
 #     would otherwise grow with the length of the session.
-TERMINAL_ROW_MAX_AGE_SECONDS=1800
-MAX_TERMINAL_ROWS=5
+MAX_TERMINAL_SUMMARY_ITEMS=12
 MAX_FINISHED_LINES=200
 MAX_FINISHED_PRS=10
 
@@ -195,10 +198,21 @@ post_merge_label() {
   return 0
 }
 
-# Render ONE watcher's row from its slot ($1). Echoes "<kind><TAB><row>", where
-# kind is "active" (a watcher is still expected to update this row) or
-# "terminal" (nothing will ever change it again, so the caller may cap it away).
-# Echoes nothing at all when the row must be hidden.
+# Render ONE watcher's row from its slot ($1). Echoes
+# "<kind><TAB><summary_label><TAB><row>", where kind is one of:
+#   - "active": the watcher is still expected to update this row, so the
+#     caller renders "row" as its own line.
+#   - "died": the watcher process is gone without a documented exit (a
+#     crash). Never resolves itself, so like "active" it always renders its
+#     own "row" — the caller never folds it into the collapsed line.
+#   - "terminal": a DOCUMENTED ci_watch.py exit (closed, timeout, no-main-ci,
+#     no-ci-configured, merged-failed). Nothing will ever change this row
+#     again, so the caller folds "summary_label" into the collapsed done-PRs
+#     line instead of rendering "row" at all.
+# summary_label is a short "#N" (hyperlinked when a PR URL is known) or, when
+# no PR has been matched yet, the branch name — always computed, but only used
+# by the caller for a terminal row. Echoes nothing at all when the row must be
+# hidden.
 render_ci_row() {
   local one_slot="$1"
   local state_file="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${one_slot}"
@@ -253,6 +267,22 @@ render_ci_row() {
     pr_part=$'\033]8;;'"${pr_url}"$'\a'"PR #${pr_number}"$'\033]8;;\a'
   fi
 
+  # Short label for the collapsed terminal-PR summary line, in the same
+  # "#N" style already used by the finished-PRs row below (not "PR #N" — the
+  # summary line packs many of these per line, so every character counts).
+  local summary_label=""
+  if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+    if [ -n "$pr_url" ] && [ "$pr_url" != "null" ]; then
+      summary_label=$'\033]8;;'"${pr_url}"$'\a'"#${pr_number}"$'\033]8;;\a'
+    else
+      summary_label="#${pr_number}"
+    fi
+  elif [[ "$raw" == *:* ]]; then
+    # No PR matched yet (the watcher hit a terminal state before ever finding
+    # one) — fall back to the branch name so the entry is still identifiable.
+    summary_label="${raw%%:*}"
+  fi
+
   # Terminal states are the watcher's DOCUMENTED exits (see the ci-watcher
   # SKILL.md): no watcher is expected any more, so the result is shown as-is,
   # never as a death. For every other state this slot's OWN lockfile decides
@@ -260,7 +290,8 @@ render_ci_row() {
   local alive=false kind=active pid
   case "$state_only" in
     # ci_watch.py EXITS on these and deliberately keeps its state file, so the
-    # row is final and the cap above may drop it once it is old enough.
+    # row is final — the caller folds it into the collapsed done-PRs line
+    # instead of rendering it on its own.
     merged-failed|timeout|no-main-ci|no-ci-configured|closed)
       alive=true
       kind=terminal
@@ -287,9 +318,13 @@ render_ci_row() {
 
   local ci_display="" ci_state
   if [ "$alive" = false ] && [ -n "$state_only" ]; then
-    # The watcher should still be running but is gone — a crash, not an exit.
+    # The watcher should still be running but is gone — a crash, not a
+    # documented exit. Unlike a real terminal state this never resolves
+    # itself, so it keeps its own full row for the rest of the session
+    # instead of folding into the collapsed done-PRs line — the caller only
+    # collapses kind="terminal", and "died" is deliberately a different kind.
     ci_display="${red}⚠ ci watcher died${reset}"
-    kind=terminal
+    kind=died
   elif [ "$detached" = true ]; then
     # Alive, but mute: distinct from both "died" and a plain running state.
     ci_display="${red}⚠ ci notifications lost — restart watcher${reset}"
@@ -348,7 +383,7 @@ render_ci_row() {
     row="$pr_part"
   fi
   [ -n "$row" ] || return 0
-  printf '%s%s%s' "$kind" "$tab" "$row"
+  printf '%s%s%s%s%s' "$kind" "$tab" "$summary_label" "$tab" "$row"
   return 0
 }
 
@@ -427,9 +462,10 @@ if [ -n "$session_id" ]; then
     _state_files+=("$_state_file")
   done < <(_ci_watch_session_state_files "$session_id")
 
-  # One `ls -t` fork orders every slot by state-file mtime, newest first, so the
-  # most recently active watcher renders at the top and the MAX_TERMINAL_ROWS
-  # cap below drops the OLDEST finished rows. Slot names hold only a UUID and
+  # One `ls -t` fork orders every slot by state-file mtime, newest first, so
+  # the most recently active watcher renders at the top and, if the collapsed
+  # summary line below has to fold anything into "+N more", the newest
+  # terminal PRs are the ones kept visible. Slot names hold only a UUID and
   # [A-Za-z0-9._-], so no name can contain a newline and break this loop.
   _ordered=()
   if [ "${#_state_files[@]}" -gt 0 ]; then
@@ -439,27 +475,20 @@ if [ -n "$session_id" ]; then
     done < <(ls -t "${_state_files[@]}" 2>/dev/null || printf '%s\n' "${_state_files[@]}")
   fi
 
-  # Live rows always render; terminal rows are aged out and capped, so a long
-  # session cannot accumulate one permanent row per branch it ever watched.
-  _now=$(date +%s)
+  # Live rows always render as their own full detail row. A terminal row never
+  # renders on its own — its summary_label is collected instead, and every
+  # terminal PR of the session is folded into one collapsed line below.
   _active_rows=()
-  _terminal_rows=()
+  _terminal_labels=()
   for _state_file in ${_ordered[@]+"${_ordered[@]}"}; do
     _out=$(render_ci_row "${_state_file##*/ci_watch_state_}")
     [ -n "$_out" ] || continue
     _kind="${_out%%"$tab"*}"
-    _row="${_out#*"$tab"}"
+    _rest="${_out#*"$tab"}"
+    _label="${_rest%%"$tab"*}"
+    _row="${_rest#*"$tab"}"
     if [ "$_kind" = "terminal" ]; then
-      # Age filter first: a terminal row past its TTL is dropped outright,
-      # never merely pushed out by the count cap below. `stat` failing (file
-      # removed between the ls -t above and here) fails safe: age is huge, so
-      # the row is dropped rather than rendered with a bogus mtime.
-      _mtime=$(stat -f "%m" "$_state_file" 2>/dev/null || echo 0)
-      _age=$(( _now - _mtime ))
-      [ "$_age" -le "$TERMINAL_ROW_MAX_AGE_SECONDS" ] || continue
-      if [ "${#_terminal_rows[@]}" -lt "$MAX_TERMINAL_ROWS" ]; then
-        _terminal_rows+=("$_row")
-      fi
+      [ -n "$_label" ] && _terminal_labels+=("$_label")
     else
       _active_rows+=("$_row")
     fi
@@ -467,9 +496,30 @@ if [ -n "$session_id" ]; then
   for _row in ${_active_rows[@]+"${_active_rows[@]}"}; do
     pr_lines+=("$_row")
   done
-  for _row in ${_terminal_rows[@]+"${_terminal_rows[@]}"}; do
-    pr_lines+=("$_row")
-  done
+
+  # Collapse every terminal-state PR of the session into ONE line, e.g.
+  # "done: #52, #53, #54". No filter on which entries qualify (no time-based
+  # expiry — see the comment above MAX_TERMINAL_SUMMARY_ITEMS) — only a cap on
+  # how many are actually printed, past which the rest fold into "+N more".
+  if [ "${#_terminal_labels[@]}" -gt 0 ]; then
+    _terminal_total="${#_terminal_labels[@]}"
+    _terminal_shown=0
+    _terminal_summary=""
+    for _label in "${_terminal_labels[@]}"; do
+      [ "$_terminal_shown" -lt "$MAX_TERMINAL_SUMMARY_ITEMS" ] || break
+      if [ -n "$_terminal_summary" ]; then
+        _terminal_summary="${_terminal_summary}, ${_label}"
+      else
+        _terminal_summary="$_label"
+      fi
+      _terminal_shown=$(( _terminal_shown + 1 ))
+    done
+    _terminal_remaining=$(( _terminal_total - _terminal_shown ))
+    if [ "$_terminal_remaining" -gt 0 ]; then
+      _terminal_summary="${_terminal_summary} +${_terminal_remaining} more"
+    fi
+    pr_lines+=("${yellow}done:${reset} ${_terminal_summary}")
+  fi
 
   _finished_row=$(render_finished_prs "$session_id")
   if [ -n "$_finished_row" ]; then

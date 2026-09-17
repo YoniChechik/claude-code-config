@@ -387,23 +387,28 @@ session id, so stop always worked; this keeps that property.
    that slot's own `/tmp/ci_watch_pr_<SLOT>` for PR metadata, and checks that
    slot's own `/tmp/ci_watch_lock_<SLOT>` for liveness. A `merged-passed` slot
    renders NO row — that PR belongs to the finished list instead.
-4. Renders one line per surviving slot: `PR #N | ci: <state>`, with `PR #N`
-   hyperlinked to the PR. For the post-merge states (`merging`,
-   `merged-failed`) the label is `post merge:` instead of `ci:`, and the words
-   "post merge" are themselves hyperlinked to
-   `<repoUrl>/commit/<mergeCommit.oid>/checks`.
-5. Renders one final line from `/tmp/ci_watch_finished_<session_id>`:
+4. Renders one line per slot that is still active (running, or dead without a
+   documented exit): `PR #N | ci: <state>`, with `PR #N` hyperlinked to the
+   PR. For the post-merge `merging` state the label is `post merge:` instead
+   of `ci:`, hyperlinked to `<repoUrl>/commit/<mergeCommit.oid>/checks`. A
+   crashed watcher (lockfile pid no longer alive, no documented exit) renders
+   `PR #N | ⚠ ci watcher died` and keeps that row forever.
+5. Every slot that DID reach a documented terminal exit (`closed`, `timeout`,
+   `no-main-ci`, `no-ci-configured`, `merged-failed`) never gets a row of its
+   own: its PR number is instead folded into one collapsed line, `done: #52,
+   #53, #54`, the instant that state is observed. That line is omitted when no
+   slot is in a terminal state.
+6. Renders one final line from `/tmp/ci_watch_finished_<session_id>`:
    `finished PRs: #12, #7`, newest first, each number hyperlinked to its PR. The
    line is omitted entirely when the file is missing, empty, or every line fails
    to parse.
 
-**Two render caps.** Nothing prunes the files on disk, so the bounds live in the
-renderer. Rows of watchers that have EXITED on a documented terminal condition
-(`closed`, `timeout`, `no-main-ci`, `no-ci-configured`, `merged-failed`) — plus
-rows of watchers that died — are capped at 5 (`MAX_TERMINAL_ROWS`), ordered by
-state-file mtime so the oldest are the ones dropped. Rows of watchers that are
-still running are never dropped. The finished-PR row is capped as described
-above.
+**No time-based expiry anywhere.** Nothing prunes the files on disk, and the
+renderer never drops a row or a `done:` entry for being old — a PR that
+finished at minute 5 of the session is still shown at hour 5. The only caps
+left are on width, not on age: the `done:` line shows at most
+`MAX_TERMINAL_SUMMARY_ITEMS` (12) PR numbers before folding the rest into a
+trailing `+N more`, and the finished-PR row is capped as described above.
 
 ### Self-cleanup
 
