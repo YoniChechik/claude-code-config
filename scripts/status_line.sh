@@ -162,9 +162,14 @@ fi
 # No time-based expiry anywhere below. A watcher's terminal state (PR closed,
 # no CI configured, post-merge CI resolved, a crashed watcher, ...) is a done
 # fact the instant it is written — nothing will ever update that row again —
-# so it moves OUT of the per-PR detail rows and INTO one collapsed summary
-# line ("done: #52, #53") right away, and stays there for the rest of the
-# session, however long that is. There is deliberately no age filter: a PR
+# so it moves OUT of the per-PR detail rows and INTO a collapsed summary line
+# right away, and stays there for the rest of the session, however long that
+# is. There are TWO such lines, because a failure and a clean finish are not
+# the same news: a red "failed: #52" for the exits that went wrong (post-merge
+# CI failed, merge timed out) and a yellow "done: #53, #54" for the ones that
+# simply have nothing left to watch (no CI configured, no main CI, PR closed).
+# Collapsing both into one generic line hid every CI failure behind a label
+# that also means "nothing to report". There is deliberately no age filter: a PR
 # that finished 10 minutes into the session is exactly as finished 5 hours
 # later, so dropping it after some TTL would just delete information for no
 # reason. Still-watching (non-terminal) PRs are unaffected and keep rendering
@@ -205,10 +210,13 @@ post_merge_label() {
 #   - "died": the watcher process is gone without a documented exit (a
 #     crash). Never resolves itself, so like "active" it always renders its
 #     own "row" — the caller never folds it into the collapsed line.
-#   - "terminal": a DOCUMENTED ci_watch.py exit (closed, timeout, no-main-ci,
-#     no-ci-configured, merged-failed). Nothing will ever change this row
-#     again, so the caller folds "summary_label" into the collapsed done-PRs
-#     line instead of rendering "row" at all.
+#   - "terminal": a CLEAN documented ci_watch.py exit (closed, no-main-ci,
+#     no-ci-configured). Nothing will ever change this row again, so the
+#     caller folds "summary_label" into the collapsed yellow done-PRs line
+#     instead of rendering "row" at all.
+#   - "terminal-failed": a documented exit that FAILED (merged-failed,
+#     timeout). Also final, but folded into a separate red "failed:" line, so
+#     a broken post-merge CI never reads as "nothing to report".
 # summary_label is a short "#N" (hyperlinked when a PR URL is known) or, when
 # no PR has been matched yet, the branch name — always computed, but only used
 # by the caller for a terminal row. Echoes nothing at all when the row must be
@@ -292,9 +300,18 @@ render_ci_row() {
     # ci_watch.py EXITS on these and deliberately keeps its state file, so the
     # row is final — the caller folds it into the collapsed done-PRs line
     # instead of rendering it on its own.
-    merged-failed|timeout|no-main-ci|no-ci-configured|closed)
+    # Clean exits: nothing went wrong, there is simply nothing left to watch.
+    no-main-ci|no-ci-configured|closed)
       alive=true
       kind=terminal
+      ;;
+    # FAILED exits. These are terminal too, but collapsing them into the same
+    # generic "done: #N" line as a clean exit made a red post-merge CI failure
+    # look exactly like "nothing to report" — the user lost the one signal that
+    # needs action. They get their own red "failed:" collapsed line instead.
+    merged-failed|timeout)
+      alive=true
+      kind=terminal-failed
       ;;
     # Reported results the watcher keeps polling past (it waits for the merge),
     # so no "died" label — but the row is still live and never capped away.
@@ -480,6 +497,7 @@ if [ -n "$session_id" ]; then
   # terminal PR of the session is folded into one collapsed line below.
   _active_rows=()
   _terminal_labels=()
+  _terminal_failed_labels=()
   for _state_file in ${_ordered[@]+"${_ordered[@]}"}; do
     _out=$(render_ci_row "${_state_file##*/ci_watch_state_}")
     [ -n "$_out" ] || continue
@@ -487,11 +505,11 @@ if [ -n "$session_id" ]; then
     _rest="${_out#*"$tab"}"
     _label="${_rest%%"$tab"*}"
     _row="${_rest#*"$tab"}"
-    if [ "$_kind" = "terminal" ]; then
-      [ -n "$_label" ] && _terminal_labels+=("$_label")
-    else
-      _active_rows+=("$_row")
-    fi
+    case "$_kind" in
+      terminal)        [ -n "$_label" ] && _terminal_labels+=("$_label") ;;
+      terminal-failed) [ -n "$_label" ] && _terminal_failed_labels+=("$_label") ;;
+      *)               _active_rows+=("$_row") ;;
+    esac
   done
   for _row in ${_active_rows[@]+"${_active_rows[@]}"}; do
     pr_lines+=("$_row")
@@ -501,24 +519,30 @@ if [ -n "$session_id" ]; then
   # "done: #52, #53, #54". No filter on which entries qualify (no time-based
   # expiry — see the comment above MAX_TERMINAL_SUMMARY_ITEMS) — only a cap on
   # how many are actually printed, past which the rest fold into "+N more".
-  if [ "${#_terminal_labels[@]}" -gt 0 ]; then
-    _terminal_total="${#_terminal_labels[@]}"
-    _terminal_shown=0
-    _terminal_summary=""
-    for _label in "${_terminal_labels[@]}"; do
-      [ "$_terminal_shown" -lt "$MAX_TERMINAL_SUMMARY_ITEMS" ] || break
-      if [ -n "$_terminal_summary" ]; then
-        _terminal_summary="${_terminal_summary}, ${_label}"
-      else
-        _terminal_summary="$_label"
-      fi
-      _terminal_shown=$(( _terminal_shown + 1 ))
+  # Joins a label list into one capped "a, b, c +N more" string in _collapsed.
+  collapse_labels() {
+    local total=$# shown=0 out="" label
+    for label in "$@"; do
+      [ "$shown" -lt "$MAX_TERMINAL_SUMMARY_ITEMS" ] || break
+      if [ -n "$out" ]; then out="${out}, ${label}"; else out="$label"; fi
+      shown=$(( shown + 1 ))
     done
-    _terminal_remaining=$(( _terminal_total - _terminal_shown ))
-    if [ "$_terminal_remaining" -gt 0 ]; then
-      _terminal_summary="${_terminal_summary} +${_terminal_remaining} more"
+    if [ "$(( total - shown ))" -gt 0 ]; then
+      out="${out} +$(( total - shown )) more"
     fi
-    pr_lines+=("${yellow}done:${reset} ${_terminal_summary}")
+    _collapsed="$out"
+  }
+
+  # Failed terminal PRs render FIRST and in red, so the line that needs action
+  # is never mistaken for the generic done line below it.
+  if [ "${#_terminal_failed_labels[@]}" -gt 0 ]; then
+    collapse_labels "${_terminal_failed_labels[@]}"
+    pr_lines+=("${red}failed:${reset} ${_collapsed}")
+  fi
+
+  if [ "${#_terminal_labels[@]}" -gt 0 ]; then
+    collapse_labels "${_terminal_labels[@]}"
+    pr_lines+=("${yellow}done:${reset} ${_collapsed}")
   fi
 
   _finished_row=$(render_finished_prs "$session_id")

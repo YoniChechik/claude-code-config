@@ -210,15 +210,17 @@ run_status_line() {
     assert_contains $'\033]8;;https://github.com/o/r/commit/deadbeef/checks\a' "$raw"
 }
 
-@test "merged-failed: a documented terminal exit, folded into the done line" {
+@test "merged-failed: a documented terminal exit, folded into the FAILED line" {
     # merged-failed is a DOCUMENTED ci_watch.py exit (main CI resolved, just
-    # unfavourably) so it collapses like every other terminal state, not a
-    # full "post merge: failed" row of its own.
+    # unfavourably) so it collapses instead of keeping a full row — but into
+    # the red "failed:" line, never the generic "done:" line that also means
+    # "nothing to report".
     write_ci_state "feat-b" "feat-b:merged-failed"
     write_pr_cache "feat-b" 3012 "https://github.com/o/r/pull/3012" "deadbeef"
     run_status_line
     assert_not_contains "post merge: failed" "$plain"
-    assert_contains "done: #3012" "$plain"
+    assert_contains "failed: #3012" "$plain"
+    assert_not_contains "done: #3012" "$plain"
 }
 
 @test "post merge stays readable when the merge commit is not cached yet" {
@@ -468,9 +470,9 @@ run_status_line() {
     done
 }
 
-@test "every documented terminal state folds into the done line, not its own row" {
+@test "every CLEAN terminal state folds into the done line, not its own row" {
     local state
-    for state in no-main-ci timeout no-ci-configured; do
+    for state in no-main-ci no-ci-configured closed; do
         setup
         write_ci_state "feat-a" "feat-a:${state}"
         write_pr_cache "feat-a" 3011 "https://github.com/o/r/pull/3011"
@@ -478,6 +480,23 @@ run_status_line() {
         run_status_line
         assert_not_contains "PR #3011 |" "$plain"
         assert_contains "done: #3011" "$plain"
+        teardown
+    done
+}
+
+@test "every FAILED terminal state folds into the failed line, never the done line" {
+    # The regression this pins: a genuinely failed run must not be reported
+    # with the same label as a clean "nothing to report" finish.
+    local state
+    for state in merged-failed timeout; do
+        setup
+        write_ci_state "feat-a" "feat-a:${state}"
+        write_pr_cache "feat-a" 3011 "https://github.com/o/r/pull/3011"
+        spawn_fake_watcher "feat-a"
+        run_status_line
+        assert_not_contains "PR #3011 |" "$plain"
+        assert_contains "failed: #3011" "$plain"
+        assert_not_contains "done:" "$plain"
         teardown
     done
 }
@@ -514,12 +533,12 @@ run_status_line() {
     assert_not_contains "|" "$plain"
 }
 
-@test "multiple terminal PRs collapse into one done line with every number" {
+@test "multiple clean terminal PRs collapse into one done line with every number" {
     write_ci_state "feat-1" "feat-1:closed"
     write_pr_cache "feat-1" 1 "https://github.com/o/r/pull/1"
     write_ci_state "feat-2" "feat-2:no-ci-configured"
     write_pr_cache "feat-2" 2 "https://github.com/o/r/pull/2"
-    write_ci_state "feat-3" "feat-3:timeout"
+    write_ci_state "feat-3" "feat-3:no-main-ci"
     write_pr_cache "feat-3" 3 "https://github.com/o/r/pull/3"
     run_status_line
     assert_contains "#1" "$plain"
@@ -528,6 +547,18 @@ run_status_line() {
     # Exactly ONE line carries them, not one row apiece.
     [ "$(printf '%s\n' "$plain" | grep -c '^done:')" -eq 1 ]
     assert_not_contains "pr: closed" "$plain"
+}
+
+@test "failed and clean terminal PRs render as two separate collapsed lines" {
+    write_ci_state "feat-ok" "feat-ok:no-ci-configured"
+    write_pr_cache "feat-ok" 10 "https://github.com/o/r/pull/10"
+    write_ci_state "feat-bad" "feat-bad:merged-failed"
+    write_pr_cache "feat-bad" 11 "https://github.com/o/r/pull/11" "deadbeef"
+    run_status_line
+    assert_contains "failed: #11" "$plain"
+    assert_contains "done: #10" "$plain"
+    [ "$(printf '%s\n' "$plain" | grep -c '^failed:')" -eq 1 ]
+    [ "$(printf '%s\n' "$plain" | grep -c '^done:')" -eq 1 ]
 }
 
 @test "a mix of terminal and active PRs: active gets its own row, terminal is collapsed" {
