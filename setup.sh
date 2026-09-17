@@ -72,31 +72,6 @@ else
   echo "    Install uv (https://docs.astral.sh/uv/), then re-run this script."
 fi
 
-# --- Update cc alias ---
-NEW_ALIAS="alias cc='claude'"
-
-update_alias() {
-  local rc_file="$1"
-  if [ ! -f "$rc_file" ]; then
-    return
-  fi
-
-  # Remove any existing cc alias line, then append the new one
-  if grep -q 'alias cc=' "$rc_file"; then
-    if [[ "$(uname)" == "Darwin" ]]; then
-      sed -i '' '/^alias cc=/d' "$rc_file"
-    else
-      sed -i '/^alias cc=/d' "$rc_file"
-    fi
-  fi
-  printf '%s\n' "$NEW_ALIAS" >> "$rc_file"
-  echo "    Updated cc alias in $rc_file"
-}
-
-echo "==> Updating cc alias"
-update_alias "$HOME/.zshrc"
-update_alias "$HOME/.bashrc"
-
 echo ""
 echo "==> Done! Restart your shell or run: source ~/.zshrc"
 echo "    Then start Claude with: cc"
