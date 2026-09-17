@@ -39,13 +39,20 @@ write_state() {
 }
 
 # Run the hook as a real subprocess with a session id on the stdin payload.
+# The payload is built with `jq -n --arg` and fed in as a herestring, so the
+# session id NEVER passes through shell-string interpolation. That is what lets
+# an adversarial id (quotes, `../`, `$( )`) reach the script as literal JSON
+# data the way Claude Code delivers it, instead of corrupting the test's own
+# command line.
 run_hook() {
-    run bash -c "printf '%s' '{\"session_id\":\"$1\"}' | bash '$SCRIPT'"
+    local payload
+    payload=$(jq -n --arg sid "$1" '{session_id: $sid}')
+    run bash "$SCRIPT" <<< "$payload"
 }
 
 # Run the hook with a raw stdin payload (for the malformed/empty cases).
 run_hook_raw() {
-    run bash -c "printf '%s' '$1' | bash '$SCRIPT'"
+    run bash "$SCRIPT" <<< "$1"
 }
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,86 @@ run_hook_raw() {
     assert_equals 0 "$status"
     assert_equals "" "$output"
     assert_equals "" "$(ls "$CLAUDE_NOTIFY_TMP_DIR")"
+}
+
+@test "completely empty stdin exits 0 and writes nothing" {
+    run bash "$SCRIPT" < /dev/null
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    assert_equals "" "$(ls "$CLAUDE_NOTIFY_TMP_DIR")"
+}
+
+# ---------------------------------------------------------------------------
+# Corrupt / hostile state values
+# ---------------------------------------------------------------------------
+
+@test "a leading-zero state value is corrupt, not octal: exit 0, no shell error" {
+    # Regression pin: bash arithmetic reads a leading-zero operand as OCTAL, so
+    # "09" once aborted the script with "value too great for base" and exit 1.
+    # $output holds stdout AND stderr, so an empty $output also proves no shell
+    # error leaked out.
+    write_state "$SESSION" "09"
+    run_hook "$SESSION"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    # Treated as a cold start, so the clock is re-initialized to a sane value.
+    local stored
+    stored=$(cat "$STATE_FILE")
+    [[ "$stored" =~ ^[1-9][0-9]*$ ]] || { printf 'not numeric: %q\n' "$stored" >&2; return 1; }
+    [ "$(( stored - NOW ))" -ge -5 ]
+    [ "$(( stored - NOW ))" -le 5 ]
+}
+
+@test "a future timestamp is rewritten instead of wedging the reminder off" {
+    # Clock skew (or a corrupt-but-numeric far-future value) must not park the
+    # reminder until the real clock catches up.
+    write_state "$SESSION" "$(( NOW + 5000 ))"
+    run_hook "$SESSION"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    local stored
+    stored=$(cat "$STATE_FILE")
+    [ "$(( stored - NOW ))" -ge -5 ]
+    [ "$(( stored - NOW ))" -le 5 ]
+}
+
+# ---------------------------------------------------------------------------
+# Hostile session ids and unusable state paths
+# ---------------------------------------------------------------------------
+
+@test "a session id with path separators is rejected and writes nothing anywhere" {
+    local outside="$BATS_TEST_TMPDIR/outside"
+    mkdir -p "$outside/sub"
+    export CLAUDE_NOTIFY_TMP_DIR="$outside/sub"
+    run_hook "../../pwned"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    assert_equals "" "$(ls "$outside/sub")"
+    assert_equals "sub" "$(ls "$outside")"
+}
+
+@test "a session id with shell metacharacters reaches the script as data and is rejected" {
+    run_hook '$(touch '"$BATS_TEST_TMPDIR"'/pwned); echo "x"'
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    [ ! -e "$BATS_TEST_TMPDIR/pwned" ]
+    assert_equals "" "$(ls "$CLAUDE_NOTIFY_TMP_DIR")"
+}
+
+@test "a directory sitting at the state-file path is left alone, not leaked into" {
+    mkdir "$STATE_FILE"
+    run_hook "$SESSION"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
+    # The old code mv'd a fresh temp file INSIDE the directory on every Stop.
+    assert_equals "" "$(ls "$STATE_FILE")"
+}
+
+@test "an unwritable state dir degrades to a silent exit 0" {
+    export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR/missing-dir"
+    run_hook "$SESSION"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
 }
 
 # ---------------------------------------------------------------------------
