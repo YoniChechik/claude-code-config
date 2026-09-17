@@ -415,3 +415,264 @@ EOF"
 @test "allow: read-only git status survives command/env prefix stripping" {
     assert_decision ALLOW "$(bash_decide "$BASE" "command git status")"
 }
+
+# =============================================================================
+# PATH TRAVERSAL on the file-edit branch. The worktree check used to run on the
+# RAW file_path string, so a path that spells out a worktree prefix and then
+# climbs back out of it matched character for character while pointing at the
+# base repo. Every one of these must DENY.
+# =============================================================================
+
+@test "deny: file path that traverses out of a worktree back into the base repo" {
+    assert_decision DENY "$(file_decide Write "$BASE" "$WT/../../../README.md")"
+}
+
+@test "deny: file path that traverses out of a worktree into a base-repo subdir" {
+    assert_decision DENY "$(file_decide Write "$BASE" "$FEATWT/../../../mobile/foo.ts")"
+}
+
+@test "deny: a single-dot-padded traversal out of a worktree" {
+    assert_decision DENY "$(file_decide Write "$BASE" "$WT/./mobile/../../../../README.md")"
+}
+
+@test "allow: a relative file path inside a worktree, resolved against cwd" {
+    assert_decision ALLOW "$(file_decide Write "$WT" "mobile/foo.ts")"
+}
+
+@test "allow: a .. that stays inside the worktree" {
+    assert_decision ALLOW "$(file_decide Write "$WT" "$WT/mobile/../mobile/foo.ts")"
+}
+
+# =============================================================================
+# GIT ALLOWLIST. The old denylist named a handful of write subcommands, so every
+# subcommand it had not heard of wrote to the base repo unchallenged. The model
+# is inverted: only known-read subcommands pass.
+# =============================================================================
+
+@test "deny: git --paginate before the subcommand" {
+    assert_decision DENY "$(bash_decide "$BASE" "git --paginate $C -am y")"
+}
+
+@test "deny: git tag (creates a ref, was never on the denylist)" {
+    assert_decision DENY "$(bash_decide "$BASE" "git tag release-x")"
+}
+
+@test "deny: git update-ref (writes a ref directly)" {
+    assert_decision DENY "$(bash_decide "$BASE" "git update-ref refs/heads/main HEAD")"
+}
+
+@test "deny: git notes add" {
+    assert_decision DENY "$(bash_decide "$BASE" "git notes $A -m x")"
+}
+
+@test "deny: git config set" {
+    assert_decision DENY "$(bash_decide "$BASE" "git config user.name attacker")"
+}
+
+@test "deny: git remote add" {
+    assert_decision DENY "$(bash_decide "$BASE" "git remote $A evil https://example.com/x.git")"
+}
+
+@test "deny: git branch that CREATES a branch" {
+    assert_decision DENY "$(bash_decide "$BASE" "git branch brand-new-branch")"
+}
+
+@test "deny: an unknown future git subcommand fails safe" {
+    assert_decision DENY "$(bash_decide "$BASE" "git some-future-subcommand --do-it")"
+}
+
+@test "deny: git -c alias.X= override, which can redefine any name as a write" {
+    assert_decision DENY "$(bash_decide "$BASE" "git -c alias.zz=$C zz -m x")"
+}
+
+@test "deny: git -c include.path= override" {
+    assert_decision DENY "$(bash_decide "$BASE" "git -c include.path=/tmp/evil.cfg status")"
+}
+
+@test "deny: a -c alias override is not laundered by pointing -C at a worktree" {
+    # An alias body can run ANY command, so -C is no evidence about what it does.
+    assert_decision DENY "$(bash_decide "$BASE" "git -C $WT -c alias.zz=$C zz -m x")"
+}
+
+@test "deny: builtin wrapper prefix on a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "builtin command git $C -am y")"
+}
+
+@test "deny: exec prefix on a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "exec git $C -am y")"
+}
+
+@test "deny: absolute path to the git binary" {
+    assert_decision DENY "$(bash_decide "$BASE" "/usr/bin/git $C -am y")"
+}
+
+@test "deny: env with an argument-taking flag before git" {
+    # The env prefix stripper used to skip `-u` but not its argument, leaving
+    # `FOO` in command position and the real git invocation unexamined.
+    assert_decision DENY "$(bash_decide "$BASE" "env -u FOO git $C -am y")"
+}
+
+# --- and the read side of the allowlist must keep working in the base repo ---
+
+@test "allow: git log in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git log --oneline -5")"
+}
+
+@test "allow: git diff in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git diff --stat")"
+}
+
+@test "allow: git show in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git show HEAD")"
+}
+
+@test "allow: git rev-parse in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git rev-parse --show-toplevel")"
+}
+
+@test "allow: bare git branch (a listing) in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch")"
+}
+
+@test "allow: git branch with read-only flags in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch -a --sort=-committerdate")"
+}
+
+@test "allow: git fetch in the base repo (touches only remote-tracking refs)" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git fetch --all")"
+}
+
+@test "allow: git worktree, the sanctioned escape hatch, from the base repo" {
+    # /create-worktree itself runs this from the base repo; denying it would
+    # make the guard impossible to comply with.
+    assert_decision ALLOW "$(bash_decide "$BASE" "git worktree list")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "git worktree $A .claude/worktrees/x -b x")"
+}
+
+@test "allow: git config --get in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git config --get user.email")"
+}
+
+@test "allow: git stash list in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git stash list")"
+}
+
+@test "allow: git ls-files piped into a reader" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git ls-files | head -20")"
+}
+
+@test "allow: every newly-gated write still works inside a worktree" {
+    assert_decision ALLOW "$(bash_decide "$WT" "git tag release-x")"
+    assert_decision ALLOW "$(bash_decide "$WT" "git branch brand-new-branch")"
+    assert_decision ALLOW "$(bash_decide "$WT" "git config user.name me")"
+}
+
+# =============================================================================
+# SHELL GRAMMAR. A command body wrapped in a brace group or an if/while/for
+# construct is still a command; the segment splitter used to hand the guard a
+# segment starting with `{` or `then` and give up on it.
+# =============================================================================
+
+@test "deny: brace group around a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "{ git $C -am y; }")"
+}
+
+@test "deny: if/then around a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "if true; then git $C -am y; fi")"
+}
+
+@test "deny: while/do around a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "while true; do git $C -am y; done")"
+}
+
+@test "deny: for/do around a base-repo git write" {
+    assert_decision DENY "$(bash_decide "$BASE" "for i in 1; do git $C -am y; done")"
+}
+
+# =============================================================================
+# HEREDOCS. A QUOTED delimiter makes the body inert data; an UNQUOTED one still
+# runs every substitution inside it before the body reaches stdin. Dropping both
+# bodies meant `cat <<EOF` / `$(git commit)` / `EOF` produced no decision.
+# =============================================================================
+
+@test "deny: unquoted heredoc delimiter whose body runs a git write" {
+    cmd="cat <<EOF
+\$(git -C $BASE $C -m x)
+EOF"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "deny: unquoted heredoc delimiter with a backtick substitution" {
+    cmd="cat <<EOF
+\`git -C $BASE $C -m x\`
+EOF"
+    assert_decision DENY "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: QUOTED heredoc delimiter keeps the same body inert" {
+    cmd="cat <<'EOF'
+\$(git -C $BASE $C -m x)
+EOF"
+    assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: double-quoted heredoc delimiter is inert too" {
+    cmd="cat <<\"EOF\"
+\$(git -C $BASE $C -m x)
+EOF"
+    assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: unquoted heredoc whose body is only prose" {
+    cmd="git $C -F - <<EOF
+refactor: rework the guard
+
+Prose in the body (git -C $BASE $C -m x) is documentation, not a command.
+EOF"
+    assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
+}
+
+# =============================================================================
+# SHELL-CODE ARGUMENTS. An end-anchored `-c "(.*)"$` match is defeated by a
+# trailing argv word, by combined short flags, and by an absolute path to the
+# interpreter.
+# =============================================================================
+
+@test "deny: bash -c with trailing argv after the code string" {
+    assert_decision DENY "$(bash_decide "$WT" "bash -c \"git -C $BASE $C -m x\" sentinel")"
+}
+
+@test "deny: bash -lc with combined short flags" {
+    assert_decision DENY "$(bash_decide "$WT" "bash -lc \"git -C $BASE $C -m x\"")"
+}
+
+@test "deny: an absolute path to the interpreter" {
+    assert_decision DENY "$(bash_decide "$WT" "/bin/bash -c \"git -C $BASE $C -m x\"")"
+}
+
+# =============================================================================
+# FAIL-CLOSED BOUNDS. Adversarially long or deeply nested input exists to run
+# the hook past the harness timeout, where a missing decision reads as allow.
+# The guard must refuse to scan it instead — and must NOT refuse a real command.
+# =============================================================================
+
+@test "ask: a command past the separator bound fails closed" {
+    local cmd="" i
+    for i in $(seq 1 400); do cmd="${cmd}echo $i && "; done
+    assert_decision ASK "$(bash_decide "$WT" "${cmd}true")"
+}
+
+@test "ask: a command past the subshell-count bound fails closed" {
+    local cmd="echo" i
+    for i in $(seq 1 100); do cmd="$cmd \$(echo $i)"; done
+    assert_decision ASK "$(bash_decide "$WT" "$cmd")"
+}
+
+@test "allow: a realistically long commit message stays well inside the bounds" {
+    local body=""
+    local i
+    for i in $(seq 1 40); do
+        body="$body This is sentence $i of a perfectly ordinary (and quite wordy) commit message."
+    done
+    assert_decision ALLOW "$(bash_decide "$WT" "git $C -m \"refactor: something real.$body\"")"
+}

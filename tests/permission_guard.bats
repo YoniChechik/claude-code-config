@@ -135,3 +135,172 @@ assert_decision() { # <expected> <actual>
 @test "ask: pulumi -C flag-prefixed destructive subcommand still recognized" {
     assert_decision ASK "$(decide "pulumi -C infra up")"
 }
+
+# =============================================================================
+# SHELL-CODE ARGUMENT BYPASSES. `_unwrap_code_arg` used to require the code
+# string to be the LAST thing in the segment, spelled with a bare `-c`, after a
+# bare interpreter name. Each of these defeats one of those assumptions.
+# =============================================================================
+
+@test "deny: bash -c with trailing argv after the code string" {
+    # The trailing word becomes $0 for the spawned shell; the code still runs.
+    assert_decision DENY "$(decide "bash -c \"$GH $REPO $DEL foo/bar\" sentinel")"
+}
+
+@test "deny: bash -lc with combined short flags" {
+    assert_decision DENY "$(decide "bash -lc \"$GH $REPO $DEL foo/bar\"")"
+}
+
+@test "deny: sh -ic with combined short flags" {
+    assert_decision DENY "$(decide "sh -ic '$GH $REPO $DEL foo/bar'")"
+}
+
+@test "deny: an absolute path to the interpreter" {
+    assert_decision DENY "$(decide "/bin/bash -c \"$GH $REPO $DEL foo/bar\"")"
+}
+
+@test "deny: quote concatenation inside the command word" {
+    assert_decision DENY "$(decide "g\"h\" $REPO $DEL foo/bar")"
+}
+
+@test "deny: quote concatenation inside a subcommand word" {
+    assert_decision DENY "$(decide "$GH re\"\"po $DEL foo/bar")"
+}
+
+@test "deny: single-quote concatenation inside the command word" {
+    assert_decision DENY "$(decide "g'h' $REPO $DEL foo/bar")"
+}
+
+@test "deny: an absolute path to the gh binary" {
+    assert_decision DENY "$(decide "/usr/bin/$GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: a relative path to the gh binary" {
+    assert_decision DENY "$(decide "./bin/$GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: env with an argument-taking flag before the real command" {
+    # The env stripper skipped `-u` but not its argument, so `FOO` was read as
+    # the command and the real invocation was never inspected.
+    assert_decision DENY "$(decide "env -u FOO $GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: env -i with an assignment before the real command" {
+    assert_decision DENY "$(decide "env -i PATH=/usr/bin $GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: builtin wrapper prefix" {
+    assert_decision DENY "$(decide "builtin command $GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: exec wrapper prefix" {
+    assert_decision DENY "$(decide "exec $GH $REPO $DEL foo/bar")"
+}
+
+# =============================================================================
+# SHELL GRAMMAR. The segment splitter cut on `;`/`&`/`|` only, so a command body
+# that arrived with a grammar keyword still attached (`{ ...`, `then ...`,
+# `do ...`) never matched a prefix-anchored rule.
+# =============================================================================
+
+@test "deny: brace group" {
+    assert_decision DENY "$(decide "{ $GH $REPO $DEL foo/bar; }")"
+}
+
+@test "deny: if/then construct" {
+    assert_decision DENY "$(decide "if true; then $GH $REPO $DEL foo/bar; fi")"
+}
+
+@test "deny: if/else construct, destructive command in the else body" {
+    assert_decision DENY "$(decide "if false; then echo no; else $GH $REPO $DEL foo/bar; fi")"
+}
+
+@test "deny: while/do construct" {
+    assert_decision DENY "$(decide "while true; do $GH $REPO $DEL foo/bar; done")"
+}
+
+@test "deny: for/do construct" {
+    assert_decision DENY "$(decide "for i in 1 2; do $GH $REPO $DEL foo/bar; done")"
+}
+
+@test "deny: subshell grouping" {
+    assert_decision DENY "$(decide "( $GH $REPO $DEL foo/bar )")"
+}
+
+@test "ask: a grammar-wrapped ask-level command is still recognized" {
+    assert_decision ASK "$(decide "{ $GC $INST $INSTANCES $DEL x; }")"
+}
+
+# =============================================================================
+# MOST-RESTRICTIVE WINS. Rules are checked in a fixed order and used to exit on
+# the first match, so a compound command that tripped an EARLY ask rule never
+# reached the LATER deny rule its other half would have matched. Each pair below
+# puts the ask rule first in file order and the deny rule second.
+# =============================================================================
+
+@test "deny: gh ask-rule first, raw-HTTP deny-rule second" {
+    local url="https://api.git""hub.com/repos/sun""say-ltd/x"
+    assert_decision DENY "$(decide "$GH repo archive foo/bar && curl -X DELETE $url")"
+}
+
+@test "deny: gcloud ask-rule first, gcloud-run prod deny-rule second" {
+    local cmd="$GC $INST $INSTANCES $DEL x && $GC run deploy --project=production-490411"
+    assert_decision DENY "$(decide "$cmd")"
+}
+
+@test "deny: bq ask-rule first, pulumi prod deny-rule second" {
+    assert_decision DENY "$(decide "bq rm mydataset.mytable && pulumi up --stack production")"
+}
+
+@test "deny: gh ask-rule first, gh repo delete deny-rule later in the same command" {
+    assert_decision DENY "$(decide "$GH repo archive foo/bar && $GH $REPO $DEL foo/bar")"
+}
+
+@test "deny: supabase ask-rule first, bare-target deny-rule second" {
+    assert_decision DENY "$(decide "supabase migration push && supabase db reset")"
+}
+
+@test "ask: an ask-only compound command still asks (deny is never invented)" {
+    assert_decision ASK "$(decide "$GH repo archive foo/bar && $GH repo rename baz")"
+}
+
+# =============================================================================
+# FAIL-CLOSED BOUNDS. A crafted input that makes the guard scan forever would,
+# once the hook timed out, be allowed by default. The guard refuses to scan
+# instead — while leaving real commands alone.
+# =============================================================================
+
+@test "ask: a command past the separator bound fails closed" {
+    local cmd="" i
+    for i in $(seq 1 400); do cmd="${cmd}echo $i && "; done
+    assert_decision ASK "$(decide "${cmd}true")"
+}
+
+@test "ask: a command past the subshell-count bound fails closed" {
+    local cmd="echo" i
+    for i in $(seq 1 100); do cmd="$cmd \$(echo $i)"; done
+    assert_decision ASK "$(decide "$cmd")"
+}
+
+@test "ask: a command past the length bound fails closed" {
+    local cmd="echo" i
+    for i in $(seq 1 2500); do cmd="$cmd word$i"; done
+    assert_decision ASK "$(decide "$cmd")"
+}
+
+@test "none: an ordinary multi-step command stays well inside the bounds" {
+    assert_decision NONE "$(decide "cd repo && git status && git diff --stat && $GH pr list && echo done")"
+}
+
+@test "ask: a broken shared library fails closed instead of silently allowing" {
+    # With _shell_command_guard.sh unavailable every rule matches nothing, which
+    # is indistinguishable from a clean pass unless the guard says so.
+    local dir="$BATS_TEST_TMPDIR/brokenlib"
+    mkdir -p "$dir"
+    cp "$HOOK" "$dir/"
+    local out
+    out=$(jq -nc --arg cmd "$GH $REPO $DEL foo/bar" '{tool_name:"Bash",tool_input:{command:$cmd}}' \
+        | bash "$dir/$(basename "$HOOK")")
+    [ -n "$out" ]
+    assert_decision ASK "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+}

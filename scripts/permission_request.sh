@@ -2,67 +2,52 @@
 # permission_request.sh
 #
 # PermissionRequest hook: auto-allows edits/writes to files under any .claude/
-# directory and bash commands whose every segment operates inside .claude/.
+# directory, and bash commands whose every path stays inside .claude/.
 #
 # Claude Code passes the permission request as JSON on stdin.
 # If we decide to allow, we print the allow JSON to stdout.
 # If we do not decide (no output), Claude falls through to its normal prompt.
+#
+# SAFE BY CONSTRUCTION, NOT BY VERB LIST
+# --------------------------------------
+# The old design sorted verbs into "read" (auto-allow whenever the segment
+# mentioned .claude/ anywhere) vs "everything else", and split the command on
+# `&&`/`||`/`;` only. Both halves leaked:
+#   - a read verb can still write outside: `cat ~/.claude/X > /tmp/out`,
+#     `cp ~/.claude/X /tmp/out`, `mv ~/.claude/X /tmp/out`,
+#     `tee /tmp/out < ~/.claude/X`, `find ~/.claude -exec rm /tmp/out \;`
+#   - not splitting on `|` meant `cat ~/.claude/X | sh` auto-allowed an
+#     arbitrary shell
+#   - `echo` was "unconditionally safe", so `echo owned > /tmp/out` allowed a
+#     write anywhere on disk
+#
+# The rule is now a whole-command property instead of a per-verb one. A Bash
+# command auto-allows ONLY when, across EVERY pipeline segment:
+#   1. the command word is on a small allowlist of inspect/manage verbs, and
+#   2. EVERY path-looking argument AND every redirection target canonicalizes
+#      to somewhere under the resolved .claude directory.
+# One argument or redirection target resolving outside .claude, or one verb off
+# the allowlist, and the whole command falls through to the normal prompt.
+# Falling through is always safe — it just asks the human.
 
-# ---------------------------------------------------------------------------
-# Read and parse the incoming JSON payload from stdin
-# ---------------------------------------------------------------------------
 INPUT=$(cat)
 
 TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
 CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
 [ -n "$CWD" ] || CWD="$HOME"
 
-# ---------------------------------------------------------------------------
-# Helper: emit the allow decision and exit successfully
-# ---------------------------------------------------------------------------
+# The shared library owns path canonicalization (_resolve_path/_resolve_paths/
+# _is_under_claude_dir) and the input bounds. Without it nothing below can make
+# a safe decision, so exit silently — which means "no auto-allow", i.e. prompt.
+# shellcheck source=./_shell_command_guard.sh
+if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
+    || ! declare -F _resolve_paths >/dev/null 2>&1; then
+    exit 0
+fi
+
 allow() {
     printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
     exit 0
-}
-
-# ---------------------------------------------------------------------------
-# Helper: canonicalize a path (resolving `..`/`.`/symlinks) before it is ever
-# pattern-matched against ".claude". Matching the RAW, unresolved text (as
-# this file used to) is a path-traversal bypass: `.../.claude/../../etc/hosts`
-# contains the substring "/.claude/" while actually pointing well outside it.
-# `~`/`$HOME`/`$CLAUDE_CONFIG_DIR` are expanded textually first, since the
-# hook only ever sees the command/path as literal text, never a real shell's
-# expansion of it.
-#
-# Uses python3's os.path.realpath rather than the platform `realpath`/
-# `readlink -f`: BSD realpath (macOS) refuses to resolve a path unless EVERY
-# component already exists on disk, which breaks the common case of a Write
-# to a file that doesn't exist yet. os.path.realpath resolves symlinks where
-# it can and lexically normalizes the rest, existing or not.
-_resolve_path() {
-    local base="$1" token="$2"
-    local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-    token="${token/#\~/$HOME}"
-    token="${token/#\$HOME/$HOME}"
-    token="${token/#\$CLAUDE_CONFIG_DIR/$claude_dir}"
-    python3 -c '
-import os, sys
-base, p = sys.argv[1], sys.argv[2]
-if not os.path.isabs(p):
-    p = os.path.join(base, p)
-print(os.path.realpath(p))
-' "$base" "$token" 2>/dev/null
-}
-
-# Helper: is RESOLVED (already-canonicalized, per _resolve_path) a path under
-# a directory literally named `.claude`? Safe to substring-match here BECAUSE
-# the path has already had every `.`/`..`/symlink collapsed — there is no
-# traversal token left for a lookalike to hide behind.
-_is_under_claude_dir() {
-    case "$1" in
-        */.claude/*|*/.claude) return 0 ;;
-        *) return 1 ;;
-    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -76,119 +61,190 @@ case "$TOOL_NAME" in
         FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
         if [ -n "$FILE_PATH" ]; then
             RESOLVED_FILE_PATH=$(_resolve_path "$CWD" "$FILE_PATH")
-            if _is_under_claude_dir "$RESOLVED_FILE_PATH"; then
+            if [ -n "$RESOLVED_FILE_PATH" ] && _is_under_claude_dir "$RESOLVED_FILE_PATH"; then
                 allow
             fi
         fi
+        exit 0
         ;;
 esac
 
+[ "$TOOL_NAME" = "Bash" ] || exit 0
+
+CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+[ -n "$CMD" ] || exit 0
+
+# Oversized/pathological input never auto-allows.
+_guard_within_bounds "$CMD" || exit 0
+
 # ---------------------------------------------------------------------------
-# Case 2 – Bash commands
+# Verbs whose behaviour is fully described by their path arguments. Anything
+# that runs another program from its arguments (sh, bash, xargs, awk, sed -e
+# with commands, ...) is deliberately absent: the path audit below cannot see
+# what those would do.
 #
-# Split the command on &&, ||, and ; to get individual segments, then verify
-# that EVERY non-empty segment is either:
-#   • an unconditionally safe verb (echo) with no path concerns, OR
-#   • a destructive-ish verb (rm, rmdir) whose every path token is in .claude/, OR
-#   • a read/inspect verb (cat, ls, head, …) that references .claude/ somewhere
-#     in the segment.
-#
-# If all segments pass → allow. If any segment fails → do nothing (fall through).
+# `find` and `cp`/`mv`/`tee` are allowed only because the path audit inspects
+# EVERY token, so `find ~/.claude -exec rm /tmp/x \;` and
+# `cp ~/.claude/x /tmp/out` are rejected on their outside-.claude token.
 # ---------------------------------------------------------------------------
-if [ "$TOOL_NAME" = "Bash" ]; then
-    CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+is_allowed_verb() {
+    case "$1" in
+        echo|cat|ls|head|tail|wc|stat|find|grep|rg|jq|tree|file|diff|\
+        mkdir|touch|rm|rmdir|mv|cp|tee|realpath|dirname|basename|du|sort|uniq|cut)
+            return 0 ;;
+    esac
+    return 1
+}
 
-    # Split on && || ; into one segment per line
-    SEGS=$(printf '%s' "$CMD" | sed 's/&&/\n/g; s/||/\n/g; s/;/\n/g')
+# A token is "path-looking" when it could name a filesystem location: it holds
+# a `/`, or starts with ~ / $HOME / $CLAUDE_CONFIG_DIR, or is . / .. — never a
+# bare word like `-name`, `*.sh` or a grep pattern.
+is_path_token() {
+    # Anything holding a `/` is covered by the first pattern, including
+    # `~/x`, `$HOME/x` and `$CLAUDE_CONFIG_DIR/x`; the rest name a directory
+    # on their own. `$tilde` keeps the tilde unmistakably literal.
+    local tilde='~'
+    case "$1" in
+        */*|"$tilde"|.|..) return 0 ;;
+        '$HOME'|'${HOME}'|'$CLAUDE_CONFIG_DIR') return 0 ;;
+    esac
+    return 1
+}
 
-    # Track whether we have seen any non-empty segment and whether all pass
-    ALL=1   # assume all segments are OK until proven otherwise
-    ANY=0   # becomes 1 once we see at least one non-empty segment
+# Collect every path that must be proven to live under .claude/. Populates the
+# PATHS array and returns 1 when the command must not auto-allow at all
+# (unknown verb, an unexpandable variable, a nested shell, ...).
+PATHS=()
+SAW_CLAUDE_CANDIDATE=0
 
-    while IFS= read -r SEG; do
-        # Strip leading/trailing whitespace
-        SEG=$(printf '%s' "$SEG" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -z "$SEG" ] && continue   # skip blank lines produced by the split
+collect_segment_paths() { # <segment>
+    local seg="$1"
+    local -a toks=()
+    local tok next verb=""
+    local expect_redirect=0
+    local i n
 
-        ANY=1
-        VERB=$(printf '%s' "$SEG" | awk '{print $1}')
+    # Word-split with globbing OFF: an unquoted expansion here would otherwise
+    # let a `*` in the command hit the real filesystem.
+    set -f
+    read -r -a toks <<<"$seg"
+    set +f
+    n=${#toks[@]}
+    [ "$n" -gt 0 ] || return 0
 
-        case "$VERB" in
-            # ----------------------------------------------------------------
-            # Unconditionally safe: echo never touches files
-            # ----------------------------------------------------------------
-            echo)
-                : # OK — no path check needed
-                ;;
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        tok="${toks[$i]}"
+        # Strip quote characters; they change nothing about which path is named.
+        tok="${tok//\"/}"
+        tok="${tok//\'/}"
+        i=$((i + 1))
+        [ -n "$tok" ] || continue
 
-            # ----------------------------------------------------------------
-            # Destructive verbs: every explicit path argument must be in .claude/
-            # ----------------------------------------------------------------
-            rm|rmdir)
-                REST=$(printf '%s' "$SEG" | awk '{$1=""; print substr($0,2)}')
-                SALL=1   # all path tokens for this segment resolve inside .claude/
-                SANY=0   # at least one path token seen
+        if [ "$expect_redirect" = "1" ]; then
+            expect_redirect=0
+            PATHS+=("$tok")
+            continue
+        fi
 
-                for TOK in $REST; do
-                    # Skip flag tokens like -rf, --recursive, etc.
-                    case "$TOK" in -*) continue ;; esac
-                    SANY=1
-                    RESOLVED_TOK=$(_resolve_path "$CWD" "$TOK")
-                    if ! _is_under_claude_dir "$RESOLVED_TOK"; then
-                        SALL=0
-                        break
-                    fi
-                done
+        # Redirections, glued (`>/tmp/x`, `2>>log`) or separated (`> /tmp/x`).
+        # `<<WORD` is a heredoc delimiter, not a path, and `<<<` is a here-string
+        # whose operand is data — both are only checked when they LOOK like a path.
+        if [[ "$tok" =~ ^[0-9]*([&]?[>][>]?|[>][&]|[<][<][<]|[<])(.*)$ ]]; then
+            next="${BASH_REMATCH[2]}"
+            if [ -z "$next" ]; then
+                expect_redirect=1
+            else
+                PATHS+=("$next")
+            fi
+            continue
+        fi
+        case "$tok" in
+            '<<'*) continue ;;
+        esac
 
-                # Reject if no path tokens were found OR any token resolved outside .claude/
-                if [ "$SANY" != 1 ] || [ "$SALL" != 1 ]; then
-                    ALL=0
-                    break
-                fi
-                ;;
-
-            # ----------------------------------------------------------------
-            # Read/inspect/navigate verbs: at least one non-flag token in the
-            # segment must RESOLVE to somewhere under .claude/ (covers quoted
-            # and ~/$HOME/$CLAUDE_CONFIG_DIR-prefixed paths, textually
-            # expanded by _resolve_path before canonicalization).
-            # ----------------------------------------------------------------
-            cat|ls|head|tail|wc|stat|find|grep|rg|jq|tree|file|mkdir|touch|mv|cp|tee)
-                REST=$(printf '%s' "$SEG" | awk '{$1=""; print substr($0,2)}')
-                SEG_HAS_CLAUDE_TOKEN=0
-                for TOK in $REST; do
-                    case "$TOK" in -*) continue ;; esac
-                    RESOLVED_TOK=$(_resolve_path "$CWD" "$TOK")
-                    if _is_under_claude_dir "$RESOLVED_TOK"; then
-                        SEG_HAS_CLAUDE_TOKEN=1
-                        break
-                    fi
-                done
-                if [ "$SEG_HAS_CLAUDE_TOKEN" != 1 ]; then
-                    ALL=0
-                    break
-                fi
-                ;;
-
-            # ----------------------------------------------------------------
-            # Any other verb is not on our allowlist → do not auto-allow
-            # ----------------------------------------------------------------
-            *)
-                ALL=0
-                break
+        # An unexpandable expansion or a nested command substitution makes the
+        # command opaque — never auto-allow it.
+        case "$tok" in
+            *'$('*|*'`'*) return 1 ;;
+            '$'*)
+                case "$tok" in
+                    '$HOME'|'$HOME/'*|'${HOME}'|'${HOME}/'*|'$CLAUDE_CONFIG_DIR'|'$CLAUDE_CONFIG_DIR/'*) ;;
+                    *) return 1 ;;
+                esac
                 ;;
         esac
-    done <<EOF
-$SEGS
-EOF
 
-    # Allow only when we saw segments and every one of them passed
-    if [ "$ANY" = 1 ] && [ "$ALL" = 1 ]; then
-        allow
-    fi
+        if [ -z "$verb" ]; then
+            verb="${tok##*/}"
+            is_allowed_verb "$verb" || return 1
+            continue
+        fi
+
+        # `--output=/tmp/x` style: the path is the flag's value.
+        case "$tok" in
+            --[A-Za-z0-9]*=*)
+                next="${tok#*=}"
+                is_path_token "$next" && PATHS+=("$next")
+                continue
+                ;;
+            -*)
+                # A plain flag names no path.
+                is_path_token "$tok" || continue
+                ;;
+        esac
+
+        if is_path_token "$tok"; then
+            PATHS+=("$tok")
+        fi
+    done
+    return 0
+}
+
+# Split on every separator that starts a new command, `|` included. Not
+# splitting on `|` is what let `cat ~/.claude/X | sh` auto-allow a shell.
+SPLIT="${CMD//;/$'\n'}"
+SPLIT="${SPLIT//&/$'\n'}"
+SPLIT="${SPLIT//|/$'\n'}"
+
+SAW_SEGMENT=0
+while IFS= read -r SEG; do
+    SEG="${SEG#"${SEG%%[![:space:]]*}"}"
+    SEG="${SEG%"${SEG##*[![:space:]]}"}"
+    [ -z "$SEG" ] && continue
+    # Shell grammar (`{`, `if`, `then`, subshell parens, `VAR=`, `command`, …)
+    # has no business in an auto-allowed command; peel it and require what is
+    # left to still be an allowlisted verb.
+    _strip_leading_wrappers "$SEG"
+    SEG="$GUARD_REPLY"
+    [ -z "$SEG" ] && continue
+    SAW_SEGMENT=1
+    collect_segment_paths "$SEG" || exit 0
+done <<<"$SPLIT"
+
+[ "$SAW_SEGMENT" = "1" ] || exit 0
+
+# ---------------------------------------------------------------------------
+# One python3 fork canonicalizes every collected path at once, then EVERY one
+# of them must land under .claude. A single outside path (argument OR
+# redirection target) means no auto-allow.
+# ---------------------------------------------------------------------------
+if [ "${#PATHS[@]}" -gt 0 ]; then
+    RESOLVED_COUNT=0
+    while IFS= read -r RESOLVED; do
+        [ -n "$RESOLVED" ] || exit 0
+        _is_under_claude_dir "$RESOLVED" || exit 0
+        RESOLVED_COUNT=$((RESOLVED_COUNT + 1))
+        SAW_CLAUDE_CANDIDATE=1
+    done < <(_resolve_paths "$CWD" "${PATHS[@]}")
+    # Every collected path must have come back resolved. A short answer means
+    # the resolver failed partway, which proves nothing about the missing ones.
+    [ "$RESOLVED_COUNT" = "${#PATHS[@]}" ] || exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Neither condition matched → exit 0 with no output so Claude prompts normally
-# ---------------------------------------------------------------------------
-exit 0
+# Require the command to actually be ABOUT .claude: a command with no path at
+# all (`echo hi`) is not this hook's business, so it falls through and Claude
+# applies its normal rules.
+[ "$SAW_CLAUDE_CANDIDATE" = "1" ] || exit 0
+
+allow

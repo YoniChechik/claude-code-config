@@ -8,7 +8,31 @@
 # subcommand (e.g. "pulumi -C infra up"), which simple prefix rules would miss.
 #
 # Exit 0 = no opinion (let other rules decide).
-# Outputs JSON with permissionDecision=ask to trigger a confirmation prompt.
+# Outputs JSON with permissionDecision=ask to trigger a confirmation prompt,
+# or permissionDecision=deny to block the model outright.
+#
+# DECISION MODEL
+# --------------
+# Every rule below RECORDS a verdict instead of exiting on the spot, and the
+# most restrictive verdict found across ALL rules wins (deny > ask > none) —
+# the same precedence the dispatcher uses to combine sibling hooks. Exiting on
+# the first match was a real bypass: the rules run in a fixed order, so a
+# compound command that tripped an early `ask` rule never reached the later
+# `deny` rule that its more dangerous half would have matched
+# (`gh repo archive x && curl -X DELETE .../repos/sunsay-ltd/y` asked instead
+# of denying).
+#
+# FAIL-CLOSED
+# -----------
+# A missing/broken shared library or adversarially large input produces an
+# explicit `ask`, never silence. Silence means "no opinion" to the dispatcher,
+# which means allow — so an internal error must never look like silence.
+
+emit_decision() {
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
+}
+
+GUARD_INTERNAL_ERROR_MSG="GUARD_INTERNAL_ERROR: the permission guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_shell_command_guard.sh."
 
 INPUT=$(cat)
 
@@ -18,21 +42,75 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 [ -n "$COMMAND" ] || exit 0
 
+# The shared library is a HARD dependency: if it cannot be sourced, or is
+# sourced but incomplete, every rule below silently matches nothing. Fail
+# closed with a distinguishable verdict rather than emitting nothing.
 # shellcheck source=./_shell_command_guard.sh
-source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh"
-
-ask() {
-    local reason="$1"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
+if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
+    || ! declare -F _expand_segments >/dev/null 2>&1 \
+    || ! declare -F _guard_within_bounds >/dev/null 2>&1; then
+    emit_decision ask "$GUARD_INTERNAL_ERROR_MSG"
     exit 0
+fi
+
+# Adversarially long / deeply nested input exists to push the hook past the
+# harness timeout, where a missing decision reads as allow. Refuse to scan it.
+if ! _guard_within_bounds "$COMMAND"; then
+    emit_decision ask "Blocked pending confirmation: this command is too long or too deeply nested for the permission guard to analyse safely (limits: ${GUARD_MAX_CMD_LEN} chars, ${GUARD_MAX_PARENS} subshells, ${GUARD_MAX_SEPARATORS} segments). Split it into smaller commands."
+    exit 0
+fi
+
+# --- verdict accumulation ---------------------------------------------------
+VERDICT=""
+VERDICT_REASON=""
+
+record_verdict() { # <deny|ask> <reason>
+    case "$1" in
+        deny)
+            if [ "$VERDICT" != "deny" ]; then
+                VERDICT="deny"
+                VERDICT_REASON="$2"
+            fi
+            ;;
+        ask)
+            if [ -z "$VERDICT" ]; then
+                VERDICT="ask"
+                VERDICT_REASON="$2"
+            fi
+            ;;
+    esac
 }
+
+ask() { record_verdict ask "$1"; }
 
 # Hard-deny: blocks the LLM from running the command. Unlike `ask`, the user
 # is NOT prompted — the model is told to stop and ask the human to run it.
-deny() {
-    local reason="$1"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
-    exit 0
+deny() { record_verdict deny "$1"; }
+
+# --- fork-free segment matching ---------------------------------------------
+# Every rule used to run `echo "$segment" | grep -qE ...` — two forks per
+# pattern per segment, ~150 patterns, which cost ~0.3s per segment and made a
+# long chained command a practical way to time the hook out. These `case`
+# helpers do the same job with zero processes.
+
+# Every pattern below is prefix-anchored, so only the START of a segment can
+# ever match. Tests run against a truncated copy (SEGMENTS_PFX): a `case` glob
+# costs O(len), and ~150 patterns times a multi-kilobyte segment was the last
+# quadratic term left in the scan.
+GUARD_PREFIX_WINDOW=160
+
+has_prefix() { # <ws-collapsed segment prefix> <literal prefix>
+    case "$1" in
+        "$2"|"$2 "*) return 0 ;;
+    esac
+    return 1
+}
+
+has_word() { # <ws-collapsed segment> <literal word>
+    case " $1 " in
+        *" $2 "*) return 0 ;;
+    esac
+    return 1
 }
 
 # Expand the compound command into every segment the pattern rules below
@@ -44,10 +122,18 @@ deny() {
 # backslash/`VAR=` prefixes already stripped from each. This closes bypasses
 # like `X=$(gh repo delete foo/bar)`, `eval "gh repo delete foo/bar"`,
 # `command gh repo delete foo/bar`, and `\gh repo delete foo/bar`.
+#
+# Each segment is stored twice: raw (for rules that need the original spacing)
+# and whitespace-collapsed (for the cheap `case` prefix tests above).
 SEGMENTS=()
+SEGMENTS_WS=()
+SEGMENTS_PFX=()
 while IFS= read -r seg; do
     [ -z "$seg" ] && continue
     SEGMENTS+=("$seg")
+    _ws_collapse "$seg"
+    SEGMENTS_WS+=("$GUARD_REPLY")
+    SEGMENTS_PFX+=("${GUARD_REPLY:0:$GUARD_PREFIX_WINDOW}")
 done < <(_expand_segments "$COMMAND")
 
 # ---------------------------------------------------------------------------
@@ -57,25 +143,26 @@ done < <(_expand_segments "$COMMAND")
 # ---------------------------------------------------------------------------
 GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, DELETE API calls, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
 
-for segment in "${SEGMENTS[@]}"; do
+for segment_ws in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
     # Only inspect segments that invoke `gh`.
-    echo "$segment" | grep -qE '(^|\s)gh(\s|$)' || continue
+    has_word "$segment_ws" "gh" || continue
 
     # 1) Any `gh ...` invocation that carries the `--admin` flag token.
     #    Matches `gh pr merge --admin 123`, `gh pr merge 123 --admin`, etc.
-    if echo "$segment" | grep -qE '(^|\s)gh\s.*(\s|=)--admin(\s|=|$)'; then
-        deny "$GH_DENY_MSG"
-    fi
+    case " $segment_ws " in
+        *" --admin "*|*" --admin="*|*"=--admin "*) deny "$GH_DENY_MSG" ;;
+    esac
 
     # 2) Repository deletion — irreversible, requires admin.
-    if echo "$segment" | grep -qE '^\s*gh\s+repo\s+delete(\s|$)'; then
+    if has_prefix "$segment_ws" "gh repo delete"; then
         deny "$GH_DENY_MSG"
     fi
 
     # 3) Raw API DELETE calls via `gh api`: `-X DELETE` or `--method DELETE`
-    #    (case-insensitive on the verb).
-    if echo "$segment" | grep -qE '^\s*gh\s+api\s' \
-        && echo "$segment" | grep -qiE '(-X|--method)(\s+|=)DELETE(\s|$)'; then
+    #    (case-insensitive on the verb — spelled as bracket classes because
+    #    macOS ships bash 3.2, which has no `${var,,}`).
+    if has_prefix "$segment_ws" "gh api" \
+        && [[ " $segment_ws " =~ (-X|--method)[[:space:]=]+[Dd][Ee][Ll][Ee][Tt][Ee]([[:space:]]|$) ]]; then
         deny "$GH_DENY_MSG"
     fi
 done
@@ -122,8 +209,8 @@ GH_PATTERNS=(
 )
 
 for pattern in "${GH_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+        if has_prefix "$segment_pfx" "$pattern"; then
             ask "gh command requires confirmation."
         fi
     done
@@ -135,7 +222,7 @@ done
 # was used to hit api.github.com/repos/sunsay-ltd/... directly (e.g.
 # merging a PR via the REST API when `gh pr merge` is gated).
 # ---------------------------------------------------------------------------
-for segment in "${SEGMENTS[@]}"; do
+for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     if [[ "$segment" =~ (^|[[:space:]])(curl|wget|http|xh)([[:space:]]) ]] && \
        [[ "$segment" =~ (-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)) ]] && \
        [[ "$segment" =~ api\.github\.com/repos/sunsay-ltd ]]; then
@@ -239,8 +326,8 @@ GCLOUD_PATTERNS=(
 )
 
 for pattern in "${GCLOUD_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+        if has_prefix "$segment_pfx" "$pattern"; then
             ask "gcloud command requires confirmation."
         fi
     done
@@ -253,7 +340,7 @@ done
 # (e.g. by pointing at a broken image or stale env). Must be run manually.
 # ---------------------------------------------------------------------------
 GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
-for segment in "${SEGMENTS[@]}"; do
+for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     if [[ "$segment" =~ gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
        [[ "$segment" =~ --project[[:space:]]*=?[[:space:]]*${GCLOUD_RUN_PROTECTED_PROJECTS} ]]; then
         deny "Blocked: gcloud run revision-creating verb (update/replace/deploy/create) against a protected project (production-490411 / staging-480220 / mirror-production-496017). Requires explicit user execution — do not retry."
@@ -269,8 +356,8 @@ BQ_PATTERNS=(
 )
 
 for pattern in "${BQ_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+        if has_prefix "$segment_pfx" "$pattern"; then
             ask "bq command requires confirmation."
         fi
     done
@@ -330,16 +417,24 @@ supabase_db_url_is_local() {
 # of the three-way policy below: no flag at all means the agent never stated its
 # intent, so the guard denies instead of trusting the CLI's implicit default.
 supabase_has_target_flag() {
-    echo "$1" | grep -qE '(^|\s)--(local|linked|proxy|db-url)(=|\s|$)'
+    case " $1 " in
+        *" --local "*|*" --local="*|*" --linked "*|*" --linked="*) return 0 ;;
+        *" --proxy "*|*" --proxy="*|*" --db-url "*|*" --db-url="*) return 0 ;;
+    esac
+    return 1
 }
 
 # True when the segment explicitly aims at the local dev database.
 supabase_targets_local() {
     local seg="$1"
-    echo "$seg" | grep -qE '(^|\s)--local(=|\s|$)' && return 0
-    if echo "$seg" | grep -qE '(^|\s)--db-url(=|\s)'; then
-        supabase_db_url_is_local "$seg" && return 0
-    fi
+    case " $seg " in
+        *" --local "*|*" --local="*) return 0 ;;
+    esac
+    case " $seg " in
+        *" --db-url "*|*" --db-url="*)
+            supabase_db_url_is_local "$seg" && return 0
+            ;;
+    esac
     return 1
 }
 
@@ -347,14 +442,16 @@ supabase_targets_local() {
 # confirmation prompt says WHAT gets hit instead of just "a remote database".
 supabase_remote_detail() {
     local seg="$1" url host
-    if echo "$seg" | grep -qE '(^|\s)--linked(=|\s|$)'; then
-        echo "--linked targets the linked cloud project"
-        return
-    fi
-    if echo "$seg" | grep -qE '(^|\s)--proxy(=|\s|$)'; then
-        echo "--proxy targets the linked cloud project through the Supabase API"
-        return
-    fi
+    case " $seg " in
+        *" --linked "*|*" --linked="*)
+            echo "--linked targets the linked cloud project"
+            return
+            ;;
+        *" --proxy "*|*" --proxy="*)
+            echo "--proxy targets the linked cloud project through the Supabase API"
+            return
+            ;;
+    esac
     url=$(supabase_db_url_value "$seg")
     host=$(supabase_db_url_host "$url")
     if [ -n "$host" ] && echo "$host" | grep -qE '^[A-Za-z0-9._-]+$'; then
@@ -412,30 +509,34 @@ SUPABASE_TARGET_AWARE_PATTERNS=(
 )
 
 for pattern in "${SUPABASE_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+        if has_prefix "$segment_pfx" "$pattern"; then
             ask "supabase command requires confirmation."
         fi
     done
 done
 
+# Indexed loop: the match is prefix-anchored (cheap, truncated copy) but the
+# target-flag inspection below needs the WHOLE segment.
 for pattern in "${SUPABASE_TARGET_AWARE_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        echo "$segment" | grep -qE "^${pattern}(\s|$)" || continue
+    for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
+        segment_ws="${SEGMENTS_WS[$seg_i]}"
+        has_prefix "${SEGMENTS_PFX[$seg_i]}" "$pattern" || continue
 
         # (b) Explicitly local — the safe dev-loop path, no prompt.
-        if supabase_targets_local "$segment"; then
+        if supabase_targets_local "$segment_ws"; then
             continue
         fi
 
         # (a) Bare call — no target flag, so the effective database depends on a
         #     per-subcommand CLI default. Refuse rather than guess.
-        if ! supabase_has_target_flag "$segment"; then
+        if ! supabase_has_target_flag "$segment_ws"; then
             deny "Blocked: \`${pattern}\` needs an explicit target — add --local to hit the local dev DB, or --linked/--db-url <remote> to target remote (remote will then require confirmation)."
+            continue
         fi
 
         # (c) A remote target is named — ask, and say which one.
-        ask "\`${pattern}\` $(supabase_remote_detail "$segment") — confirm this is intended."
+        ask "\`${pattern}\` $(supabase_remote_detail "$segment_ws") — confirm this is intended."
     done
 done
 
@@ -542,9 +643,9 @@ pulumi_target_guard() {
     done
 }
 
-for segment in "${SEGMENTS[@]}"; do
-    echo "$segment" | grep -qE '^\s*pulumi\s' || continue
-    pulumi_target_guard "$segment"
+for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
+    has_prefix "${SEGMENTS_PFX[$seg_i]}" "pulumi" || continue
+    pulumi_target_guard "${SEGMENTS_WS[$seg_i]}"
 done
 
 # ---------------------------------------------------------------------------
@@ -570,8 +671,8 @@ PULUMI_PATTERNS=(
 )
 
 for pattern in "${PULUMI_PATTERNS[@]}"; do
-    for segment in "${SEGMENTS[@]}"; do
-        if echo "$segment" | grep -qE "^${pattern}(\s|$)"; then
+    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+        if has_prefix "$segment_pfx" "$pattern"; then
             ask "pulumi command requires confirmation."
         fi
     done
@@ -582,8 +683,8 @@ done
 # Strip -C / --cwd and other global flags, then match effective subcommand.
 # ---------------------------------------------------------------------------
 PULUMI_SEG_FOUND=0
-for segment in "${SEGMENTS[@]}"; do
-    if echo "$segment" | grep -qE '^\s*pulumi\s'; then
+for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
+    if has_prefix "$segment_pfx" "pulumi"; then
         PULUMI_SEG_FOUND=1
         break
     fi
@@ -639,15 +740,16 @@ if [ "$PULUMI_SEG_FOUND" = "1" ]; then
         "plugin rm"
     )
 
-    for segment in "${SEGMENTS[@]}"; do
+    for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
         # Only consider segments that begin with `pulumi`.
-        echo "$segment" | grep -qE '^\s*pulumi\s' || continue
+        has_prefix "${SEGMENTS_PFX[$seg_i]}" "pulumi" || continue
+        segment_ws="${SEGMENTS_WS[$seg_i]}"
         # POSIX character classes, not \s (a GNU extension BSD/macOS sed does
         # not support — the sed pipeline below silently no-oped on macOS
         # before this fix, so `pulumi -C infra up` was never recognized as a
         # write. pulumi_target_guard() above already uses this same
         # [[:space:]] form for the identical reason.
-        EFFECTIVE=$(echo "$segment" \
+        EFFECTIVE=$(echo "$segment_ws" \
             | sed -E 's/^[[:space:]]*pulumi[[:space:]]+//' \
             | sed -E 's/-C[[:space:]]+[^ ]+[[:space:]]*//g' \
             | sed -E 's/--cwd[[:space:]]+[^ ]+[[:space:]]*//g' \
@@ -660,11 +762,20 @@ if [ "$PULUMI_SEG_FOUND" = "1" ]; then
             | sed -E 's/[[:space:]]+/ /g' \
             | sed -E 's/^[[:space:]]*//')
         for subcmd in "${PULUMI_WRITE_SUBCMDS[@]}"; do
-            if echo "$EFFECTIVE" | grep -qE "^${subcmd}(\s|$)"; then
+            if has_prefix "$EFFECTIVE" "$subcmd"; then
                 ask "pulumi command requires confirmation."
             fi
         done
     done
+fi
+
+# ---------------------------------------------------------------------------
+# Emit the single most restrictive verdict recorded by ALL the rules above.
+# No output at all still means "no opinion", which the dispatcher reads as
+# allow — that path is reached only when every rule genuinely passed.
+# ---------------------------------------------------------------------------
+if [ -n "$VERDICT" ]; then
+    emit_decision "$VERDICT" "$VERDICT_REASON"
 fi
 
 exit 0
