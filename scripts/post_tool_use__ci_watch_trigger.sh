@@ -4,7 +4,7 @@
 #
 # After a Bash tool call that (a) really succeeded and (b) matches one of a
 # DELIBERATELY NARROW set of command shapes, this hook injects an instruction
-# for CLAUDE (never the user) to start skills/ci-watcher/ci_watch_once.sh in
+# for CLAUDE (never the user) to start scripts/ci_watch_once.sh in
 # the background for the branch the command acted on.
 #
 # The three triggers:
@@ -13,14 +13,14 @@
 #   2. `gh pr create` for the current branch       -> push-mode watcher
 #   3. `gh pr merge` of the current branch's PR    -> merge-mode watcher
 #
-# Trigger contract (intentional limitation, documented in the ci-watcher
-# skill): a hook cannot reliably parse arbitrary shell. `cd elsewhere && git
-# push`, `git -C other push`, a multi-ref push, `gh pr create --repo
-# owner/other`, `gh pr merge 123`, a raw GraphQL mutation — none of those can
-# be resolved from this hook's own cwd, so NONE of them trigger anything. The
-# hook triggers only on the simple forms whose target is unambiguously
-# "the current branch of the repo at the hook's cwd", and silently skips
-# everything else. `/ci-watcher [branch]` is the manual fallback.
+# Trigger contract (intentional limitation): a hook cannot reliably parse
+# arbitrary shell. `cd elsewhere && git push`, `git -C other push`, a
+# multi-ref push, `gh pr create --repo owner/other`, `gh pr merge 123`, a raw
+# GraphQL mutation — none of those can be resolved from this hook's own cwd,
+# so NONE of them trigger anything. The hook triggers only on the simple
+# forms whose target is unambiguously "the current branch of the repo at the
+# hook's cwd", and silently skips everything else — there is no manual
+# fallback, so a missed trigger means nobody launches a watcher at all.
 #
 # Output is hookSpecificOutput.additionalContext ONLY — no systemMessage, so
 # nothing is ever surfaced to the user. Every git/gh call the hook makes is
@@ -274,65 +274,31 @@ if [ "$ACTION" = "push" ]; then
     [ "$pr_state" = "OPEN" ] || exit 0
 fi
 
-# --- Step 9: build the watcher's SLOT the same way the watcher does. --------
-# _ci_slug / _ci_watch_key live in scripts/_notify.sh — THE single
-# implementation of both recipes, sourced here exactly as ci_watch_once.sh
-# sources it, so the paths this message names are byte-for-byte the paths the
-# watcher will really create.
-# shellcheck source-path=SCRIPTDIR
-# shellcheck source=./_notify.sh
-source "${SCRIPT_DIR}/_notify.sh" 2>/dev/null || {
-    hook_log "could not source _notify.sh"
-    exit 0
-}
-
-OWNER_REPO=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
-OWNER_REPO=${OWNER_REPO//[[:space:]]/}
-if [ -z "$OWNER_REPO" ]; then
-    hook_log "could not resolve owner/repo via gh in $CWD; skipping"
-    exit 0
-fi
-
-KEY=$(_ci_watch_key "$OWNER_REPO" "$BRANCH" 2>/dev/null) || {
-    hook_log "could not compute the watcher key for $OWNER_REPO#$BRANCH; skipping"
-    exit 0
-}
-SLUG=$(_ci_slug "$BRANCH")
-
-# --- Step 10: emit the launch instruction (additionalContext ONLY). ---------
+# --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
 # The opening sentence names what just happened; the rest is identical for all
-# three triggers apart from the mode and the task-id filename's kind segment.
+# three triggers apart from the mode.
 case "$ACTION" in
     push) lead="A \`git push\` to '${BRANCH}' with an open PR just succeeded." ;;
     create) lead="A \`gh pr create\` for '${BRANCH}' just succeeded, so its PR is open." ;;
     merge) lead="A \`gh pr merge\` of '${BRANCH}' just succeeded." ;;
 esac
 
-# The task_id only exists in the CALLING AGENT's turn, after the Bash tool call
-# returns — the watcher script can never know its own external task_id. So the
-# agent, not the script, is told to persist it; `/ci-watcher stop-all` reads
-# those files later.
 jq -n \
     --arg lead "$lead" \
     --arg branch "$BRANCH" \
     --arg kind "$KIND" \
-    --arg slug "$SLUG" \
-    --arg key "$KEY" \
     '{
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
         additionalContext: (
           $lead
           + " Launch the " + $kind + " watcher: call the Bash tool with "
-          + "`command: bash ~/.claude/skills/ci-watcher/ci_watch_once.sh "
+          + "`command: bash ~/.claude/scripts/ci_watch_once.sh "
           + $kind + " '"'"'" + $branch + "'"'"'` and `run_in_background: true` "
           + "(no explicit `timeout` override — this watcher ends only on a real "
-          + "CI result, not a time box). Immediately after the call returns its "
-          + "`task_id`, write it verbatim (atomic mktemp-in-`/tmp`-then-mv) to "
-          + "`/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID}_" + $kind + "_"
-          + $slug + "-" + $key + "`. You do not need to check for an existing "
-          + "watcher first — the script'"'"'s own lock evicts any stale one "
-          + "automatically."
+          + "CI result, not a time box). You do not need to check for an "
+          + "existing watcher first — the script'"'"'s own lock evicts any "
+          + "stale one automatically."
         )
       }
     }'
