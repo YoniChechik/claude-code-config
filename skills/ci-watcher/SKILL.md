@@ -1,386 +1,362 @@
 ---
 name: "ci-watcher"
-description: "Run the CI watcher script for the current or specified branch. One watcher per branch, several at once per session. Use `/ci-watcher stop` for the current branch, `/ci-watcher stop <branch>` for another, `/ci-watcher stop-all` for every watcher of this session."
-argument-hint: "[branch|stop [branch]|stop-all]"
+description: "Launch or stop a one-shot CI watcher for a branch. `/ci-watcher [branch]` watches the branch's PR checks, `/ci-watcher merge [branch]` watches the merge and the post-merge run, `/ci-watcher stop <branch>` stops that branch's watchers, `/ci-watcher stop-all` stops every watcher this session launched."
+argument-hint: "[branch|merge [branch]|stop <branch> [push|merge]|stop-all]"
 ---
 
-CI watcher: always-on background process that monitors CI and notifies on both failure and pass through the `Monitor` tool's stdout event stream.
-Claude must never stop the watcher on its own initiative. The watcher itself may still exit on a terminal condition (PR closed without merge, no CI on the default branch, main-CI timeout, main CI resolved) — that is fine and is not a Claude-initiated kill.
+A CI watcher is a ONE-SHOT background process: `ci_watch_once.sh push '<branch>'`
+or `ci_watch_once.sh merge '<branch>'`. It runs once, start to finish, prints its
+result on stdout, and exits. There is no daemon, no re-arm and no persistence.
 
-One session can run SEVERAL watchers at once — one per branch. Every `/tmp`
-file is keyed on a per-branch `SLOT`, so launching a watcher for `feat/b` never
-disturbs the one already watching `feat/a`.
+- **push mode** — waits for the branch's PR checks to settle, then reports once:
+  `CI passed for <branch>` / `CI FAILED for <branch>` / `No CI checks configured
+  for <branch>`, and exits.
+- **merge mode** — waits for the PR to really merge (bounded at 6h), then
+  discovers the post-merge run(s) on the default branch and reports one line per
+  run, then exits.
 
-**Tool availability:** `Monitor` and `TaskStop` are deferred tools in this harness. If they are not already available, load them first with `ToolSearch` query `select:Monitor,TaskStop`.
+The two modes are independent. A push watcher and a merge watcher for the SAME
+branch run side by side and never disturb each other, because every `/tmp` file
+is keyed on `(owner/repo, branch, kind)` — see "the KEY" below.
 
-# **CRITICAL RULE: DO NOT KILL THE CI WATCHER AUTOMATICALLY**
+One session can hold SEVERAL watchers at once: several branches, and both kinds
+per branch. Launching one never disturbs another.
 
-**THE CI WATCHER MUST NEVER BE KILLED BY CLAUDE ON ITS OWN.** This is an absolute rule with no exceptions:
+**Tool availability:** `TaskStop` is a deferred tool in this harness. If it is
+not already available, load it first with `ToolSearch` query `select:TaskStop`.
 
-- **DO NOT** kill the watcher when CI passes.
-- **DO NOT** kill the watcher when CI fails.
-- **DO NOT** kill the watcher when a PR is merged.
-- **DO NOT** kill the watcher on merge to `main`.
-- **DO NOT** kill the watcher when the feature looks "done".
-- **DO NOT** kill the watcher on any other "natural completion" event.
-- **DO NOT** call `/ci-watcher stop`, `TaskStop` on the watcher's task id, `kill <pid>`, `pkill ci_watch`, or any equivalent on your own initiative.
+# the hook launches watchers automatically
 
-**THE ONLY WAY TO STOP THE WATCHER IS AN EXPLICIT USER REQUEST**, such as the user typing `/ci-watcher stop` or giving a clear natural-language instruction like "stop the ci watcher" / "kill the ci watcher". If the user has not explicitly asked, leave it running.
+`scripts/post_tool_use__ci_watch_trigger.sh` (a `PostToolUse:Bash` hook) launches
+the right watcher on its own, with no `/ci-watcher` invocation, right after:
 
-# the SLOT: how every `/tmp` file is keyed
+- a `git push` of the current branch that already has an OPEN PR → push watcher,
+- a `gh pr create` for the current branch → push watcher,
+- a `gh pr merge` of the current branch's PR → merge watcher.
 
-- `SESSION` = `$CLAUDE_CODE_SESSION_ID` (the full UUID).
-- `IDENTITY` = `"<owner>/<repo>#<branch>"`, raw and unsanitized.
-- `IDENTITY_HASH` = the first 10 hex chars of `sha256(IDENTITY)`.
-- `BRANCH_SLUG` = `"<readable branch prefix>-<IDENTITY_HASH>"`.
-- `SLOT` = `"${SESSION}_${BRANCH_SLUG}"`, and the files are
-  `/tmp/ci_watch_state_<SLOT>`, `/tmp/ci_watch_lock_<SLOT>`,
-  `/tmp/ci_watch_pr_<SLOT>`, `/tmp/ci_watch_task_<SLOT>` and
-  `/tmp/ci_watch_<SLOT>.log`.
+## the trigger contract is INTENTIONALLY narrow
 
-The hash, not the readable prefix, is what makes the slot unique. `owner/repo`
-is folded in because a branch name alone is not a watcher identity: one session
-can `cd` between worktrees of two repos that both have a branch called `main`.
+A hook cannot reliably parse arbitrary shell, so it does not try. It triggers
+ONLY on the simple forms whose target is unambiguously "the current branch of the
+repo at the hook's own cwd", and silently skips everything else:
 
-`_ci_slot` in `~/.claude/scripts/_notify.sh` is THE single bash implementation
-of this recipe, and the block below sources that file and calls it. Never
-re-inline the `shasum` / `tr` / `cut` pipeline here — a second bash copy would
-drift from the one the tests cross-check against `ci_watch.py`.
+- bare `git push`, `git push -f`, `git push --force[-with-lease]`, or
+  `git push <remote> <currentbranch>`. Skipped: `git -C <dir> push`, any
+  `src:dst` refspec, a branch delete, a multi-ref push, any other flag, and a
+  push whose output says `Everything up-to-date`.
+- bare `gh pr create`, or `gh pr create --head <currentbranch>`. Skipped:
+  `--repo`, a positional argument, a differing `--head`.
+- bare `gh pr merge` or `gh pr merge --auto`. Skipped: `--repo` and any explicit
+  PR number, URL or branch selector.
+- Anything that is not ONE simple command (a `&&` chain, a pipeline, a command
+  substitution, a redirect) is skipped, and so is any command that did not exit
+  0 or that carries `-h`/`--help`.
 
-One more file is SESSION-level, with no branch component:
-`/tmp/ci_watch_finished_<SESSION>` collects every PR that merged AND went green
-on post-merge CI. `ci_watch.py` appends to it; `status_line.sh` renders it. No
-path in this skill writes or deletes it.
+This is a deliberate limitation, not a gap to close: a wrong-target watch is far
+worse than no watch. **The manual commands below are the fallback** whenever the
+hook did not fire.
 
-Run this block FIRST in every flow below — launch, `stop`, and `stop <branch>`.
-Run it from the repo directory whose branch you are targeting: `owner/repo` is
-resolved with `gh repo view` from the CURRENT directory, so `stop <branch>` run
-from repo A can never derive the slot of a watcher launched in repo B. It would
-report "nothing to stop" for a watcher that is very much alive. Use
-`/ci-watcher stop-all` when you cannot reach the right repo directory.
+# RULE: never stop a watcher on your own initiative
 
-The block prints the branch it resolved (`BRANCH=`). Use THAT value everywhere
-below — it is whitespace-stripped, exactly as `ci_watch.py` strips its own
-branch argument, and an unstripped copy would hash to a different slot:
+Never run `/ci-watcher stop`, `/ci-watcher stop-all`, `TaskStop` on a watcher's
+task id, `kill`, or any equivalent, unless the USER explicitly asked for it —
+by typing `/ci-watcher stop` or saying something like "stop the ci watcher".
+
+A watcher needs no supervision. It reaches a real end state on its own (CI
+verdict, no checks, PR closed, post-merge runs reported, merge-wait timeout,
+persistent error) and exits by itself the instant it has that result. There is
+nothing to protect it from and nothing to tidy up after it.
+
+Relaunching is not a kill: launching a new watcher of the same kind for the same
+branch is always safe. The new one evicts the stale one through the lock
+protocol, automatically.
+
+# the KEY: how every `/tmp` file is keyed
+
+- `OWNER_REPO` = `<owner>/<repo>`, from `gh repo view` in the CURRENT directory.
+- `KEY` = the first 10 hex chars of `sha256("<owner>/<repo>#<branch>")`.
+- `SLUG` = the branch name, made filename-safe and cut to 40 chars.
+- `KIND` = the literal string `push` or `merge`.
+
+The KEY is GLOBAL — it carries no session id. A watcher for a branch is the same
+watcher in every session and every terminal on the machine, which is exactly why
+a stale one can always be superseded.
+
+The four files per `(kind, branch, repo)`:
+
+- `/tmp/ci_watch2_lock_<kind>_<slug>-<KEY>` — the `lockf(1)` lock file itself.
+  The kernel holds this lock for exactly as long as the watcher body runs, and
+  releases it the instant the holder dies by ANY means. It is the single source
+  of truth for "is a watcher of this kind running for this branch".
+- `/tmp/ci_watch2_pid_<kind>_<slug>-<KEY>` — INFORMATIONAL only:
+  `pgid=<pgid> start=<epoch> session=<session id>`. It exists to AIM an eviction
+  signal, never to decide whether the lock is held. A stale, wrong or missing
+  value costs at worst a wasted or missing signal.
+- `/tmp/ci_watch2_<kind>_<slug>-<KEY>.log` — the diagnostic log. Every `gh`/`git`
+  line goes here; stdout carries the notification lines alone.
+- `/tmp/ci_watch2_task_<SESSION>_<kind>_<slug>-<KEY>` — per-session bookkeeping:
+  the Bash background `task_id` of the watcher THIS session launched. Only
+  `/ci-watcher stop-all` reads it.
+
+`_ci_watch_key` and `_ci_slug` in `~/.claude/scripts/_notify.sh` are THE single
+implementation of the KEY and SLUG recipes — `ci_watch_once.sh` and the hook both
+source that file. Never re-inline the `shasum`/`tr`/`cut` pipeline here; a second
+copy would drift and would name files no watcher ever creates.
+
+Run this block FIRST in every flow below — launch, `stop` and `stop-all`. Run it
+from the repo directory whose branch you are targeting: `owner/repo` comes from
+`gh repo view` in the CURRENT directory, so a `stop` run from repo A can never
+derive the key of a watcher in repo B.
+
+Use the printed `BRANCH=`, `SLUG=` and `KEY=` values verbatim below — `BRANCH` is
+whitespace-stripped exactly as `ci_watch_once.sh` strips its own argument, and an
+unstripped copy would hash to a different KEY:
 
 ```bash
-# Guard: without a session id every path collapses to /tmp/ci_watch_*_ and one
-# session would read (or stop) another session's watcher.
-if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
-    echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot key the ci watcher files." >&2
-    exit 1
-fi
-# BRANCH: preset it for `stop <branch>`; otherwise the current branch is used.
-# Inline a user-supplied branch as a SINGLE-quoted literal (BRANCH='feat/x'),
-# never through double quotes — see the quoting rule in step 2.
+# BRANCH: preset it for an explicit branch argument; otherwise use the current
+# branch. Inline a user-supplied branch as a SINGLE-quoted literal
+# (BRANCH='feat/x'), never through double quotes — see the quoting rule in the
+# launch step.
 BRANCH="${BRANCH:-$(git branch --show-current)}"
-# Strip leading/trailing whitespace, exactly as ci_watch.py does to sys.argv[1].
-# A pasted branch name with a trailing space would otherwise hash HERE to a slot
-# the watcher itself never computes, and every liveness check would miss it.
+# Strip leading/trailing whitespace, exactly as ci_watch_once.sh does to $2. A
+# pasted branch name with a trailing space would otherwise hash HERE to a key
+# the watcher itself never computes, and every lock and stop would miss it.
 BRANCH="${BRANCH#"${BRANCH%%[![:space:]]*}"}"
 BRANCH="${BRANCH%"${BRANCH##*[![:space:]]}"}"
 if [[ -z "$BRANCH" ]]; then
     echo "Error: no branch resolved; cannot key the ci watcher files." >&2
     exit 1
 fi
-# THE single bash implementation of the slot recipe. owner/repo is part of the
-# identity, so two worktrees of different repos that share a branch name still
-# get two distinct slots. _ci_slot fails loudly if the hash cannot be computed.
+# THE single bash implementation of the KEY and SLUG recipes. owner/repo is part
+# of the identity, so two worktrees of different repos that share a branch name
+# still get two distinct keys. _ci_watch_key fails loudly if the hash cannot be
+# computed.
 # shellcheck source=/dev/null
 source ~/.claude/scripts/_notify.sh
-SLOT=$(_ci_slot "$CLAUDE_CODE_SESSION_ID" \
-    "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$BRANCH") || exit 1
-echo "SESSION=${CLAUDE_CODE_SESSION_ID}"
+OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+KEY=$(_ci_watch_key "$OWNER_REPO" "$BRANCH") || exit 1
+SLUG=$(_ci_slug "$BRANCH")
 echo "BRANCH=${BRANCH}"
 echo "DIR=$(pwd)"
-echo "SLOT=${SLOT}"
-# Monitor task id for THIS slot only, or NONE. Other branches' watchers in the
-# same session are never read and never touched here.
-cat "/tmp/ci_watch_task_${SLOT}" 2>/dev/null || echo NONE
+echo "SLUG=${SLUG}"
+echo "KEY=${KEY}"
 ```
-
-# stale task-id handling
-
-`/tmp/ci_watch_task_<SLOT>` holds the `Monitor` task id of ONE branch's watcher.
-The stored id can point at a task whose underlying process already exited on its
-own (terminal condition) or crashed. Never trust the file's contents without a
-liveness check first.
-
-The liveness check is the PID lockfile — the same signal `status_line.sh` and
-`_notify.sh` use. Prepend the slot from the block above as a single-quoted
-literal, e.g. `SLOT='4f1c2b90-…_feat_my-branch-9a1b2c3d4e' bash -c '…'`:
-```bash
-# Guard: the lockfile is keyed on the full SLOT. Without it the path collapses
-# to /tmp/ci_watch_lock_ and the check reports another watcher's state.
-if [[ -z "${SLOT:-}" ]]; then
-    echo "Error: SLOT is unset; run the slot block first." >&2
-    exit 1
-fi
-# Read the PID the watcher wrote into its lockfile, then confirm that PID is
-# still a live ci_watch process (ps args must contain "ci_watch"). Prints
-# ALIVE, MUTE (alive, but its notifications reach nobody) or DEAD.
-LOCK="/tmp/ci_watch_lock_${SLOT}"
-STATE="/tmp/ci_watch_state_${SLOT}"
-# First line only: ci_watch.py writes its pid at offset 0 and truncates right
-# after, so a longer predecessor's tail can briefly follow the live pid.
-PID=$(head -n 1 "$LOCK" 2>/dev/null || echo "")
-if [[ -n "$PID" ]] && ps -p "$PID" -o args= 2>/dev/null | grep -q ci_watch; then
-    if grep -q ':monitor-detached@' "$STATE" 2>/dev/null; then
-        echo "MUTE $PID"
-    else
-        echo "ALIVE $PID"
-    fi
-else
-    echo "DEAD"
-fi
-```
-
-Then:
-- **DEAD** — the stored task id is stale. Call `TaskStop` on it anyway (best
-  effort). A "task not found" / "already finished" error is EXPECTED here: ignore
-  it, do NOT treat it as a launch failure. Then delete the task-id file.
-- **MUTE `<PID>`** — the process runs but its stdout writes fail, so no CI
-  result will ever reach you again. Treat it exactly like **ALIVE** here, then
-  relaunch it (step 2) and tell the user why; a relaunch is not a Claude-
-  initiated kill.
-- **ALIVE** — call `TaskStop` on the id for real, then confirm both the Monitor
-  task reports stopped AND the PID from the lockfile is gone: re-run the check
-  above at 1s intervals, **at most 10 times**. The loop is bounded on purpose —
-  an unbounded wait would wedge `/ci-watcher stop` and every relaunch forever.
-  - It prints `DEAD` within 10 tries — delete the task-id file and continue.
-  - It still prints `ALIVE <PID>` after 10 tries — `TaskStop` did not kill the
-    real process. Do NOT loop again and do NOT launch a second watcher. Report
-    to the user that the watcher survived `TaskStop`, give them the PID, and
-    stop. Killing it is an explicit user decision (see the CRITICAL RULE).
-
-This handling is always scoped to ONE slot. Applying it to `feat/a`'s watcher
-never reads, stops, or deletes anything belonging to `feat/b`'s watcher.
 
 # step 0: handle `stop` and `stop-all`
 
-## `/ci-watcher stop` and `/ci-watcher stop <branch>`
+Both stop watchers and exit — do NOT launch anything afterwards. Run either one
+ONLY on an explicit user request (see the RULE above).
 
-Both stop exactly ONE watcher and exit — do NOT launch anything.
+## `/ci-watcher stop <branch> [push|merge]`
 
-- No further argument: the CURRENT branch's watcher. Run the slot block with no
-  `BRANCH` preset.
-- `stop <branch>`: that branch's watcher. Run the slot block with
-  `BRANCH='<branch>'` preset as a single-quoted literal.
+This signals the recorded OS process group directly, read from `PIDFILE`. It is
+CROSS-SESSION by design: `PIDFILE` ownership is not scoped to a session, so this
+stops the branch's watcher whichever session launched it — which is the point,
+since a stale watcher is stale everywhere.
 
-The slot block prints the stored task id (or `NONE`) on its last line.
+Run the KEY block with `BRANCH='<branch>'` preset. Then, for BOTH kinds (or only
+the one kind the user named):
 
-If it is `NONE`, the task id is missing — but a watcher may still be running
-(the `/tmp` file can be reaped, or the session can have crashed between
-`Monitor` returning and the id being persisted). Do NOT report "nothing to stop"
-yet. Run the liveness check above first:
-- **DEAD** — there really is nothing to stop for that branch. Report that and exit.
-- **ALIVE `<PID>`** — a watcher is running with no recoverable task id. Kill it
-  by PID instead, then confirm with the same bounded re-check (1s intervals, at
-  most 10 tries):
 ```bash
-# PID is the number from the ALIVE line above. `:?` fails loud rather than
-# running `kill ""` if this block is ever run on its own.
-kill "${PID:?run the liveness check first and pass its PID}"
+# KIND is 'push' or 'merge'. Repeat this block once per kind to stop.
+PIDFILE="/tmp/ci_watch2_pid_${KIND:?}_${SLUG:?run the KEY block first}-${KEY:?}"
+LOCKFILE="/tmp/ci_watch2_lock_${KIND}_${SLUG}-${KEY}"
+# Nothing holds the lock -> there is no watcher of this kind. Say so and stop.
+if lockf -t 0 -k "$LOCKFILE" true 2>/dev/null; then
+    echo "NOT-RUNNING ${KIND}"
+    exit 0
+fi
+# The lock IS held. Read the pgid the holder recorded for us to aim at.
+PGID=$(tr ' ' '\n' <"$PIDFILE" 2>/dev/null | grep '^pgid=' | head -n 1)
+PGID=${PGID#pgid=}
+case "$PGID" in '' | *[!0-9]*) PGID="" ;; esac
+if [[ -z "$PGID" ]]; then
+    # Residual limitation, identical to the lock design's own eviction path:
+    # with no recorded target there is NOTHING to signal. All we can do is poll
+    # the lock and hope the holder finishes on its own.
+    echo "NO-TARGET ${KIND} (pid file missing or stale; polling the lock only)"
+else
+    # Negative pgid: the signal reaches the watcher, its lockf parent and every
+    # gh child in one shot.
+    kill -TERM -- -"$PGID" 2>/dev/null
+fi
+# The lock CLEARING is the only authoritative proof the watcher is gone — never
+# a guess about whether some (possibly reused) pgid is still alive. Poll it for
+# 10 seconds, then escalate.
+for _ in $(seq 1 10); do
+    lockf -t 0 -k "$LOCKFILE" true 2>/dev/null && { echo "STOPPED ${KIND}"; exit 0; }
+    sleep 1
+done
+if [[ -n "$PGID" ]]; then
+    kill -KILL -- -"$PGID" 2>/dev/null
+    for _ in $(seq 1 5); do
+        lockf -t 0 -k "$LOCKFILE" true 2>/dev/null && { echo "KILLED ${KIND}"; exit 0; }
+        sleep 1
+    done
+fi
+echo "STILL-HELD ${KIND}"
 ```
-  If it still reports `ALIVE` after 10 tries, report the surviving PID to the
-  user and stop; do not escalate to `kill -9` on your own initiative.
 
-Otherwise (the last line is a task id) apply the stale-task-id handling above
-for that slot, then remove that slot's file:
+Report one line per kind: stopped / killed / not running / still held. If a kind
+reports `NO-TARGET` and then `STILL-HELD`, tell the user plainly: the watcher is
+alive, `PIDFILE` names no process to signal, so it was left to finish on its own.
+
+Then drop this session's task-id files for that branch, if any — they can only be
+stale now:
+
 ```bash
-rm -f "/tmp/ci_watch_task_${SLOT:?run the slot block first}"
+rm -f "/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID:?}_push_${SLUG:?}-${KEY:?}" \
+      "/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID}_merge_${SLUG}-${KEY}"
 ```
-Exit without launching.
 
 ## `/ci-watcher stop-all`
 
-Stops EVERY watcher of this session. Enumerate the slots first — the union of
-the task-id, lock and state files, so a watcher whose task-id file was reaped
-(or was never written, because the session died before `Monitor` returned) is
-still found through its lock or state file:
+Stops every watcher THIS SESSION launched, and nothing else. It works only
+through this session's own task-id files, so it can never reach into another
+session's currently-owned watcher — not even one this session originally launched
+and that a newer session has since superseded.
+
 ```bash
 # Guard: without a session id the glob would match every session's files.
 if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     echo "Error: CLAUDE_CODE_SESSION_ID is unset; cannot enumerate ci watchers." >&2
     exit 1
 fi
-# Three independent discovery sources, de-duplicated. `sort -u` collapses a slot
-# that shows up in more than one of them.
-for kind in task lock state; do
-    for f in "/tmp/ci_watch_${kind}_${CLAUDE_CODE_SESSION_ID}"_*; do
-        # An unmatched glob stays literal in bash, so skip anything that is not
-        # a REGULAR file rather than echoing the pattern as a slot. -f (not -e)
-        # also keeps a FIFO planted in the shared /tmp out of the list.
-        [ -f "$f" ] || continue
-        printf '%s\n' "${f##*/ci_watch_${kind}_}"
-    done
-done | sort -u
+# An unmatched glob stays literal in bash, so the -f guard is what drops it.
+for f in "/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID}"_*; do
+    [ -f "$f" ] || continue
+    printf '%s\t%s\n' "${f##*/}" "$(cat "$f")"
+done
 ```
-Then, for EACH slot printed, apply the stale-task-id handling above with that
-`SLOT` (liveness check, `TaskStop` on the stored id if there is one, otherwise
-`kill "$PID"`, confirm gone, `rm -f` the task-id file). Report one summary line
-per slot: stopped / already dead / survived. Exit without launching.
 
-# step 1: parse branch name from user input
+For EACH line, call `TaskStop` on that task id, one by one. A task that already
+finished on its own is inert — `TaskStop` on it is a harmless no-op, and a "task
+not found" / "already finished" error is EXPECTED: ignore it, never treat it as a
+failure. Then delete that file:
+
+```bash
+rm -f "/tmp/<the task file name from the listing above>"
+```
+
+Report one summary line per file. Exit without launching.
+
+**Accepted limitation:** stale task-id files are never garbage-collected in the
+background. They are only cleaned up opportunistically — when `/ci-watcher` runs
+again in this session (a launch overwrites that key's file, `stop`/`stop-all`
+deletes them). A very long-lived session can accumulate a few inert files in
+`/tmp`; that is known and accepted, not an oversight.
+
+# step 1: parse the arguments
 
 ## user input
 "$ARGUMENTS"
 
-## parse branch name
-If user input is provided- determine branch name from it. If not, determine the current branch:
+## parse
+- `stop` / `stop-all` → step 0 above.
+- First word `merge` → merge mode; the branch is the SECOND word, if given.
+- Otherwise → push mode; the branch is the first word, if given.
+- No branch given → the current branch:
 ```bash
 git branch --show-current
 ```
 
-# step 2: launch the CI watcher
+# step 2: launch the watcher
 
-Run the slot block first (top of this file). It prints `SESSION`, `DIR`, `SLOT`
-and the existing task id for this branch's slot.
+Use this for a push-mode launch (`/ci-watcher [branch]`) and for a merge-mode
+launch (`/ci-watcher merge [branch]`) alike — only the mode word changes. Both
+are FALLBACKS: normally the hook has already launched the watcher. Launch
+manually when the hook did not fire (a command outside its trigger contract), or
+when the user wants a forced relaunch, or — for merge mode — when the PR was
+merged outside this session and no `gh pr merge` ever ran here.
 
-Take the branch name from step 1 (the output of `git branch --show-current`, or
-the user's argument). Never re-echo it through another double-quoted shell
-string — see the quoting rule below.
+Run the KEY block first. You do NOT need to check for an existing watcher: the
+script's own lock evicts a stale one of the same kind automatically.
 
-If the task id is not `NONE`, apply the stale-task-id handling above BEFORE
-launching. It targets ONLY this branch's slot: relaunching for `feat/b` never
-evicts the watcher that is already running for `feat/a`.
+Then make a single **Bash** tool call:
 
-Then make a single `Monitor` call:
+- `command` (template — `<DIR>`, `<MODE>` and `<BRANCH>` are placeholders you
+  replace with the literal values, NOT shell variables):
 
-- `command` (template — `<DIR>`, `<SESSION>`, `<BRANCH>` and `<SLOT>` are
-  placeholders you replace with the literal values, NOT shell variables):
+  `cd '<DIR>' && bash ~/.claude/skills/ci-watcher/ci_watch_once.sh <MODE> '<BRANCH>'`
 
-  `cd '<DIR>' && exec env CLAUDE_CODE_SESSION_ID='<SESSION>' uv run ~/.claude/skills/ci-watcher/ci_watch.py '<BRANCH>' 2>>'/tmp/ci_watch_<SLOT>.log'`
-
-- `description`: `CI status for branch <BRANCH>`
-- `persistent`: `true`
-- `timeout_ms`: `3600000` (required by the schema; ignored when `persistent` is true)
+- `run_in_background`: `true`
+- NO explicit `timeout` override — this watcher ends only on a real CI result,
+  not on a time box.
 
 Fully substituted example — this is the shape the tool call must have:
 
 ```
-cd '/Users/me/code/myrepo' && exec env CLAUDE_CODE_SESSION_ID='4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11' uv run ~/.claude/skills/ci-watcher/ci_watch.py 'feat/my-branch' 2>>'/tmp/ci_watch_4f1c2b90-1c3d-4a55-9e21-7b6a0d5e8c11_feat_my-branch-9a1b2c3d4e.log'
+cd '/Users/me/code/myrepo' && bash ~/.claude/skills/ci-watcher/ci_watch_once.sh push 'feat/my-branch'
 ```
 
 Never pass the template through verbatim. A shell expands an unset `$DIR` to the
 empty string, `cd ''` **succeeds silently**, and the watcher then starts in an
-arbitrary directory with an empty session id and exits 2 — to stderr, so you
-would never see it.
+arbitrary directory, fails to resolve `owner/repo`, and exits 1.
 
 Why the command looks like that:
 
-- **cwd and session id are inlined as literals, not inherited.** `Monitor` runs
-  in the same shell environment as Bash, but neither its cwd nor its env
-  inheritance is contractually guaranteed. `ci_watch.py` exits 2 without
-  `CLAUDE_CODE_SESSION_ID`, and it shells out to `gh repo view` and
-  `git ls-remote`, which need the repo directory. Neither can be left to chance.
-  `ci_watch.py` derives the same `SLOT` itself from the session id, the branch
-  and its own `gh repo view` call, so the slot is never passed as an argument —
-  only the log path spells it out.
+- **cwd is inlined as a literal, not inherited.** `ci_watch_once.sh` shells out
+  to `gh repo view`, which resolves its repo from the process cwd. That cannot be
+  left to chance.
 - **Every interpolated value is SINGLE-quoted.** This is the security-relevant
   bullet. Git branch names may legally contain `$`, backticks, `;` and `&`, and
   the command string is executed by a shell. Double quotes stop word splitting,
   globbing, `;` and `&` — they do **not** stop `$VAR`, `` `cmd` `` or `$(cmd)`,
   so a branch named ``x`touch /tmp/pwn` `` or `x$(id)` would execute inside
-  double quotes. Only single quotes suppress every form of substitution.
-  If a value itself contains a single quote, close, escape, reopen: write `'`
-  as `'\''` (so `it's` becomes `'it'\''s'`). The log-redirect target is
-  single-quoted for the same reason, even though the slot holds only a UUID,
-  a sanitized branch slug and a hex hash.
-- **`exec` replaces the shell.** Without it, `Monitor` would track a parent shell
-  whose child is the real `uv`/python process, and `TaskStop` could kill the
-  parent while orphaning the watcher. With `exec`, the tracked process IS the
-  watcher.
-- **stderr goes to the log file.** stdout is the Monitor event stream: one line
-  = one session notification. `ci_watch.py` writes every diagnostic to stderr,
-  which is appended to `/tmp/ci_watch_<SLOT>.log` so `tail -f` debugging still
-  works. The cost is that stderr no longer shows up in `TaskOutput`. Redirect
-  stream 2 ONLY. An all-streams redirect, or any redirect of stream 1, would
-  swallow every notification and the watcher would go silent with no error.
+  double quotes. Only single quotes suppress every form of substitution. If a
+  value itself contains a single quote, close, escape, reopen: write `'` as
+  `'\''` (so `it's` becomes `'it'\''s'`).
+- **`run_in_background: true`, and the Bash tool only.** The watcher ends on a
+  real end state, which may be minutes or hours away. A background Bash task is
+  not subject to the foreground tool timeout; its stdout arrives as one
+  completion notification.
+- **stdout is the notification.** `ci_watch_once.sh` prints its result lines on
+  stdout and every diagnostic to `/tmp/ci_watch2_<kind>_<slug>-<KEY>.log`. Do not
+  redirect stream 1 — that would swallow the result and the watcher would go
+  silent with no error.
 
-Then persist the returned task id atomically so a concurrent reader never
-sees a half-written id:
+Immediately after the Bash call returns its `task_id`, write it verbatim to this
+session's task-id file, atomically, so `/ci-watcher stop-all` can find it later.
+The script can never know its own `task_id` — that value exists only here, in
+your turn — so persisting it is YOUR job, not the script's:
+
 ```bash
 # Temp file, then rename — rename is atomic on the same filesystem. The temp
 # name is per-invocation unique (mktemp), NOT a fixed ".tmp" suffix: two
-# near-simultaneous launches for the same slot would otherwise write and rename
-# the very same temp path and one could publish the other's half-written id.
-# The temp name must also NOT start with "ci_watch_task_": `stop-all` globs
-# "/tmp/ci_watch_task_<SESSION>_*", and a temp file caught by that glob would be
-# enumerated as a phantom slot.
-TASK_FILE="/tmp/ci_watch_task_${SLOT:?run the slot block first}"
-TASK_TMP=$(mktemp "/tmp/.ci_watch_tmp_task.XXXXXX")
+# near-simultaneous launches would otherwise write and rename the very same temp
+# path and one could publish the other's half-written id. The temp name must also
+# NOT start with "ci_watch2_task_": stop-all globs
+# "/tmp/ci_watch2_task_<SESSION>_*", and a temp file caught by that glob would be
+# enumerated as a phantom watcher.
+TASK_FILE="/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID:?}_${MODE:?}_${SLUG:?run the KEY block first}-${KEY:?}"
+TASK_TMP=$(mktemp "/tmp/.ci_watch2_tmp_task.XXXXXX")
 printf '%s' "<TASK_ID>" > "$TASK_TMP" && mv "$TASK_TMP" "$TASK_FILE"
 ```
 
-Persist the id BEFORE verifying the launch, never after: a watcher that is alive
-but slow to appear must still be stoppable, and an id pointing at a dead task is
-handled by the stale-task-id logic above.
+This is the same instruction the hook injects, word for word in substance, so a
+human-invoked `/ci-watcher` and a hook-triggered one behave identically.
 
-Ordering hazard, for two launches racing on ONE slot: the rename is
-last-writer-wins, while `acquire_lock` inside `ci_watch.py` lets exactly one
-watcher survive. The loser's shell can therefore publish a DEAD task id over the
-winner's. That is recoverable — a later `stop` finds the pid still alive and
-reports it — but never launch two watchers for one branch on purpose.
+Finally, tell the user one line: `CI watcher running for <branch> (<mode> mode,
+log: /tmp/ci_watch2_<kind>_<slug>-<KEY>.log)`. The watcher's own result arrives
+later, on its own, as the background task's completion notification.
 
-Finally, confirm the watcher actually came up. `ci_watch.py` can die within a
-second (branch not on the remote, missing `gh` auth, `uv` resolution failure),
-and all of those messages go to the log file, not to `TaskOutput` — so without
-this check a dead-on-arrival watcher is completely silent. Run the liveness
-check above at 1s intervals, at most 10 times (`uv` may need a moment to start):
-- **ALIVE `<PID>`** — report to the user: `CI watcher running for branch
-  <BRANCH> (PID <PID>, log: /tmp/ci_watch_<SLOT>.log)`.
-- Still **DEAD** after 10 tries — the watcher failed to start. Show the user the
-  tail of the log and stop:
+If the watcher fails immediately, its stdout says so in one line (a persistent
+`gh` error, or a lock it could not acquire). Show the user that line and the tail
+of the log:
+
 ```bash
-tail -n 20 "/tmp/ci_watch_${SLOT:?run the slot block first}.log"
+tail -n 20 "/tmp/ci_watch2_${MODE:?}_${SLUG:?run the KEY block first}-${KEY:?}.log"
 ```
-
-Note: state, PR-cache, lock, log and task-id files in `/tmp/` are all keyed on
-the per-branch `SLOT`, so a session can hold several watchers at once and each
-one's files are disjoint. The watched branch is also recorded inside the state
-file as `<branch>:<state>`. To watch an ADDITIONAL branch, just run step 2 again
-for it — nothing has to be stopped first. To replace one branch's watcher, run
-step 2 for that same branch; its own stale-task-id handling evicts only it.
 
 # behavior notes
 
-## repeated sync is BY DESIGN
+## keep fixing what the watcher reports
 
-The watcher will frequently surface "CI behind" / "branch behind" problems, and that means
-we will repeatedly need to sync. **This is intentional, not a bug.** Do NOT ignore any
-"CI behind" / branch-behind alert, and do NOT escalate it to the user. Just keep fixing and
-re-syncing every single time it comes up — however many times that is.
+A `CI FAILED` report is a job to do, not an alert to escalate. Fix the cause and
+push again — the hook launches a fresh push watcher on that push automatically.
+Do NOT ignore a failure report and do NOT hand it back to the user unfixed.
 
-## keep watching after merge
+## a post-merge failure gets its own PR
 
-After a PR is merged, **do NOT kill the watcher** (see the CRITICAL RULE above). It keeps
-watching the CI run triggered by the merge to `main` and will alert us if that post-merge
-run fails. If the post-merge `main` CI fails, fix it in a separate/new PR — never reopen or
-reuse the merged one.
-
-Once the post-merge CI goes green, `ci_watch.py` appends that PR to
-`/tmp/ci_watch_finished_<SESSION>` and the status line moves it from its own
-`PR #N | post merge: …` row into the shared `finished PRs: …` row.
-
-Every OTHER documented terminal exit (`closed`, `timeout`, `no-main-ci`,
-`no-ci-configured`, `merged-failed`) gets the same treatment, one level
-simpler: the instant `status_line.sh` sees the state file in one of these
-states, that PR's row disappears from the per-PR detail rows and its number
-is folded into one collapsed `done: #52, #53, #54` line instead — no separate
-file, no dedup step, just a render-time scan of that session's state files.
-It stays on that line for the rest of the session, however long that is.
-There is **no time-based expiry anywhere** in this rendering: a PR that
-finished 10 minutes into the session is exactly as finished 5 hours later, so
-nothing is ever dropped for being "too old". A watcher that dies without a documented exit (a crash, not a graceful stop,
-detected when its lockfile's pid is no longer alive) is a different case: it
-keeps its own `⚠ ci watcher died` row forever instead of collapsing, since a
-crash needs attention and never resolves itself.
-
-Nothing ever prunes the on-disk files, so the two remaining bounds are:
-the `finished PRs: …` row reads only the last 200 lines of its file, dedupes
-on `(repo, number)` and shows the 10 newest PRs; the `done: …` line has no
-count limit on which PRs qualify, only on how many are actually printed —
-past `MAX_TERMINAL_SUMMARY_ITEMS` (12) the newest are shown and the rest fold
-into a trailing `+N more`. Rows of watchers that are still running (or that
-died without a documented exit) are never dropped, capped, or aged out.
+If merge-mode reports `Post-merge CI FAILED`, fix it in a separate, NEW PR. Never
+reopen or reuse the merged one.

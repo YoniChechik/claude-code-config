@@ -54,5 +54,10 @@ EOF
 ### Step 4: PR Success Confirmation
 - Display created PR URL
 
-### Step 5: Launch CI Watcher
-Invoke the `/ci-watcher` skill to monitor CI for the current branch.
+### Step 5: CI Watcher (automatic)
+The `PostToolUse` hook `post_tool_use__ci_watch_trigger.sh` launches a push-mode
+CI watcher for the branch the instant `gh pr create` succeeds. Do NOT invoke
+`/ci-watcher` yourself — the hook's own instruction tells you how to start it.
+
+Fallback: if no watcher launch instruction arrives shortly after the PR is
+created, run `/ci-watcher <branch>` manually for that branch.
