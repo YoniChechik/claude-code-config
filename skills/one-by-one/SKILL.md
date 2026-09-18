@@ -1,6 +1,6 @@
 ---
 name: "one-by-one"
-description: "Present a list one item at a time, every item numbered. User says 'next' or 'go' to advance, or asks a question to stay on the item. Claude's own questions favor numbered alternatives, yes/no, or 'go' for a stated default, to keep replies short. Uses the adhd-structure skill to format each item's content. Logs answers without acting until every item is resolved, and survives interruptions (subagent/monitor notifications) by logging them too and reprinting the pending question."
+description: "Present a list one item at a time, every item numbered. User says 'next' to advance, or asks a question to stay on the item. Claude's own questions favor numbered alternatives, yes/no, or 'go' for a stated default, to keep replies short. Uses the adhd-structure skill to format each item's content. Logs answers without acting until every item is resolved, and survives interruptions (subagent/monitor notifications) by logging them too and reprinting the pending question."
 argument-hint: "[topic]"
 ---
 
@@ -12,8 +12,8 @@ Pace a multi-item answer. One item per turn. Every item is numbered, start to fi
 
 1. One short line: what this is about.
 2. Numbered list of item names only — no content yet.
-3. Stop. Wait for "next" or "go".
-4. On "go", write that item using the adhd-structure format (1-line summary → 5-line version → deeper detail on request). Keep its number in view (e.g. "Item 2 of 5").
+3. Stop. Wait for "next".
+4. On "next", write that item using the adhd-structure format (1-line summary → 5-line version → deeper detail on request). Keep its number in view (e.g. "Item 2 of 5").
 5. If the item is a real decision/question, end it with a short recommendation and the lowest-effort way to answer (see "Claude's questions"). If the item is purely informational (nothing to decide), skip the recommendation entirely — just present the information.
 6. End the item with: "Say 'next' for the next one" — or, if it asked a question, with that question instead.
 7. Anything else — pushback, a question, "explain more" — means stay on this item. Answer it directly. "Next" is the only advance word; saying it closes the current item AS-IS (whatever state it's in after the discussion — accepted, revised, whatever was last said) and moves to the next one. There is no separate accept-then-advance step: reaching "next" IS the approval, nothing more to confirm.
