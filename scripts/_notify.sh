@@ -123,6 +123,38 @@ _ci_slot() {
     printf '%s_%s-%s' "$session_id" "$(_ci_slug "$branch")" "$identity_hash"
 }
 
+# --- CI watcher key (the one-shot ci_watch_once.sh watchers) ----------------
+# The GLOBAL, session-independent identity of one watched branch:
+#   KEY = first 10 hex chars of sha256("<owner>/<repo>#<branch>")
+# Same hash recipe as _ci_slot above, minus the session-id component, because a
+# one-shot watcher is keyed on (owner/repo, branch, kind) across every session
+# and terminal on the machine, not per session.
+#
+# It returns ONLY the hash. It takes no `kind` argument: each caller composes
+# its own filename as "<component>_<kind>_<slug>-<KEY>", where <slug> is
+# _ci_slug "$branch". One shared hash function; kind-scoping lives in the
+# filename convention, never in duplicated hashing logic.
+#
+# Args: <owner/repo> <branch>.
+_ci_watch_key() {
+    local name_with_owner="$1" branch="$2"
+    local identity_hash
+    identity_hash=$(printf '%s' "${name_with_owner}#${branch}" \
+        | shasum -a 256 | cut -c1-10)
+    # Validate rather than trust: shasum is a perl script, not a coreutils
+    # binary, and is absent on many minimal images. An empty hash would build a
+    # key no watcher ever owns, so every lock, eviction and stop would silently
+    # target files that do not exist.
+    case "$identity_hash" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+        *)
+            echo "Error: could not compute the ci watcher identity hash (is shasum installed?)." >&2
+            return 1
+            ;;
+    esac
+    printf '%s' "$identity_hash"
+}
+
 # Echo the path of every EXISTING ci_watch state file belonging to session $1,
 # one per line — i.e. one line per watcher the session is currently running.
 # THE single discovery implementation: status_line.sh calls this, so "which
