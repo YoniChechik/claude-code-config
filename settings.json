@@ -65,7 +65,7 @@
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__pr_ci_reminder.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__ci_watch_trigger.sh",
             "suppressOutput" : true,
             "type" : "command"
           }
