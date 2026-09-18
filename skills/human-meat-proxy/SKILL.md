@@ -1,5 +1,5 @@
 ---
-name: "human-action-needed"
+name: "human-meat-proxy"
 description: "Use whenever a task might require a human-only action — approving an OAuth/app install, clicking a payment or install confirmation, revealing/copying a one-time credential, solving a CAPTCHA, or anything else Shopify/GCP/etc. structurally require a real logged-in human for. Do the entire task yourself first via Chrome MCP, right up to the blocked step, and only then ask — with the browser already sitting on the exact page, and the ask trimmed to the 1-2 clicks left."
 ---
 
