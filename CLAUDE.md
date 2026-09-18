@@ -1,24 +1,29 @@
 # CORE GUIDELINES
 
-- The current year is 2026 (August at the time of writing).
+1. The current year is 2026 (September at the time of writing).
+2. Be concise. No unnecessary detail.
+3. COMMIT AND PUSH FREQUENTLY!
+4. NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
+5. THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
+6. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
+7. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
+8. When working on feature- make sure you used `/create-worktree` or `/cd-permanent` to work inside the worktree (`<repo-root>/.claude/worktrees/<branch>`). NEVER work directly in the base repo directory.
+9.  NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
+10. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
+11. Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758) — e.g. `except jwt.PyJWTError, KeyError:` is VALID; parens are only required when binding via `as` — so NEVER "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which FALSELY flags it as a SyntaxError.
+12. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
+13. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
+14. Never use legacy or deprecated libraries/ dependencies.
+15. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
 
-1. Be concise. No unnecessary detail.
-2. COMMIT AND PUSH FREQUENTLY!
-3. NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
-4. THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
-5. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
-6. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
-7. When working on feature- make sure you used `/create-worktree` or `/cd-permanent` to work inside the worktree (`<repo-root>/.claude/worktrees/<branch>`). NEVER work directly in the base repo directory.
-8. NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
-9. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
-10. Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758) — e.g. `except jwt.PyJWTError, KeyError:` is VALID; parens are only required when binding via `as` — so NEVER "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which FALSELY flags it as a SyntaxError.
-11. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
-12. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
+
+# FEATURE DEVELOPMENT
+
+95% of the time, the user will ask you to implement a feature. use "/new-feature" skill.
+The other 5% of the time we will start with a debug seession / code analysis / literature review - but those will almost certainly lead to a feature implementation. In those cases, use the "/new-feature" skill after the debug/analysis/research is done.
 
 
 # USER FACING BEHAVIOR
-
-## ASD-STE100 Simplified Technical English
 
 Always respond using ASD-STE100 Simplified Technical English. It is a controlled writing standard. Aerospace and defense groups made it. It helps people write clear technical text.
 
@@ -68,8 +73,6 @@ The goal is easy reading. Many readers are not native English speakers. Clear te
    - Forbidden closers: "Let me know if you need anything else," "Hope this helps," "Happy to clarify," "Feel free to ask."
    - Start with the answer. End when the answer is done.
 
-
-- **Real ambiguity in the request.** One short clarifying question beats guessing and rewriting.
 
 # RTK
 

@@ -52,4 +52,4 @@ expected, harmless relaunch/eviction, not a race).
   fixing, then stop.
 
 ### Step 8: Summary
-Report a summary of what the feature is, how we implemented it, and what happened at all post-implementation steps (including whether it merged).
+Report a summary of what the feature is, how we implemented it, and what happened at all post-implementation steps (including whether it merged) — use the `/adhd-structure` skill.
