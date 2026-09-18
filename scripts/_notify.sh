@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 
-# Base directory for the CI watcher state/lock files and the session-name
+# Base directory for the CI watcher lock/pid files and the session-name
 # sidecar. Defaults to /tmp; overridable (mainly for tests) so these paths can
-# be redirected without touching the real /tmp. Mirrors ci_watch.py's TMP_DIR
-# constant.
+# be redirected without touching the real /tmp.
 : "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
 
 # --- Session name (the /session-name skill's per-session label) --------------
@@ -81,19 +80,16 @@ _session_name_read() {
     _sanitize_and_cap "$raw"
 }
 
-# --- CI watcher slots -------------------------------------------------------
-# One session runs one watcher PER BRANCH, and every /tmp file of a watcher is
-# keyed on that watcher's SLOT:
-#   SLOT = "<session id>_<branch slug>-<identity hash>"
-# The identity hash is the first 10 hex chars of sha256("<owner>/<repo>#<branch>").
-# It, not the readable branch slug, is what makes the slot unique — folding in
-# owner/repo is what stops two worktrees of DIFFERENT repos that share a branch
-# name from sharing a slot.
+# --- CI watcher key components ----------------------------------------------
+# Every ci_watch_once.sh watcher's /tmp files are keyed on
+# "<component>_<kind>_<slug>-<KEY>", where <slug> is the readable branch slug
+# below and <KEY> is _ci_watch_key's identity hash. The hash, not the slug, is
+# what makes the key unique — folding owner/repo into it is what stops two
+# worktrees of DIFFERENT repos that share a branch name from colliding.
 
 # The readable branch slug: every BYTE outside [A-Za-z0-9._-] becomes "_",
-# capped at 40 bytes. LC_ALL=C forces tr and cut into byte mode so this matches
-# ci_watch.py's sanitize_branch() exactly — a codepoint-vs-byte disagreement on
-# a non-ASCII branch name would desync the two languages' slots.
+# capped at 40 bytes. LC_ALL=C forces tr and cut into byte mode so a non-ASCII
+# branch name can't desync a codepoint count from a byte count.
 _ci_slug() {
     # The $( ) strips cut's line terminator, so the slug carries no trailing
     # newline for a caller that does not wrap it in a command substitution of
@@ -101,34 +97,11 @@ _ci_slug() {
     printf '%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40)"
 }
 
-# Build a full SLOT. Args: <session id> <owner/repo> <branch>.
-# THE single bash implementation: skills/ci-watcher/SKILL.md sources this file
-# and calls this function. Do not re-inline the pipeline anywhere.
-_ci_slot() {
-    local session_id="$1" name_with_owner="$2" branch="$3"
-    local identity_hash
-    identity_hash=$(printf '%s' "${name_with_owner}#${branch}" \
-        | shasum -a 256 | cut -c1-10)
-    # Validate rather than trust: shasum is a perl script, not a coreutils
-    # binary, and is absent on many minimal images. An empty hash would build a
-    # slot no watcher ever owns, and every liveness check, stop and launch would
-    # then target files that do not exist — silently.
-    case "$identity_hash" in
-        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-        *)
-            echo "Error: could not compute the ci watcher identity hash (is shasum installed?)." >&2
-            return 1
-            ;;
-    esac
-    printf '%s_%s-%s' "$session_id" "$(_ci_slug "$branch")" "$identity_hash"
-}
-
 # --- CI watcher key (the one-shot ci_watch_once.sh watchers) ----------------
 # The GLOBAL, session-independent identity of one watched branch:
 #   KEY = first 10 hex chars of sha256("<owner>/<repo>#<branch>")
-# Same hash recipe as _ci_slot above, minus the session-id component, because a
-# one-shot watcher is keyed on (owner/repo, branch, kind) across every session
-# and terminal on the machine, not per session.
+# A one-shot watcher is keyed on (owner/repo, branch, kind) across every
+# session and terminal on the machine, not per session.
 #
 # It returns ONLY the hash. It takes no `kind` argument: each caller composes
 # its own filename as "<component>_<kind>_<slug>-<KEY>", where <slug> is
@@ -153,26 +126,4 @@ _ci_watch_key() {
             ;;
     esac
     printf '%s' "$identity_hash"
-}
-
-# Echo the path of every EXISTING ci_watch state file belonging to session $1,
-# one per line — i.e. one line per watcher the session is currently running.
-# THE single discovery implementation: status_line.sh calls this, so "which
-# watchers does this session have" is defined once.
-_ci_watch_session_state_files() {
-    local session_id="${1:-}"
-    [ -n "$session_id" ] || return 0
-    local f
-    # `nullglob` is deliberately NOT set (it is global shell state and this file
-    # is sourced into other scripts): with no match bash leaves the pattern
-    # literal, so the -e guard is what drops it.
-    for f in "${CLAUDE_NOTIFY_TMP_DIR}/ci_watch_state_${session_id}"_*; do
-        # REGULAR files only, never -e. These paths are predictable and live in
-        # a shared /tmp, so a FIFO planted at one of them would block the `cat`
-        # of every consumer — the 1s status-line poll — forever. -f also drops
-        # an unmatched literal glob.
-        [ -f "$f" ] || continue
-        printf '%s\n' "$f"
-    done
-    return 0
 }

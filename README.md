@@ -7,7 +7,7 @@ Personal Claude Code configuration (hooks, commands, agents, settings).
 **Prerequisites:**
 
 - Claude Code installed (creates `~/.claude` on first run).
-- [`uv`](https://docs.astral.sh/uv/) — runs the Python scripts (`ci_watch.py`) and the setup cleanup step.
+- [`uv`](https://docs.astral.sh/uv/) — runs `ruff` for the post-edit lint hook and the setup cleanup step.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/YoniChechik/claude-code-config/main/setup.sh)

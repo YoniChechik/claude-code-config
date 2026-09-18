@@ -194,10 +194,11 @@ wait_for_file() {
     assert_eq 0 "$status"
 }
 
-@test "_ci_watch_key is _ci_slot's hash minus the session prefix" {
-    run bash -c "source '$NOTIFY_SH'; printf '%s|%s' \"\$(_ci_slot sess 'o/r' 'feat-x')\" \"\$(_ci_watch_key 'o/r' 'feat-x')\""
-    local slot="${output%|*}" key="${output#*|}"
-    assert_eq "sess_feat-x-${key}" "$slot"
+@test "_ci_watch_key matches the raw sha256(owner/repo#branch) recipe" {
+    local expected
+    expected=$(printf '%s' 'o/r#feat-x' | shasum -a 256 | cut -c1-10)
+    run bash -c "source '$NOTIFY_SH'; _ci_watch_key 'o/r' 'feat-x'"
+    assert_eq "$expected" "$output"
 }
 
 @test "_ci_watch_key folds owner/repo into the identity" {
