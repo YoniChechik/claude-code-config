@@ -11,9 +11,9 @@
   "disableBypassPermissionsMode" : false,
   "effortLevel" : "high",
   "env" : {
-    "API_TIMEOUT_MS" : "300000",
-    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" : "60000",
-    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS" : "300000",
+    "API_TIMEOUT_MS" : "600000",
+    "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" : "300000",
+    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS" : "600000",
     "ENABLE_TOOL_SEARCH" : "true"
   },
   "feedbackDrafts" : "off",
