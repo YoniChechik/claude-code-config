@@ -93,12 +93,14 @@ process_worktree() {
         return
     fi
 
-    # Age gate: a worktree younger than 4 days old is never removed here, no
-    # matter its merge/PR state or whether it has uncommitted changes — age
-    # overrides dirtiness. Once it's 4+ days old, fall through to the
-    # merge/PR checks below, which CAN delete it even if still dirty.
-    last_touched=$(worktree_last_touched "$wt_path")
-    if [[ "$last_touched" == "0" || "$last_touched" -gt "$age_cutoff" ]]; then
+    # Dirty gate: a worktree with uncommitted or untracked changes is never
+    # removed here, no matter its merge/PR state — losing local edits nobody
+    # pushed is the actual risk, not the worktree's age. (The age-based gate
+    # this replaced was a proxy for the same risk and is redundant now that
+    # the ahead_count/PR-state checks below already rule out the false-positive
+    # "brand-new branch looks merged" case that motivated it — confirmed live,
+    # 2026-08-30.)
+    if [[ -n "$(git -C "$wt_path" status --porcelain 2>/dev/null)" ]]; then
         return
     fi
 
@@ -152,7 +154,9 @@ git worktree prune 2>/dev/null || true
 # `git worktree list` reports (wherever it lives on disk) that has had no
 # commits and no uncommitted file changes in over 4 days — abandoned
 # agent/feature worktrees that would otherwise sit around eating disk space.
-# Reuses the same `age_cutoff` (4 days) computed above for process_worktree.
+# Uses the same `age_cutoff` (4 days) computed above. Unlike process_worktree,
+# this pass has no merge/PR confirmation to lean on, so age is the only signal
+# available and stays load-bearing here.
 cwd_real=$(pwd -P)
 
 wt_path=""
