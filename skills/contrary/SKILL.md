@@ -24,10 +24,14 @@ The subagent has zero memory of this session. Whatever you send must stand alone
 
 Attacking a strawman is worse than not attacking at all. If you're unsure what the user means, ask before dispatching.
 
-### 2. Dispatch a fresh subagent
-Use the Agent/Task tool with `subagent_type: general-purpose`. The prompt must be fully self-contained and embed the critique instructions below verbatim.
+### 2. Dispatch the critic — default to Codex
+Default: run the critique via the `codex` skill, in review mode — an independent model is a genuinely more independent adversarial read than Claude critiquing Claude. Follow the `codex` skill's process, using the critique instructions below (prefixed with its own "READ-ONLY REVIEW" line per that skill's Step 1) as the prompt.
 
-#### Subagent prompt template
+Fallback: if codex is unavailable or its run fails, dispatch a general-purpose Claude subagent instead (`subagent_type: general-purpose`), with the same critique instructions embedded verbatim as its prompt.
+
+Either way, the prompt must be fully self-contained — no memory of this session.
+
+#### Critique instructions (the prompt, either path)
 
 ```
 You are an adversarial critic. Output goes to chat only. Do NOT write code, edit files, or run tests.
