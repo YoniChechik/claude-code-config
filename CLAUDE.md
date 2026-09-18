@@ -15,7 +15,6 @@
 11. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
 12. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
 
-@RTK.md
 
 # USER FACING BEHAVIOR
 
@@ -71,3 +70,7 @@ The goal is easy reading. Many readers are not native English speakers. Clear te
 
 
 - **Real ambiguity in the request.** One short clarifying question beats guessing and rewriting.
+
+# RTK
+
+@RTK.md
