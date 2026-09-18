@@ -25,10 +25,7 @@ Explore the codebase and create a structured implementation plan.
 Use a subagent to carry out the following steps:
 
 ### Step 1: Explore & Plan
-- Explore existing code patterns and architecture
-- Identify related files and components
-- Understand dependencies and integration points
-- Use web search to find relevant information and examples
+- Run the `/explore` skill on `$ARGUMENTS` — it covers the codebase side (patterns, architecture, related files, dependencies, integration points) and the web side (common solutions, alternatives, libraries, blog posts about the problem) together.
 - **Ask the user multiple questions throughout the process:**
   - Unclear scope or boundaries
   - Multiple valid technical approaches
@@ -36,6 +33,7 @@ Use a subagent to carry out the following steps:
   - Concerns and tradeoffs
 - **Decide yourself:**
   - Implementation details, file/function names, code organization, other obvious choices
+- **This isn't one-shot.** Explore, ask, and decide can all rerun as many times as needed while planning — a new unknown or problem surfacing mid-plan is normal, not a failure to plan properly the first time. Re-run `/explore` on the new question, ask the user again if it's their call, and fold the answer back into the plan before moving on.
 
 ### Step 2: Write Plan File
 
