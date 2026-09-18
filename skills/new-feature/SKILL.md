@@ -24,40 +24,13 @@ Pick the **fast** track when either is true:
 - The description explicitly says "fast" (or an equivalent — "quick", "no planning", "skip tests").
 - It's a small, low-risk, well-scoped change: no real design decisions, no new dependencies or architecture, roughly a handful of files.
 
-Otherwise, use the **full** track — the default for anything with real scope or unclear boundaries. State which track was picked and why, in one line, before continuing.
+Otherwise, use the **full** track — the default for anything with real scope or unclear boundaries. State which track was picked and why, in one line, before continuing. On the fast track, skip every step below marked "(skip if fast)"; run the rest in order.
 
 ### Step 2: Create Worktree
 Run `/create-worktree $ARGUMENTS`. This also sets the terminal tab title and (inside
 cmux) the native session name via `/session-name`.
 
-## Fast track
-
-### Step 3F: Implement
-Use a subagent to implement the feature directly based on the description.
-- After each significant change, commit and push.
-- If problems occur, use `/debug` skill to fix them.
-
-### Step 4F: PR Creation
-Run `/pr-create` skill to create the pull request. This also launches the CI watcher in the background automatically.
-
-### Step 5F: Merge
-Run `bash ~/.claude/scripts/ci_watch_once.sh push '<branch>'` as a **foreground** Bash
-call (not backgrounded) — this blocks until CI settles, superseding the background
-watcher Step 4F already launched for the same branch (same lock key, so this is an
-expected, harmless relaunch/eviction, not a race).
-
-- `CI passed for <branch>` or `No CI checks configured for <branch>` → merge
-  immediately: `gh pr merge <PR> --squash --delete-branch`. Report the merge. Do
-  **not** ask for confirmation first — this step runs automatically.
-- `CI FAILED for <branch>` → do **not** merge. Report the failure and what needs
-  fixing, then stop.
-
-### Step 6F: Summary
-Report what was built and the PR URL (and whether it merged) — use the `/adhd-structure` skill.
-
-## Full track
-
-### Step 3: Plan
+### Step 3: Plan (skip if fast)
 Run `/plan $FEATURE_DESCRIPTION` skill.
 
 ### Step 4: Implement
@@ -65,10 +38,10 @@ Run `/plan $FEATURE_DESCRIPTION` skill.
 - If problems occur, use `/debug` skill to fix them
 - After each significant change, commit and push (main agent does this directly)
 
-### Step 5: Build Tests
+### Step 5: Build Tests (skip if fast)
 Run `/build-tests` skill for test planning and building.
 
-### Step 6: Post
+### Step 6: Post (skip if fast)
 Run `/post` skill for quality checks, code review, test review, and lint/format.
 
 ### Step 7: PR Creation
