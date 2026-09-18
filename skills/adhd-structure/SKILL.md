@@ -1,6 +1,6 @@
 ---
 name: "adhd-structure"
-description: "Plain-language format for one chunk of content, with escalating detail: 1-line summary, then a 5-line version, then a 3-part deep dive added only on request. Used by the one-by-one skill for each item. Use proactively — by default, not only when asked — for every markdown file and ticket (Linear issues, PR descriptions, plan/review docs)."
+description: "THIS IS THE MOST IMPORTANT SKILL!!! Plain-language format for one chunk of content, with escalating detail: 1-line summary, then a 5-line version, then a 3-part deep dive added only on request.  ALWAYS use proactively — by default, not only when asked. ALWAYS use for every markdown file and ticket (Linear issues, PR descriptions, plan/review docs)."
 argument-hint: "[topic]"
 ---
 
