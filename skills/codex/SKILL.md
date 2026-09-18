@@ -1,6 +1,6 @@
 ---
 name: "codex"
-description: "Use when Claude wants a read-only second opinion from OpenAI Codex CLI on: exploring an unfamiliar codebase, reviewing a plan/design .md, or reviewing a PR diff. Codex runs sandboxed read-only (no writes, no prompts, no network)."
+description: "Use when Claude wants a read-only second opinion from OpenAI Codex CLI on: exploring an unfamiliar codebase, reviewing a plan/design .md, or reviewing a PR diff. Codex runs sandboxed read-only (no writes, no prompts, no network) by default; Recipe 4 is an opt-in full-access review mode the user must ask for."
 argument-hint: "[target or question]"
 ---
 
@@ -10,13 +10,21 @@ Delegate read-only review work to the `codex` CLI. Codex gets its own look at th
 
 Codex runs are LONG (often many minutes, sometimes over an hour). This skill spawns **one dedicated subagent** whose entire job is: launch codex detached → block on a re-invoked poll loop until it exits → read the output → digest it → return a summary. The calling agent does not babysit codex and does not read raw codex output — it gets a finished summary back from the subagent.
 
-## Mandatory flags
+## Mandatory flags (Recipes 1-3)
+
+Recipe 4 ("Deep Review") deliberately changes `-C`, `--sandbox`, and `--skip-git-repo-check`. It is the **only** exception, it is opt-in, and it is spelled out in its own section below.
 
 - **`-C /tmp`** — always run codex from `/tmp`, never from the caller's repo. Running codex inside a real project (e.g. one with `keyshelf.config.ts`, `.env.keyshelf`, `package.json` triggers, etc.) makes codex burn its first turn auto-discovering project skills and it often exits mid-reasoning instead of doing the actual analysis. Pass any project file paths as **absolute paths inside the prompt** — codex's read-only sandbox can still read them.
 - **`--skip-git-repo-check`** — always set, since `/tmp` is not a git repo.
 - **`--sandbox read-only`** — never relax this.
 - **`-c approval_policy="never"`** — codex never prompts.
 - **`-o <file>`** — always write output to a file; never consume stdout directly.
+
+## Known gotcha: a prompt that names no file gets you a blind answer
+
+**`-C /tmp --sandbox read-only` CAN read arbitrary absolute paths outside `/tmp`.** This was verified directly on codex-cli 0.146.0: given `Read the file /Users/<user>/core/CLAUDE.md and quote its first two lines`, codex ran `/bin/zsh -lc "sed -n '1,2p' /Users/<user>/core/CLAUDE.md"` from `/tmp` and quoted the file correctly. `read-only` restricts **writes** and **network**, not the read scope.
+
+So if a codex answer comes back with "I could not read the repo" and zero `file:line` citations, the cause is almost always the **prompt**, not the sandbox: the prompt described files in prose and never told codex to open a specific absolute path, so codex answered from the prompt text plus general knowledge. **Every prompt must list the absolute paths codex is to read and instruct it to read them before answering.** Reserve Recipe 4 for when codex genuinely needs to run its own `grep`/`git log`/tests or reach the network — not as a fix for an underspecified prompt.
 
 ## Step 1: build the review prompt
 
@@ -163,13 +171,14 @@ When the subagent returns:
 
 ## Rules (non-negotiable)
 
-- **Always run from `/tmp` via `-C /tmp --skip-git-repo-check`.** Never `-C` into a real project directory — see the mandatory-flags rationale above.
+- **Always run from `/tmp` via `-C /tmp --skip-git-repo-check`.** Never `-C` into a real project directory — see the mandatory-flags rationale above. **Sole exception: Recipe 4.**
 - **Always use `-o <file>`** to write output to a file. Never consume codex stdout directly.
 - **The launch is always detached (`&`); the wait is always a blocking re-invoke poll loop inside the subagent.** The launcher subshell uses shell-level `&` (never `run_in_background=true`, which dies with the subagent). The WAIT is a foreground Bash poll call the subagent re-invokes until it prints `DONE`/`ABORTED` — never the async `Monitor` tool (it returns immediately and the subagent's turn would end before codex finishes). The subagent launches, polls in a re-invoke loop, digests, returns.
 - **Never let the caller poll for codex.** The subagent owns the entire wait. The calling agent's only interaction is spawning it and reading its summary.
-- Sandbox MUST be `read-only`. Never use `--full-auto` (implies workspace-write) or `--dangerously-bypass-approvals-and-sandbox`.
+- Sandbox MUST be `read-only`, **except for Recipe 4** (see the named exception below). Never use `--full-auto` (implies workspace-write) or `--dangerously-bypass-approvals-and-sandbox` — the latter is banned in every recipe, Recipe 4 included, because it disables the sandbox *and* every approval path at once.
+- **Named exception — Recipe 4 is the sole case where the sandbox is not `read-only`.** Recipe 4 uses `--sandbox danger-full-access` and is permitted **only when the user has explicitly asked, in that specific request, for codex to be given full access**. A calling agent must never choose it on its own initiative, never carry an older grant forward into a later request, and never reach for it because a `read-only` run produced a weak answer (that is the prompt gotcha above, not a sandbox limit). Under Recipe 4 the "codex must not write" guarantee is enforced by the **prompt**, not the sandbox — so the verbatim review-only instruction in that recipe is itself mandatory.
 - Approval policy goes via `-c approval_policy="never"` — `codex exec` has no `--ask-for-approval` flag.
-- `read-only` sandbox **blocks network egress**. Any `gh`/`git fetch`/`curl` for gathering input must be run by Claude OUTSIDE codex, before the subagent is spawned, and written to a file codex reads by absolute path.
+- `read-only` sandbox **blocks network egress**. In Recipes 1-3, any `gh`/`git fetch`/`curl` for gathering input must be run by Claude OUTSIDE codex, before the subagent is spawned, and written to a file codex reads by absolute path. (Recipe 4 has network access and can fetch its own.)
 - Codex never writes. If codex suggests fixes, Claude applies them.
 
 ## Recipe 1: Codebase Exploration
@@ -207,3 +216,57 @@ Review the PR. Metadata then diff in /tmp/codex-diff-<...>.txt.
 Focus on correctness, edge cases, and security. Cite file:line.
 Do NOT invoke any skills.
 ```
+
+## Recipe 4: Deep Review — full read/web/bash access, review-only by instruction
+
+**OPT-IN ONLY.** Use this recipe **only when the user has explicitly asked, in this request, to give codex full access.** It is not the default and never the fallback for a disappointing `read-only` run. Recipes 1-3 remain the safe default for normal reviews.
+
+**What it is for.** A question codex cannot answer from a handful of quoted files: it needs to browse the real tree, run its own `grep` / `git log` / tests to verify a claim, and reach the network to find current primary sources instead of recalling training data.
+
+**What changes from Recipes 1-3:**
+
+- **`--sandbox danger-full-access`** — codex-cli's most permissive sandbox mode (`codex exec --help` lists exactly three: `read-only`, `workspace-write`, `danger-full-access`). It grants full read **and write** access, shell, and network. The "do not modify anything" guarantee comes from the **prompt**, not from the sandbox. Still **never** `--dangerously-bypass-approvals-and-sandbox`.
+- **`-C <real repo or worktree path>`** instead of `/tmp` — codex works inside the actual tree, so `grep`, `git log`, and test runs resolve normally. Accept the cost the `/tmp` rule was avoiding: codex may spend its first turn on project skill discovery. Mitigate it with the `Do NOT invoke any skills.` line, which stays mandatory.
+- **DROP `--skip-git-repo-check`** — a real repo/worktree is a git repo, so the flag is unnecessary.
+- **KEEP `-c approval_policy="never"`** and **KEEP `-o <file>`** — unchanged.
+- **Network is ON** — do not pre-fetch diffs or docs for codex; tell it to fetch them itself and cite real URLs.
+
+**Launch shape** (the detached-launch + blocking-poll subagent machinery from Step 2 is unchanged; only the `codex exec` line differs):
+
+```bash
+codex exec --sandbox danger-full-access -c approval_policy="never" \
+  -C /absolute/path/to/repo-or-worktree \
+  -o "$OUT" \
+  "$(cat "$PROMPT_FILE")"
+```
+
+**Prompt template.** The block below MUST appear **verbatim, near the top of the prompt**:
+
+```
+You are doing a READ-ONLY REVIEW. You have full tool access, but you must NOT create, modify, or delete any file, run any git command that changes state (commit/push/branch/checkout/reset), or make any destructive/mutating call. If you want to suggest a fix, describe it in your written output — do not apply it.
+```
+
+Then the review body:
+
+```
+Read these files before answering (absolute paths):
+  /absolute/path/.../<file 1>
+  /absolute/path/.../<file 2>
+  ...
+
+Use your own bash access to verify anything else you need — grep the tree, read
+git history, run the relevant tests. Do not assume; check.
+
+Use your own web access to find real, current primary sources. Cite actual URLs.
+Do not cite claims recalled from training data as if they were sources.
+
+Question: <the substantive question>
+
+Give a final, concrete recommendation. Cite file:line for every claim about this
+codebase, and a URL for every external claim. Flag explicitly anywhere your answer
+differs from what a pure-reasoning pass with no code access would have concluded.
+
+Do NOT invoke any skills.
+```
+
+**After the run.** Verify codex kept to review-only — the sandbox did not enforce it. Run `git status` and `git log --oneline -3` in the target worktree and confirm nothing changed beyond what you expect.
