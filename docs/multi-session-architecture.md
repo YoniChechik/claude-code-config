@@ -4,8 +4,8 @@ How `~/.claude/` handles multiple Claude Code sessions running simultaneously
 across multiple terminal windows, multiple repos, and multiple feature worktrees.
 
 This is an internal design doc. It describes what the code actually does today,
-keyed off `session_start.sh`, the `post_tool_use__ci_watch_trigger.sh` hook, the
-`/ci-watcher` skill, and `ci_watch_once.sh`.
+keyed off `session_start.sh`, the `post_tool_use__ci_watch_trigger.sh` hook, and
+`ci_watch_once.sh`.
 
 ---
 
@@ -91,8 +91,7 @@ regression, just the same real-world limit the daemon always had.
                         push watcher
                       → Claude calls Bash with
                         `ci_watch_once.sh push 'feat-auth'` and
-                        run_in_background: true, then writes the returned
-                        task_id to /tmp/ci_watch2_task_<SESSION>_push_<slug>-<KEY>
+                        run_in_background: true
 5. watcher runs       → derives the SAME (owner/repo, branch, kind) key itself
                         via `gh repo view` + its own arguments
                       → acquires LOCKFILE via `lockf -t 0 -k`, writes PIDFILE
@@ -127,8 +126,6 @@ ASCII view of two windows running at the same time:
 │ /tmp/ci_watch2_lock_push_feat_auth-1f2e3d4c5b   ← kernel-held by the push watcher   │
 │ /tmp/ci_watch2_pid_push_feat_auth-1f2e3d4c5b    ← its eviction-target pgid          │
 │ /tmp/ci_watch2_lock_merge_feat_docs-7a8b9c0d1e  ← kernel-held by the merge watcher  │
-│ /tmp/ci_watch2_task_bbbbbbbb-…_push_feat_auth-1f2e3d4c5b   ← this session's bookkeeping│
-│ /tmp/ci_watch2_task_bbbbbbbb-…_merge_feat_docs-7a8b9c0d1e  ← this session's bookkeeping│
 │ Each watcher reports once, on its own, via a Bash background-task notification.      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -151,11 +148,10 @@ KIND       = "push" | "merge"
 `_ci_watch_key` (in `scripts/_notify.sh`) computes `KEY` from `OWNER_REPO` and
 `branch` — it takes no `kind` argument and no session argument. `_ci_slug`
 computes `SLUG` from `branch` alone (unchanged from before). Every caller —
-the watcher script itself, the hook, the `/ci-watcher` skill's manual
-commands, `/ci-watcher stop` — composes its own filename as
-`<component>_<KIND>_<SLUG>-<KEY>`, so the hash function has exactly one
-implementation and kind-scoping lives in the filename convention, never in
-duplicated hashing logic.
+the watcher script itself and the hook, the only two remaining callers —
+composes its own filename as `<component>_<KIND>_<SLUG>-<KEY>`, so the hash
+function has exactly one implementation and kind-scoping lives in the
+filename convention, never in duplicated hashing logic.
 
 **Why global, not per-session.** A stale push watcher for an old commit, or a
 stale merge watcher for a PR that already merged, is stale for *every*
@@ -172,23 +168,21 @@ mid-session, and two repos can legitimately have same-named branches. Hashing
 `"<owner>/<repo>#<branch>"` prevents two unrelated branches called `main` in
 different repos from colliding.
 
-### The four files per watcher
+### The three files per watcher
 
 ```
 /tmp/ci_watch2_lock_<KIND>_<SLUG>-<KEY>        the lockf(1) lock file itself
 /tmp/ci_watch2_pid_<KIND>_<SLUG>-<KEY>         informational: pgid/start/session
 /tmp/ci_watch2_<KIND>_<SLUG>-<KEY>.log         diagnostic log (gh/git chatter, stderr)
-/tmp/ci_watch2_task_<SESSION>_<KIND>_<SLUG>-<KEY>   per-session task-id bookkeeping
 ```
 
-The first three are global (no session component) and shared by whichever
-session is currently running that `(branch, kind)`'s watcher. Only the fourth
-carries a session id, because it exists purely so `/ci-watcher stop-all` can
-find and `TaskStop` the Bash background tasks *this specific session*
-launched — it is written by whichever agent code path issued the
-`run_in_background` call (the hook's instructions, or the skill's manual
-commands), never by the watcher script itself, since a script cannot know the
-external `task_id` the Bash tool assigns to its own invocation.
+All three are global (no session component) and shared by whichever session is
+currently running that `(branch, kind)`'s watcher. There used to be a fourth,
+per-session `task_id` bookkeeping file, written so a manual `/ci-watcher
+stop-all` command could find and `TaskStop` this session's own launches. The
+`/ci-watcher` skill (the only reader of that file) has been removed — only the
+automatic hook-driven launch path remains — so nothing writes or reads it
+anymore.
 
 ---
 
@@ -268,7 +262,7 @@ poll-loop `sleep` — goes through `run_watchable`, which:
 **Only `SIGTERM` is trapped — there is no `SIGINT` handling.** This is a
 deliberate scope narrowing discovered during implementation, not an
 oversight: nothing in this design ever sends a watcher `SIGINT` — eviction
-and `/ci-watcher stop` both use `TERM` then, if needed, `KILL`. A `SIGINT`
+uses `TERM` then, if needed, `KILL`. A `SIGINT`
 trap was implemented and then removed after empirical testing showed it
 could never fire: a signal that is already `SIG_IGN` "on entry" to a shell
 can never be trapped by that shell (a POSIX/bash rule), and that is exactly
@@ -316,7 +310,8 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    success long before the PR is actually merged, so the real merge is what
    this phase polls for. `MERGED` → proceed. `CLOSED` (not merged) → report
    and exit. Still `OPEN` past the bound → report the timeout with a
-   `/ci-watcher merge <branch>` retry instruction, and exit. The bound is a
+   `bash ~/.claude/scripts/ci_watch_once.sh merge <branch>` retry
+   instruction, and exit. The bound is a
    concrete, freshly-chosen constant (not inherited from `Monitor`'s old
    30-minute cap) — long enough to cover a slow CI pipeline across a full
    working day, short enough to bound a forgotten/leaked process to a
@@ -350,27 +345,15 @@ into a false pass.
 
 ## Stop semantics
 
-- **`/ci-watcher stop <branch> [push|merge]`** reads `PIDFILE` for the
-  matching kind(s) of that branch and signals the recorded process group
-  directly: `SIGTERM` → poll the lock (10s) → `SIGKILL` → poll again (5s).
-  This is **cross-session by design** — `PIDFILE` ownership carries no
-  session scoping, so this works even against a watcher launched by a
-  different terminal, or one whose launching session has since exited. If
-  `PIDFILE` is missing or stale, this degrades to the same residual
-  limitation as the lock's own eviction path: no target to signal, so it
-  falls back to polling the lock alone.
-- **`/ci-watcher stop-all`** is scoped strictly to *this session's own*
-  task-id files (`/tmp/ci_watch2_task_<SESSION>_*`) and `TaskStop`s them one
-  by one. It never reaches into another session's currently-owned watcher,
-  even one this session originally launched and was later superseded on (a
-  relaunch from anywhere overwrites that key's task-id file the next time
-  *this* session launches it, but does not retroactively touch a task-id
-  another session wrote for the same key). A task-id whose task has already
-  finished is inert — `TaskStop`ing it is a harmless no-op.
-- **Never automatic.** A watcher runs to a real end state on its own and
-  needs no supervision; nobody should call `/ci-watcher stop`,
-  `/ci-watcher stop-all`, or `TaskStop` on a watcher's task id without an
-  explicit user request.
+There is no manual stop anymore — the `/ci-watcher` skill that provided `stop
+<branch> [push|merge]` and `stop-all` was removed; only the hook-driven
+automatic launch path remains, invoking `ci_watch_once.sh` (now in
+`scripts/`, not a skill) directly.
+
+A watcher still never needs supervision: it runs to a real end state on its
+own, and the only way one is ever terminated early is the eviction path
+described under "Locking" above — a fresh launch for the same `(branch,
+kind)` evicting whatever held the lock before it.
 
 ---
 
@@ -435,21 +418,13 @@ This is the case the branch slug alone could not separate, and the reason
   merge`/`gh pr merge --auto` with no explicit PR number/URL/`--repo`.
   Anything else — compound commands, `-C`, `--repo`, an explicit differing
   branch, a PR number/URL, a multi-branch push — is silently skipped: no
-  trigger, no guess. `/ci-watcher [branch]` / `/ci-watcher merge [branch]`
-  are the manual fallback.
-- **Cross-session `stop` signals by pgid, not `TaskStop`.** This is what lets
-  it work even after the launching session has exited, but it degrades to
-  lock-probe-only polling (no signal sent) if `PIDFILE` is stale or missing —
-  a residual limitation of a purely informational file, stated plainly
-  rather than hidden.
+  trigger, no guess, and no manual fallback since the `/ci-watcher` skill
+  was removed — a missed trigger now means nobody launched a watcher for
+  that push/PR/merge at all.
 - **Fixed timing constants, not user-configurable without an edit**: the
   6-hour merge-wait bound, the 120-second post-merge run-appearance grace,
   and the 20-run discovery snapshot cap are all constants in the script
   (overridable by env var for tests, not by end-user configuration).
-- **Stale task-id files are not background-garbage-collected**, only cleaned
-  up opportunistically the next time `/ci-watcher` runs in that session.
-  Unbounded accumulation across a very long-lived session is an accepted,
-  documented limitation, not an oversight.
 - **The per-key diagnostic log is never rotated or truncated.** It grows for
   as long as a given `(branch, kind)` gets relaunched. Simple rotation would
   be a cheap follow-up, not something this design currently does.
@@ -465,13 +440,13 @@ This is the case the branch slug alone could not separate, and the reason
 
 ## Quick reference
 
-| Question                                               | Answer                                                                                                                                                                                                    |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What's the per-watcher file key?                       | `(owner/repo, branch, kind)` — global, never scoped to a session. `KEY = sha256("<owner>/<repo>#<branch>")[:10]`, filenames are `<component>_<kind>_<slug>-<KEY>`.                                        |
-| Which file DOES carry a session id?                    | Only the task-id bookkeeping file, `ci_watch2_task_<SESSION>_<kind>_<slug>-<KEY>` — used solely by `/ci-watcher stop-all` to find this session's own Bash background tasks.                               |
-| How does a watcher get launched?                       | A Bash tool call with `run_in_background: true`, no `timeout` override — from the `PostToolUse:Bash` hook's `additionalContext`, or a manual `/ci-watcher`/`/ci-watcher merge` command.                   |
-| What stops two same-kind watchers from colliding?      | `lockf(1)` — kernel-mediated, released automatically the instant the holder dies by any means. A same-branch, same-kind relaunch evicts the predecessor by its recorded pgid (`SIGTERM`, then `SIGKILL`). |
-| Do a push watcher and a merge watcher ever collide?    | No — different `kind` means a different `LOCKFILE`; they never contend or evict each other, even for the same branch.                                                                                     |
-| What stops the watcher from outliving the session?     | Nothing special — it runs to its own real end state and exits on its own. The host Claude Code process staying alive is the only outer bound, same as the old daemon's `Monitor` lifetime was.            |
-| How is `SIGINT` handled?                               | It isn't — only `SIGTERM` is trapped. Nothing in this design ever sends a watcher `SIGINT`, and a signal already `SIG_IGN` on entry to a backgrounded, non-interactive shell can never be trapped by it.  |
-| How does `/ci-watcher stop <branch>` find the process? | Reads `PIDFILE` for the recorded process-group id and signals it directly — cross-session, since `PIDFILE` carries no session scoping.                                                                    |
+| Question                                            | Answer                                                                                                                                                                                                    |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What's the per-watcher file key?                    | `(owner/repo, branch, kind)` — global, never scoped to a session. `KEY = sha256("<owner>/<repo>#<branch>")[:10]`, filenames are `<component>_<kind>_<slug>-<KEY>`.                                        |
+| Does any file carry a session id?                   | No. The old per-session task-id bookkeeping file existed only for the now-removed `/ci-watcher stop-all` and has been deleted along with it.                                                              |
+| How does a watcher get launched?                    | A Bash tool call with `run_in_background: true`, no `timeout` override — from the `PostToolUse:Bash` hook's `additionalContext`. There is no manual launch path anymore.                                  |
+| What stops two same-kind watchers from colliding?   | `lockf(1)` — kernel-mediated, released automatically the instant the holder dies by any means. A same-branch, same-kind relaunch evicts the predecessor by its recorded pgid (`SIGTERM`, then `SIGKILL`). |
+| Do a push watcher and a merge watcher ever collide? | No — different `kind` means a different `LOCKFILE`; they never contend or evict each other, even for the same branch.                                                                                     |
+| What stops the watcher from outliving the session?  | Nothing special — it runs to its own real end state and exits on its own. The host Claude Code process staying alive is the only outer bound, same as the old daemon's `Monitor` lifetime was.            |
+| How is `SIGINT` handled?                            | It isn't — only `SIGTERM` is trapped. Nothing in this design ever sends a watcher `SIGINT`, and a signal already `SIG_IGN` on entry to a backgrounded, non-interactive shell can never be trapped by it.  |
+| How is a stuck watcher terminated?                  | Only automatically, by eviction: a fresh launch for the same `(branch, kind)` signals the old holder's recorded pgid directly (`SIGTERM`, then `SIGKILL`) and takes the lock. There is no manual stop.    |

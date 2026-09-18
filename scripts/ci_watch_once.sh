@@ -73,9 +73,9 @@ source "${SCRIPT_DIR}/../../scripts/_notify.sh"
 # Shape notes, because each line closes a real race:
 #   - The trap is installed BEFORE "$@" is backgrounded, so a signal arriving
 #     in that gap cannot fall through to the shell's default action.
-#   - Only SIGTERM is trapped. Every path that stops a watcher in this system
-#     — lock eviction, `/ci-watcher stop` — sends TERM then, if needed, KILL;
-#     nothing in this design ever sends SIGINT to a watcher. A SIGINT trap was
+#   - Only SIGTERM is trapped. The only path that stops a watcher in this
+#     system — lock eviction — sends TERM then, if needed, KILL; nothing in
+#     this design ever sends SIGINT to a watcher. A SIGINT trap was
 #     tried and dropped: a signal that is SIG_IGN "on entry" to a shell can
 #     never be trapped by that shell (POSIX/bash rule), which is exactly the
 #     disposition a background job gets unless the PARENT shell enables real
@@ -128,8 +128,8 @@ run_watchable() {
     return "$rc"
 }
 
-# run_watchable reported that WE were signaled (an eviction by a newer watcher,
-# or a /ci-watcher stop).  Leave immediately and silently: the notification of
+# run_watchable reported that WE were signaled (an eviction by a newer
+# watcher).  Leave immediately and silently: the notification of
 # this branch's CI result is now the newer watcher's job, and printing anything
 # here would be a second, contradictory report.
 bail_if_signaled() {
@@ -256,8 +256,8 @@ short_reason() {
 # The one escalation path out of a retryable error: one stdout line, nonzero
 # exit.  A watcher that cannot see the truth must say so, never guess.
 die_persistent() {
-    printf 'CI watch for %s hit a persistent error: %s — stopping; run /ci-watcher %s to retry\n' \
-        "$BRANCH" "$1" "$BRANCH"
+    printf 'CI watch for %s hit a persistent error: %s — stopping; run `bash ~/.claude/scripts/ci_watch_once.sh %s %s` to retry\n' \
+        "$BRANCH" "$1" "$MODE" "$BRANCH"
     exit 1
 }
 
@@ -403,7 +403,7 @@ merge_body() {
                 ;;
         esac
         if [[ $(($(date +%s) - wait_start)) -ge "$CI_WATCH_MERGE_WAIT_MAX" ]]; then
-            printf 'CI settled wait timed out; %s still not merged after 6h — stopping. Run /ci-watcher merge %s after you merge it.\n' \
+            printf 'CI settled wait timed out; %s still not merged after 6h — stopping. Run `bash ~/.claude/scripts/ci_watch_once.sh merge %s` after you merge it.\n' \
                 "$BRANCH" "$BRANCH"
             return 0
         fi
