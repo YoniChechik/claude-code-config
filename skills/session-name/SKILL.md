@@ -1,15 +1,17 @@
 ---
 name: "session-name"
-description: "Assign or update a short label describing what this Claude Code session is currently doing, stored in a per-session sidecar file so status_line.sh and the cmux workspace title can show it"
+description: "Assign or update a short label describing what this Claude Code session is currently doing, stored in a per-session sidecar file so status_line.sh and the cmux workspace title can show it; also triggers Claude Code's native /rename inside cmux so the terminal title, /resume picker, and Remote Control app pick up the name too"
 argument-hint: "[optional forced name]"
 ---
 
 Sets (or re-sets) the current session's display name: a short, human-readable
 label stored in a per-session sidecar file. `status_line.sh` and the cmux
 workspace title read only this file — there is no fallback to the
-branch/worktree name or to Claude Code's own native `session_name` field. Safe to re-run any
-number of times in one session as the topic drifts; each run is a fresh
-decision, not a one-time setup step.
+branch/worktree name. When running inside cmux, this skill additionally
+triggers Claude Code's own native `/rename` (Step 9) — a separate naming
+layer covering the terminal title, the `/resume` picker, and the Remote
+Control app. Safe to re-run any number of times in one session as the topic
+drifts; each run is a fresh decision, not a one-time setup step.
 
 ## Step 1: Guard the session id
 
@@ -167,7 +169,43 @@ automatic mechanism gated on a live socket setting — this skill's explicit
 rename is independent of it and runs regardless of whether that setting is
 ever turned on.
 
-## Step 9: Report
+## Step 9: Trigger Claude Code's native `/rename` (cmux only)
+
+The sidecar file (Step 7) and cmux workspace title (Step 8) are a
+project-local naming layer — they do not touch Claude Code's own native
+session name (`~/.claude/sessions/<pid>.json`'s `name` field), which drives
+the terminal title, the `/resume` picker, and the Remote Control companion
+app. That native field has no exposed tool or file-edit path: editing the
+JSON file directly, or appending a fabricated `ai-title` record to the
+session's transcript JSONL, does NOT propagate to Remote Control (confirmed
+empirically) — only the real `/rename` command does, because it also pushes
+the change live over the session's existing connection to Anthropic's
+backend.
+
+When running inside cmux (`$CMUX_SURFACE_ID` is set), `cmux send` delivers
+text to this session's own terminal surface exactly as if it were typed —
+cmux is the pty's actual owner, so this is not a hack, it is the documented
+path (`cmux send --help`). Use it to fire the real native rename:
+
+```bash
+if [[ -n "${CMUX_SURFACE_ID:-}" ]] && command -v cmux >/dev/null 2>&1; then
+    cmux send -- "/rename ${NAME}\n"
+fi
+```
+
+Confirmed empirically (2026-09-18): this updates `sessions/<pid>.json`'s
+`name` / `nameSource:"user"` / `formerNames`, the `/resume` picker's title,
+and the Remote Control app's displayed name — all three at once, even
+mid-turn while the orchestrator is still busy. Skip silently when
+`CMUX_SURFACE_ID` is unset (not running inside cmux) — there is no other
+known path to the native field from inside a session.
+
+Do not attempt this via raw tty `TIOCSTI` injection: macOS restricts
+`TIOCSTI` to the tty's session leader (the `claude` process itself) or root —
+a sibling process gets `EPERM` even with read/write permission on the device
+file, confirmed empirically.
+
+## Step 10: Report
 
 Tell the user the session name that is now stored (new or unchanged), and
 that they can re-run `/session-name` at any later point if the topic drifts —

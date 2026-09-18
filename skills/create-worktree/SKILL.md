@@ -31,13 +31,13 @@ This handles: fetching latest main from origin, branch detection (new / existing
 The script prints the worktree path (relative to the repo root) as its last stdout line.
 
 ### Step 3: Set the session name
-Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). This stores the session name in the sidecar file and sets the cmux workspace title via `cmux rename-workspace`.
+Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). This stores the session name in the sidecar file, sets the cmux workspace title via `cmux rename-workspace`, and (inside cmux) also triggers Claude Code's native `/rename` via `cmux send`, so the terminal title, `/resume` picker, and Remote Control app all pick up `$FEATURE_NAME` too.
 
 ### Step 4: Notify User
 Tell user:
 - The worktree has been created at `.claude/worktrees/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` is tracking remote
-- The tab title is set to `$FEATURE_NAME` via `/session-name`. To also rename the session in the resume picker, they may optionally type `/rename $FEATURE_NAME` themselves — this requires the manual command because `/rename` is interactive-only and cannot be automated.
+- The session (tab title, `/resume` picker, Remote Control) is renamed to `$FEATURE_NAME` via `/session-name`.
 
 ### Step 5: Change to Feature Directory
 Change to the feature worktree directory using `/cd-permanent .claude/worktrees/$FEATURE_NAME` skill.
