@@ -75,9 +75,15 @@ fire() {
     [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$before" ]
 }
 
-@test "a failed gh pr merge never syncs" {
-    before="$(git -C "$PRIMARY" rev-parse HEAD)"
-    run fire "gh pr merge 12" 1 "$WT"
+@test "a gh pr merge that exits nonzero still syncs (gh's own post-merge branch-switch can fail after a real merge)" {
+    # Confirmed live, repeatedly, in this repo's own merge workflow:
+    # `gh pr merge --squash --delete-branch` reliably exits 1 on its local
+    # branch-switch step ("... already used by worktree ...") even when the
+    # remote merge fully succeeded. There is no reliable way to tell that
+    # case apart from a genuine failure using only the exit code, and an
+    # extra sync after a real failure is harmless, so this hook must not
+    # gate on exit code at all.
+    run fire "gh pr merge 12 --squash --delete-branch" 1 "$WT"
     [ "$status" -eq 0 ]
-    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$before" ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
 }
