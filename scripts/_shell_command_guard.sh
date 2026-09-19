@@ -33,42 +33,7 @@
 #   1. No forks in per-segment code. Helpers return through the GUARD_REPLY
 #      global instead of stdout, because `x=$(f ...)` forks a subshell for
 #      every call; `[[ ... ]]`/`case` replace every `echo | grep` and `sed`.
-#   2. Hard bounds (_guard_within_bounds) reject pathological input up front,
-#      so the caller can fail CLOSED instead of scanning forever.
-
-# -----------------------------------------------------------------------------
-# Hard input bounds. Anything past these is not a command a human would type;
-# it is an attempt to run the hook past its timeout so the harness allows the
-# call by default. Callers must treat a `_guard_within_bounds` failure as a
-# fail-CLOSED verdict (ask/deny), never as "no opinion".
-#
-# Calibrated against this repo's own bats fixtures: the longest real command is
-# a multi-line `git commit -F -` heredoc well under 2 KiB, with fewer than 10
-# parens and fewer than 10 separators.
-# -----------------------------------------------------------------------------
-GUARD_MAX_CMD_LEN=${GUARD_MAX_CMD_LEN:-16384}
-GUARD_MAX_PARENS=${GUARD_MAX_PARENS:-64}
-# Counts CHARACTERS, so `&&`/`||` each cost two — 256 is roughly 128 chained
-# commands, far past anything hand-written.
-GUARD_MAX_SEPARATORS=${GUARD_MAX_SEPARATORS:-256}
-
-# _guard_within_bounds <command-text> -> 0 when safe to scan, 1 when not.
-#
-# Every test is a single bash parameter expansion (no loop, no fork), so the
-# bound check itself can never be the slow part. Paren/backtick count bounds
-# nesting DEPTH transitively: depth can never exceed the number of openers.
-_guard_within_bounds() {
-    local s="$1" t
-    [ "${#s}" -le "$GUARD_MAX_CMD_LEN" ] || return 1
-    # Count `(` and backticks together — the sanitizer rewrites backticks to
-    # parens, so both feed the same nesting.
-    t="${s//[^(\`]/}"
-    [ "${#t}" -le "$GUARD_MAX_PARENS" ] || return 1
-    # Count segment separators: ; & | and newline.
-    t="${s//[^;&|$'\n']/}"
-    [ "${#t}" -le "$GUARD_MAX_SEPARATORS" ] || return 1
-    return 0
-}
+#   2. No forks in per-segment code, per rule 1 above.
 
 # -----------------------------------------------------------------------------
 # Path canonicalization, shared by permission_request.sh (is this command

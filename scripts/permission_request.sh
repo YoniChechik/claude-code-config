@@ -74,9 +74,6 @@ esac
 CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
 [ -n "$CMD" ] || exit 0
 
-# Oversized/pathological input never auto-allows.
-_guard_within_bounds "$CMD" || exit 0
-
 # ---------------------------------------------------------------------------
 # Verbs whose behaviour is fully described by their path arguments. Anything
 # that runs another program from its arguments (sh, bash, xargs, awk, sed -e

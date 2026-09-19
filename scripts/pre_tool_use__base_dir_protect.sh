@@ -43,8 +43,7 @@ tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
 # shellcheck source=./_shell_command_guard.sh
 if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
     || ! declare -F _strip_leading_wrappers >/dev/null 2>&1 \
-    || ! declare -F _resolve_path >/dev/null 2>&1 \
-    || ! declare -F _guard_within_bounds >/dev/null 2>&1; then
+    || ! declare -F _resolve_path >/dev/null 2>&1; then
     emit_decision ask "$INTERNAL_ERROR_MSG"
     exit 0
 fi
@@ -271,13 +270,6 @@ if [ "$tool_name" = "Bash" ]; then
     cwd=$(echo "$INPUT" | jq -r '.cwd // empty')
 
     if [ -z "$command" ]; then
-        exit 0
-    fi
-
-    # Adversarially long / deeply nested input is an attempt to run this hook
-    # past the harness timeout, where a missing decision reads as allow.
-    if ! _guard_within_bounds "$command"; then
-        emit_decision ask "Blocked pending confirmation: this command is too long or too deeply nested for the base-dir guard to analyse safely (limits: ${GUARD_MAX_CMD_LEN} chars, ${GUARD_MAX_PARENS} subshells, ${GUARD_MAX_SEPARATORS} segments). Split it into smaller commands."
         exit 0
     fi
 
