@@ -21,15 +21,9 @@ if [[ "$git_dir" == *"/worktrees/"* ]]; then
         git merge --ff-only "origin/$current_branch" >/dev/null 2>&1 || true
     fi
 else
-    # checkout -f main can fail (e.g. another worktree already has main checked
-    # out) — in that case do NOT continue, or reset --hard would land on
-    # whatever branch is actually checked out instead of main. Confirmed via
-    # `branch --show-current` too, in case checkout "succeeds" but a detached
-    # HEAD or some other state leaves us not actually on main.
-    if git checkout -f main >/dev/null 2>&1 && [[ "$(git branch --show-current 2>/dev/null)" == "main" ]]; then
-        git fetch origin --prune >/dev/null 2>&1 || true
-        git reset --hard origin/main >/dev/null 2>&1 || true
-        git clean -fd >/dev/null 2>&1 || true
+    # shellcheck source=./_git_sync.sh
+    if source "$(dirname "${BASH_SOURCE[0]}")/_git_sync.sh" 2>/dev/null; then
+        _sync_primary_checkout_to_origin_main "$git_root"
     fi
 fi
 
