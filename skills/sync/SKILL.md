@@ -14,8 +14,10 @@ Merges from origin/main, commits any local changes with professional message gen
 ## Process
 
 ### Step 1: Fetch and Merge
+Run from this skill's own directory (the "Base directory for this skill" path
+given above, not a hardcoded path):
 ```bash
-bash ~/.claude/skills/sync/sync_merge.sh
+bash "<skill-base-dir>/sync_merge.sh"
 ```
 Parse the JSON output. If `conflicts` is true (exit code 1), resolve conflicts:
 - Resolve by preferring current branch changes
@@ -44,9 +46,9 @@ Brief description (50 chars max)
 Use the user's hint from `$ARGUMENTS` if provided.
 
 ### Step 5: Commit, Push, and Verify
-If changes exist from Step 2:
+If changes exist from Step 2, from this skill's own directory:
 ```bash
-bash ~/.claude/skills/sync/sync_commit_push.sh "GENERATED_COMMIT_MESSAGE"
+bash "<skill-base-dir>/sync_commit_push.sh" "GENERATED_COMMIT_MESSAGE"
 ```
 Parse the JSON output. Check `verified` is true. If not, report issue.
 If no changes, just report already synced.

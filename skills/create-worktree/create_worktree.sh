@@ -5,6 +5,11 @@
 
 set -e
 
+# Resolved from this script's own invoked location, never hardcoded — this
+# file is meant to be symlinked into another tool's config directory rather
+# than copied, so it must find its sibling scripts wherever it actually is.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 FEATURE_NAME="$1"
 
 if [ -z "$FEATURE_NAME" ]; then
@@ -29,7 +34,7 @@ git fetch --prune
 # An existing worktree path is a hard error — bail out with a clear message
 # instead of letting `git worktree add` fail cryptically.
 if [ -e "$WORKTREE_ABS" ]; then
-    echo "Error: $WORKTREE_REL already exists. Use /cd-permanent $WORKTREE_REL to work in it." >&2
+    echo "Error: $WORKTREE_REL already exists. Run: cd \"$REPO_ROOT/$WORKTREE_REL\"" >&2
     exit 1
 fi
 
@@ -65,11 +70,11 @@ fi
 
 # Worktrees share the .git object store but NOT the working tree, so .env files
 # and installed dependencies still have to be provisioned per worktree.
-bash ~/.claude/skills/create-worktree/symlink_env_files.sh "$REPO_ROOT" "$WORKTREE_ABS"
+bash "${SCRIPT_DIR}/symlink_env_files.sh" "$REPO_ROOT" "$WORKTREE_ABS"
 
 # Setup environment inside the worktree (uv venv / npm install / pnpm install).
 cd "$WORKTREE_ABS"
-bash ~/.claude/skills/create-worktree/setup_project_env.sh
+bash "${SCRIPT_DIR}/setup_project_env.sh"
 cd "$REPO_ROOT"
 
 # The cmux workspace title is set by the create-worktree SKILL's Step 3, which

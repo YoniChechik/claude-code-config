@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# Config-dir override matches the convention already established in
+# _shell_command_guard.sh, since this file is meant to be symlinked into
+# another tool's config directory rather than copied.
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 # ──────────────────────────────────────────────────────────────
 # Step 1: Validate that a commit message was provided
 # ──────────────────────────────────────────────────────────────
@@ -59,7 +64,7 @@ fi
 # Step 6: Run git_branch_state.sh to get verification JSON
 # ──────────────────────────────────────────────────────────────
 # The script outputs JSON with keys: branch, diverged, behind_main.
-BRANCH_STATE=$(bash "$HOME/.claude/scripts/git_branch_state.sh")
+BRANCH_STATE=$(bash "${CONFIG_DIR}/scripts/git_branch_state.sh")
 
 # ──────────────────────────────────────────────────────────────
 # Step 7: Parse verification JSON and determine success

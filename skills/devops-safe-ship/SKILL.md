@@ -112,13 +112,14 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
 - **Background subagents + poll-loops.** Wait via a 1s-sleep for-loop, ≤10s per
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
-- **CI watcher** per push/merge (`bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`,
-  auto-launched by the PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`)
+- **CI watcher** per push/merge (this environment's CI-watcher script — in Claude Code,
+  `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>` — auto-launched by the
+  PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`)
   — one-shot per event, not a persistent daemon; re-launch it on every "behind" alert.
 - **Dodge hook false-positives.** Write commit messages and PR bodies to a file and
   pass `--body-file`/`-F` — the base-dir hook false-positives on git-words inside
   `$(...)` / prose.
-- **Second opinion before merge.** Run a `/codex` read-only review on the plan and
+- **Second opinion before merge.** Run a `/other-llm` read-only review on the plan and
   on the diff of any risky PR before merging.
 
 ### 7. Memory, continuity & communication
@@ -133,7 +134,7 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
 ## Procedure when invoked
 
 1. **Map the rollout** into the minimum ordered PRs deploy-ordering forces. Note for
-   each: additive vs risky, auto-deploy vs manual, rollback path. Run `/codex` on
+   each: additive vs risky, auto-deploy vs manual, rollback path. Run `/other-llm` on
    the plan.
 2. **For each PR, in order:**
    a. Branch a fresh worktree off `origin/main` (fetch first). Never the base repo.
@@ -141,8 +142,9 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
       this is a flip.
    c. Write rollback + (for cutovers) an attestation block into the PR body via
       `-F`/`--body-file`.
-   d. `/post` + `/codex` diff review; get CI green; the CI watcher auto-launches on
-      push/merge (or run `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`).
+   d. `/post` + `/other-llm` diff review; get CI green; the CI watcher auto-launches on
+      push/merge (or run this environment's CI-watcher script manually — in Claude Code,
+      `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`).
    e. Classify any RED guard: benign-by-design (force-merge, print why, lean on the
       green preflight) vs real (fix).
    f. **If the merge/deploy is irreversible → PAUSE and hand to the human** (pre-checks

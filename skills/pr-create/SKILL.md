@@ -55,9 +55,11 @@ EOF
 - Display created PR URL
 
 ### Step 5: CI Watcher (automatic)
-The `PostToolUse` hook `post_tool_use__ci_watch_trigger.sh` launches a push-mode
-CI watcher for the branch the instant `gh pr create` succeeds. Do NOT invoke
-`/ci-watcher` yourself — the hook's own instruction tells you how to start it.
+A `PostToolUse` hook (`ci_watch_trigger`, or this environment's equivalent) launches a
+push-mode CI watcher for the branch the instant `gh pr create` succeeds, and tells you
+the exact command to run it with. Do not guess that command yourself or invoke a
+`/ci-watcher`-style skill directly — use exactly what the hook's own instruction gives you.
 
-Fallback: if no watcher launch instruction arrives shortly after the PR is
-created, run `bash ~/.claude/scripts/ci_watch_once.sh push <branch>` manually.
+Fallback: if no watcher launch instruction arrives shortly after the PR is created, find
+this environment's CI-watcher script (in Claude Code: `~/.claude/scripts/ci_watch_once.sh`)
+and run `bash <that script> push <branch>` manually.

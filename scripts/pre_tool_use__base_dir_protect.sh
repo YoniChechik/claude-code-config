@@ -41,6 +41,33 @@ DENY_GIT_MSG="DENIED: Git write operation attempted outside a git worktree. Dire
 DENY_EDIT_MSG="DENIED: File edit/write attempted outside a git worktree inside a git repo. Direct edits to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) For feature/implementation work, run '/new-feature <feature-description>' — it creates the worktree and runs the implement-PR-merge pipeline end to end. For a non-feature one-off with no PR planned, run '/create-worktree <feature-description>' directly instead — this creates an isolated git worktree under .claude/worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that worktree. Never edit files directly in the base repo directory."
 INTERNAL_ERROR_MSG="GUARD_INTERNAL_ERROR: the base-dir guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_shell_command_guard.sh."
 
+# WORKTREE_CONTAINER_REL selects which relative path segment under a repo root
+# counts as the worktree container, so this same guard file can protect a base
+# repo that uses a different worktree convention (e.g. a `.pi` symlink to this
+# file, where worktrees live at `.worktrees` instead of Claude Code's
+# `.claude/worktrees`) without weakening the default case.
+#
+# Resolved to one of exactly two known-safe literal PATTERN PAIRS before it
+# ever touches a glob — the raw env var is never interpolated into a `case`
+# pattern. An unvalidated value spliced straight into a glob would itself be a
+# bypass (`WORKTREE_CONTAINER_REL='*'` would make `*/*/?*` match almost
+# anything), so anything other than the one recognized override falls back to
+# the default, including an empty/unset value, whitespace, or a value
+# containing glob metacharacters (`*`, `?`, `[`) or `..`.
+case "${WORKTREE_CONTAINER_REL:-}" in
+    .worktrees)
+        WORKTREE_WRITE_PATTERN="*/.worktrees/?*"
+        WORKTREE_EDIT_PATTERN="*/.worktrees/*/*"
+        ;;
+    *)
+        # Default. Also where every invalid/unrecognized value lands, and
+        # where the empty/unset case lands — never treat "not the one known
+        # override" as anything but the default.
+        WORKTREE_WRITE_PATTERN="*/.claude/worktrees/?*"
+        WORKTREE_EDIT_PATTERN="*/.claude/worktrees/*/*"
+        ;;
+esac
+
 INPUT=$(cat)
 
 tool_name=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -480,7 +507,7 @@ if [ "$tool_name" = "Bash" ]; then
             # feature worktrees from /create-worktree and harness agent worktrees.
             # Require a non-empty <name> component so the container dir itself stays protected.
             case "$effective_cwd" in
-                */.claude/worktrees/?*) exit 0 ;;
+                $WORKTREE_WRITE_PATTERN) exit 0 ;;
             esac
         fi
         emit_decision deny "$DENY_GIT_MSG"
@@ -534,7 +561,7 @@ else
     # /create-worktree and harness agent worktrees. Require a path component AFTER <name>
     # so the worktrees container dir itself stays protected.
     case "$resolved_path" in
-        */.claude/worktrees/*/*) exit 0 ;;
+        $WORKTREE_EDIT_PATTERN) exit 0 ;;
     esac
 
     emit_decision deny "$DENY_EDIT_MSG"

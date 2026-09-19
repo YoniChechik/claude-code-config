@@ -48,10 +48,11 @@ Run `/post` skill for quality checks, code review, test review, and lint/format.
 Run `/pr-create` skill to create a pull request. This also launches the CI watcher in the background automatically.
 
 ### Step 8: Merge
-Run `bash ~/.claude/scripts/ci_watch_once.sh push '<branch>'` as a **foreground** Bash
-call (not backgrounded) — this blocks until CI settles, superseding the background
-watcher Step 7 already launched for the same branch (same lock key, so this is an
-expected, harmless relaunch/eviction, not a race).
+Find this environment's CI-watcher script (in Claude Code: `~/.claude/scripts/ci_watch_once.sh`)
+and run `bash <that script> push '<branch>'` as a **foreground** Bash call (not
+backgrounded) — this blocks until CI settles, superseding the background watcher Step 7
+already launched for the same branch (same lock key, so this is an expected, harmless
+relaunch/eviction, not a race).
 
 - `CI passed for <branch>` or `No CI checks configured for <branch>` → merge
   immediately: `gh pr merge <PR> --squash --delete-branch`. Report the merge. Do

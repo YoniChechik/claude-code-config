@@ -114,6 +114,68 @@ assert_decision() { # <expected> <actual>
 }
 
 # =============================================================================
+# WORKTREE_CONTAINER_REL: lets this same guard file protect a base repo using
+# a different worktree convention (e.g. a `.pi` symlink, where worktrees live
+# at `.worktrees` instead of `.claude/worktrees`), without weakening the
+# default case. The raw env var is never spliced into a glob — only the two
+# known-safe literal pattern pairs it resolves to are ever matched against.
+# =============================================================================
+
+@test "allow: default behavior is unchanged with WORKTREE_CONTAINER_REL explicitly unset" {
+    ALT_WT="$BASE/.worktrees/altfeat"
+    mkdir -p "$ALT_WT/mobile"
+    unset WORKTREE_CONTAINER_REL
+    # The default (.claude/worktrees) convention still governs: a bare
+    # .worktrees path is NOT recognized and is denied like any other base-repo path.
+    assert_decision DENY "$(bash_decide "$BASE" "git $C -m x" )"
+    assert_decision ALLOW "$(bash_decide "$WT" "git $C -m x")"
+}
+
+@test "allow: WORKTREE_CONTAINER_REL=.worktrees permits a git write inside .worktrees/<name>" {
+    ALT_WT="$BASE/.worktrees/altfeat"
+    mkdir -p "$ALT_WT/mobile"
+    export WORKTREE_CONTAINER_REL=".worktrees"
+    assert_decision ALLOW "$(bash_decide "$ALT_WT" "git $C -m x")"
+    unset WORKTREE_CONTAINER_REL
+}
+
+@test "allow: WORKTREE_CONTAINER_REL=.worktrees permits a file Write inside .worktrees/<name>" {
+    ALT_WT="$BASE/.worktrees/altfeat"
+    mkdir -p "$ALT_WT/mobile"
+    export WORKTREE_CONTAINER_REL=".worktrees"
+    assert_decision ALLOW "$(file_decide Write "$ALT_WT" "$ALT_WT/mobile/foo.ts")"
+    unset WORKTREE_CONTAINER_REL
+}
+
+@test "deny: WORKTREE_CONTAINER_REL=.worktrees still protects the .worktrees container itself" {
+    ALT_WT="$BASE/.worktrees/altfeat"
+    mkdir -p "$ALT_WT/mobile"
+    export WORKTREE_CONTAINER_REL=".worktrees"
+    assert_decision DENY "$(bash_decide "$BASE/.worktrees" "git $C -m x")"
+    assert_decision DENY "$(file_decide Write "$BASE" "$BASE/.worktrees/NOTES.md")"
+    unset WORKTREE_CONTAINER_REL
+}
+
+@test "deny: with the override active, the OLD .claude/worktrees convention is no longer recognized" {
+    export WORKTREE_CONTAINER_REL=".worktrees"
+    assert_decision DENY "$(bash_decide "$WT" "git $C -m x")"
+    unset WORKTREE_CONTAINER_REL
+}
+
+@test "deny: an injected glob wildcard in WORKTREE_CONTAINER_REL falls back to the default, not a bypass" {
+    ALT_WT="$BASE/.worktrees/altfeat"
+    mkdir -p "$ALT_WT/mobile"
+    for bad in '*' '?' '.claude/worktrees/../..' '/etc' '' ' '; do
+        export WORKTREE_CONTAINER_REL="$bad"
+        assert_decision DENY "$(bash_decide "$ALT_WT" "git $C -m x")" || {
+            echo "bypass with WORKTREE_CONTAINER_REL=[$bad]" >&2
+            return 1
+        }
+    done
+    unset WORKTREE_CONTAINER_REL
+}
+
+# =============================================================================
 # ALLOWED: narrow pull-only sync shapes in the base repo (not a worktree). Each
 # one only adopts state already on origin, or deletes untracked cruft — never
 # writes content this session authored, so the worktree confinement does not
