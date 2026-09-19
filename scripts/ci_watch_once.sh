@@ -63,8 +63,8 @@ exec </dev/null
 # and the installed ~/.claude copy each source their own sibling.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR
-# shellcheck source=../../scripts/_notify.sh
-source "${SCRIPT_DIR}/../../scripts/_notify.sh"
+# shellcheck source=./_notify.sh
+source "${SCRIPT_DIR}/_notify.sh"
 
 # --- run_watchable ----------------------------------------------------------
 # Run "$@" as a background job in its OWN process group, block until it ends,
