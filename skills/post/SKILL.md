@@ -24,14 +24,17 @@ Instruct the fix agent to:
 6. Briefly summarize what was fixed and what was rejected.
 
 ## Step 3: Lint, Format, Test, Ship
-After the fix agent is done, run the quality check script to auto-format and lint:
+After the fix agent is done, run the quality check script (in this skill's own
+directory — the "Base directory for this skill" path given above, not a
+hardcoded `~/.claude` path) to auto-format and lint:
 ```bash
-~/.claude/skills/post/quality_check.sh --fix
+bash "<skill-base-dir>/quality_check.sh" --fix
 ```
 Then verify no errors remain:
 ```bash
-~/.claude/skills/post/quality_check.sh
+bash "<skill-base-dir>/quality_check.sh"
 ```
+Substitute `<skill-base-dir>` with the literal base-directory path given above.
 If errors remain, read the files and fix manually, then re-run until clean.
 
 Run the project's tests and make sure they pass.

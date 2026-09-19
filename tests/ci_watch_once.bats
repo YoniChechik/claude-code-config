@@ -23,6 +23,10 @@
 
 WATCHER="${BATS_TEST_DIRNAME}/../scripts/ci_watch_once.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
+# The script reports its own invoked path (via $SELF) in user-facing retry
+# messages, resolved to an absolute path — never a hardcoded ~/.claude
+# literal, so assertions must match against this, not a fixed string.
+WATCHER_ABS="$(cd "$(dirname "$WATCHER")" && pwd)/$(basename "$WATCHER")"
 
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
@@ -514,7 +518,7 @@ DRV
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
     assert_contains "CI settled wait timed out; feat-x still not merged after 6h" "$output"
-    assert_contains "Run \`bash ~/.claude/scripts/ci_watch_once.sh merge feat-x\` after you merge it." "$output"
+    assert_contains "Run \`bash $WATCHER_ABS merge feat-x\` after you merge it." "$output"
 }
 
 # --- merge mode, phase 2 ----------------------------------------------------
@@ -573,7 +577,7 @@ DRV
     run bash "$WATCHER" push "$BRANCH"
     [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
     assert_contains "CI watch for feat-x hit a persistent error" "$output"
-    assert_contains "run \`bash ~/.claude/scripts/ci_watch_once.sh push feat-x\` to retry" "$output"
+    assert_contains "run \`bash $WATCHER_ABS push feat-x\` to retry" "$output"
     assert_eq 3 "$(call_count 'statusCheckRollup')"
     assert_not_contains "No CI checks configured" "$output"
 }
@@ -616,4 +620,23 @@ DRV
     assert_eq "CI passed for feat-x" "$output"
     run cat "$BATS_TEST_TMPDIR/ci_watch2_push_${SLUG}-${KEY}.log"
     assert_contains "VERBOSE-GH-CHATTER" "$output"
+}
+
+# --- self-referencing paths --------------------------------------------------
+# This script is meant to be symlinked into another tool's config directory
+# (e.g. ~/.pi) rather than copied. Its retry messages must report the path it
+# was actually INVOKED through, not the real file's location, so a `.pi` user
+# is told to re-run the `.pi` path, not a `.claude` one.
+
+@test "the persistent-error retry message reports the invoked symlink path, not the real file's" {
+    LINK_DIR="$BATS_TEST_TMPDIR/pi-style-link"
+    mkdir -p "$LINK_DIR"
+    ln -s "$WATCHER_ABS" "$LINK_DIR/ci_watch_once.sh"
+    ln -s "$(cd "$(dirname "$NOTIFY_SH")" && pwd)/_notify.sh" "$LINK_DIR/_notify.sh"
+
+    stub pr_rollup 1 "gh: Bad credentials (HTTP 401)"
+    run bash "$LINK_DIR/ci_watch_once.sh" push "$BRANCH"
+    [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
+    assert_contains "run \`bash $LINK_DIR/ci_watch_once.sh push feat-x\` to retry" "$output"
+    assert_not_contains "$WATCHER_ABS" "$output"
 }

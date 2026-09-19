@@ -23,21 +23,28 @@ Creates a git worktree for isolated feature development. Handles new features, e
 - Feature name must NOT contain `/`. If the chosen name has a prefix like `feat/`, `fix/`, `chore/`, etc. (this also covers Linear's own team-prefixed `gitBranchName`, e.g. `yoni/paper-179-...`), strip everything up to and including the last `/` (e.g. `feat/add-login` → `add-login`, `yoni/paper-179-change-app-access` → `paper-179-change-app-access`). The final name must be a flat kebab-case string with no slashes.
 
 ### Step 2: Run the worktree script
+Run `create_worktree.sh` from this skill's own directory — the "Base directory for this skill" path given above, not a hardcoded `~/.claude` path, since this file is shared verbatim across tools with different config-directory names:
 ```bash
-bash ~/.claude/skills/create-worktree/create_worktree.sh "$FEATURE_NAME"
+bash "<skill-base-dir>/create_worktree.sh" "$FEATURE_NAME"
 ```
-This handles: fetching latest main from origin, branch detection (new / existing local / existing remote), `git worktree add` at `.claude/worktrees/$FEATURE_NAME`, branching off `origin/main` (never a stale local main), env symlinking, and environment setup. It does not set the cmux workspace title — that happens in Step 3 below.
+Substitute `<skill-base-dir>` with the literal base-directory path given above.
+
+This handles: fetching latest main from origin, branch detection (new / existing local / existing remote), `git worktree add` at `.claude/worktrees/$FEATURE_NAME`, branching off `origin/main` (never a stale local main), env symlinking, and environment setup. It does not set the workspace title — that happens in Step 3 below.
 
 The script prints the worktree path (relative to the repo root) as its last stdout line.
 
 ### Step 3: Set the session name
-Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). This stores the session name in the sidecar file, sets the cmux workspace title via `cmux rename-workspace`, and (inside cmux) also triggers Claude Code's native `/rename` via `cmux send`, so the terminal title, `/resume` picker, and Remote Control app all pick up `$FEATURE_NAME` too.
+Invoke the `/session-name` skill, passing the already-derived kebab-case `$FEATURE_NAME` as its argument (`/session-name $FEATURE_NAME`). See that skill for exactly what it does — it stores the name and, where the current tool supports it, propagates it to the terminal/workspace title too.
 
 ### Step 4: Notify User
 Tell user:
 - The worktree has been created at `.claude/worktrees/$FEATURE_NAME`
 - The branch `$FEATURE_NAME` is tracking remote
-- The session (tab title, `/resume` picker, Remote Control) is renamed to `$FEATURE_NAME` via `/session-name`.
+- The session is renamed to `$FEATURE_NAME` via `/session-name`.
 
 ### Step 5: Change to Feature Directory
-Change to the feature worktree directory using `/cd-permanent .claude/worktrees/$FEATURE_NAME` skill.
+Change to the feature worktree directory:
+```bash
+cd "$(git rev-parse --show-toplevel)/.claude/worktrees/$FEATURE_NAME"
+```
+Confirm with `pwd`. A known limitation: this cannot change directory out of the base directory where the session started, if the harness restricts that.

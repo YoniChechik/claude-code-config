@@ -1,6 +1,6 @@
 ---
 name: "plan-big-feature"
-description: "Decompose a large, multi-part feature or initiative into decoupled groups (epics), research each with parallel subagents (get a second opinion from Codex on genuinely hard architecture calls), draft MVP-scoped tickets under each group — created in the project's ticket tracker if one exists, else a single markdown plan file as fallback — and gate ALL implementation behind a full `/one-by-one` user-approval pass. Never let implementation start before that gate completes."
+description: "Decompose a large, multi-part feature or initiative into decoupled groups (epics), research each with parallel subagents (get a second opinion from the other LLM on genuinely hard architecture calls), draft MVP-scoped tickets under each group — created in the project's ticket tracker if one exists, else a single markdown plan file as fallback — and gate ALL implementation behind a full `/one-by-one` user-approval pass. Never let implementation start before that gate completes."
 argument-hint: "[feature or initiative description]"
 ---
 
@@ -22,7 +22,7 @@ Fan out parallel subagents (never sequential — this is exactly the kind of wor
 - Read the actual code/config/docs, not assume from memory — an initiative like this usually spans work done over many sessions, and stale assumptions (a file that got deleted, a store that got migrated, a feature that already shipped) are the single biggest way this kind of plan goes wrong.
 - Come back with concrete findings: exact file paths, exact ticket IDs (if a tracker exists), exact tradeoffs — not vague summaries.
 
-For any research question that's a genuinely hard, load-bearing architecture call (not a matter of just reading the code to find the answer) — get a second opinion from the `codex` CLI (`codex exec -s read-only --skip-git-repo-check -`, prompt piped via stdin; check `codex --help` for exact flags if unfamiliar). Give it the concrete facts your own research already found, not a blind question. Preserve its actual response (don't paraphrase away disagreement) in the final plan.
+For any research question that's a genuinely hard, load-bearing architecture call (not a matter of just reading the code to find the answer) — get a second opinion from whichever coding CLI is NOT the active model for this session (per the `other-llm` skill's Step 1 selection): `codex exec -s read-only --skip-git-repo-check -` (prompt piped via stdin; check `codex --help` for exact flags if unfamiliar) when Codex is the other one, or `claude -p --no-session-persistence` when Claude is the other one. Give it the concrete facts your own research already found, not a blind question. Preserve its actual response (don't paraphrase away disagreement) in the final plan.
 
 You (the orchestrator) synthesize the parallel findings yourself — never delegate the synthesis to another agent. Understanding what the research means, and what to propose because of it, is the one part of this process that must not be delegated.
 
@@ -42,7 +42,7 @@ Prefer creating this directly as tracked tickets in whatever the project already
 
 Either way — **do not actually create, move, or edit anything yet.** This step produces the proposal only. State this explicitly to the user when you hand it over.
 
-If a `/codex`-style critique skill exists in this environment, run it against the finished proposal (file or drafted ticket set) before presenting it, the same way `/plan` runs its own Codex critique pass — flag weak spots, missing considerations, bad sequencing between groups, unclear scope boundaries. Apply only surgical, uncontroversial fixes directly; anything Codex raises that changes scope goes to the user as an open question, not a silent edit.
+If an `/other-llm`-style critique skill exists in this environment, run it against the finished proposal (file or drafted ticket set) before presenting it, the same way `/plan` runs its own critique pass — flag weak spots, missing considerations, bad sequencing between groups, unclear scope boundaries. Apply only surgical, uncontroversial fixes directly; anything it raises that changes scope goes to the user as an open question, not a silent edit.
 
 ### Step 4: The gate — one-by-one review, before anything is built
 

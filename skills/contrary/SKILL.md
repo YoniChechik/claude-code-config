@@ -24,10 +24,10 @@ The subagent has zero memory of this session. Whatever you send must stand alone
 
 Attacking a strawman is worse than not attacking at all. If you're unsure what the user means, ask before dispatching.
 
-### 2. Dispatch the critic — default to Codex
-Default: run the critique via the `codex` skill, in review mode — an independent model is a genuinely more independent adversarial read than Claude critiquing Claude. Follow the `codex` skill's process, using the critique instructions below (prefixed with its own "READ-ONLY REVIEW" line per that skill's Step 1) as the prompt.
+### 2. Dispatch the critic — default to the other LLM
+Default: run the critique via the `other-llm` skill, in review mode — a genuinely different model family is a more independent adversarial read than one model critiquing itself. Follow the `other-llm` skill's process, using the critique instructions below (prefixed with its own "READ-ONLY REVIEW" line per that skill's Step 2) as the prompt.
 
-Fallback: if codex is unavailable or its run fails, dispatch a general-purpose Claude subagent instead (`subagent_type: general-purpose`), with the same critique instructions embedded verbatim as its prompt.
+Fallback: if the other CLI is unavailable or its run fails, dispatch a general-purpose subagent on the SAME model as this session instead (`subagent_type: general-purpose`), with the same critique instructions embedded verbatim as its prompt.
 
 Either way, the prompt must be fully self-contained — no memory of this session.
 

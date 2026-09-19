@@ -17,7 +17,7 @@ Scan the current session for:
 
 Exclude:
 - Anything already done or already answered.
-- Calls you can reasonably make yourself per existing conventions (CLAUDE.md, an ADR, an established pattern).
+- Calls you can reasonably make yourself per existing conventions (the repo's own instructions file, an ADR, an established pattern).
 - Pure physical actions only the user can do (click, type a card number, approve OAuth) — that's `human-meat-proxy`, not this list.
 
 Order: anything blocking a running subagent, CI, or a deploy goes first. Cosmetic/low-stakes goes last.

@@ -118,13 +118,13 @@ Create `review.md` with the following structure:
 
 **Write the report to `review.md` in the current directory.**
 
-### Subagent 2: Codex critique pass
+### Subagent 2: Other-LLM critique pass
 
-After the review subagent writes `review.md`, get a second opinion from Codex:
+After the review subagent writes `review.md`, get a second opinion from the other LLM:
 
-- **Critique**: Invoke the `/codex` skill on the current branch diff (per its PR diff review recipe). Ask it to find things the primary review missed — bugs, security issues, design smells, untested paths, missed edge cases.
-- **Triage**: Separate valid Codex findings from noise.
-- **Merge**: Append the valid new findings into `review.md` under the appropriate severity sections, tagged as `(Codex)` so the fix phase picks them up.
+- **Critique**: Invoke the `/other-llm` skill on the current branch diff (per its PR diff review recipe). Ask it to find things the primary review missed — bugs, security issues, design smells, untested paths, missed edge cases.
+- **Triage**: Separate valid findings from noise.
+- **Merge**: Append the valid new findings into `review.md` under the appropriate severity sections, tagged as `(other-llm)` so the fix phase picks them up.
 
 The skill ends with the merged `review.md`. Do NOT fix anything — fixing is a separate, single-writer phase.
 

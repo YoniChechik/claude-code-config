@@ -256,8 +256,8 @@ short_reason() {
 # The one escalation path out of a retryable error: one stdout line, nonzero
 # exit.  A watcher that cannot see the truth must say so, never guess.
 die_persistent() {
-    printf 'CI watch for %s hit a persistent error: %s — stopping; run `bash ~/.claude/scripts/ci_watch_once.sh %s %s` to retry\n' \
-        "$BRANCH" "$1" "$MODE" "$BRANCH"
+    printf 'CI watch for %s hit a persistent error: %s — stopping; run `bash %s %s %s` to retry\n' \
+        "$BRANCH" "$1" "$SELF" "$MODE" "$BRANCH"
     exit 1
 }
 
@@ -403,8 +403,8 @@ merge_body() {
                 ;;
         esac
         if [[ $(($(date +%s) - wait_start)) -ge "$CI_WATCH_MERGE_WAIT_MAX" ]]; then
-            printf 'CI settled wait timed out; %s still not merged after 6h — stopping. Run `bash ~/.claude/scripts/ci_watch_once.sh merge %s` after you merge it.\n' \
-                "$BRANCH" "$BRANCH"
+            printf 'CI settled wait timed out; %s still not merged after 6h — stopping. Run `bash %s merge %s` after you merge it.\n' \
+                "$BRANCH" "$SELF" "$BRANCH"
             return 0
         fi
         run_watchable sleep "$CI_WATCH_MERGE_POLL"

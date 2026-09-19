@@ -6,13 +6,20 @@
 
 set -euo pipefail
 
+# Config-dir override matches the convention already established in
+# _shell_command_guard.sh, since this file is meant to be symlinked into
+# another tool's config directory rather than copied, and that tool's own
+# shared-scripts directory doesn't necessarily sit at the same RELATIVE path
+# from this file (e.g. Claude Code's scripts/ vs. a per-extension layout).
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 # --- Step 1: Fetch latest state from origin ---
 git fetch origin
 
 # --- Step 2: Get branch state JSON from helper script ---
 # git_branch_state.sh returns JSON like:
 #   {"branch": "feat-x", "diverged": false, "behind_main": 3}
-branch_state=$(bash "$HOME/.claude/scripts/git_branch_state.sh")
+branch_state=$(bash "${CONFIG_DIR}/scripts/git_branch_state.sh")
 
 # --- Step 3: Parse the relevant fields with jq ---
 behind_main=$(echo "$branch_state" | jq -r '.behind_main')
