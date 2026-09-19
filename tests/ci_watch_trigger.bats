@@ -158,21 +158,16 @@ ctx() {
     printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty'
 }
 
-# A trigger must name the right mode, carry the exact background-launch
-# phrasing, and name the right task-id file. Args: <mode> <context text>.
-# shellcheck disable=SC2016  # The backticks and ${...} below are LITERAL text
-# the hook emits for the agent to read — expanding them here would defeat the
-# point of the assertion.
+# A trigger must name the right mode and carry the exact background-launch
+# phrasing. Args: <mode> <context text>.
+# shellcheck disable=SC2016  # The backticks below are LITERAL text the hook
+# emits for the agent to read — expanding them here would defeat the point of
+# the assertion.
 assert_launch_instruction() {
     local kind="$1" text="$2"
-    assert_contains "bash ~/.claude/skills/ci-watcher/ci_watch_once.sh ${kind} '${BRANCH}'" "$text" || return 1
+    assert_contains "bash ~/.claude/scripts/ci_watch_once.sh ${kind} '${BRANCH}'" "$text" || return 1
     assert_contains '`run_in_background: true`' "$text" || return 1
     assert_contains 'no explicit `timeout` override' "$text" || return 1
-    # Written with a single-quoted prefix so the shell does not expand the
-    # session-id placeholder the hook emits VERBATIM for the agent to expand.
-    local taskfile='/tmp/ci_watch2_task_${CLAUDE_CODE_SESSION_ID}_'"${kind}_${SLUG}-${KEY}"
-    assert_contains "$taskfile" "$text" || return 1
-    assert_contains "write it verbatim" "$text" || return 1
     return 0
 }
 
@@ -296,9 +291,9 @@ assert_launch_instruction() {
     assert_eq 0 "$status"
     assert_contains "A \`gh pr create\` for 'feat-x' just succeeded" "$output"
     assert_launch_instruction push "$output"
-    # The PR was just created, so its state needs no lookup.
-    run grep -c "pr view" "$GH_STUB_DIR/calls.log"
-    assert_eq 1 "$status"
+    # The PR was just created, so its state needs no lookup. No gh call at
+    # all happens on this path, so calls.log is never even created.
+    assert_not_contains "pr view" "$(cat "$GH_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
 @test "gh pr create --head <currentbranch> with decorating flags launches a push watcher" {
@@ -312,7 +307,6 @@ assert_launch_instruction() {
     assert_eq 0 "$status"
     assert_contains "A \`gh pr merge\` of 'feat-x' just succeeded." "$output"
     assert_launch_instruction merge "$output"
-    assert_not_contains "_push_${SLUG}-${KEY}" "$output"
 }
 
 @test "gh pr merge --auto launches a merge watcher" {
@@ -324,8 +318,8 @@ assert_launch_instruction() {
 @test "a merge trigger never runs the gh pr view OPEN precheck" {
     run ctx "gh pr merge --auto"
     assert_eq 0 "$status"
-    run grep -c "pr view" "$GH_STUB_DIR/calls.log"
-    assert_eq 1 "$status"
+    # No gh call at all happens on this path, so calls.log is never created.
+    assert_not_contains "pr view" "$(cat "$GH_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
 @test "the hook emits additionalContext ONLY — never a systemMessage" {
@@ -479,24 +473,6 @@ assert_launch_instruction() {
     assert_eq "" "$output"
     run cat "$HOOK_LOG"
     assert_contains "gh pr view failed" "$output"
-}
-
-@test "a hanging gh repo view fails OPEN on the merge path" {
-    gh_stub repo_name HANG
-    run ctx "gh pr merge --auto"
-    assert_eq 0 "$status"
-    assert_eq "" "$output"
-    run cat "$HOOK_LOG"
-    assert_contains "could not resolve owner/repo" "$output"
-}
-
-@test "a failing gh repo view fails OPEN" {
-    gh_stub repo_name 1 ""
-    run ctx "git push"
-    assert_eq 0 "$status"
-    assert_eq "" "$output"
-    run cat "$HOOK_LOG"
-    assert_contains "could not resolve owner/repo" "$output"
 }
 
 @test "an unresolvable current branch fails OPEN" {

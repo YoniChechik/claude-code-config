@@ -112,8 +112,9 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
 - **Background subagents + poll-loops.** Wait via a 1s-sleep for-loop, ≤10s per
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
-- **Persistent CI watcher** per feature branch (`/ci-watcher`) — never auto-kill it;
-  keep fixing/re-syncing on every "behind" alert.
+- **CI watcher** per push/merge (`bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`,
+  auto-launched by the PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`)
+  — one-shot per event, not a persistent daemon; re-launch it on every "behind" alert.
 - **Dodge hook false-positives.** Write commit messages and PR bodies to a file and
   pass `--body-file`/`-F` — the base-dir hook false-positives on git-words inside
   `$(...)` / prose.
@@ -140,7 +141,8 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
       this is a flip.
    c. Write rollback + (for cutovers) an attestation block into the PR body via
       `-F`/`--body-file`.
-   d. `/post` + `/codex` diff review; get CI green; launch `/ci-watcher`.
+   d. `/post` + `/codex` diff review; get CI green; the CI watcher auto-launches on
+      push/merge (or run `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`).
    e. Classify any RED guard: benign-by-design (force-merge, print why, lean on the
       green preflight) vs real (fix).
    f. **If the merge/deploy is irreversible → PAUSE and hand to the human** (pre-checks

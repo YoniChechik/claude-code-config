@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Tests for skills/ci-watcher/ci_watch_once.sh (the one-shot push/merge watcher)
+# Tests for scripts/ci_watch_once.sh (the one-shot push/merge watcher)
 # and for _ci_watch_key in scripts/_notify.sh.
 #
 # Strategy:
@@ -21,7 +21,7 @@
 # not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
 # non-final `[[ ... ]]` and reports the test as ok.
 
-WATCHER="${BATS_TEST_DIRNAME}/../skills/ci-watcher/ci_watch_once.sh"
+WATCHER="${BATS_TEST_DIRNAME}/../scripts/ci_watch_once.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 
 setup() {
@@ -403,8 +403,8 @@ DRV
 }
 
 # No SIGINT test: run_watchable only traps TERM. Nothing in this system ever
-# sends a watcher SIGINT (eviction and `/ci-watcher stop` both use TERM then
-# KILL), and a signal that is SIG_IGN "on entry" to a shell can never be
+# sends a watcher SIGINT (eviction uses TERM then KILL), and a signal that is
+# SIG_IGN "on entry" to a shell can never be
 # trapped by it (POSIX/bash) — the disposition a background job gets unless
 # its parent enables real job control before forking it, which a backgrounded
 # Bash-tool invocation with no controlling terminal cannot guarantee. That
@@ -514,7 +514,7 @@ DRV
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
     assert_contains "CI settled wait timed out; feat-x still not merged after 6h" "$output"
-    assert_contains "Run /ci-watcher merge feat-x after you merge it." "$output"
+    assert_contains "Run \`bash ~/.claude/scripts/ci_watch_once.sh merge feat-x\` after you merge it." "$output"
 }
 
 # --- merge mode, phase 2 ----------------------------------------------------
@@ -573,7 +573,7 @@ DRV
     run bash "$WATCHER" push "$BRANCH"
     [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
     assert_contains "CI watch for feat-x hit a persistent error" "$output"
-    assert_contains "run /ci-watcher feat-x to retry" "$output"
+    assert_contains "run \`bash ~/.claude/scripts/ci_watch_once.sh push feat-x\` to retry" "$output"
     assert_eq 3 "$(call_count 'statusCheckRollup')"
     assert_not_contains "No CI checks configured" "$output"
 }

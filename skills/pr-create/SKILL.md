@@ -60,4 +60,4 @@ CI watcher for the branch the instant `gh pr create` succeeds. Do NOT invoke
 `/ci-watcher` yourself — the hook's own instruction tells you how to start it.
 
 Fallback: if no watcher launch instruction arrives shortly after the PR is
-created, run `/ci-watcher <branch>` manually for that branch.
+created, run `bash ~/.claude/scripts/ci_watch_once.sh push <branch>` manually.

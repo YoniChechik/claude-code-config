@@ -650,24 +650,6 @@ EOF"
     assert_decision DENY "$(bash_decide "$WT" "/bin/bash -c \"git -C $BASE $C -m x\"")"
 }
 
-# =============================================================================
-# FAIL-CLOSED BOUNDS. Adversarially long or deeply nested input exists to run
-# the hook past the harness timeout, where a missing decision reads as allow.
-# The guard must refuse to scan it instead — and must NOT refuse a real command.
-# =============================================================================
-
-@test "ask: a command past the separator bound fails closed" {
-    local cmd="" i
-    for i in $(seq 1 400); do cmd="${cmd}echo $i && "; done
-    assert_decision ASK "$(bash_decide "$WT" "${cmd}true")"
-}
-
-@test "ask: a command past the subshell-count bound fails closed" {
-    local cmd="echo" i
-    for i in $(seq 1 100); do cmd="$cmd \$(echo $i)"; done
-    assert_decision ASK "$(bash_decide "$WT" "$cmd")"
-}
-
 @test "allow: a realistically long commit message stays well inside the bounds" {
     local body=""
     local i

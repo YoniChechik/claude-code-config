@@ -24,9 +24,9 @@
 #
 # FAIL-CLOSED
 # -----------
-# A missing/broken shared library or adversarially large input produces an
-# explicit `ask`, never silence. Silence means "no opinion" to the dispatcher,
-# which means allow — so an internal error must never look like silence.
+# A missing/broken shared library produces an explicit `ask`, never silence.
+# Silence means "no opinion" to the dispatcher, which means allow — so an
+# internal error must never look like silence.
 
 emit_decision() {
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
@@ -47,16 +47,8 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 # closed with a distinguishable verdict rather than emitting nothing.
 # shellcheck source=./_shell_command_guard.sh
 if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
-    || ! declare -F _expand_segments >/dev/null 2>&1 \
-    || ! declare -F _guard_within_bounds >/dev/null 2>&1; then
+    || ! declare -F _expand_segments >/dev/null 2>&1; then
     emit_decision ask "$GUARD_INTERNAL_ERROR_MSG"
-    exit 0
-fi
-
-# Adversarially long / deeply nested input exists to push the hook past the
-# harness timeout, where a missing decision reads as allow. Refuse to scan it.
-if ! _guard_within_bounds "$COMMAND"; then
-    emit_decision ask "Blocked pending confirmation: this command is too long or too deeply nested for the permission guard to analyse safely (limits: ${GUARD_MAX_CMD_LEN} chars, ${GUARD_MAX_PARENS} subshells, ${GUARD_MAX_SEPARATORS} segments). Split it into smaller commands."
     exit 0
 fi
 

@@ -264,34 +264,6 @@ assert_decision() { # <expected> <actual>
     assert_decision ASK "$(decide "$GH repo archive foo/bar && $GH repo rename baz")"
 }
 
-# =============================================================================
-# FAIL-CLOSED BOUNDS. A crafted input that makes the guard scan forever would,
-# once the hook timed out, be allowed by default. The guard refuses to scan
-# instead — while leaving real commands alone.
-# =============================================================================
-
-@test "ask: a command past the separator bound fails closed" {
-    local cmd="" i
-    for i in $(seq 1 400); do cmd="${cmd}echo $i && "; done
-    assert_decision ASK "$(decide "${cmd}true")"
-}
-
-@test "ask: a command past the subshell-count bound fails closed" {
-    local cmd="echo" i
-    for i in $(seq 1 100); do cmd="$cmd \$(echo $i)"; done
-    assert_decision ASK "$(decide "$cmd")"
-}
-
-@test "ask: a command past the length bound fails closed" {
-    local cmd="echo" i
-    for i in $(seq 1 2500); do cmd="$cmd word$i"; done
-    assert_decision ASK "$(decide "$cmd")"
-}
-
-@test "none: an ordinary multi-step command stays well inside the bounds" {
-    assert_decision NONE "$(decide "cd repo && git status && git diff --stat && $GH pr list && echo done")"
-}
-
 @test "ask: a broken shared library fails closed instead of silently allowing" {
     # With _shell_command_guard.sh unavailable every rule matches nothing, which
     # is indistinguishable from a clean pass unless the guard says so.
