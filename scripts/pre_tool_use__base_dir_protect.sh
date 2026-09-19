@@ -18,7 +18,15 @@
 # of them was a silent bypass. The model is inverted: a small allowlist names the
 # subcommands known to be READ-ONLY (plus `fetch`, which only writes
 # remote-tracking refs, and `worktree`, which is the sanctioned escape hatch that
-# /create-worktree itself needs). ANYTHING ELSE counts as a write and must run
+# /create-worktree itself needs), PLUS three narrow PULL-ONLY shapes of
+# `checkout`/`reset`/`clean` (see git_subcommand_is_read below): each one only
+# adopts state that ALREADY exists on origin, or deletes untracked cruft — never
+# writes content this session authored. What this guard actually protects
+# against is unreviewed writes landing in the base repo outside the worktree+PR
+# flow; catching the base repo up to origin's own already-reviewed state is the
+# opposite of that, and blocking it just adds friction (confirmed live: it
+# forced a manual out-of-band sync after a mid-session merge). ANYTHING ELSE
+# counts as a write and must run
 # inside a worktree. New git subcommands therefore fail safe by default.
 
 # ---------------------------------------------------------------------------
@@ -58,13 +66,18 @@ fi
 #                       override can redefine ANY subcommand name to do
 #                       ANYTHING, so the subcommand name stops being evidence
 #                       of anything and the invocation is never trusted.
-#   GIT_IS_READ         1 when the subcommand is on the read-only allowlist
+#   GIT_IS_READ         1 when the subcommand is on the read-only allowlist,
+#                       or matches one of the narrow pull-only sync shapes
+#                       (see git_subcommand_is_read below)
 # Returns 1 when the segment is not a git invocation at all.
 # ---------------------------------------------------------------------------
 
 # Subcommands that only read. `fetch` updates remote-tracking refs but never the
 # worktree or a local branch, and `worktree` is how a worktree gets created in
-# the first place — both are deliberately here.
+# the first place — both are deliberately here. `checkout`/`reset`/`clean` are
+# writes in general, but each has one narrow shape below (the exact pull-model
+# sync `_sync_primary_checkout_to_origin_main` runs) that only adopts state
+# already on origin or deletes untracked cruft, never new authored content.
 git_subcommand_is_read() { # <subcommand> <remaining args, ws-collapsed>
     local sub="$1" args="$2" first
     first="${args%%[[:space:]]*}"
@@ -116,6 +129,34 @@ git_subcommand_is_read() { # <subcommand> <remaining args, ws-collapsed>
             return 1 ;;
         submodule)
             case "$first" in status|summary) return 0 ;; esac
+            return 1 ;;
+        checkout)
+            # `checkout -f main`/`-f master`, bare — adopts the LOCAL default
+            # branch's already-committed tip, never a pathspec or another ref's
+            # file content. Nothing else about checkout is trusted: `-- <path>`
+            # populates the working tree from arbitrary ref content, and a
+            # different branch/commit could be local, unpushed, unreviewed.
+            case "$args" in
+                "-f main"|"-f master") return 0 ;;
+            esac
+            return 1 ;;
+        reset)
+            # `reset --hard origin/<default-branch>`, bare — adopts state
+            # already reviewed and merged on the remote. A reset to anything
+            # else (a local branch, a SHA, a pathspec) could adopt unreviewed
+            # local history and is never trusted.
+            case "$args" in
+                "--hard origin/main"|"--hard origin/master") return 0 ;;
+            esac
+            return 1 ;;
+        clean)
+            # `-fd` (any flag order/case, optionally with `-x`) only deletes
+            # untracked/ignored files — it cannot alter or introduce tracked
+            # content. No argument here can ever be a pathspec that survives
+            # this exact-flag match, so scoping to bare flags is enough.
+            case "$args" in
+                -fd|-df|-fdx|-fxd|-dfx|-dxf|-xfd|-xdf) return 0 ;;
+            esac
             return 1 ;;
     esac
     return 1
