@@ -7,14 +7,13 @@
 5. THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
 6. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
 7. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
-8. When working on feature- make sure you used `/create-worktree` or `/cd-permanent` to work inside the worktree (`<repo-root>/.claude/worktrees/<branch>`). NEVER work directly in the base repo directory.
-9.  NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
-10. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
-11. Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758) — e.g. `except jwt.PyJWTError, KeyError:` is VALID; parens are only required when binding via `as` — so NEVER "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which FALSELY flags it as a SyntaxError.
-12. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
-13. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
-14. Never use legacy or deprecated libraries/ dependencies.
-15. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
+8. NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
+9. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
+10. Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758) — e.g. `except jwt.PyJWTError, KeyError:` is VALID; parens are only required when binding via `as` — so NEVER "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which FALSELY flags it as a SyntaxError.
+11. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
+12. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
+13. Never use legacy or deprecated libraries/ dependencies.
+14. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
 
 
 # FEATURE DEVELOPMENT
