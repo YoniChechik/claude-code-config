@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# PostToolUse:Bash hook — after a `gh pr merge` succeeds, immediately sync the
-# PRIMARY checkout (never a worktree) to origin/main, instead of leaving it
-# stale until the next SessionStart. The base-dir guard forbids agents from
-# writing to the primary checkout directly, so without this a mid-session
-# merge (including this hook's own PR) leaves the base repo's scripts/skills
-# stale for the rest of the session, and for any other concurrent session.
+# PostToolUse:Bash hook — after a `gh pr merge` command runs, immediately
+# sync the PRIMARY checkout (never a worktree) to origin/main, instead of
+# leaving it stale until the next SessionStart. The base-dir guard forbids
+# agents from writing to the primary checkout directly, so without this a
+# mid-session merge (including this hook's own PR) leaves the base repo's
+# scripts/skills stale for the rest of the session, and for any other
+# concurrent session.
 #
 # Deliberately permissive, unlike post_tool_use__ci_watch_trigger.sh: that
 # hook's false positives launch a background watcher for the WRONG branch, a
@@ -13,6 +14,17 @@
 # or missed sync is harmless — reset --hard origin/main is a no-op when
 # nothing changed, and a missed one just waits for the next SessionStart —
 # so this does not need that same exact-shape parsing.
+#
+# Deliberately does NOT gate on tool_response.exit_code, for the same reason:
+# `gh pr merge --squash --delete-branch`, run from a worktree while another
+# worktree (typically the primary checkout) has the target branch checked
+# out, reliably exits nonzero on gh's own post-merge local branch-switch step
+# ("failed to run git: fatal: 'main' is already used by worktree...") EVEN
+# THOUGH the remote merge itself fully succeeded — confirmed live, repeatedly,
+# in this repo's own merge workflow. Gating on exit_code == 0 meant this hook
+# never fired in practice. An extra sync attempt after a command that merely
+# LOOKS like `gh pr merge` but didn't actually merge anything is equally
+# harmless, so there is no exit-code check to get wrong here.
 #
 # Output: none, ever. Syncing the primary checkout is invisible infrastructure
 # the agent never needs to react to, so this hook emits no additionalContext
@@ -45,10 +57,6 @@ esac
 if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|=|$)'; then
     exit 0
 fi
-
-# Only a real success counts.
-exit_code=$(printf '%s' "$input" | jq -r '.tool_response.exit_code // empty' 2>/dev/null)
-[ "$exit_code" = "0" ] || exit 0
 
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 [ -n "$cwd" ] || exit 0
