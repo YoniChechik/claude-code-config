@@ -113,6 +113,80 @@ assert_decision() { # <expected> <actual>
     assert_decision ALLOW "$(bash_decide "$BASE" "git status")"
 }
 
+# =============================================================================
+# ALLOWED: narrow pull-only sync shapes in the base repo (not a worktree). Each
+# one only adopts state already on origin, or deletes untracked cruft — never
+# writes content this session authored, so the worktree confinement does not
+# apply. These are the exact commands _sync_primary_checkout_to_origin_main
+# runs.
+# =============================================================================
+
+@test "allow: checkout -f main in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git checkout -f main")"
+}
+
+@test "allow: checkout -f master in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git checkout -f master")"
+}
+
+@test "allow: reset --hard origin/main in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git reset --hard origin/main")"
+}
+
+@test "allow: clean -fd in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git clean -fd")"
+}
+
+@test "allow: clean -xfd (flag order/case with -x) in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git clean -xfd")"
+}
+
+@test "allow: the full base-repo sync sequence chained together" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git checkout -f main && git fetch origin --prune && git reset --hard origin/main && git clean -fd")"
+}
+
+# =============================================================================
+# DENIED: near-miss variants of the pull-only sync shapes. Each one differs
+# from the exact allowed shape in the one way that would let it write content
+# this session authored, or content from somewhere other than origin.
+# =============================================================================
+
+@test "deny: checkout of a non-default branch in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git checkout -f some-other-branch")"
+}
+
+@test "deny: checkout with a pathspec in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git checkout -f main -- mobile/foo.ts")"
+}
+
+@test "deny: checkout main without -f in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git checkout main")"
+}
+
+@test "deny: reset --hard to a local branch in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git reset --hard some-local-branch")"
+}
+
+@test "deny: reset --hard to a bare SHA in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git reset --hard HEAD~1")"
+}
+
+@test "deny: reset --hard origin/main plus a trailing pathspec in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git reset --hard origin/main -- mobile/foo.ts")"
+}
+
+@test "deny: reset --soft origin/main in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git reset --soft origin/main")"
+}
+
+@test "deny: clean -f alone (no -d) in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git clean -f")"
+}
+
+@test "deny: clean -fd with a path argument in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git clean -fd mobile/")"
+}
+
 @test "allow: Write a nested file inside a feature worktree" {
     assert_decision ALLOW "$(file_decide Write "$FEATWT" "$FEATWT/mobile/foo.ts")"
 }
