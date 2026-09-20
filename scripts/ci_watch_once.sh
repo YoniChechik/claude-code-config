@@ -412,7 +412,7 @@ merge_body() {
     done
 
     # Phase 2: find the post-merge run(s) on the default branch, then watch each.
-    if ! gh_call_nonempty gh repo view --repo "$OWNER_REPO" --json defaultBranchRef -q .defaultBranchRef.name; then
+    if ! gh_call_nonempty gh repo view "$OWNER_REPO" --json defaultBranchRef -q .defaultBranchRef.name; then
         die_persistent "$(short_reason "$GH_OUT")"
     fi
     local default_branch
