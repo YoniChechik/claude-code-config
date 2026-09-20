@@ -145,9 +145,25 @@ case "$cmd" in
 esac
 
 # --- Step 5a: which of the three triggers could this be? --------------------
-# Word-split into tokens. Everything that could hide a word boundary (quotes
-# aside) was already rejected above.
-read -r -a tokens <<<"$cmd"
+# Tokenize into argv-shaped words. `read -a` only splits on IFS whitespace and
+# has NO concept of quoting, so `gh pr create --title "flip all five DEV-746
+# ..."` (any multi-word --title/--body/etc value -- the overwhelmingly common
+# case for this hook) exploded into one token per word, which then failed
+# shape_ok_create() on the very next bare word after `--title` and silently
+# skipped the trigger. `xargs -n1` DOES honor single/double quotes the way the
+# real shell that ran `$cmd` already did, which is all we need -- every
+# metacharacter that would make a fuller shell-grammar parse necessary
+# ($(), backtick, `;`, `&`, `|`, redirects, newlines) was already rejected by
+# Step 4c above, and xargs performs no `$VAR`/`~` expansion or globbing, so a
+# literal token is exactly what comes out.
+if ! tokens_str=$(printf '%s' "$cmd" | xargs -n1 2>/dev/null); then
+    hook_log "could not tokenize command (unbalanced quoting?); skipping: $cmd"
+    exit 0
+fi
+tokens=()
+while IFS= read -r line; do
+    tokens+=("$line")
+done <<<"$tokens_str"
 
 KIND=""     # the ci_watch_once.sh mode to launch: push | merge
 ACTION=""   # which trigger matched, for the message's opening sentence

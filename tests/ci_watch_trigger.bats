@@ -302,6 +302,23 @@ assert_launch_instruction() {
     assert_launch_instruction push "$output"
 }
 
+@test "gh pr create with a multi-word quoted --title still launches a push watcher" {
+    # Regression test: `read -a` (the tokenizer this hook used to use) has no
+    # concept of quoting, so a multi-word --title value exploded into one
+    # token per word and the very next bare word after --title read as an
+    # unexpected positional argument, silently defeating the trigger. This is
+    # the overwhelmingly common real shape (every PR title has spaces).
+    run ctx 'gh pr create --title "feat(x): flip five flags on production" --body-file /tmp/body.md'
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "gh pr create with a multi-word quoted --body still launches a push watcher" {
+    run ctx 'gh pr create --title Fix --body "line one and line two"'
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
 @test "gh pr merge launches a MERGE watcher with the merge task-id filename" {
     run ctx "gh pr merge"
     assert_eq 0 "$status"
@@ -311,6 +328,12 @@ assert_launch_instruction() {
 
 @test "gh pr merge --auto launches a merge watcher" {
     run ctx "gh pr merge --auto --squash --delete-branch"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output"
+}
+
+@test "gh pr merge with a multi-word quoted --body still launches a merge watcher" {
+    run ctx 'gh pr merge --auto --body "merging after two rounds of review"'
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output"
 }
