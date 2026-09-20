@@ -6,7 +6,7 @@
 # Strategy:
 #   - The REAL hook is run end to end, fed a real PostToolUse JSON payload on
 #     stdin.  Only `gh` and `git` are substituted, as PATH-shadowing stubs
-#     (same convention as ci_watch_once.bats): the suite must never touch the
+#     (same convention as ci_watch.bats): the suite must never touch the
 #     network and must never depend on the checkout's real branch.
 #   - CLAUDE_NOTIFY_TMP_DIR redirects the hook's fail-open log into
 #     BATS_TEST_TMPDIR, so a live hook's real log is never read or written.
@@ -163,13 +163,13 @@ ctx() {
 # <selector> defaults to $BRANCH (the plain-case launch target); pass it
 # explicitly when the trigger carries its own explicit PR number/URL/branch.
 # <repo>, when given, asserts the launch command also forwards an explicit
-# `--repo <repo>` to ci_watch_once.sh.
+# `--repo <repo>` to ci_watch.sh.
 # shellcheck disable=SC2016  # The backticks below are LITERAL text the hook
 # emits for the agent to read — expanding them here would defeat the point of
 # the assertion.
 assert_launch_instruction() {
     local kind="$1" text="$2" selector="${3:-$BRANCH}" repo="${4:-}"
-    local expect="bash ~/.claude/scripts/ci_watch_once.sh ${kind} '${selector}'"
+    local expect="bash ~/.claude/scripts/ci_watch.sh ${kind} '${selector}'"
     [ -n "$repo" ] && expect="${expect} --repo '${repo}'"
     assert_contains "$expect" "$text" || return 1
     assert_contains '`run_in_background: true`' "$text" || return 1

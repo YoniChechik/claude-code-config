@@ -4,7 +4,7 @@
 #
 # After a Bash tool call that (a) really succeeded and (b) matches one of a
 # DELIBERATELY NARROW set of command shapes, this hook injects an instruction
-# for CLAUDE (never the user) to start scripts/ci_watch_once.sh in
+# for CLAUDE (never the user) to start scripts/ci_watch.sh in
 # the background for the branch the command acted on.
 #
 # The three triggers:
@@ -171,7 +171,7 @@ while IFS= read -r line; do
     tokens+=("$line")
 done <<<"$tokens_str"
 
-KIND=""     # the ci_watch_once.sh mode to launch: push | merge
+KIND=""     # the ci_watch.sh mode to launch: push | merge
 ACTION=""   # which trigger matched, for the message's opening sentence
 case "${tokens[0]:-} ${tokens[1]:-} ${tokens[2]:-}" in
     "git push "*) KIND="push"; ACTION="push" ;;
@@ -351,11 +351,11 @@ fi
 
 # --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
 # The opening sentence names what just happened; the rest is identical for all
-# three triggers apart from the mode. SELECTOR is what ci_watch_once.sh's
+# three triggers apart from the mode. SELECTOR is what ci_watch.sh's
 # second positional gets: the current branch for push/create, or the
 # resolved merge target (an explicit PR number/URL/branch, or the current
 # branch as fallback) for merge. REPO_FLAG, when non-empty, is an explicit
-# --repo this hook was told to trust, forwarded to ci_watch_once.sh so IT
+# --repo this hook was told to trust, forwarded to ci_watch.sh so IT
 # also targets that repo instead of resolving one from its own cwd.
 case "$ACTION" in
     push)
@@ -386,7 +386,7 @@ jq -n \
         additionalContext: (
           $lead
           + " Launch the " + $kind + " watcher: call the Bash tool with "
-          + "`command: bash ~/.claude/scripts/ci_watch_once.sh "
+          + "`command: bash ~/.claude/scripts/ci_watch.sh "
           + $kind + " '"'"'" + $selector + "'"'"'"
           + (if $repo_flag == "" then "" else " --repo '"'"'" + $repo_flag + "'"'"'" end)
           + "` and `run_in_background: true` "

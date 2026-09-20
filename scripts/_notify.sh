@@ -81,7 +81,7 @@ _session_name_read() {
 }
 
 # --- CI watcher key components ----------------------------------------------
-# Every ci_watch_once.sh watcher's /tmp files are keyed on
+# Every ci_watch.sh watcher's /tmp files are keyed on
 # "<component>_<kind>_<slug>-<KEY>", where <slug> is the readable branch slug
 # below and <KEY> is _ci_watch_key's identity hash. The hash, not the slug, is
 # what makes the key unique — folding owner/repo into it is what stops two
@@ -97,7 +97,7 @@ _ci_slug() {
     printf '%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40)"
 }
 
-# --- CI watcher key (the one-shot ci_watch_once.sh watchers) ----------------
+# --- CI watcher key (the one-shot ci_watch.sh watchers) ----------------
 # The GLOBAL, session-independent identity of one watched branch:
 #   KEY = first 10 hex chars of sha256("<owner>/<repo>#<branch>")
 # A one-shot watcher is keyed on (owner/repo, branch, kind) across every

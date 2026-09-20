@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# One-shot CI watcher.  Usage: ci_watch_once.sh push|merge '<branch>'
+# One-shot CI watcher.  Usage: ci_watch.sh push|merge '<branch>'
 #
 # Three design invariants this file exists to uphold:
 #
@@ -527,12 +527,12 @@ acquire_and_run() {
 }
 
 # --- Entry point ------------------------------------------------------------
-BODY_SENTINEL="__ci_watch_once_body"
+BODY_SENTINEL="__ci_watch_body"
 # Absolute, so the re-entry through `lockf` cannot depend on the driver's cwd.
 SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 
 usage() {
-    echo "Usage: ci_watch_once.sh push|merge '<branch>' [--repo owner/repo]" >&2
+    echo "Usage: ci_watch.sh push|merge '<branch>' [--repo owner/repo]" >&2
     exit 2
 }
 

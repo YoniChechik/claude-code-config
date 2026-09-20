@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Tests for scripts/ci_watch_once.sh (the one-shot push/merge watcher)
+# Tests for scripts/ci_watch.sh (the one-shot push/merge watcher)
 # and for _ci_watch_key in scripts/_notify.sh.
 #
 # Strategy:
@@ -21,7 +21,7 @@
 # not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
 # non-final `[[ ... ]]` and reports the test as ok.
 
-WATCHER="${BATS_TEST_DIRNAME}/../scripts/ci_watch_once.sh"
+WATCHER="${BATS_TEST_DIRNAME}/../scripts/ci_watch.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 # The script reports its own invoked path (via $SELF) in user-facing retry
 # messages, resolved to an absolute path — never a hardcoded ~/.claude
@@ -686,12 +686,12 @@ DRV
 @test "the persistent-error retry message reports the invoked symlink path, not the real file's" {
     LINK_DIR="$BATS_TEST_TMPDIR/pi-style-link"
     mkdir -p "$LINK_DIR"
-    ln -s "$WATCHER_ABS" "$LINK_DIR/ci_watch_once.sh"
+    ln -s "$WATCHER_ABS" "$LINK_DIR/ci_watch.sh"
     ln -s "$(cd "$(dirname "$NOTIFY_SH")" && pwd)/_notify.sh" "$LINK_DIR/_notify.sh"
 
     stub pr_rollup 1 "gh: Bad credentials (HTTP 401)"
-    run bash "$LINK_DIR/ci_watch_once.sh" push "$BRANCH"
+    run bash "$LINK_DIR/ci_watch.sh" push "$BRANCH"
     [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
-    assert_contains "run \`bash $LINK_DIR/ci_watch_once.sh push feat-x\` to retry" "$output"
+    assert_contains "run \`bash $LINK_DIR/ci_watch.sh push feat-x\` to retry" "$output"
     assert_not_contains "$WATCHER_ABS" "$output"
 }
