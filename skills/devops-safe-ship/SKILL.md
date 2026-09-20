@@ -16,7 +16,7 @@ real signals, and keep a one-line rollback ready before you merge.
 
 Invoke for: issuer/auth cutovers, signing-key revokes, hard-to-reverse changes,
 or any change where a mistake locks users out or can't be
-trivially undone. For ordinary additive features use `/new-feature` or `/plan`.
+trivially undone. For ordinary additive features follow the Feature Development workflow or use `/plan`.
 
 ## Rollout under design: "$ARGUMENTS"
 

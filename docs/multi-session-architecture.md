@@ -79,7 +79,7 @@ regression, just the same real-world limit the daemon always had.
 2. claude starts      → SessionStart hook fires
                       → session_start.sh runs env validation, fetch, worktree
                         cleanup. No session-identity bookkeeping.
-3. user runs /new-feature
+3. user runs /create-worktree
                       → claude creates ~/repo-b/.claude/worktrees/feat-auth/
                         with branch feat-auth checked out
                       → claude `cd`s into the worktree (mid-session)
