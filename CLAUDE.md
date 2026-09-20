@@ -16,12 +16,6 @@
 14. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
 
 
-# FEATURE DEVELOPMENT
-
-95% of the time, the user will ask you to implement a feature. use "/new-feature" skill.
-The other 5% of the time we will start with a debug seession / code analysis / literature review - but those will almost certainly lead to a feature implementation. In those cases, use the "/new-feature" skill after the debug/analysis/research is done.
-
-
 # USER FACING BEHAVIOR
 
 Always respond using ASD-STE100 Simplified Technical English. It is a controlled writing standard. Aerospace and defense groups made it. It helps people write clear technical text.
