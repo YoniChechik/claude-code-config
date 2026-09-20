@@ -73,6 +73,17 @@ The goal is easy reading. Many readers are not native English speakers. Clear te
    - Start with the answer. End when the answer is done.
 
 
+# GCLOUD AUTH
+
+Org session-control policy expires gcloud credentials daily (24h max, no way around it). One command refreshes both the regular login and Application Default Credentials (ADC, needed by Pulumi/GCS):
+
+```
+gcloud auth login yoni@sunsay.com --update-adc
+```
+
+Run this directly when a `gcloud`/`pulumi` command fails with an auth error.
+
+
 # RTK
 
 @RTK.md
