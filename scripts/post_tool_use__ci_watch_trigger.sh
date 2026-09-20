@@ -11,16 +11,22 @@
 #   1. `git push` of the current branch, when that branch already has an OPEN
 #      PR                                          -> push-mode watcher
 #   2. `gh pr create` for the current branch       -> push-mode watcher
-#   3. `gh pr merge` of the current branch's PR    -> merge-mode watcher
+#   3. `gh pr merge` of the current branch's PR,
+#      or of an explicitly named PR                -> merge-mode watcher
 #
 # Trigger contract (intentional limitation): a hook cannot reliably parse
 # arbitrary shell. `cd elsewhere && git push`, `git -C other push`, a
-# multi-ref push, `gh pr create --repo owner/other`, `gh pr merge 123`, a raw
-# GraphQL mutation — none of those can be resolved from this hook's own cwd,
-# so NONE of them trigger anything. The hook triggers only on the simple
-# forms whose target is unambiguously "the current branch of the repo at the
-# hook's cwd", and silently skips everything else — there is no manual
-# fallback, so a missed trigger means nobody launches a watcher at all.
+# multi-ref push, a raw GraphQL mutation — none of those can be resolved from
+# this hook's own cwd, so NONE of them trigger anything. BUT an explicit
+# `--repo`/`-R owner/repo` on `gh pr create`/`gh pr merge`, and an explicit
+# positional PR number/URL/branch on `gh pr merge`, ARE trusted outright
+# instead of being treated as out of contract: the caller named that target
+# directly, in a command that already succeeded, so there is nothing to
+# verify it against cwd for — see shape_ok_create/shape_ok_merge below. The
+# hook triggers on that explicit-target shape, or on the plain "current
+# branch of the repo at the hook's cwd" shape, and silently skips everything
+# else — there is no manual fallback, so a missed trigger means nobody
+# launches a watcher at all.
 #
 # Output is hookSpecificOutput.additionalContext ONLY — no systemMessage, so
 # nothing is ever surfaced to the user. Every git/gh call the hook makes is
@@ -184,14 +190,23 @@ fi
 # --- Step 6: resolve the current branch from the hook's OWN cwd. ------------
 # `cd` rather than `git -C`, because `gh` resolves its repo from the process
 # cwd too and must see the same directory the tool call ran in.
-[ -n "$CWD" ] || { hook_log "no cwd in the hook payload; skipping"; exit 0; }
-cd "$CWD" 2>/dev/null || { hook_log "cwd does not exist: $CWD"; exit 0; }
-
-BRANCH=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" git branch --show-current 2>/dev/null)
-if [ -z "$BRANCH" ]; then
-    hook_log "could not resolve the current branch in $CWD; skipping"
-    exit 0
-fi
+#
+# Needed for push and create unconditionally (their target IS "the current
+# branch of the repo at cwd", even when create's PR lands in an explicit
+# --repo via a fork workflow). For merge it is needed only as the FALLBACK
+# selector — skipped entirely when the command already carries its own
+# explicit target, so a merge run from a detached HEAD or an unrelated cwd
+# still triggers as long as it named its target itself.
+resolve_branch() {
+    [ -n "$CWD" ] || { hook_log "no cwd in the hook payload; skipping"; return 1; }
+    cd "$CWD" 2>/dev/null || { hook_log "cwd does not exist: $CWD"; return 1; }
+    BRANCH=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" git branch --show-current 2>/dev/null)
+    if [ -z "$BRANCH" ]; then
+        hook_log "could not resolve the current branch in $CWD; skipping"
+        return 1
+    fi
+    return 0
+}
 
 # --- Step 7: the narrowed per-trigger shape checks. -------------------------
 # Each returns non-zero for "out of contract" — which always means skip
@@ -226,16 +241,29 @@ shape_ok_push() {
     esac
 }
 
-# `gh pr create`: no `--repo`, no `--head` other than the current branch, no
-# positional argument. Flags that only decorate the PR (title, body, labels,
-# draft, ...) cannot retarget it, so they stay in contract; their VALUES are
-# stepped over so a value never reads as a positional.
+# `gh pr create`: no `--head` other than the current branch, no positional
+# argument. Flags that only decorate the PR (title, body, labels, draft, ...)
+# cannot retarget it, so they stay in contract; their VALUES are stepped over
+# so a value never reads as a positional. An explicit `--repo`/`-R` is
+# TRUSTED (captured into CREATE_REPO) rather than rejected — the caller named
+# the destination repo directly (a fork-workflow `gh pr create --repo
+# upstream/repo` still pushes from cwd's own current branch, so BRANCH is
+# still the right --head to expect).
+CREATE_REPO=""
 shape_ok_create() {
     local i t
     for ((i = 3; i < ${#tokens[@]}; i++)); do
         t="${tokens[$i]}"
         case "$t" in
-            --repo | -R | --repo=*) return 1 ;;
+            --repo | -R)
+                i=$((i + 1))
+                CREATE_REPO="${tokens[$i]:-}"
+                [ -n "$CREATE_REPO" ] || return 1
+                ;;
+            --repo=*)
+                CREATE_REPO="${t#--repo=}"
+                [ -n "$CREATE_REPO" ] || return 1
+                ;;
             --head | -H)
                 i=$((i + 1))
                 [ "${tokens[$i]:-}" = "$BRANCH" ] || return 1
@@ -251,29 +279,60 @@ shape_ok_create() {
     return 0
 }
 
-# `gh pr merge`: no `--repo`, and no positional at all — a positional here is
-# the PR number, URL or branch selector, i.e. a target this hook did not
-# resolve itself.
+# `gh pr merge`: an explicit `--repo`/`-R` is TRUSTED (captured into
+# MERGE_REPO) rather than rejected, and AT MOST ONE positional argument — the
+# PR number, URL or branch selector `gh pr merge` itself accepts — is TRUSTED
+# as the explicit target (captured into MERGE_TARGET) rather than being
+# treated as out of contract. The merge command's own success already proves
+# `gh` resolved that positional to a real PR, so there is nothing left to
+# verify it against the current branch for. A SECOND positional stays out of
+# contract: nothing in `gh pr merge`'s grammar takes two, so that shape is
+# unrecognized, not a second selector.
+MERGE_REPO=""
+MERGE_TARGET=""
 shape_ok_merge() {
     local i t
     for ((i = 3; i < ${#tokens[@]}; i++)); do
         t="${tokens[$i]}"
         case "$t" in
-            --repo | -R | --repo=*) return 1 ;;
+            --repo | -R)
+                i=$((i + 1))
+                MERGE_REPO="${tokens[$i]:-}"
+                [ -n "$MERGE_REPO" ] || return 1
+                ;;
+            --repo=*)
+                MERGE_REPO="${t#--repo=}"
+                [ -n "$MERGE_REPO" ] || return 1
+                ;;
             -b | --body | -F | --body-file | -t | --subject | --match-head-commit | --author-email)
                 i=$((i + 1))
                 ;;
             -*) ;;
-            *) return 1 ;;
+            *)
+                [ -z "$MERGE_TARGET" ] || return 1
+                MERGE_TARGET="$t"
+                ;;
         esac
     done
     return 0
 }
 
 case "$ACTION" in
-    push) shape_ok_push || exit 0 ;;
-    create) shape_ok_create || exit 0 ;;
-    merge) shape_ok_merge || exit 0 ;;
+    push)
+        resolve_branch || exit 0
+        shape_ok_push || exit 0
+        ;;
+    create)
+        resolve_branch || exit 0
+        shape_ok_create || exit 0
+        ;;
+    merge)
+        shape_ok_merge || exit 0
+        if [ -z "$MERGE_TARGET" ]; then
+            resolve_branch || exit 0
+            MERGE_TARGET="$BRANCH"
+        fi
+        ;;
 esac
 
 # --- Step 8: a push only matters if the branch already has an OPEN PR. ------
@@ -292,17 +351,35 @@ fi
 
 # --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
 # The opening sentence names what just happened; the rest is identical for all
-# three triggers apart from the mode.
+# three triggers apart from the mode. SELECTOR is what ci_watch_once.sh's
+# second positional gets: the current branch for push/create, or the
+# resolved merge target (an explicit PR number/URL/branch, or the current
+# branch as fallback) for merge. REPO_FLAG, when non-empty, is an explicit
+# --repo this hook was told to trust, forwarded to ci_watch_once.sh so IT
+# also targets that repo instead of resolving one from its own cwd.
 case "$ACTION" in
-    push) lead="A \`git push\` to '${BRANCH}' with an open PR just succeeded." ;;
-    create) lead="A \`gh pr create\` for '${BRANCH}' just succeeded, so its PR is open." ;;
-    merge) lead="A \`gh pr merge\` of '${BRANCH}' just succeeded." ;;
+    push)
+        SELECTOR="$BRANCH"
+        REPO_FLAG=""
+        lead="A \`git push\` to '${BRANCH}' with an open PR just succeeded."
+        ;;
+    create)
+        SELECTOR="$BRANCH"
+        REPO_FLAG="$CREATE_REPO"
+        lead="A \`gh pr create\` for '${BRANCH}' just succeeded, so its PR is open."
+        ;;
+    merge)
+        SELECTOR="$MERGE_TARGET"
+        REPO_FLAG="$MERGE_REPO"
+        lead="A \`gh pr merge\` of '${MERGE_TARGET}' just succeeded."
+        ;;
 esac
 
 jq -n \
     --arg lead "$lead" \
-    --arg branch "$BRANCH" \
+    --arg selector "$SELECTOR" \
     --arg kind "$KIND" \
+    --arg repo_flag "$REPO_FLAG" \
     '{
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
@@ -310,7 +387,9 @@ jq -n \
           $lead
           + " Launch the " + $kind + " watcher: call the Bash tool with "
           + "`command: bash ~/.claude/scripts/ci_watch_once.sh "
-          + $kind + " '"'"'" + $branch + "'"'"'` and `run_in_background: true` "
+          + $kind + " '"'"'" + $selector + "'"'"'"
+          + (if $repo_flag == "" then "" else " --repo '"'"'" + $repo_flag + "'"'"'" end)
+          + "` and `run_in_background: true` "
           + "(no explicit `timeout` override — this watcher ends only on a real "
           + "CI result, not a time box). You do not need to check for an "
           + "existing watcher first — the script'"'"'s own lock evicts any "

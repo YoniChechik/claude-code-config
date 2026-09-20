@@ -326,7 +326,7 @@ push_body() {
     # checks" is a lie a few seconds early.  Poll the rollup first, and only
     # believe "none" once the whole grace window has passed.
     while :; do
-        gh_call_nonempty gh pr view "$BRANCH" --json statusCheckRollup \
+        gh_call_nonempty gh pr view "$BRANCH" --repo "$OWNER_REPO" --json statusCheckRollup \
             -q '.statusCheckRollup | length'
         rc=$?
         if [[ "$rc" -ne 0 ]]; then
@@ -350,7 +350,7 @@ push_body() {
     done
 
     # Step 2: block on the real verdict.
-    GH_TERMINAL_RC=1 gh_call gh pr checks "$BRANCH" --watch --fail-fast
+    GH_TERMINAL_RC=1 gh_call gh pr checks "$BRANCH" --repo "$OWNER_REPO" --watch --fail-fast
     rc=$?
     if [[ "$rc" -eq 0 ]]; then
         printf 'CI passed for %s\n' "$BRANCH"
@@ -381,7 +381,7 @@ merge_body() {
     # PR is really merged, so the merge itself is what we poll for — bounded, so
     # a forgotten watcher has a concrete lifetime instead of living forever.
     while :; do
-        gh_call_nonempty gh pr view "$BRANCH" \
+        gh_call_nonempty gh pr view "$BRANCH" --repo "$OWNER_REPO" \
             --json state,mergedAt,mergeCommit,url \
             -q '(.state) + " " + (.mergeCommit.oid // "")'
         rc=$?
@@ -412,7 +412,7 @@ merge_body() {
     done
 
     # Phase 2: find the post-merge run(s) on the default branch, then watch each.
-    if ! gh_call_nonempty gh repo view --json defaultBranchRef -q .defaultBranchRef.name; then
+    if ! gh_call_nonempty gh repo view --repo "$OWNER_REPO" --json defaultBranchRef -q .defaultBranchRef.name; then
         die_persistent "$(short_reason "$GH_OUT")"
     fi
     local default_branch
@@ -424,7 +424,7 @@ merge_body() {
     # seconds of the merge commit landing.
     local appeared=0 waited=0 ids_text=""
     while :; do
-        if gh_call gh run list --branch "$default_branch" --commit "$sha" \
+        if gh_call gh run list --repo "$OWNER_REPO" --branch "$default_branch" --commit "$sha" \
             --json databaseId -L 20 -q '.[].databaseId' \
             && [[ -n "${GH_OUT//[[:space:]]/}" ]]; then
             ids_text=$GH_OUT
@@ -459,7 +459,7 @@ merge_body() {
         [[ "$announced" -eq 1 ]] && continue
         seen+=("$id")
 
-        if GH_TERMINAL_RC=1 gh_call gh run watch "$id" --exit-status; then
+        if GH_TERMINAL_RC=1 gh_call gh run watch "$id" --repo "$OWNER_REPO" --exit-status; then
             printf 'Post-merge CI passed for the merge of %s (run %s)\n' "$BRANCH" "$id"
         else
             printf 'Post-merge CI FAILED for the merge of %s (run %s)\n' "$BRANCH" "$id"
@@ -493,8 +493,10 @@ run_body() {
 # passed straight out.
 acquire_and_run() {
     local attempt rc pgid
+    local reentry_args=("$SELF" "$MODE" "$BRANCH" "$BODY_SENTINEL")
+    [[ -n "$REPO_OVERRIDE" ]] && reentry_args+=(--repo "$REPO_OVERRIDE")
     for ((attempt = 1; attempt <= CI_WATCH_ACQUIRE_ATTEMPTS; attempt++)); do
-        lockf -t 0 -k "$LOCKFILE" "$BASH" "$SELF" "$MODE" "$BRANCH" "$BODY_SENTINEL"
+        lockf -t 0 -k "$LOCKFILE" "$BASH" "${reentry_args[@]}"
         rc=$?
         if [[ "$rc" -ne 75 ]]; then
             exit "$rc"
@@ -530,7 +532,7 @@ BODY_SENTINEL="__ci_watch_once_body"
 SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 
 usage() {
-    echo "Usage: ci_watch_once.sh push|merge '<branch>'" >&2
+    echo "Usage: ci_watch_once.sh push|merge '<branch>' [--repo owner/repo]" >&2
     exit 2
 }
 
@@ -546,15 +548,55 @@ BRANCH="${2:-}"
 BRANCH="${BRANCH#"${BRANCH%%[![:space:]]*}"}"
 BRANCH="${BRANCH%"${BRANCH##*[![:space:]]}"}"
 [[ -n "$BRANCH" ]] || usage
+# For merge mode this may also be a bare PR number, a PR URL, or any other
+# selector `gh pr view`/`gh pr merge` itself accepts -- the caller (the
+# PostToolUse hook) trusts an explicit target over guessing one from the
+# current branch, and every gh call below already treats this value as an
+# opaque selector string, never as something it parses itself.
 
+# --- Remaining args: BODY_SENTINEL and/or --repo, order-independent. --------
+# External callers pass MODE BRANCH [--repo owner/repo]; the internal lockf
+# re-entry (acquire_and_run, below) additionally inserts BODY_SENTINEL,
+# before or after --repo -- both are recognized regardless of position.
 IS_BODY=0
-[[ "${3:-}" == "$BODY_SENTINEL" ]] && IS_BODY=1
+REPO_OVERRIDE=""
+shift 2 2>/dev/null || true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        "$BODY_SENTINEL")
+            IS_BODY=1
+            shift
+            ;;
+        --repo)
+            REPO_OVERRIDE="${2:-}"
+            shift 2
+            ;;
+        --repo=*)
+            REPO_OVERRIDE="${1#--repo=}"
+            shift
+            ;;
+        *)
+            # Unrecognized extra argument: ignored defensively rather than
+            # failing a re-entry this driver does not fully control the
+            # shape of.
+            shift
+            ;;
+    esac
+done
 
-OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
-OWNER_REPO=${OWNER_REPO//[[:space:]]/}
-if [[ -z "$OWNER_REPO" ]]; then
-    echo "Error: could not resolve owner/repo via gh; cannot key the ci watcher files." >&2
-    exit 1
+# The repo every gh call below targets. An explicit --repo is TRUSTED
+# outright and used as-is -- the caller named it, so there is nothing to
+# verify against this process's own cwd. Otherwise, fall back to resolving it
+# from `gh`'s own cwd, exactly as before.
+if [[ -n "$REPO_OVERRIDE" ]]; then
+    OWNER_REPO="$REPO_OVERRIDE"
+else
+    OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
+    OWNER_REPO=${OWNER_REPO//[[:space:]]/}
+    if [[ -z "$OWNER_REPO" ]]; then
+        echo "Error: could not resolve owner/repo via gh; cannot key the ci watcher files." >&2
+        exit 1
+    fi
 fi
 
 KEY=$(_ci_watch_key "$OWNER_REPO" "$BRANCH") || exit 1

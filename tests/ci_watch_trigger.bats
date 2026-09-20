@@ -159,13 +159,19 @@ ctx() {
 }
 
 # A trigger must name the right mode and carry the exact background-launch
-# phrasing. Args: <mode> <context text>.
+# phrasing. Args: <mode> <context text> [selector] [repo].
+# <selector> defaults to $BRANCH (the plain-case launch target); pass it
+# explicitly when the trigger carries its own explicit PR number/URL/branch.
+# <repo>, when given, asserts the launch command also forwards an explicit
+# `--repo <repo>` to ci_watch_once.sh.
 # shellcheck disable=SC2016  # The backticks below are LITERAL text the hook
 # emits for the agent to read — expanding them here would defeat the point of
 # the assertion.
 assert_launch_instruction() {
-    local kind="$1" text="$2"
-    assert_contains "bash ~/.claude/scripts/ci_watch_once.sh ${kind} '${BRANCH}'" "$text" || return 1
+    local kind="$1" text="$2" selector="${3:-$BRANCH}" repo="${4:-}"
+    local expect="bash ~/.claude/scripts/ci_watch_once.sh ${kind} '${selector}'"
+    [ -n "$repo" ] && expect="${expect} --repo '${repo}'"
+    assert_contains "$expect" "$text" || return 1
     assert_contains '`run_in_background: true`' "$text" || return 1
     assert_contains 'no explicit `timeout` override' "$text" || return 1
     return 0
@@ -402,16 +408,16 @@ assert_launch_instruction() {
     assert_eq "" "$output"
 }
 
-@test "gh pr create --repo owner/other does not trigger" {
+@test "gh pr create --repo owner/other trusts the explicit repo and launches a push watcher" {
     run ctx "gh pr create --repo owner/other"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
+    assert_launch_instruction push "$output" "$BRANCH" "owner/other"
 }
 
-@test "gh pr create -R owner/other does not trigger" {
+@test "gh pr create -R owner/other trusts the explicit repo and launches a push watcher" {
     run ctx "gh pr create -R owner/other --title Fix"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
+    assert_launch_instruction push "$output" "$BRANCH" "owner/other"
 }
 
 @test "gh pr create --head <otherbranch> does not trigger" {
@@ -420,20 +426,54 @@ assert_launch_instruction() {
     assert_eq "" "$output"
 }
 
-@test "gh pr merge 123 --repo owner/other does not trigger" {
+@test "gh pr merge 123 --repo owner/other trusts both explicit values and launches a merge watcher" {
     run ctx "gh pr merge 123 --repo owner/other"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
+    assert_launch_instruction merge "$output" "123" "owner/other"
+    # No branch resolution needed: the target was already fully explicit.
+    assert_not_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
-@test "gh pr merge with an explicit PR number does not trigger" {
+@test "gh pr merge with an explicit PR number trusts it and launches a merge watcher, no cwd branch lookup" {
     run ctx "gh pr merge 123 --auto"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
+    assert_launch_instruction merge "$output" "123"
+    assert_not_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
-@test "gh pr merge with an explicit PR URL does not trigger" {
+@test "gh pr merge with an explicit PR URL trusts it and launches a merge watcher" {
     run ctx "gh pr merge https://github.com/owner/other/pull/9"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "https://github.com/owner/other/pull/9"
+}
+
+# Regression: this is the exact real-world shape the old hook silently missed
+# -- a subagent's `gh pr merge <number> --repo sunsay-ltd/core --squash`.
+@test "gh pr merge <number> --repo owner/repo --squash launches a merge watcher with the explicit number and repo" {
+    run ctx "gh pr merge 456 --repo sunsay-ltd/core --squash"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+}
+
+@test "gh pr merge --repo owner/other with NO explicit PR number falls back to the cwd branch as selector" {
+    run ctx "gh pr merge --repo owner/other --auto"
+    assert_eq 0 "$status"
+    # Repo is explicit, but the target still resolves to the current branch.
+    assert_launch_instruction merge "$output" "$BRANCH" "owner/other"
+    assert_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
+}
+
+@test "a merge with no explicit target and an unresolvable cwd branch fails OPEN" {
+    set_branch "" 1
+    run ctx "gh pr merge --auto"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "could not resolve the current branch" "$output"
+}
+
+@test "gh pr merge with two positionals stays out of contract" {
+    run ctx "gh pr merge 123 456"
     assert_eq 0 "$status"
     assert_eq "" "$output"
 }

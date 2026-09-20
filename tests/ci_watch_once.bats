@@ -226,6 +226,54 @@ wait_for_file() {
     assert_eq 2 "$status"
 }
 
+# --- --repo override ---------------------------------------------------------
+# The PostToolUse hook trusts an explicit --repo/PR-number from the triggering
+# gh command and forwards them here; these regression tests prove the watcher
+# actually uses those explicit values downstream, rather than re-resolving
+# them from its own cwd.
+
+@test "--repo override skips the nameWithOwner lookup and keys/watches the named repo" {
+    stub pr_rollup 0 "1"
+    stub pr_checks 0 "ok"
+    run bash "$WATCHER" push "$BRANCH" --repo "x/y"
+    assert_eq 0 "$status"
+    assert_contains "CI passed for feat-x" "$output"
+
+    # Keyed on x/y, not o/r: the lock file name changes because the identity
+    # hash does -- proves OWNER_REPO really came from --repo, not from gh.
+    local key_xy
+    key_xy=$(bash -c "source '$NOTIFY_SH'; _ci_watch_key 'x/y' '$BRANCH'")
+    [ -f "$BATS_TEST_TMPDIR/ci_watch2_lock_push_${SLUG}-${key_xy}" ] \
+        || { echo "expected a lock file keyed on x/y" >&2; return 1; }
+
+    # Never called gh repo view for nameWithOwner -- the override short-circuits it.
+    assert_not_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
+    # Every gh call below carries the explicit repo.
+    assert_contains "--repo x/y" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
+@test "merge accepts a PR number as the selector and forwards --repo to every gh call" {
+    stub pr_state 0 "MERGED deadbeef"
+    stub repo_default 0 "main"
+    stub run_list 0 "999"
+    stub run_watch 0 "ok"
+    run bash "$WATCHER" merge "123" --repo "x/y"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI passed for the merge of 123 (run 999)" "$output"
+    assert_not_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "--repo x/y" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
+@test "with no --repo override, the watcher still self-resolves via gh repo view (unchanged plain case)" {
+    stub pr_rollup 0 "1"
+    stub pr_checks 0 "ok"
+    run bash "$WATCHER" push "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "CI passed for feat-x" "$output"
+    assert_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "--repo o/r" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
 # --- lock -------------------------------------------------------------------
 
 @test "uncontended acquire runs the body and records the lock + pid files" {
