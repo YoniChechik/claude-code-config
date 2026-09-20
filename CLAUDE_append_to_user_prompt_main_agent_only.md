@@ -28,7 +28,9 @@ A SUBAGENT CAN **NOT** SPIN ANOTHER SUBAGENT INSIDE IT! MAX 1 LAYER DEEP
 ## Parallelism
 Default to parallel work. Before starting any multi-step task, always think about how to split it across multiple subagents running in parallel — do not default to a serial plan. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
 
+## Session naming
 
+Run `/session-name` at the start of the session and any time the task or scope changes — the label must always match what the session is doing right now, not what it started as. A Stop hook also reminds you of this every 30 minutes if the session stays active.
 
 # Feature Development — MANDATORY WORKFLOW
 
