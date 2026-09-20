@@ -21,7 +21,10 @@
 # /create-worktree itself needs), PLUS three narrow PULL-ONLY shapes of
 # `checkout`/`reset`/`clean` (see git_subcommand_is_read below): each one only
 # adopts state that ALREADY exists on origin, or deletes untracked cruft — never
-# writes content this session authored. What this guard actually protects
+# writes content this session authored. One more shape joins them: deleting a
+# branch the guard itself proves is already merged into the default branch
+# (git_branch_delete_is_merged), which is post-merge cleanup, not a write.
+# What this guard actually protects
 # against is unreviewed writes landing in the base repo outside the worktree+PR
 # flow; catching the base repo up to origin's own already-reviewed state is the
 # opposite of that, and blocking it just adds friction (confirmed live: it
@@ -120,7 +123,13 @@ git_subcommand_is_read() { # <subcommand> <remaining args, ws-collapsed>
         branch)
             # Read only while every argument is a read-ish flag: a positional
             # creates a branch, and -d/-m/-c/-u… mutate one.
-            git_branch_args_are_read "$args"
+            if git_branch_args_are_read "$args"; then
+                return 0
+            fi
+            # One narrow write shape is exempt: deleting a branch whose commits
+            # are ALREADY fully merged into the default branch (see
+            # git_branch_delete_is_merged).
+            git_branch_delete_is_merged "$args"
             return $? ;;
         config)
             case " $args " in
@@ -212,6 +221,88 @@ git_branch_args_are_read() {
         esac
     done
     return 0
+}
+
+# `git branch -d/-D <name>` in the base repo is post-merge cleanup, not an
+# unreviewed write: once <name> is fully merged into the default branch, every
+# commit it holds already lives in main and deleting the pointer destroys
+# nothing. That is the ONLY write shape of `git branch` exempted here, and the
+# -d/-D flag alone is never taken as evidence — this function verifies the
+# ancestry itself with `git merge-base --is-ancestor` and returns 1 (= a write,
+# keep blocking) whenever it cannot prove the branch is merged.
+git_branch_delete_is_merged() {
+    local args="$1" tok name="" saw_delete=0 repo_dir head_ref short ref
+
+    # Step 1: accept ONLY a plain delete invocation — one or more delete/force/
+    # quiet flags plus exactly one branch name. Any other flag (-r deletes a
+    # remote-tracking ref, -m/-c/-u/-f-with-a-name rewrite one) or a second
+    # positional aborts, so no other `git branch` shape can reach the check.
+    while [ -n "$args" ]; do
+        tok="${args%%[[:space:]]*}"
+        if [ "$tok" = "$args" ]; then args=""; else args="${args#*[[:space:]]}"; fi
+        args="${args#"${args%%[![:space:]]*}"}"
+        case "$tok" in
+            -d|-D|--delete) saw_delete=1 ;;
+            -f|--force|-q|--quiet) ;;
+            # The name must be a plain branch name. Anything holding a flag, a
+            # glob, a revision suffix (~ ^ : ..) or a quote/expansion character
+            # could make the ancestry check below test a ref other than the one
+            # git would really delete.
+            -*|*'*'*|*'?'*|*'['*|*'~'*|*'^'*|*':'*|*'\'*|*'..'*|*'$'*|*'"'*|*"'"*) return 1 ;;
+            *)
+                [ -n "$name" ] && return 1
+                name="$tok" ;;
+        esac
+    done
+    [ "$saw_delete" = "1" ] && [ -n "$name" ] || return 1
+
+    # Step 2: pick the repo the delete would run in — `git -C <path>` when
+    # present (resolved against the segment's effective cwd), otherwise that cwd.
+    # Worktrees share the base repo's ref store, so either answers identically.
+    repo_dir="${GIT_C_TARGET:-}"
+    repo_dir="${repo_dir/#\~/$HOME}"
+    if [ -z "$repo_dir" ]; then
+        repo_dir="${effective_cwd:-$cwd}"
+    elif [ "${repo_dir#/}" = "$repo_dir" ]; then
+        repo_dir="${effective_cwd:-$cwd}/$repo_dir"
+    fi
+    [ -n "$repo_dir" ] && [ -d "$repo_dir" ] || return 1
+
+    # Step 3: the branch must actually exist as a local branch.
+    git -C "$repo_dir" rev-parse --verify --quiet "refs/heads/$name" >/dev/null 2>&1 || return 1
+
+    # Step 4: name the default branch. origin/HEAD says which it is when it is
+    # set; main/master are the fallbacks this repo uses elsewhere in the guard.
+    head_ref=$(git -C "$repo_dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    short="${head_ref#origin/}"
+
+    # The default branch is trivially merged into itself, so the ancestry test
+    # would happily authorize `git branch -D main`. Refuse it by name instead:
+    # this exemption exists for finished FEATURE branches only.
+    case "$name" in
+        main|master) return 1 ;;
+    esac
+    [ -n "$short" ] && [ "$name" = "$short" ] && return 1
+
+    # Step 5: require the branch to be an ancestor of the default branch. Both
+    # the remote-tracking ref and the local branch count: `gh pr merge` lands the
+    # commits on origin first, and a plain `git fetch` (already allowed by this
+    # guard) is enough to see them. A stale local ref only makes the check FAIL,
+    # which keeps the delete blocked — it can never widen the exemption.
+    for ref in "refs/remotes/origin/$short" "refs/heads/$short" \
+        refs/remotes/origin/main refs/heads/main \
+        refs/remotes/origin/master refs/heads/master; do
+        [ "$ref" = "refs/remotes/origin/" ] && continue
+        [ "$ref" = "refs/heads/" ] && continue
+        # The branch is trivially its own ancestor — never let it stand in for
+        # the default branch and authorize its own deletion.
+        [ "$ref" = "refs/heads/$name" ] && continue
+        git -C "$repo_dir" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || continue
+        if git -C "$repo_dir" merge-base --is-ancestor "refs/heads/$name" "$ref" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 git_classify() {
