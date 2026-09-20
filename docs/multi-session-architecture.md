@@ -5,7 +5,7 @@ across multiple terminal windows, multiple repos, and multiple feature worktrees
 
 This is an internal design doc. It describes what the code actually does today,
 keyed off `session_start.sh`, the `post_tool_use__ci_watch_trigger.sh` hook, and
-`ci_watch_once.sh`.
+`ci_watch.sh`.
 
 ---
 
@@ -20,7 +20,7 @@ watcher and a `merge` watcher concurrently.
 
 The old design (a single always-on `ci_watch.py` daemon per branch, launched
 via `Monitor({persistent: true})` and kept alive for the life of the session)
-is gone. `ci_watch_once.sh` is a **one-shot** script: it runs exactly once,
+is gone. `ci_watch.sh` is a **one-shot** script: it runs exactly once,
 to exactly one real CI result, and exits — no re-arm, no phase-cursor file,
 no daemon to protect from being auto-killed. It comes in two independently
 triggered **kinds**:
@@ -90,7 +90,7 @@ regression, just the same real-world limit the daemon always had.
                         additionalContext instructing Claude to launch the
                         push watcher
                       → Claude calls Bash with
-                        `ci_watch_once.sh push 'feat-auth'` and
+                        `ci_watch.sh push 'feat-auth'` and
                         run_in_background: true
 5. watcher runs       → derives the SAME (owner/repo, branch, kind) key itself
                         via `gh repo view` + its own arguments
@@ -310,7 +310,7 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    success long before the PR is actually merged, so the real merge is what
    this phase polls for. `MERGED` → proceed. `CLOSED` (not merged) → report
    and exit. Still `OPEN` past the bound → report the timeout with a
-   `bash ~/.claude/scripts/ci_watch_once.sh merge <branch>` retry
+   `bash ~/.claude/scripts/ci_watch.sh merge <branch>` retry
    instruction, and exit. The bound is a
    concrete, freshly-chosen constant (not inherited from `Monitor`'s old
    30-minute cap) — long enough to cover a slow CI pipeline across a full
@@ -347,7 +347,7 @@ into a false pass.
 
 There is no manual stop anymore — the `/ci-watcher` skill that provided `stop
 <branch> [push|merge]` and `stop-all` was removed; only the hook-driven
-automatic launch path remains, invoking `ci_watch_once.sh` (now in
+automatic launch path remains, invoking `ci_watch.sh` (now in
 `scripts/`, not a skill) directly.
 
 A watcher still never needs supervision: it runs to a real end state on its

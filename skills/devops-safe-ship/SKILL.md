@@ -113,7 +113,7 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
 - **CI watcher** per push/merge (this environment's CI-watcher script — in Claude Code,
-  `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>` — auto-launched by the
+  `bash ~/.claude/scripts/ci_watch.sh push|merge <branch>` — auto-launched by the
   PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`)
   — one-shot per event, not a persistent daemon; re-launch it on every "behind" alert.
 - **Dodge hook false-positives.** Write commit messages and PR bodies to a file and
@@ -144,7 +144,7 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
       `-F`/`--body-file`.
    d. `/post` + `/other-llm` diff review; get CI green; the CI watcher auto-launches on
       push/merge (or run this environment's CI-watcher script manually — in Claude Code,
-      `bash ~/.claude/scripts/ci_watch_once.sh push|merge <branch>`).
+      `bash ~/.claude/scripts/ci_watch.sh push|merge <branch>`).
    e. Classify any RED guard: benign-by-design (force-merge, print why, lean on the
       green preflight) vs real (fix).
    f. **If the merge/deploy is irreversible → PAUSE and hand to the human** (pre-checks
