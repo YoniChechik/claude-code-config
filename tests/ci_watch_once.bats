@@ -537,6 +537,13 @@ DRV
     assert_contains "Post-merge CI passed for the merge of feat-x (run 111)" "$output"
     # One poll only: no waiting on an already-merged PR.
     assert_eq 1 "$(call_count 'pr view')"
+    # Regression: `gh repo view --repo <owner/repo>` is REJECTED by the real gh
+    # CLI (unlike `gh pr view`/`gh pr create`, `gh repo view` takes the
+    # repository as a bare positional argument, never a `--repo` flag) — the
+    # stub here is too permissive to catch that on its own, so pin the exact
+    # invocation shape directly against the call log.
+    assert_contains "repo view o/r --json defaultBranchRef" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_not_contains "repo view --repo" "$(cat "$GH_STUB_DIR/calls.log")"
 }
 
 @test "merge: a PR closed without merging is reported and never treated as an error" {
