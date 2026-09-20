@@ -539,6 +539,19 @@ else
         exit 0
     fi
 
+    # Exempt the auto-memory system's own storage directory. Memory files live
+    # at ~/.claude/projects/<sanitized-cwd>/memory/ and the memory system's own
+    # instructions expect direct, low-ceremony writes throughout a session —
+    # requiring a worktree+PR for every memory write defeats the point of the
+    # system (confirmed live: it blocked a routine memory write mid-session).
+    # Scoped narrowly to .../projects/*/memory/* under the real $HOME so this
+    # does not exempt anything else under ~/.claude/projects/ (session
+    # transcripts, etc.) and cannot be spoofed by a path that merely contains
+    # the same relative segments elsewhere.
+    case "$resolved_path" in
+        "$HOME"/.claude/projects/*/memory/*) exit 0 ;;
+    esac
+
     is_in_git_repo() {
         local dir="$1"
         while [ "$dir" != "/" ] && [ -n "$dir" ]; do
