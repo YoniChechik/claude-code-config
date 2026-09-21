@@ -28,6 +28,14 @@
 # else — there is no manual fallback, so a missed trigger means nobody
 # launches a watcher at all.
 #
+# One carve-out to that "not ONE simple command" limitation (Step 3b): a
+# `--body "$(cat <<'EOF' ... EOF )"` heredoc substitution with a QUOTED
+# delimiter is provably inert (no expansion happens inside it at all), so it
+# is neutralized to a placeholder before the shape checks run, rather than
+# rejecting the whole command over its own internal `$(`/newlines. An
+# UNQUOTED delimiter is NOT neutralized and still rejects the command, since
+# its body can contain real `$(...)`/`` ` ``/`$VAR` expansion.
+#
 # Output is hookSpecificOutput.additionalContext ONLY — no systemMessage, so
 # nothing is ever surfaced to the user. Every git/gh call the hook makes is
 # time-boxed and FAILS OPEN: on any error, empty answer or timeout the hook
@@ -130,6 +138,31 @@ CWD=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
 [ -n "$cmd" ] || exit 0
 
+# --- Step 3b: neutralize safe, QUOTED-delimiter heredoc command substitutions. ---
+# `--body "$(cat <<'EOF' ... EOF )"` -- this environment's own recommended
+# shape for a multi-line PR body/commit message, precisely to dodge OTHER
+# hooks' false-positives on git-words in prose -- trips Step 4c's "not ONE
+# simple command" gate below for the wrong reason. `$(` and the heredoc's
+# internal newlines ARE real metacharacters in general, but a SINGLE- or
+# DOUBLE-quoted heredoc delimiter suppresses ALL expansion inside the body --
+# no `$VAR`, no `$(...)`, no backtick -- so that body is inert literal text
+# that cannot retarget the repo/branch, which is the actual risk Step 4c
+# guards against. Replace each such heredoc substitution with an opaque,
+# single-word placeholder BEFORE Step 4c/5 ever see the command, so the
+# flag's VALUE still reads as exactly one token (matching how
+# shape_ok_create/shape_ok_merge already skip over a --body/--title value)
+# instead of poisoning the whole command's shape check. `/s` (DOTALL) lets
+# `.` cross the heredoc's internal newlines; the non-greedy `.*?` stops at
+# the FIRST line that is exactly the delimiter, matching real heredoc
+# semantics. An UNQUOTED delimiter (`<<EOF`, real expansion happens inside
+# the body) is deliberately NOT matched here and still falls through to Step
+# 4c's rejection, unchanged -- this only neutralizes the provably-inert
+# form. `\x27` stands in for a literal single-quote inside the perl
+# character class, since the outer perl program is itself single-quoted in
+# this shell command.
+cmd_for_parsing=$(printf '%s' "$cmd" | perl -0777 -pe 's/\$\(\s*cat\s+<<-?\s*([\x27"])([A-Za-z_][A-Za-z0-9_]*)\1\s*\n.*?\n\s*\2\s*\n?\)/HEREDOC_LITERAL_BODY/gs' 2>/dev/null)
+[ -n "$cmd_for_parsing" ] || cmd_for_parsing="$cmd"
+
 # --- Step 4: the two universal gates. ---------------------------------------
 # (a) The command must actually have SUCCEEDED. The hook this replaces never
 #     checked, so it reproducibly fired on `gh pr merge --help`.
@@ -138,15 +171,19 @@ CWD=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 # (b) A help invocation performs no action. The token boundaries matter: a
 #     naive substring test would treat `git push origin push-harder` or
 #     `git reset -hard` as a help call.
-if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|=|$)'; then
+if printf '%s' "$cmd_for_parsing" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|=|$)'; then
     exit 0
 fi
 
 # (c) Anything that is not ONE simple command is out of contract: a pipeline, a
 #     `&&` chain, a command substitution or a redirect can move the effective
-#     repo/branch in ways this hook cannot follow.
+#     repo/branch in ways this hook cannot follow. Checked against the
+#     HEREDOC-NEUTRALIZED command (Step 3b) so a safe, literal multi-line
+#     --body/--title value doesn't trip this on its own newlines/`$(` — any
+#     OTHER `;`/`&`/`|`/backtick/`$(`/`>`/`<`/newline outside that one
+#     recognized heredoc shape still rejects the command exactly as before.
 # shellcheck disable=SC2016  # `$(` here is a literal two-byte pattern, not an expansion.
-case "$cmd" in
+case "$cmd_for_parsing" in
     *";"* | *"&"* | *"|"* | *'`'* | *'$('* | *">"* | *"<"* | *$'\n'*) exit 0 ;;
 esac
 
@@ -157,12 +194,15 @@ esac
 # case for this hook) exploded into one token per word, which then failed
 # shape_ok_create() on the very next bare word after `--title` and silently
 # skipped the trigger. `xargs -n1` DOES honor single/double quotes the way the
-# real shell that ran `$cmd` already did, which is all we need -- every
-# metacharacter that would make a fuller shell-grammar parse necessary
+# real shell that ran `$cmd_for_parsing` already did, which is all we need --
+# every metacharacter that would make a fuller shell-grammar parse necessary
 # ($(), backtick, `;`, `&`, `|`, redirects, newlines) was already rejected by
-# Step 4c above, and xargs performs no `$VAR`/`~` expansion or globbing, so a
-# literal token is exactly what comes out.
-if ! tokens_str=$(printf '%s' "$cmd" | xargs -n1 2>/dev/null); then
+# Step 4c above (on the heredoc-neutralized command, Step 3b), and xargs
+# performs no `$VAR`/`~` expansion or globbing, so a literal token is exactly
+# what comes out. Tokenizing `cmd_for_parsing` rather than the original
+# `cmd` means a neutralized `--body "HEREDOC_LITERAL_BODY"` reads as one
+# clean value token, exactly like any other quoted --body string already did.
+if ! tokens_str=$(printf '%s' "$cmd_for_parsing" | xargs -n1 2>/dev/null); then
     hook_log "could not tokenize command (unbalanced quoting?); skipping: $cmd"
     exit 0
 fi
