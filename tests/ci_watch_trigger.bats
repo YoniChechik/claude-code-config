@@ -325,6 +325,34 @@ assert_launch_instruction() {
     assert_launch_instruction push "$output"
 }
 
+@test "gh pr create with a heredoc --body (quoted delimiter) still launches a push watcher" {
+    run ctx 'gh pr create --title Fix --body "$(cat <<'"'"'EOF'"'"'
+## Summary
+Some body text; with a semicolon and | a pipe and > a redirect char, all literal inside the heredoc.
+EOF
+)"'
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "gh pr create with a heredoc --body (UNQUOTED delimiter) stays out of contract" {
+    run ctx 'gh pr create --title Fix --body "$(cat <<EOF
+some body text
+EOF
+)"'
+    assert_eq 0 "$status"
+    [ -z "$output" ]
+}
+
+@test "a heredoc --body followed by a real dangerous command still stays out of contract" {
+    run ctx 'gh pr create --title Fix --body "$(cat <<'"'"'EOF'"'"'
+safe body
+EOF
+)" ; rm -rf /'
+    assert_eq 0 "$status"
+    [ -z "$output" ]
+}
+
 @test "gh pr merge launches a MERGE watcher with the merge task-id filename" {
     run ctx "gh pr merge"
     assert_eq 0 "$status"
