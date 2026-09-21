@@ -350,7 +350,24 @@ push_body() {
     done
 
     # Step 2: block on the real verdict.
-    GH_TERMINAL_RC=1 gh_call gh pr checks "$BRANCH" --repo "$OWNER_REPO" --watch --fail-fast
+    #
+    # Deliberately NOT --fail-fast. `--fail-fast` returns the instant ANY
+    # single check goes red, which races against a transient-failure re-run —
+    # and this watcher is ONE RUN, ONE REPORT with no re-arm (see the file
+    # header), so a stale "CI FAILED" from a flake that was re-run and passed
+    # a moment later is final: nobody ever tells the caller the real outcome.
+    # Confirmed in production 2026-09-21: a WIF-token-refresh flake on
+    # `app-backend-integration-tests` tripped --fail-fast at the instant it
+    # went red; the calling agent recognized it as transient and re-ran the
+    # job, which passed — but the watcher had already reported "CI FAILED"
+    # and exited, so the PR sat fully green and unmerged with no watcher left
+    # to say so. Without --fail-fast, `gh pr checks --watch` polls the whole
+    # rollup until every check reaches a terminal state, so a check that gets
+    # re-run while still polling has its NEW result picked up on the next
+    # poll instead of being missed. This costs a slower report on a real,
+    # non-flaky failure (no other check can shortcut a doomed run early) in
+    # exchange for never reporting a stale false failure on a flake.
+    GH_TERMINAL_RC=1 gh_call gh pr checks "$BRANCH" --repo "$OWNER_REPO" --watch
     rc=$?
     if [[ "$rc" -eq 0 ]]; then
         printf 'CI passed for %s\n' "$BRANCH"

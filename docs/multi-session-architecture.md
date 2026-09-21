@@ -95,8 +95,9 @@ regression, just the same real-world limit the daemon always had.
 5. watcher runs       → derives the SAME (owner/repo, branch, kind) key itself
                         via `gh repo view` + its own arguments
                       → acquires LOCKFILE via `lockf -t 0 -k`, writes PIDFILE
-                      → blocks on `gh pr checks --watch --fail-fast` (after a
-                        short check-registration grace)
+                      → blocks on `gh pr checks --watch` (after a
+                        short check-registration grace; deliberately no
+                        `--fail-fast` — see ci_watch.sh's own comment)
                       → prints exactly ONE line to stdout, then exits; the
                         Bash background task's completion notification
                         relays it to the session
@@ -292,7 +293,9 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    have registered check suites yet, so an immediate "no checks" would be a
    lie a few seconds early. Poll `gh pr view --json statusCheckRollup` until
    it gains entries, or until the grace window elapses.
-2. **Block on the verdict**: `gh pr checks "$BRANCH" --watch --fail-fast`.
+2. **Block on the verdict**: `gh pr checks "$BRANCH" --watch` (no `--fail-fast`,
+   so a check that gets re-run while still polling has its new result picked
+   up instead of the watcher bailing on a since-fixed transient flake).
    Pass → `CI passed for <branch>`. Fail → `CI FAILED for <branch>` (reporting
    a red CI is the watcher's job *done*, not the watcher failing — exit 0
    either way). `gh pr checks` shares exit 1 between "genuinely failed" and
