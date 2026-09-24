@@ -506,6 +506,56 @@ EOF
     assert_eq "" "$output"
 }
 
+# --- the rtk proxy-prefix unwrap ---------------------------------------------
+# Regression: `rtk hook claude` (a sibling PreToolUse hook on the same "Bash"
+# matcher) silently rewrites `gh pr merge`/`gh pr create` into
+# `rtk gh pr merge ...`/`rtk gh pr create ...` before they run, and PostToolUse
+# sees that rewritten command -- this is the real shape that silently ate
+# every merge/create trigger in production until the Step 5a2 unwrap was
+# added.
+
+@test "an rtk-rewritten gh pr merge still launches a merge watcher" {
+    run ctx "rtk gh pr merge 456 --repo sunsay-ltd/core --squash --delete-branch"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+}
+
+@test "an rtk-rewritten gh pr create still launches a push watcher" {
+    run ctx "rtk gh pr create --title Fix --body-file /tmp/body.md"
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "an rtk-rewritten git push still launches a push watcher" {
+    run ctx "rtk git push"
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "rtk proxy <cmd> unwraps one level deeper and still launches a merge watcher" {
+    run ctx "rtk proxy gh pr merge 456 --repo sunsay-ltd/core --squash"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+}
+
+@test "rtk run <cmd> unwraps one level deeper and still launches a merge watcher" {
+    run ctx "rtk run gh pr merge --auto"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output"
+}
+
+@test "bare rtk with no further command stays out of contract" {
+    run ctx "rtk"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+}
+
+@test "an rtk-rewritten FAILED gh pr merge still never triggers (exit-code gate still applies)" {
+    run ctx "rtk gh pr merge --auto" 1
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+}
+
 @test "a compound command containing a push does not trigger" {
     run ctx "cd /elsewhere && git push"
     assert_eq 0 "$status"
