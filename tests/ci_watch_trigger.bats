@@ -191,10 +191,47 @@ assert_launch_instruction() {
     assert_eq "" "$output"
 }
 
-@test "a FAILED gh pr merge never triggers" {
+@test "a FAILED gh pr merge whose PR is still OPEN does not trigger" {
+    # Merge no longer trusts the local exit code alone (see the regression
+    # tests below) — it verifies real PR state instead. A nonzero exit AND a
+    # real non-MERGED state is a genuine failure, and still does not trigger.
+    gh_stub pr_state 0 "OPEN"
     run ctx "gh pr merge --auto" 128
     assert_eq 0 "$status"
     assert_eq "" "$output"
+}
+
+# --- the merge exit-code-vs-real-state regression (worktree branch clash) ---
+#
+# `gh pr merge --delete-branch`, run from the very worktree of the branch
+# being merged, tries to switch that worktree to the base branch after
+# deleting the source branch. When another worktree (typically the primary
+# checkout) already has the base branch checked out, git refuses and `gh`
+# exits nonzero even though the remote merge fully succeeded. Trusting the
+# local exit code alone silently dropped the trigger on this repo's own
+# everyday merge shape — confirmed live, repeatedly.
+
+@test "a gh pr merge that exits nonzero but IS really merged still triggers" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge --squash --delete-branch" 1
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output"
+}
+
+@test "a gh pr merge with an explicit target that exits nonzero but IS really merged still triggers" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge 456 --repo sunsay-ltd/core --squash --delete-branch" 1
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+}
+
+@test "a merge precheck failure (gh pr view itself fails) does not trigger and is logged" {
+    gh_stub pr_state 1 "no pull requests found"
+    run ctx "gh pr merge --squash --delete-branch" 1
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "gh pr view failed" "$output"
 }
 
 # --- the --help / -h exclusion ----------------------------------------------
@@ -354,6 +391,7 @@ EOF
 }
 
 @test "gh pr merge launches a MERGE watcher with the merge task-id filename" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge"
     assert_eq 0 "$status"
     assert_contains "A \`gh pr merge\` of 'feat-x' just succeeded." "$output"
@@ -361,22 +399,27 @@ EOF
 }
 
 @test "gh pr merge --auto launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --auto --squash --delete-branch"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output"
 }
 
 @test "gh pr merge with a multi-word quoted --body still launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx 'gh pr merge --auto --body "merging after two rounds of review"'
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output"
 }
 
-@test "a merge trigger never runs the gh pr view OPEN precheck" {
+@test "a merge trigger DOES run a gh pr view MERGED precheck, unlike push's OPEN precheck" {
+    # Verifies real state instead of trusting gh's own exit code (see the
+    # regression tests above) — so, unlike the old behavior, a gh call always
+    # happens here.
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --auto"
     assert_eq 0 "$status"
-    # No gh call at all happens on this path, so calls.log is never created.
-    assert_not_contains "pr view" "$(cat "$GH_STUB_DIR/calls.log" 2>/dev/null || true)"
+    assert_contains "pr view" "$(cat "$GH_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
 @test "the hook emits additionalContext ONLY — never a systemMessage" {
@@ -455,6 +498,7 @@ EOF
 }
 
 @test "gh pr merge 123 --repo owner/other trusts both explicit values and launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 123 --repo owner/other"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "123" "owner/other"
@@ -463,6 +507,7 @@ EOF
 }
 
 @test "gh pr merge with an explicit PR number trusts it and launches a merge watcher, no cwd branch lookup" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 123 --auto"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "123"
@@ -470,6 +515,7 @@ EOF
 }
 
 @test "gh pr merge with an explicit PR URL trusts it and launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge https://github.com/owner/other/pull/9"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "https://github.com/owner/other/pull/9"
@@ -478,12 +524,14 @@ EOF
 # Regression: this is the exact real-world shape the old hook silently missed
 # -- a subagent's `gh pr merge <number> --repo sunsay-ltd/core --squash`.
 @test "gh pr merge <number> --repo owner/repo --squash launches a merge watcher with the explicit number and repo" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 456 --repo sunsay-ltd/core --squash"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
 }
 
 @test "gh pr merge --repo owner/other with NO explicit PR number falls back to the cwd branch as selector" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --repo owner/other --auto"
     assert_eq 0 "$status"
     # Repo is explicit, but the target still resolves to the current branch.

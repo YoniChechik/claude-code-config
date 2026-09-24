@@ -5,14 +5,17 @@
 # After a Bash tool call that (a) really succeeded and (b) matches one of a
 # DELIBERATELY NARROW set of command shapes, this hook injects an instruction
 # for CLAUDE (never the user) to start scripts/ci_watch.sh in
-# the background for the branch the command acted on.
+# the background for the branch the command acted on. "Really succeeded" for
+# push/create means the local exit code; for merge it means the PR's real
+# state (see Step 4a/Step 8) — `gh`'s own exit code is not reliable there.
 #
 # The three triggers:
 #   1. `git push` of the current branch, when that branch already has an OPEN
 #      PR                                          -> push-mode watcher
 #   2. `gh pr create` for the current branch       -> push-mode watcher
 #   3. `gh pr merge` of the current branch's PR,
-#      or of an explicitly named PR                -> merge-mode watcher
+#      or of an explicitly named PR, verified MERGED
+#      regardless of gh's own local exit code       -> merge-mode watcher
 #
 # Trigger contract (intentional limitation): a hook cannot reliably parse
 # arbitrary shell. `cd elsewhere && git push`, `git -C other push`, a
@@ -177,9 +180,24 @@ cmd_for_parsing=$(printf '%s' "$cmd" | perl -0777 -pe 's/\$\(\s*cat\s+<<-?\s*([\
 [ -n "$cmd_for_parsing" ] || cmd_for_parsing="$cmd"
 
 # --- Step 4: the two universal gates. ---------------------------------------
-# (a) The command must actually have SUCCEEDED. The hook this replaces never
-#     checked, so it reproducibly fired on `gh pr merge --help`.
-[ "$exit_code" = "0" ] || exit 0
+# (a) The command must actually have SUCCEEDED — for push/create (Step 5c
+#     below), which have no other way to confirm success. Merge is the one
+#     exception: `gh pr merge --delete-branch`, run (as this hook always is)
+#     from the very worktree of the branch being merged, tries to switch
+#     that worktree's local HEAD to the base branch after deleting the
+#     source branch — and when another worktree (typically the primary
+#     checkout) already has the base branch checked out, git refuses
+#     ("fatal: 'main' is already used by worktree ..."). `gh` surfaces that
+#     as a nonzero exit even though the REMOTE merge fully succeeded —
+#     confirmed live, repeatedly (the same `gh` behavior
+#     post_tool_use__sync_main_after_merge.sh's own doc comment independently
+#     hit and documented). Trusting local exit_code alone therefore silently
+#     dropped the merge trigger on this repo's own everyday merge shape. So
+#     EXIT_OK is recorded here but NOT enforced for merge; Step 8 instead
+#     verifies the PR's real state via `gh pr view`, which is authoritative
+#     regardless of what the local exit code says.
+EXIT_OK=0
+[ "$exit_code" = "0" ] && EXIT_OK=1
 
 # (b) A help invocation performs no action. The token boundaries matter: a
 #     naive substring test would treat `git push origin push-harder` or
@@ -247,7 +265,14 @@ case "${tokens[0]:-} ${tokens[1]:-} ${tokens[2]:-}" in
     *) exit 0 ;;
 esac
 
-# --- Step 5b: a no-op push has nothing to watch. ----------------------------
+# --- Step 5b: push/create must have actually succeeded locally. -------------
+# Merge is deliberately excluded — see Step 4a; its success is verified
+# independently in Step 8 instead of trusted from the local exit code.
+if [ "$ACTION" != "merge" ]; then
+    [ "$EXIT_OK" = "1" ] || exit 0
+fi
+
+# --- Step 5c: a no-op push has nothing to watch. ----------------------------
 if [ "$ACTION" = "push" ]; then
     case "$tool_stdout$tool_stderr" in
         *"Everything up-to-date"*) exit 0 ;;
@@ -350,11 +375,13 @@ shape_ok_create() {
 # MERGE_REPO) rather than rejected, and AT MOST ONE positional argument — the
 # PR number, URL or branch selector `gh pr merge` itself accepts — is TRUSTED
 # as the explicit target (captured into MERGE_TARGET) rather than being
-# treated as out of contract. The merge command's own success already proves
-# `gh` resolved that positional to a real PR, so there is nothing left to
-# verify it against the current branch for. A SECOND positional stays out of
-# contract: nothing in `gh pr merge`'s grammar takes two, so that shape is
-# unrecognized, not a second selector.
+# treated as out of contract. `gh` accepting this shape already proves it
+# resolved that positional to a real PR selector, so there is nothing left
+# to verify it against the current branch for — Step 8's `gh pr view`
+# separately confirms the PR that selector names is actually MERGED, since
+# (per Step 4a) the local exit code alone is not reliable for that. A SECOND
+# positional stays out of contract: nothing in `gh pr merge`'s grammar takes
+# two, so that shape is unrecognized, not a second selector.
 MERGE_REPO=""
 MERGE_TARGET=""
 shape_ok_merge() {
@@ -402,9 +429,11 @@ case "$ACTION" in
         ;;
 esac
 
-# --- Step 8: a push only matters if the branch already has an OPEN PR. ------
-# `gh pr create` needs no precheck (the PR was just created, so it is open) and
-# neither does `gh pr merge` (the merge command's own success IS the trigger).
+# --- Step 8: precheck the real PR state via `gh pr view`. -------------------
+# `gh pr create` needs no precheck (the PR was just created, so it is open).
+# Push requires OPEN. Merge requires MERGED — checked here rather than
+# trusted from the local exit code, per Step 4a: `gh`'s own exit code is not
+# reliable for merge specifically, but the PR's real state always is.
 if [ "$ACTION" = "push" ]; then
     pr_state=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" gh pr view "$BRANCH" --json state -q .state 2>/dev/null)
     rc=$?
@@ -414,6 +443,25 @@ if [ "$ACTION" = "push" ]; then
     fi
     pr_state=${pr_state//[[:space:]]/}
     [ "$pr_state" = "OPEN" ] || exit 0
+elif [ "$ACTION" = "merge" ]; then
+    # Only needed when MERGE_TARGET came from the cwd-branch fallback (Step
+    # 7 already `cd`'d there via resolve_branch); when the target was fully
+    # explicit that `cd` never ran, and `gh pr view` needs the same cwd `gh`
+    # itself would have resolved from if MERGE_REPO is also empty. Harmless
+    # to repeat if already there.
+    # Fail-open on purpose: if this cd fails, `gh pr view` below still runs
+    # from wherever cwd already is and its own rc!=0 handling covers it.
+    [ -n "$CWD" ] && { cd "$CWD" 2>/dev/null || true; }
+    merge_view_args=("$MERGE_TARGET" --json state -q .state)
+    [ -z "$MERGE_REPO" ] || merge_view_args+=(--repo "$MERGE_REPO")
+    pr_state=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" gh pr view "${merge_view_args[@]}" 2>/dev/null)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        hook_log "gh pr view failed (rc=$rc) for merge target $MERGE_TARGET; skipping"
+        exit 0
+    fi
+    pr_state=${pr_state//[[:space:]]/}
+    [ "$pr_state" = "MERGED" ] || exit 0
 fi
 
 # --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
