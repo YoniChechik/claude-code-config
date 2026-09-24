@@ -142,6 +142,16 @@
           }
         ],
         "matcher" : "*"
+      },
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/stop__wakeup_status.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "*"
       }
     ],
     "StopFailure" : [

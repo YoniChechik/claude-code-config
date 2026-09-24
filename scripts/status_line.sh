@@ -21,6 +21,7 @@ yellow=$'\033[38;2;223;142;29m'
 magenta=$'\033[38;2;136;57;239m'
 red=$'\033[38;2;214;40;40m'
 green=$'\033[38;2;64;160;43m'
+cyan=$'\033[38;2;4;165;229m'
 reset=$'\033[0m'
 newline=$'\n'
 
@@ -84,6 +85,14 @@ branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 # the `set -e` / ERR trap above.
 session_name=$(_session_name_read "$session_id" 2>/dev/null || true)
 
+# Wakeup indicator: read the sidecar written by
+# scripts/stop__wakeup_status.sh, which mirrors the Stop hook input's
+# session_crons array (armed ScheduleWakeup/CronCreate/`/loop` timers) into a
+# per-session file, keyed the same way as the session-name sidecar above.
+# `|| true` keeps a helper failure of any kind to "no segment shown" instead
+# of aborting the whole status line under the `set -e` / ERR trap above.
+wakeup_raw=$(_wakeup_next_read "$session_id" 2>/dev/null || true)
+
 dirty_marker=""
 if [ -n "$branch" ]; then
   if ! git -C "$dir" diff --quiet 2>/dev/null || ! git -C "$dir" diff --cached --quiet 2>/dev/null; then
@@ -146,6 +155,28 @@ if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
   fi
 fi
 
+# Line 2c: wakeup indicator, shown only while a wakeup is actually armed AND
+# still in the future. _wakeup_next_read already refuses to echo a past
+# epoch, so reaching this block with non-empty $wakeup_raw means "still
+# armed" -- no further staleness check needed here.
+wakeup_line=""
+if [ -n "$wakeup_raw" ]; then
+  wakeup_epoch="${wakeup_raw%%$'\t'*}"
+  wakeup_label="${wakeup_raw#*$'\t'}"
+  # No tab found (a malformed read) -- the `#*` strip is then a no-op, so
+  # label would equal the whole raw value. Treat that as "no label" rather
+  # than rendering the raw payload.
+  if [ "$wakeup_label" = "$wakeup_raw" ]; then
+    wakeup_label=""
+  fi
+  wakeup_time=$(date -r "$wakeup_epoch" "+%H:%M" 2>/dev/null || date -d "@${wakeup_epoch}" "+%H:%M" 2>/dev/null || echo "")
+  if [ -n "$wakeup_time" ]; then
+    wakeup_line="${cyan}⏰ next: ${wakeup_time}${reset}"
+    if [ -n "$wakeup_label" ]; then
+      wakeup_line="${wakeup_line} ${cyan}(${wakeup_label})${reset}"
+    fi
+  fi
+fi
 
 # CI-watcher status rendering was removed along with the old ci_watch.py
 # daemon: the new one-shot watchers (ci_watch.sh) report through Bash
@@ -157,6 +188,9 @@ if [ -n "$info_line" ]; then
 fi
 if [ -n "$org_line" ]; then
   output="${output}${newline}${org_line}"
+fi
+if [ -n "$wakeup_line" ]; then
+  output="${output}${newline}${wakeup_line}"
 fi
 # ${#pr_lines[@]} guard, not "${pr_lines[@]:-}": expanding an empty array is an
 # unbound-variable error under `set -u` on bash 3.2 (the macOS system bash).
