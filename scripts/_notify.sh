@@ -80,6 +80,63 @@ _session_name_read() {
     _sanitize_and_cap "$raw"
 }
 
+# --- Wakeup indicator (armed ScheduleWakeup/CronCreate/`/loop` timers) ------
+# THE single implementation of the wakeup-sidecar path + read contract,
+# shared by scripts/stop__wakeup_status.sh (the writer) and status_line.sh
+# (the reader), so the two can never disagree on where the file lives or how
+# a corrupt/stale one degrades. Mirrors the session-name sidecar's shape one
+# directory up: same "${CLAUDE_NOTIFY_TMP_DIR}/<prefix>_<session_id>" layout,
+# same atomic-write-never-truncate discipline, same NO-fallback contract.
+#
+# Sidecar content is two lines: line 1 the earliest upcoming fire time across
+# every entry in the Stop hook's `session_crons`, as a Unix epoch; line 2 a
+# short label (already sanitized+capped via `_sanitize_and_cap`) taken from
+# that entry's `prompt`. The file is removed entirely — not written empty —
+# the moment `session_crons` goes back to empty, which is what makes the
+# status-line segment disappear once a loop/cron finishes.
+
+# Echo the sidecar path for session id $1. Returns 1 (echoes nothing) for an
+# empty session id so a caller can `|| return 0` rather than operate on a
+# bogus path built from an empty component.
+_wakeup_next_path() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || return 1
+    printf '%s' "${CLAUDE_NOTIFY_TMP_DIR}/wakeup_next_${session_id}"
+}
+
+# Echo "<epoch>\t<label>" for session id $1 when a still-future wakeup is on
+# file. Echoes nothing (empty, exit 0) for: an empty session id, a missing or
+# non-regular sidecar, a sidecar that reads empty/corrupt, a stored epoch that
+# is not a plain positive integer, or an epoch that is not still in the
+# future (a stale file the writer failed to clear degrades to "no segment"
+# rather than showing a wakeup that already fired). NO fallback of any other
+# kind, matching `_session_name_read`'s contract.
+_wakeup_next_read() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || return 0
+    local path
+    path=$(_wakeup_next_path "$session_id") || return 0
+    # Regular files only -- same FIFO/socket hazard as the session-name
+    # sidecar: this is read on the ~1s status-line poll, so a blocking `head`
+    # would hang the whole status line.
+    [ -f "$path" ] || return 0
+    # Byte cap before anything else touches the value, so a runaway or
+    # corrupt sidecar degrades to a truncated/garbage read instead of being
+    # slurped whole. 512 bytes comfortably covers an epoch line plus a
+    # 35-codepoint (<=140-byte) label line.
+    local raw
+    raw=$(head -c 512 "$path" 2>/dev/null || true)
+    [ -n "$raw" ] || return 0
+    local epoch label
+    epoch=$(printf '%s\n' "$raw" | sed -n '1p')
+    label=$(printf '%s\n' "$raw" | sed -n '2p')
+    [[ "$epoch" =~ ^[1-9][0-9]*$ ]] || return 0
+    local now
+    now=$(date +%s)
+    [ "$epoch" -gt "$now" ] || return 0
+    printf '%s\t%s' "$epoch" "$label"
+}
+
 # --- CI watcher key components ----------------------------------------------
 # Every ci_watch.sh watcher's /tmp files are keyed on
 # "<component>_<kind>_<slug>-<KEY>", where <slug> is the readable branch slug
