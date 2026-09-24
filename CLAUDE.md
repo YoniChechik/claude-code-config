@@ -2,9 +2,9 @@
 
 1. The current year is 2026 (September at the time of writing).
 2. Be concise. No unnecessary detail.
-3. COMMIT AND PUSH FREQUENTLY!
+3. Commit and push after each meaningful change.
 4. NO backward compatibility. Delete unused code completely. Only keep backward compatibility if explicitly requested by the user.
-5. THERE IS NO SUCH THING AS PRE_EXITING ERRORS- IF YOU FIND AN ERROR YOU FIX IT IMMEDIATELY!
+5. Fix errors immediately when you find them — there is no "pre-existing, so I'll leave it" exception.
 6. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
 7. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
 8. NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
