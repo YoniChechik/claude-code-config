@@ -36,6 +36,19 @@
 # UNQUOTED delimiter is NOT neutralized and still rejects the command, since
 # its body can contain real `$(...)`/`` ` ``/`$VAR` expansion.
 #
+# A second carve-out (Step 5a2): `rtk hook claude` -- this repo's own
+# PreToolUse hook, registered on the identical "Bash" matcher -- silently
+# rewrites `gh pr merge`/`gh pr create` into `rtk gh pr merge ...`/
+# `rtk gh pr create ...` before they execute, and PostToolUse sees that
+# REWRITTEN command as tool_input.command (per the hooks docs: PostToolUse's
+# tool_input is "the arguments sent to the tool", not the literal text Claude
+# typed). Confirmed live: this silently ate EVERY `gh pr merge`/`gh pr
+# create` trigger across a full session, while a hand-crafted test payload
+# (built from the literal, un-rewritten command) worked fine -- the
+# discrepancy that flagged this bug. An `rtk `/`rtk proxy `/`rtk run ` prefix
+# is unwrapped before the shape checks (Step 5a2) so the underlying `gh`/
+# `git` shape still matches.
+#
 # Output is hookSpecificOutput.additionalContext ONLY — no systemMessage, so
 # nothing is ever surfaced to the user. Every git/gh call the hook makes is
 # time-boxed and FAILS OPEN: on any error, empty answer or timeout the hook
@@ -210,6 +223,20 @@ tokens=()
 while IFS= read -r line; do
     tokens+=("$line")
 done <<<"$tokens_str"
+
+# --- Step 5a2: unwrap an `rtk` proxy prefix. ---------------------------------
+# See the header comment above for why this is needed: `rtk hook claude`
+# rewrites `gh pr merge`/`gh pr create` into `rtk gh pr merge ...`/`rtk gh pr
+# create ...` before they run, so tokens[0] is "rtk", not "gh"/"git", and the
+# case match below would otherwise silently miss every rewritten call. `rtk
+# proxy <cmd>`/`rtk run <cmd>` (RTK.md's own documented raw-passthrough forms)
+# unwrap the same way, one extra token deep.
+if [ "${tokens[0]:-}" = "rtk" ]; then
+    tokens=("${tokens[@]:1}")
+    case "${tokens[0]:-}" in
+        proxy | run) tokens=("${tokens[@]:1}") ;;
+    esac
+fi
 
 KIND=""     # the ci_watch.sh mode to launch: push | merge
 ACTION=""   # which trigger matched, for the message's opening sentence
