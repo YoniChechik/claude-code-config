@@ -32,6 +32,8 @@ if ! parsed=$(printf '%s' "$input" | jq -r '
   (.context_window.remaining_percentage // ""),
   (.rate_limits.five_hour.used_percentage // ""),
   (.rate_limits.five_hour.resets_at // ""),
+  (.rate_limits.seven_day.used_percentage // ""),
+  (.rate_limits.seven_day.resets_at // ""),
   (.session_id // "")
 ' 2>/dev/null); then
   printf '%s' "${red}(status_line.sh: json parse error)${reset}"
@@ -54,7 +56,9 @@ git_dir="${fields[1]-}"
 remaining="${fields[2]-}"
 five_hr_used="${fields[3]-}"
 five_hr_resets_at="${fields[4]-}"
-session_id="${fields[5]-}"
+seven_day_used="${fields[5]-}"
+seven_day_resets_at="${fields[6]-}"
+session_id="${fields[7]-}"
 
 # Treat literal "null" (jq's output for a missing top-level field with no
 # `// ""` fallback) the same as empty.
@@ -63,6 +67,8 @@ session_id="${fields[5]-}"
 [[ "$remaining" == "null" ]] && remaining=""
 [[ "$five_hr_used" == "null" ]] && five_hr_used=""
 [[ "$five_hr_resets_at" == "null" ]] && five_hr_resets_at=""
+[[ "$seven_day_used" == "null" ]] && seven_day_used=""
+[[ "$seven_day_resets_at" == "null" ]] && seven_day_resets_at=""
 [[ "$session_id" == "null" ]] && session_id=""
 
 # Fall back to PWD so we still render something useful when the harness
@@ -120,7 +126,7 @@ fi
 # Line 1: path + dirty marker + optional context
 status="${blue}${display_dir}${reset}${dirty_marker}"
 
-# Line 2: context window + 5h rate limit
+# Line 2: context window + 5h rate limit + weekly rate limit
 info_line=""
 
 if [ -n "$remaining" ] && [ "$remaining" != "null" ]; then
@@ -141,6 +147,22 @@ if [ -n "$five_hr_used" ] && [ "$five_hr_used" != "null" ]; then
     info_line="${info_line} | ${five_hr_part}"
   else
     info_line="${five_hr_part}"
+  fi
+fi
+
+if [ -n "$seven_day_used" ] && [ "$seven_day_used" != "null" ]; then
+  seven_day_remaining=$(printf "%.0f" "$(echo "100 - $seven_day_used" | bc)")
+  seven_day_part="${yellow}week: ${seven_day_remaining}%${reset}"
+  if [ -n "$seven_day_resets_at" ] && [ "$seven_day_resets_at" != "null" ]; then
+    seven_day_reset_time=$(date -r "$seven_day_resets_at" "+%a %H:%M" 2>/dev/null || date -d "@${seven_day_resets_at}" "+%a %H:%M" 2>/dev/null || echo "")
+    if [ -n "$seven_day_reset_time" ]; then
+      seven_day_part="${seven_day_part} ${yellow}(${seven_day_reset_time})${reset}"
+    fi
+  fi
+  if [ -n "$info_line" ]; then
+    info_line="${info_line} | ${seven_day_part}"
+  else
+    info_line="${seven_day_part}"
   fi
 fi
 
