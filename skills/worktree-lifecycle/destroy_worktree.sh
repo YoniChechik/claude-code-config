@@ -113,6 +113,30 @@ fi
 # --- Teardown -------------------------------------------------------------
 SIZE_BEFORE="$(du -sh "$WT_PATH" 2>/dev/null | cut -f1 || true)"
 
+# Stop this worktree's devtrees stack (process-compose + its Docker containers)
+# before the directory disappears — an already-removed worktree can't be `cd`'d
+# into to run `devtrees down` afterward, leaving the stack orphaned.
+WT_BASENAME="$(basename "$WT_PATH")"
+if command -v devtrees >/dev/null 2>&1; then
+    echo "Stopping devtrees stack for $WT_BASENAME..."
+    (cd "$WT_PATH" && devtrees down) 2>&1 | sed 's/^/  /' || echo "  (devtrees down failed or no stack running; continuing)"
+fi
+
+# Belt-and-suspenders: some containers (Supabase's in particular) have been seen
+# surviving `devtrees down` as exited zombies that pile up and starve other
+# worktrees of Docker capacity. Remove any container whose name references this
+# worktree, matched on a name-prefix substring since devtrees/Supabase truncate
+# long slugs.
+if command -v docker >/dev/null 2>&1 && [ "${#WT_BASENAME}" -ge 8 ]; then
+    SLUG="${WT_BASENAME:0:20}"
+    STALE_CONTAINERS="$(docker ps -a --format '{{.Names}}' | grep -F "$SLUG" || true)"
+    if [ -n "$STALE_CONTAINERS" ]; then
+        echo "Removing leftover Docker containers for $WT_BASENAME:"
+        echo "$STALE_CONTAINERS" | sed 's/^/  /'
+        echo "$STALE_CONTAINERS" | xargs -r docker rm -f
+    fi
+fi
+
 # `git worktree remove` detaches it from git's bookkeeping cleanly.
 git -C "$MAIN_REPO_ROOT" worktree remove --force "$WT_PATH"
 
