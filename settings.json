@@ -122,15 +122,6 @@
           }
         ],
         "matcher" : "*"
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/session_start_main_agent_prompt.sh",
-            "type" : "command"
-          }
-        ],
-        "matcher" : "*"
       }
     ],
     "Stop" : [
