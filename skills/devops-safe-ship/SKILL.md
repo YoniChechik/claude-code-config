@@ -112,9 +112,11 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
 - **Background subagents + poll-loops.** Wait via a 1s-sleep for-loop, ≤10s per
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
-- **CI watcher** per push/merge (this environment's CI-watcher script — in Claude Code,
-  `bash ~/.claude/scripts/ci_watch.sh push|merge <branch>` — auto-launched by the
-  PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`)
+- **CI watcher** per push/merge (this environment's gh-monitor script — in Claude Code,
+  `bash ~/.claude/scripts/gh_monitor.sh push|merge <branch>` — auto-launched by the
+  PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`; the same script also
+  watches an arbitrary dispatched workflow run via `gh_monitor.sh run <run-id>` or
+  `gh_monitor.sh run <workflow-file> --dispatch`)
   — one-shot per event, not a persistent daemon; re-launch it on every "behind" alert.
 - **Dodge hook false-positives.** Write commit messages and PR bodies to a file and
   pass `--body-file`/`-F` — the base-dir hook false-positives on git-words inside
@@ -143,8 +145,8 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
    c. Write rollback + (for cutovers) an attestation block into the PR body via
       `-F`/`--body-file`.
    d. `/post` + `/other-llm` diff review; get CI green; the CI watcher auto-launches on
-      push/merge (or run this environment's CI-watcher script manually — in Claude Code,
-      `bash ~/.claude/scripts/ci_watch.sh push|merge <branch>`).
+      push/merge (or run this environment's gh-monitor script manually — in Claude Code,
+      `bash ~/.claude/scripts/gh_monitor.sh push|merge <branch>`).
    e. Classify any RED guard: benign-by-design (force-merge, print why, lean on the
       green preflight) vs real (fix).
    f. **If the merge/deploy is irreversible → PAUSE and hand to the human** (pre-checks

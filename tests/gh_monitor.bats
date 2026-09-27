@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
-# Tests for scripts/ci_watch.sh (the one-shot push/merge watcher)
-# and for _ci_watch_key in scripts/_notify.sh.
+# Tests for scripts/gh_monitor.sh (the one-shot push/merge watcher)
+# and for _gh_monitor_key in scripts/_notify.sh.
 #
 # Strategy:
 #   - The REAL script is run end to end.  Only two things are substituted: `gh`
@@ -21,7 +21,7 @@
 # not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
 # non-final `[[ ... ]]` and reports the test as ok.
 
-WATCHER="${BATS_TEST_DIRNAME}/../scripts/ci_watch.sh"
+WATCHER="${BATS_TEST_DIRNAME}/../scripts/gh_monitor.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 # The script reports its own invoked path (via $SELF) in user-facing retry
 # messages, resolved to an absolute path — never a hardcoded ~/.claude
@@ -35,26 +35,26 @@ setup() {
 
     # Every timer near zero: the suite asserts the LOGIC of each bound, never
     # that the wall clock really elapsed.
-    export CI_WATCH_CHECK_GRACE_MAX=2
-    export CI_WATCH_CHECK_GRACE_POLL=1
-    export CI_WATCH_MERGE_WAIT_MAX=2
-    export CI_WATCH_MERGE_POLL=1
-    export CI_WATCH_RUN_APPEAR_MAX=2
-    export CI_WATCH_RUN_APPEAR_POLL=1
-    export CI_WATCH_RETRY_MAX=3
-    export CI_WATCH_RETRY_BACKOFF=0
-    export CI_WATCH_ACQUIRE_ATTEMPTS=5
-    export CI_WATCH_EVICT_TERM_WAIT=5
-    export CI_WATCH_EVICT_KILL_WAIT=3
-    export CI_WATCH_NO_PID_WAIT=10
-    export CI_WATCH_PROBE_POLL=1
+    export GH_MONITOR_CHECK_GRACE_MAX=2
+    export GH_MONITOR_CHECK_GRACE_POLL=1
+    export GH_MONITOR_MERGE_WAIT_MAX=2
+    export GH_MONITOR_MERGE_POLL=1
+    export GH_MONITOR_RUN_APPEAR_MAX=2
+    export GH_MONITOR_RUN_APPEAR_POLL=1
+    export GH_MONITOR_RETRY_MAX=3
+    export GH_MONITOR_RETRY_BACKOFF=0
+    export GH_MONITOR_ACQUIRE_ATTEMPTS=5
+    export GH_MONITOR_EVICT_TERM_WAIT=5
+    export GH_MONITOR_EVICT_KILL_WAIT=3
+    export GH_MONITOR_NO_PID_WAIT=10
+    export GH_MONITOR_PROBE_POLL=1
 
     # The key/slug the watcher derives for o/r + feat-x, recomputed here through
     # the same shipped helpers rather than hardcoded.
     # shellcheck source=../scripts/_notify.sh
     source "$NOTIFY_SH"
-    KEY=$(_ci_watch_key "o/r" "$BRANCH")
-    SLUG=$(_ci_slug "$BRANCH")
+    KEY=$(_gh_monitor_key "o/r" "$BRANCH")
+    SLUG=$(_gh_monitor_slug "$BRANCH")
 
     GH_STUB_DIR="$BATS_TEST_TMPDIR/ghstub"
     mkdir -p "$GH_STUB_DIR" "$BATS_TEST_TMPDIR/bin"
@@ -98,8 +98,8 @@ assert_eq() {
     return 1
 }
 
-lockfile_for() { printf '%s/ci_watch2_lock_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
-pidfile_for() { printf '%s/ci_watch2_pid_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
+lockfile_for() { printf '%s/gh_monitor_lock_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
+pidfile_for() { printf '%s/gh_monitor_pid_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
 
 # Write one stubbed gh response. Args: <key> <exit code> <stdout text...>.
 # A key may be sequenced as "<key>.<n>" to answer the n-th call differently.
@@ -132,6 +132,13 @@ case "$1 $2" in
     "pr checks") key=pr_checks ;;
     "run list") key=run_list ;;
     "run watch") key=run_watch ;;
+    "run view")
+        case "$*" in
+            *databaseId*) key=run_view_exists ;;
+            *jobs*) key=run_view_jobs ;;
+        esac
+        ;;
+    "workflow run") key=workflow_run ;;
 esac
 printf '%s\n' "$*" >>"$GH_STUB_DIR/calls.log"
 [ -n "$key" ] || { echo "gh stub: unroutable call: $*" >&2; exit 99; }
@@ -188,25 +195,25 @@ wait_for_file() {
     return 1
 }
 
-# --- _ci_watch_key ----------------------------------------------------------
+# --- _gh_monitor_key ----------------------------------------------------------
 
-@test "_ci_watch_key returns 10 lowercase hex chars" {
-    run bash -c "source '$NOTIFY_SH'; _ci_watch_key 'o/r' 'feat-x'"
+@test "_gh_monitor_key returns 10 lowercase hex chars" {
+    run bash -c "source '$NOTIFY_SH'; _gh_monitor_key 'o/r' 'feat-x'"
     assert_eq 0 "$status"
     assert_eq 10 "${#output}"
     run bash -c "printf '%s' '$output' | grep -qE '^[0-9a-f]{10}\$'"
     assert_eq 0 "$status"
 }
 
-@test "_ci_watch_key matches the raw sha256(owner/repo#branch) recipe" {
+@test "_gh_monitor_key matches the raw sha256(owner/repo#branch) recipe" {
     local expected
     expected=$(printf '%s' 'o/r#feat-x' | shasum -a 256 | cut -c1-10)
-    run bash -c "source '$NOTIFY_SH'; _ci_watch_key 'o/r' 'feat-x'"
+    run bash -c "source '$NOTIFY_SH'; _gh_monitor_key 'o/r' 'feat-x'"
     assert_eq "$expected" "$output"
 }
 
-@test "_ci_watch_key folds owner/repo into the identity" {
-    run bash -c "source '$NOTIFY_SH'; printf '%s %s' \"\$(_ci_watch_key 'o/r1' 'b')\" \"\$(_ci_watch_key 'o/r2' 'b')\""
+@test "_gh_monitor_key folds owner/repo into the identity" {
+    run bash -c "source '$NOTIFY_SH'; printf '%s %s' \"\$(_gh_monitor_key 'o/r1' 'b')\" \"\$(_gh_monitor_key 'o/r2' 'b')\""
     local a="${output% *}" b="${output#* }"
     [ "$a" != "$b" ] && return 0
     echo "two repos sharing a branch name produced the same key: $a" >&2
@@ -242,8 +249,8 @@ wait_for_file() {
     # Keyed on x/y, not o/r: the lock file name changes because the identity
     # hash does -- proves OWNER_REPO really came from --repo, not from gh.
     local key_xy
-    key_xy=$(bash -c "source '$NOTIFY_SH'; _ci_watch_key 'x/y' '$BRANCH'")
-    [ -f "$BATS_TEST_TMPDIR/ci_watch2_lock_push_${SLUG}-${key_xy}" ] \
+    key_xy=$(bash -c "source '$NOTIFY_SH'; _gh_monitor_key 'x/y' '$BRANCH'")
+    [ -f "$BATS_TEST_TMPDIR/gh_monitor_lock_push_${SLUG}-${key_xy}" ] \
         || { echo "expected a lock file keyed on x/y" >&2; return 1; }
 
     # Never called gh repo view for nameWithOwner -- the override short-circuits it.
@@ -338,7 +345,7 @@ SLOWSTUB
 @test "contention with a missing PIDFILE falls back to lock-probe-only and still acquires" {
     local lock; lock=$(lockfile_for push)
     local pidout="$BATS_TEST_TMPDIR/holderpid"
-    # Holder exits on its own well inside CI_WATCH_NO_PID_WAIT.
+    # Holder exits on its own well inside GH_MONITOR_NO_PID_WAIT.
     start_lock_holder "$lock" 3 "$pidout"
     rm -f "$(pidfile_for push)"
 
@@ -370,7 +377,7 @@ SLOWSTUB
     start_lock_holder "$lock" 120 "$pidout"
     # No PIDFILE and a short probe window: nothing to signal, holder never ends.
     rm -f "$(pidfile_for push)"
-    export CI_WATCH_NO_PID_WAIT=1
+    export GH_MONITOR_NO_PID_WAIT=1
 
     run bash "$WATCHER" push "$BRANCH"
     [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
@@ -568,7 +575,7 @@ DRV
 }
 
 @test "merge: a PR still open at MERGE_WAIT_MAX times out with the retry instruction" {
-    export CI_WATCH_MERGE_WAIT_MAX=0
+    export GH_MONITOR_MERGE_WAIT_MAX=0
     stub pr_state 0 "OPEN "
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
@@ -591,7 +598,7 @@ DRV
 }
 
 @test "merge: no post-merge run inside the appearance grace is announced as such" {
-    export CI_WATCH_RUN_APPEAR_MAX=0
+    export GH_MONITOR_RUN_APPEAR_MAX=0
     stub pr_state 0 "MERGED abc123"
     stub repo_default 0 "main"
     stub run_list 0
@@ -673,7 +680,7 @@ DRV
     run bash "$WATCHER" push "$BRANCH"
     assert_eq 0 "$status"
     assert_eq "CI passed for feat-x" "$output"
-    run cat "$BATS_TEST_TMPDIR/ci_watch2_push_${SLUG}-${KEY}.log"
+    run cat "$BATS_TEST_TMPDIR/gh_monitor_push_${SLUG}-${KEY}.log"
     assert_contains "VERBOSE-GH-CHATTER" "$output"
 }
 
@@ -686,12 +693,132 @@ DRV
 @test "the persistent-error retry message reports the invoked symlink path, not the real file's" {
     LINK_DIR="$BATS_TEST_TMPDIR/pi-style-link"
     mkdir -p "$LINK_DIR"
-    ln -s "$WATCHER_ABS" "$LINK_DIR/ci_watch.sh"
+    ln -s "$WATCHER_ABS" "$LINK_DIR/gh_monitor.sh"
     ln -s "$(cd "$(dirname "$NOTIFY_SH")" && pwd)/_notify.sh" "$LINK_DIR/_notify.sh"
 
     stub pr_rollup 1 "gh: Bad credentials (HTTP 401)"
-    run bash "$LINK_DIR/ci_watch.sh" push "$BRANCH"
+    run bash "$LINK_DIR/gh_monitor.sh" push "$BRANCH"
     [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
-    assert_contains "run \`bash $LINK_DIR/ci_watch.sh push feat-x\` to retry" "$output"
+    assert_contains "run \`bash $LINK_DIR/gh_monitor.sh push feat-x\` to retry" "$output"
     assert_not_contains "$WATCHER_ABS" "$output"
+}
+
+# --- run mode: watch an already-dispatched run id ----------------------------
+
+@test "run: an existing run id that passes reports a plain pass line" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_watch 0 "ok"
+    run bash "$WATCHER" run "42"
+    assert_eq 0 "$status"
+    assert_contains "CI run 42 passed for o/r" "$output"
+}
+
+@test "run: an existing run id that fails reports FAILED plus the failing job names" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_watch 1 "run failed"
+    stub run_view_jobs 0 "build, lint"
+    run bash "$WATCHER" run "42"
+    assert_eq 0 "$status"
+    assert_contains "CI run 42 FAILED for o/r — failed jobs: build, lint" "$output"
+}
+
+@test "run: a failure whose job list can't be fetched still reports FAILED, no job list" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_watch 1 "run failed"
+    stub run_view_jobs 99 "boom"
+    run bash "$WATCHER" run "42"
+    assert_eq 0 "$status"
+    assert_contains "CI run 42 FAILED for o/r" "$output"
+    assert_not_contains "failed jobs" "$output"
+}
+
+@test "run: a run id that never registers within grace announces 'No CI run found'" {
+    stub run_view_exists 99 "not found"
+    run bash "$WATCHER" run "999"
+    assert_eq 0 "$status"
+    assert_contains "No CI run found for 999 on o/r" "$output"
+    assert_eq 0 "$(call_count 'run watch')"
+}
+
+@test "run: a run id that registers mid-grace still gets watched, not declared missing" {
+    stub run_view_exists.1 99 "not found"
+    stub run_view_exists.2 0 '{"databaseId":42}'
+    stub run_watch 0 "ok"
+    run bash "$WATCHER" run "42"
+    assert_eq 0 "$status"
+    assert_contains "CI run 42 passed for o/r" "$output"
+    assert_not_contains "No CI run found" "$output"
+}
+
+@test "run: --ref/-f without --dispatch is a usage error, exit 2" {
+    run bash "$WATCHER" run "42" --ref main
+    assert_eq 2 "$status"
+    run bash "$WATCHER" run "42" -f key=value
+    assert_eq 2 "$status"
+}
+
+# --- run mode: dispatch a fresh run ------------------------------------------
+
+@test "run --dispatch: dispatches, resolves the new run id, then watches it to a pass" {
+    stub workflow_run 0 ""
+    stub run_list 0 "77"
+    stub run_watch 0 "ok"
+    run bash "$WATCHER" run "ci.yml" --dispatch --ref main -f env=staging
+    assert_eq 0 "$status"
+    assert_contains "CI run 77 passed for o/r" "$output"
+    assert_contains "workflow run ci.yml --repo o/r --ref main -f env=staging" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
+@test "run --dispatch: a dispatched run that fails reports FAILED with its job list" {
+    stub workflow_run 0 ""
+    stub run_list 0 "78"
+    stub run_watch 1 "run failed"
+    stub run_view_jobs 0 "app-backend-tests"
+    run bash "$WATCHER" run "ci.yml" --dispatch
+    assert_eq 0 "$status"
+    assert_contains "CI run 78 FAILED for o/r — failed jobs: app-backend-tests" "$output"
+}
+
+@test "run --dispatch: no run appears within the appearance grace is announced as such" {
+    export GH_MONITOR_RUN_APPEAR_MAX=0
+    stub workflow_run 0 ""
+    stub run_list 0
+    run bash "$WATCHER" run "ci.yml" --dispatch
+    assert_eq 0 "$status"
+    assert_contains "Dispatched ci.yml on o/r but no run appeared within 0s" "$output"
+    assert_eq 0 "$(call_count 'run watch')"
+}
+
+@test "run --dispatch: a run that appears mid-grace is watched, not declared missing" {
+    stub workflow_run 0 ""
+    stub run_list.1 0
+    stub run_list.2 0 "79"
+    stub run_watch 0 "ok"
+    run bash "$WATCHER" run "ci.yml" --dispatch
+    assert_eq 0 "$status"
+    assert_contains "CI run 79 passed for o/r" "$output"
+}
+
+@test "run --dispatch: a dispatch failure escalates via die_persistent with the dispatch flags in the retry command" {
+    stub workflow_run 1 "gh: Bad credentials (HTTP 401)"
+    run bash "$WATCHER" run "ci.yml" --dispatch --ref main -f env=staging
+    [ "$status" -ne 0 ] || { echo "expected a nonzero exit" >&2; return 1; }
+    assert_contains "run \`bash $WATCHER_ABS run ci.yml --dispatch --ref main -f env=staging\` to retry" "$output"
+}
+
+@test "run and push watchers for the same target string use different locks and never contend" {
+    local key42 slug42 runlock
+    key42=$(_gh_monitor_key "o/r" "42")
+    slug42=$(_gh_monitor_slug "42")
+    runlock="$BATS_TEST_TMPDIR/gh_monitor_lock_run_${slug42}-${key42}"
+    local pidout="$BATS_TEST_TMPDIR/holderpid"
+    start_lock_holder "$runlock" 120 "$pidout"
+
+    stub pr_rollup 0 "1"
+    stub pr_checks 0 "ok"
+    run bash "$WATCHER" push "42"
+    assert_eq 0 "$status"
+    assert_contains "CI passed for 42" "$output"
+    run lockf -t 0 -k "$runlock" true
+    assert_eq 75 "$status"
 }
