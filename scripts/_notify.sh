@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Base directory for the CI watcher lock/pid files and the session-name
+# Base directory for the gh_monitor lock/pid files and the session-name
 # sidecar. Defaults to /tmp; overridable (mainly for tests) so these paths can
 # be redirected without touching the real /tmp.
 : "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
@@ -137,39 +137,41 @@ _wakeup_next_read() {
     printf '%s\t%s' "$epoch" "$label"
 }
 
-# --- CI watcher key components ----------------------------------------------
-# Every ci_watch.sh watcher's /tmp files are keyed on
-# "<component>_<kind>_<slug>-<KEY>", where <slug> is the readable branch slug
-# below and <KEY> is _ci_watch_key's identity hash. The hash, not the slug, is
-# what makes the key unique — folding owner/repo into it is what stops two
-# worktrees of DIFFERENT repos that share a branch name from colliding.
+# --- gh_monitor key components -----------------------------------------------
+# Every gh_monitor.sh watcher's /tmp files are keyed on
+# "<component>_<kind>_<slug>-<KEY>", where <slug> is the readable target slug
+# below (a branch name, PR selector, run id, or workflow file) and <KEY> is
+# _gh_monitor_key's identity hash. The hash, not the slug, is what makes the
+# key unique — folding owner/repo into it is what stops two worktrees of
+# DIFFERENT repos that share a target name from colliding.
 
-# The readable branch slug: every BYTE outside [A-Za-z0-9._-] becomes "_",
+# The readable target slug: every BYTE outside [A-Za-z0-9._-] becomes "_",
 # capped at 40 bytes. LC_ALL=C forces tr and cut into byte mode so a non-ASCII
-# branch name can't desync a codepoint count from a byte count.
-_ci_slug() {
+# target name can't desync a codepoint count from a byte count.
+_gh_monitor_slug() {
     # The $( ) strips cut's line terminator, so the slug carries no trailing
     # newline for a caller that does not wrap it in a command substitution of
     # its own. tr has already turned any real newline into "_".
     printf '%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | LC_ALL=C cut -c1-40)"
 }
 
-# --- CI watcher key (the one-shot ci_watch.sh watchers) ----------------
-# The GLOBAL, session-independent identity of one watched branch:
-#   KEY = first 10 hex chars of sha256("<owner>/<repo>#<branch>")
-# A one-shot watcher is keyed on (owner/repo, branch, kind) across every
-# session and terminal on the machine, not per session.
+# --- gh_monitor key (the one-shot gh_monitor.sh watchers) --------------------
+# The GLOBAL, session-independent identity of one watched target:
+#   KEY = first 10 hex chars of sha256("<owner>/<repo>#<target>")
+# A one-shot watcher is keyed on (owner/repo, target, kind) across every
+# session and terminal on the machine, not per session. <target> is a branch
+# name for push/merge, or a run id / workflow file for run.
 #
 # It returns ONLY the hash. It takes no `kind` argument: each caller composes
 # its own filename as "<component>_<kind>_<slug>-<KEY>", where <slug> is
-# _ci_slug "$branch". One shared hash function; kind-scoping lives in the
-# filename convention, never in duplicated hashing logic.
+# _gh_monitor_slug "$target". One shared hash function; kind-scoping lives in
+# the filename convention, never in duplicated hashing logic.
 #
-# Args: <owner/repo> <branch>.
-_ci_watch_key() {
-    local name_with_owner="$1" branch="$2"
+# Args: <owner/repo> <target>.
+_gh_monitor_key() {
+    local name_with_owner="$1" target="$2"
     local identity_hash
-    identity_hash=$(printf '%s' "${name_with_owner}#${branch}" \
+    identity_hash=$(printf '%s' "${name_with_owner}#${target}" \
         | shasum -a 256 | cut -c1-10)
     # Validate rather than trust: shasum is a perl script, not a coreutils
     # binary, and is absent on many minimal images. An empty hash would build a
@@ -178,7 +180,7 @@ _ci_watch_key() {
     case "$identity_hash" in
         [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
         *)
-            echo "Error: could not compute the ci watcher identity hash (is shasum installed?)." >&2
+            echo "Error: could not compute the gh_monitor identity hash (is shasum installed?)." >&2
             return 1
             ;;
     esac

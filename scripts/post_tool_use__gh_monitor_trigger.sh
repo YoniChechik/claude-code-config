@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# PostToolUse:Bash hook — auto-launch the one-shot CI watcher.
+# PostToolUse:Bash hook — auto-launch the one-shot gh_monitor watcher.
 #
 # After a Bash tool call that (a) really succeeded and (b) matches one of a
 # DELIBERATELY NARROW set of command shapes, this hook injects an instruction
-# for CLAUDE (never the user) to start scripts/ci_watch.sh in
+# for CLAUDE (never the user) to start scripts/gh_monitor.sh in
 # the background for the branch the command acted on. "Really succeeded" for
 # push/create means the local exit code; for merge it means the PR's real
 # state (see Step 4a/Step 8) — `gh`'s own exit code is not reliable there.
@@ -62,8 +62,8 @@
 # Both are env-overridable so the test suite can point the log somewhere else
 # and shrink the time box without really waiting 5s.
 : "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
-: "${CI_WATCH_HOOK_TIMEOUT:=5}"
-HOOK_LOG="${CLAUDE_NOTIFY_TMP_DIR}/ci_watch2_hook.log"
+: "${GH_MONITOR_HOOK_TIMEOUT:=5}"
+HOOK_LOG="${CLAUDE_NOTIFY_TMP_DIR}/gh_monitor_hook.log"
 
 # Resolved HERE, before Step 6 `cd`s into the tool call's cwd: after that cd a
 # relative $BASH_SOURCE would resolve against the wrong directory.
@@ -87,7 +87,7 @@ esac
 # One fail-open log line. Never writes to stdout: stdout is the hook's JSON
 # channel, and a stray byte there is a protocol error.
 hook_log() {
-    printf '%s ci_watch_trigger: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >>"$HOOK_LOG" 2>/dev/null
+    printf '%s gh_monitor_trigger: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >>"$HOOK_LOG" 2>/dev/null
     return 0
 }
 
@@ -256,7 +256,7 @@ if [ "${tokens[0]:-}" = "rtk" ]; then
     esac
 fi
 
-KIND=""     # the ci_watch.sh mode to launch: push | merge
+KIND=""     # the gh_monitor.sh mode to launch: push | merge
 ACTION=""   # which trigger matched, for the message's opening sentence
 case "${tokens[0]:-} ${tokens[1]:-} ${tokens[2]:-}" in
     "git push "*) KIND="push"; ACTION="push" ;;
@@ -292,7 +292,7 @@ fi
 resolve_branch() {
     [ -n "$CWD" ] || { hook_log "no cwd in the hook payload; skipping"; return 1; }
     cd "$CWD" 2>/dev/null || { hook_log "cwd does not exist: $CWD"; return 1; }
-    BRANCH=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" git branch --show-current 2>/dev/null)
+    BRANCH=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" git branch --show-current 2>/dev/null)
     if [ -z "$BRANCH" ]; then
         hook_log "could not resolve the current branch in $CWD; skipping"
         return 1
@@ -435,7 +435,7 @@ esac
 # trusted from the local exit code, per Step 4a: `gh`'s own exit code is not
 # reliable for merge specifically, but the PR's real state always is.
 if [ "$ACTION" = "push" ]; then
-    pr_state=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" gh pr view "$BRANCH" --json state -q .state 2>/dev/null)
+    pr_state=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" gh pr view "$BRANCH" --json state -q .state 2>/dev/null)
     rc=$?
     if [ "$rc" -ne 0 ]; then
         hook_log "gh pr view failed (rc=$rc) for $BRANCH; skipping"
@@ -454,7 +454,7 @@ elif [ "$ACTION" = "merge" ]; then
     [ -n "$CWD" ] && { cd "$CWD" 2>/dev/null || true; }
     merge_view_args=("$MERGE_TARGET" --json state -q .state)
     [ -z "$MERGE_REPO" ] || merge_view_args+=(--repo "$MERGE_REPO")
-    pr_state=$(run_timeout "$CI_WATCH_HOOK_TIMEOUT" gh pr view "${merge_view_args[@]}" 2>/dev/null)
+    pr_state=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" gh pr view "${merge_view_args[@]}" 2>/dev/null)
     rc=$?
     if [ "$rc" -ne 0 ]; then
         hook_log "gh pr view failed (rc=$rc) for merge target $MERGE_TARGET; skipping"
@@ -466,11 +466,11 @@ fi
 
 # --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
 # The opening sentence names what just happened; the rest is identical for all
-# three triggers apart from the mode. SELECTOR is what ci_watch.sh's
+# three triggers apart from the mode. SELECTOR is what gh_monitor.sh's
 # second positional gets: the current branch for push/create, or the
 # resolved merge target (an explicit PR number/URL/branch, or the current
 # branch as fallback) for merge. REPO_FLAG, when non-empty, is an explicit
-# --repo this hook was told to trust, forwarded to ci_watch.sh so IT
+# --repo this hook was told to trust, forwarded to gh_monitor.sh so IT
 # also targets that repo instead of resolving one from its own cwd.
 case "$ACTION" in
     push)
@@ -501,7 +501,7 @@ jq -n \
         additionalContext: (
           $lead
           + " Launch the " + $kind + " watcher: call the Bash tool with "
-          + "`command: bash ~/.claude/scripts/ci_watch.sh "
+          + "`command: bash ~/.claude/scripts/gh_monitor.sh "
           + $kind + " '"'"'" + $selector + "'"'"'"
           + (if $repo_flag == "" then "" else " --repo '"'"'" + $repo_flag + "'"'"'" end)
           + "` and `run_in_background: true` "

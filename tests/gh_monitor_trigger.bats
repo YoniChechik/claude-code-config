@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
 #
-# Tests for scripts/post_tool_use__ci_watch_trigger.sh — the PostToolUse:Bash
+# Tests for scripts/post_tool_use__gh_monitor_trigger.sh — the PostToolUse:Bash
 # hook that auto-launches the one-shot CI watcher.
 #
 # Strategy:
 #   - The REAL hook is run end to end, fed a real PostToolUse JSON payload on
 #     stdin.  Only `gh` and `git` are substituted, as PATH-shadowing stubs
-#     (same convention as ci_watch.bats): the suite must never touch the
+#     (same convention as gh_monitor.bats): the suite must never touch the
 #     network and must never depend on the checkout's real branch.
 #   - CLAUDE_NOTIFY_TMP_DIR redirects the hook's fail-open log into
 #     BATS_TEST_TMPDIR, so a live hook's real log is never read or written.
@@ -18,16 +18,16 @@
 # not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
 # non-final `[[ ... ]]` and reports the test as ok.
 
-HOOK="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__ci_watch_trigger.sh"
+HOOK="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__gh_monitor_trigger.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
-    HOOK_LOG="$BATS_TEST_TMPDIR/ci_watch2_hook.log"
+    HOOK_LOG="$BATS_TEST_TMPDIR/gh_monitor_hook.log"
 
     # Short enough that the fail-open timeout test finishes in ~1s, long enough
     # that a loaded machine never trips it on a healthy stub.
-    export CI_WATCH_HOOK_TIMEOUT=2
+    export GH_MONITOR_HOOK_TIMEOUT=2
 
     # The directory the payload's `cwd` points at. The hook cd's into it before
     # calling git/gh; it does not have to be a real repo, because both are
@@ -94,8 +94,8 @@ set_branch() {
     local b="$1" rc="${2:-0}"
     { printf '%s\n' "$rc"; [ -n "$b" ] && printf '%s\n' "$b"; } >"$GIT_STUB_DIR/branch"
     BRANCH="$b"
-    KEY=$(_ci_watch_key "o/r" "$b" 2>/dev/null)
-    SLUG=$(_ci_slug "$b")
+    KEY=$(_gh_monitor_key "o/r" "$b" 2>/dev/null)
+    SLUG=$(_gh_monitor_slug "$b")
     return 0
 }
 
@@ -163,13 +163,13 @@ ctx() {
 # <selector> defaults to $BRANCH (the plain-case launch target); pass it
 # explicitly when the trigger carries its own explicit PR number/URL/branch.
 # <repo>, when given, asserts the launch command also forwards an explicit
-# `--repo <repo>` to ci_watch.sh.
+# `--repo <repo>` to gh_monitor.sh.
 # shellcheck disable=SC2016  # The backticks below are LITERAL text the hook
 # emits for the agent to read — expanding them here would defeat the point of
 # the assertion.
 assert_launch_instruction() {
     local kind="$1" text="$2" selector="${3:-$BRANCH}" repo="${4:-}"
-    local expect="bash ~/.claude/scripts/ci_watch.sh ${kind} '${selector}'"
+    local expect="bash ~/.claude/scripts/gh_monitor.sh ${kind} '${selector}'"
     [ -n "$repo" ] && expect="${expect} --repo '${repo}'"
     assert_contains "$expect" "$text" || return 1
     assert_contains '`run_in_background: true`' "$text" || return 1

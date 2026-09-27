@@ -65,7 +65,7 @@
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__ci_watch_trigger.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__gh_monitor_trigger.sh",
             "suppressOutput" : true,
             "type" : "command"
           }

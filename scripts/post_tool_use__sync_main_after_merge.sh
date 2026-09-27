@@ -8,7 +8,7 @@
 # scripts/skills stale for the rest of the session, and for any other
 # concurrent session.
 #
-# Deliberately permissive, unlike post_tool_use__ci_watch_trigger.sh: that
+# Deliberately permissive, unlike post_tool_use__gh_monitor_trigger.sh: that
 # hook's false positives launch a background watcher for the WRONG branch, a
 # real correctness bug, so it parses the command's exact shape. Here an extra
 # or missed sync is harmless — reset --hard origin/main is a no-op when

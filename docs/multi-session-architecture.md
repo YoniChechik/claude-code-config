@@ -4,8 +4,8 @@ How `~/.claude/` handles multiple Claude Code sessions running simultaneously
 across multiple terminal windows, multiple repos, and multiple feature worktrees.
 
 This is an internal design doc. It describes what the code actually does today,
-keyed off `session_start.sh`, the `post_tool_use__ci_watch_trigger.sh` hook, and
-`ci_watch.sh`.
+keyed off `session_start.sh`, the `post_tool_use__gh_monitor_trigger.sh` hook, and
+`gh_monitor.sh`.
 
 ---
 
@@ -20,29 +20,39 @@ watcher and a `merge` watcher concurrently.
 
 The old design (a single always-on `ci_watch.py` daemon per branch, launched
 via `Monitor({persistent: true})` and kept alive for the life of the session)
-is gone. `ci_watch.sh` is a **one-shot** script: it runs exactly once,
+is gone. `gh_monitor.sh` is a **one-shot** script: it runs exactly once,
 to exactly one real CI result, and exits — no re-arm, no phase-cursor file,
-no daemon to protect from being auto-killed. It comes in two independently
+no daemon to protect from being auto-killed. It comes in three independently
 triggered **kinds**:
 
 - **`push`** — tracks one push's pre-merge CI checks to a verdict (pass, fail,
   or "no checks configured"), then exits.
 - **`merge`** — waits for the PR to actually merge, then tracks the resulting
   post-merge CI run(s) on the default branch to a verdict, then exits.
+- **`run`** — watches one GitHub Actions workflow run to a pass/fail verdict
+  (with a best-effort per-job failure list on a red verdict), then exits.
+  Either an already-dispatched run id (`run <run-id>`), or a workflow file to
+  dispatch fresh via `gh workflow run` and then watch (`run <workflow-file>
+  --dispatch [--ref <ref>] [-f key=value ...]`). Unlike `push`/`merge`, this
+  kind is never auto-triggered by the hook — it is launched directly, by
+  Claude, whenever it dispatches or already holds the id of an arbitrary
+  workflow run it wants to watch to completion.
 
-Both are launched the same way: a Bash tool call with `run_in_background:
+All three are launched the same way: a Bash tool call with `run_in_background:
 true` (never `Monitor` — see "Why Bash, not Monitor" below) and no `timeout`
 override, so the watcher runs to a real end state rather than a time box.
 
 The mechanism that makes concurrent watchers not collide: every watcher's
-`/tmp` files are keyed on `(owner/repo, branch, kind)` — **not** on the
-session. A push watcher for `feat/auth` and a merge watcher for `feat/auth`
-use different files entirely (different `kind`) and never contend with or
-evict each other. Two watchers of the *same* kind for the *same* branch
-(from the same session relaunching, or from two different sessions/terminals)
-contend for the *same* lock, and the newer one evicts the older — this is
-intentional and cross-session, because a stale watcher for an old
-push/merge is stale everywhere, not just within the session that started it.
+`/tmp` files are keyed on `(owner/repo, target, kind)` — **not** on the
+session, where `target` is a branch name for `push`/`merge` or a run id /
+workflow file for `run`. A push watcher for `feat/auth` and a merge watcher
+for `feat/auth` use different files entirely (different `kind`) and never
+contend with or evict each other. Two watchers of the *same* kind for the
+*same* target (from the same session relaunching, or from two different
+sessions/terminals) contend for the *same* lock, and the newer one evicts the
+older — this is intentional and cross-session, because a stale watcher for an
+old push/merge/run is stale everywhere, not just within the session that
+started it.
 
 ---
 
@@ -84,20 +94,20 @@ regression, just the same real-world limit the daemon always had.
                         with branch feat-auth checked out
                       → claude `cd`s into the worktree (mid-session)
 4. claude runs `git push`
-                      → PostToolUse:Bash fires post_tool_use__ci_watch_trigger.sh
+                      → PostToolUse:Bash fires post_tool_use__gh_monitor_trigger.sh
                       → hook sees a successful, narrowed-shape `git push`,
                         checks `gh pr view` shows an OPEN pr, and returns
                         additionalContext instructing Claude to launch the
                         push watcher
                       → Claude calls Bash with
-                        `ci_watch.sh push 'feat-auth'` and
+                        `gh_monitor.sh push 'feat-auth'` and
                         run_in_background: true
-5. watcher runs       → derives the SAME (owner/repo, branch, kind) key itself
+5. watcher runs       → derives the SAME (owner/repo, target, kind) key itself
                         via `gh repo view` + its own arguments
                       → acquires LOCKFILE via `lockf -t 0 -k`, writes PIDFILE
                       → blocks on `gh pr checks --watch` (after a
                         short check-registration grace; deliberately no
-                        `--fail-fast` — see ci_watch.sh's own comment)
+                        `--fail-fast` — see gh_monitor.sh's own comment)
                       → prints exactly ONE line to stdout, then exits; the
                         Bash background task's completion notification
                         relays it to the session
@@ -118,15 +128,15 @@ ASCII view of two windows running at the same time:
 ┌─ Window A ──────────────────────────────────────────────────────────────────────────┐
 │ cwd: ~/repo-a              session_id: aaaaaaaa-aaaa-aaaa-aaaa-…                    │
 │ branch: main                                                                        │
-│ No watcher running → no /tmp/ci_watch2_*                                            │
+│ No watcher running → no /tmp/gh_monitor_*                                            │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─ Window B ──────────────────────────────────────────────────────────────────────────┐
 │ cwd: ~/repo-b/.claude/worktrees/feat-auth   session_id: bbbbbbbb-bbbb-bbbb-bbbb-…   │
 │ push watcher for feat/auth AND merge watcher for feat/docs, both running at once     │
-│ /tmp/ci_watch2_lock_push_feat_auth-1f2e3d4c5b   ← kernel-held by the push watcher   │
-│ /tmp/ci_watch2_pid_push_feat_auth-1f2e3d4c5b    ← its eviction-target pgid          │
-│ /tmp/ci_watch2_lock_merge_feat_docs-7a8b9c0d1e  ← kernel-held by the merge watcher  │
+│ /tmp/gh_monitor_lock_push_feat_auth-1f2e3d4c5b   ← kernel-held by the push watcher   │
+│ /tmp/gh_monitor_pid_push_feat_auth-1f2e3d4c5b    ← its eviction-target pgid          │
+│ /tmp/gh_monitor_lock_merge_feat_docs-7a8b9c0d1e  ← kernel-held by the merge watcher  │
 │ Each watcher reports once, on its own, via a Bash background-task notification.      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -135,23 +145,24 @@ ASCII view of two windows running at the same time:
 
 ## The Key
 
-Every watcher's files are keyed on `(owner/repo, branch, kind)` — global,
-never scoped to a session:
+Every watcher's files are keyed on `(owner/repo, target, kind)` — global,
+never scoped to a session, where `target` is a branch name for `push`/`merge`
+or a run id / workflow file for `run`:
 
 ```
 OWNER_REPO = "<owner>/<repo>"                             (from `gh repo view`)
-KEY        = first 10 hex chars of sha256("OWNER_REPO#branch")
-SLUG       = branch, every byte outside [A-Za-z0-9._-] replaced by _,
+KEY        = first 10 hex chars of sha256("OWNER_REPO#target")
+SLUG       = target, every byte outside [A-Za-z0-9._-] replaced by _,
              truncated to 40 bytes
-KIND       = "push" | "merge"
+KIND       = "push" | "merge" | "run"
 ```
 
-`_ci_watch_key` (in `scripts/_notify.sh`) computes `KEY` from `OWNER_REPO` and
-`branch` — it takes no `kind` argument and no session argument. `_ci_slug`
-computes `SLUG` from `branch` alone (unchanged from before). Every caller —
-the watcher script itself and the hook, the only two remaining callers —
-composes its own filename as `<component>_<KIND>_<SLUG>-<KEY>`, so the hash
-function has exactly one implementation and kind-scoping lives in the
+`_gh_monitor_key` (in `scripts/_notify.sh`) computes `KEY` from `OWNER_REPO` and
+`target` — it takes no `kind` argument and no session argument. `_gh_monitor_slug`
+computes `SLUG` from `target` alone (unchanged from before, just renamed).
+Every caller — the watcher script itself and the hook, the only two remaining
+callers — composes its own filename as `<component>_<KIND>_<SLUG>-<KEY>`, so
+the hash function has exactly one implementation and kind-scoping lives in the
 filename convention, never in duplicated hashing logic.
 
 **Why global, not per-session.** A stale push watcher for an old commit, or a
@@ -172,9 +183,9 @@ different repos from colliding.
 ### The three files per watcher
 
 ```
-/tmp/ci_watch2_lock_<KIND>_<SLUG>-<KEY>        the lockf(1) lock file itself
-/tmp/ci_watch2_pid_<KIND>_<SLUG>-<KEY>         informational: pgid/start/session
-/tmp/ci_watch2_<KIND>_<SLUG>-<KEY>.log         diagnostic log (gh/git chatter, stderr)
+/tmp/gh_monitor_lock_<KIND>_<SLUG>-<KEY>        the lockf(1) lock file itself
+/tmp/gh_monitor_pid_<KIND>_<SLUG>-<KEY>         informational: pgid/start/session
+/tmp/gh_monitor_<KIND>_<SLUG>-<KEY>.log         diagnostic log (gh/git chatter, stderr)
 ```
 
 All three are global (no session component) and shared by whichever session is
@@ -313,7 +324,7 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    success long before the PR is actually merged, so the real merge is what
    this phase polls for. `MERGED` → proceed. `CLOSED` (not merged) → report
    and exit. Still `OPEN` past the bound → report the timeout with a
-   `bash ~/.claude/scripts/ci_watch.sh merge <branch>` retry
+   `bash ~/.claude/scripts/gh_monitor.sh merge <branch>` retry
    instruction, and exit. The bound is a
    concrete, freshly-chosen constant (not inherited from `Monitor`'s old
    30-minute cap) — long enough to cover a slow CI pipeline across a full
@@ -327,6 +338,35 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    that registers after that snapshot, or a fan-out past 20, is an accepted
    scope limit — not a design gap this system tries to close.
 3. Exit 0 regardless of the verdicts — reporting them *is* the successful job.
+
+### `run` mode
+
+Watches one GitHub Actions workflow run to a pass/fail verdict. Two shapes,
+selected by whether `--dispatch` is given:
+
+1. **Already-dispatched** (`run <run-id>`): `TARGET` is a run id. A short
+   existence-registration grace (same constant as push's check-registration
+   grace) polls `gh run view <run-id> --json databaseId` until the run is
+   visible, or reports "No CI run found" if it never registers.
+2. **Fresh dispatch** (`run <workflow-file> --dispatch [--ref <ref>] [-f
+   key=value ...]`): calls `gh workflow run <workflow-file>` (forwarding
+   `--ref`/`-f` verbatim), records the dispatch timestamp, then polls `gh run
+   list --workflow <workflow-file>` (same appearance-grace constants as
+   merge's post-merge discovery) for the first run created at or after that
+   timestamp. Nothing appears within the grace window → report and exit.
+3. Either shape converges here: `gh run watch <run-id> --exit-status`. Pass →
+   `CI run <id> passed for <owner/repo>`. Fail → `CI run <id> FAILED for
+   <owner/repo>`, plus a best-effort `— failed jobs: <names>` suffix from `gh
+   run view --json jobs` (never lets a failure to fetch that list mask the
+   real pass/fail verdict already known from `gh run watch`'s own exit code).
+4. Exit 0 regardless of the verdict — reporting it *is* the successful job.
+
+Unlike `push`/`merge`, `run` is never launched by the PostToolUse hook — there
+is no reliable way to infer "this `gh workflow run` deserves a watcher" from a
+bare command shape the way an open PR does for a push. Claude launches a
+`run` watcher directly, in the same background-Bash-call style, whenever it
+dispatches (or already holds the id of) a workflow run it wants watched to
+completion.
 
 ### Error handling
 
@@ -350,7 +390,7 @@ into a false pass.
 
 There is no manual stop anymore — the `/ci-watcher` skill that provided `stop
 <branch> [push|merge]` and `stop-all` was removed; only the hook-driven
-automatic launch path remains, invoking `ci_watch.sh` (now in
+automatic launch path remains, invoking `gh_monitor.sh` (now in
 `scripts/`, not a skill) directly.
 
 A watcher still never needs supervision: it runs to a real end state on its
@@ -368,8 +408,8 @@ kind)` evicting whatever held the lock before it.
 Window 1: session_id=11111111-…, branch=feat-auth
           pushed (push watcher launched), then merged (merge watcher launched)
 
-/tmp/ci_watch2_lock_push_feat-auth-1f2e3d4c5b    ← push watcher's lock
-/tmp/ci_watch2_lock_merge_feat-auth-1f2e3d4c5b   ← merge watcher's lock — DIFFERENT file
+/tmp/gh_monitor_lock_push_feat-auth-1f2e3d4c5b    ← push watcher's lock
+/tmp/gh_monitor_lock_merge_feat-auth-1f2e3d4c5b   ← merge watcher's lock — DIFFERENT file
                                   ↑ different kind ⇒ never contend, coexist freely
 ```
 
@@ -391,8 +431,8 @@ Session A's watcher by its recorded pgid, and takes over.
 Window 1: cwd=~/r/.claude/worktrees/feat-a   session_id=11111111-…
 Window 2: cwd=~/r/.claude/worktrees/feat-b   session_id=22222222-…
 
-/tmp/ci_watch2_lock_push_feat-a-1f2e3d4c5b   ← disjoint KEY (different branch)
-/tmp/ci_watch2_lock_push_feat-b-7a8b9c0d1e   ← disjoint KEY
+/tmp/gh_monitor_lock_push_feat-a-1f2e3d4c5b   ← disjoint KEY (different branch)
+/tmp/gh_monitor_lock_push_feat-b-7a8b9c0d1e   ← disjoint KEY
 ```
 
 ### One session, two repos with the SAME branch name
@@ -401,8 +441,8 @@ Window 2: cwd=~/r/.claude/worktrees/feat-b   session_id=22222222-…
 Session 11111111-… watches `main` in owner/repo-a, then `main` in owner/repo-b
 (a mid-session `cd` between worktrees).
 
-/tmp/ci_watch2_lock_push_main-0c1d2e3f40   ← same slug, DIFFERENT hash
-/tmp/ci_watch2_lock_push_main-5a6b7c8d9e
+/tmp/gh_monitor_lock_push_main-0c1d2e3f40   ← same slug, DIFFERENT hash
+/tmp/gh_monitor_lock_push_main-5a6b7c8d9e
 ```
 
 This is the case the branch slug alone could not separate, and the reason
@@ -443,13 +483,13 @@ This is the case the branch slug alone could not separate, and the reason
 
 ## Quick reference
 
-| Question                                            | Answer                                                                                                                                                                                                    |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What's the per-watcher file key?                    | `(owner/repo, branch, kind)` — global, never scoped to a session. `KEY = sha256("<owner>/<repo>#<branch>")[:10]`, filenames are `<component>_<kind>_<slug>-<KEY>`.                                        |
-| Does any file carry a session id?                   | No. The old per-session task-id bookkeeping file existed only for the now-removed `/ci-watcher stop-all` and has been deleted along with it.                                                              |
-| How does a watcher get launched?                    | A Bash tool call with `run_in_background: true`, no `timeout` override — from the `PostToolUse:Bash` hook's `additionalContext`. There is no manual launch path anymore.                                  |
-| What stops two same-kind watchers from colliding?   | `lockf(1)` — kernel-mediated, released automatically the instant the holder dies by any means. A same-branch, same-kind relaunch evicts the predecessor by its recorded pgid (`SIGTERM`, then `SIGKILL`). |
-| Do a push watcher and a merge watcher ever collide? | No — different `kind` means a different `LOCKFILE`; they never contend or evict each other, even for the same branch.                                                                                     |
-| What stops the watcher from outliving the session?  | Nothing special — it runs to its own real end state and exits on its own. The host Claude Code process staying alive is the only outer bound, same as the old daemon's `Monitor` lifetime was.            |
-| How is `SIGINT` handled?                            | It isn't — only `SIGTERM` is trapped. Nothing in this design ever sends a watcher `SIGINT`, and a signal already `SIG_IGN` on entry to a backgrounded, non-interactive shell can never be trapped by it.  |
-| How is a stuck watcher terminated?                  | Only automatically, by eviction: a fresh launch for the same `(branch, kind)` signals the old holder's recorded pgid directly (`SIGTERM`, then `SIGKILL`) and takes the lock. There is no manual stop.    |
+| Question                                            | Answer                                                                                                                                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| What's the per-watcher file key?                    | `(owner/repo, target, kind)` — global, never scoped to a session. `KEY = sha256("<owner>/<repo>#<target>")[:10]`, filenames are `<component>_<kind>_<slug>-<KEY>`. `target` is a branch for push/merge, a run id or workflow file for run. |
+| Does any file carry a session id?                   | No. The old per-session task-id bookkeeping file existed only for the now-removed `/ci-watcher stop-all` and has been deleted along with it.                                                                                               |
+| How does a watcher get launched?                    | A Bash tool call with `run_in_background: true`, no `timeout` override — from the `PostToolUse:Bash` hook's `additionalContext`. There is no manual launch path anymore.                                                                   |
+| What stops two same-kind watchers from colliding?   | `lockf(1)` — kernel-mediated, released automatically the instant the holder dies by any means. A same-branch, same-kind relaunch evicts the predecessor by its recorded pgid (`SIGTERM`, then `SIGKILL`).                                  |
+| Do a push watcher and a merge watcher ever collide? | No — different `kind` means a different `LOCKFILE`; they never contend or evict each other, even for the same branch.                                                                                                                      |
+| What stops the watcher from outliving the session?  | Nothing special — it runs to its own real end state and exits on its own. The host Claude Code process staying alive is the only outer bound, same as the old daemon's `Monitor` lifetime was.                                             |
+| How is `SIGINT` handled?                            | It isn't — only `SIGTERM` is trapped. Nothing in this design ever sends a watcher `SIGINT`, and a signal already `SIG_IGN` on entry to a backgrounded, non-interactive shell can never be trapped by it.                                   |
+| How is a stuck watcher terminated?                  | Only automatically, by eviction: a fresh launch for the same `(branch, kind)` signals the old holder's recorded pgid directly (`SIGTERM`, then `SIGKILL`) and takes the lock. There is no manual stop.                                     |

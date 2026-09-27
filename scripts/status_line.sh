@@ -201,7 +201,7 @@ if [ -n "$wakeup_raw" ]; then
 fi
 
 # CI-watcher status rendering was removed along with the old ci_watch.py
-# daemon: the new one-shot watchers (ci_watch.sh) report through Bash
+# daemon: the new one-shot watchers (gh_monitor.sh) report through Bash
 # background-task notifications instead of a polled status-line row.
 pr_lines=()
 output="${status}"
