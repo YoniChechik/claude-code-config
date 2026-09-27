@@ -154,7 +154,7 @@ if [ -n "$seven_day_used" ] && [ "$seven_day_used" != "null" ]; then
   seven_day_remaining=$(printf "%.0f" "$(echo "100 - $seven_day_used" | bc)")
   seven_day_part="${yellow}week: ${seven_day_remaining}%${reset}"
   if [ -n "$seven_day_resets_at" ] && [ "$seven_day_resets_at" != "null" ]; then
-    seven_day_reset_time=$(date -r "$seven_day_resets_at" "+%H:%M" 2>/dev/null || date -d "@${seven_day_resets_at}" "+%H:%M" 2>/dev/null || echo "")
+    seven_day_reset_time=$(date -r "$seven_day_resets_at" "+%a %H:%M" 2>/dev/null || date -d "@${seven_day_resets_at}" "+%a %H:%M" 2>/dev/null || echo "")
     if [ -n "$seven_day_reset_time" ]; then
       seven_day_part="${seven_day_part} ${yellow}(${seven_day_reset_time})${reset}"
     fi
