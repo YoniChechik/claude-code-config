@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 # Purpose:
 #   SessionStart hook that injects the "orchestrator / main agent only"
-#   guidance (CLAUDE_append_to_user_prompt_main_agent_only.md) as additional
+#   guidance (main_agent_only.md) as additional
 #   context for the current session.
 #
 # Why:
@@ -48,7 +48,7 @@ cat >/dev/null
 # Step 2: Locate the guidance file next to this script's repo root.
 # ----------------------------------------------------------------------------
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-guidance_file="$script_dir/../CLAUDE_append_to_user_prompt_main_agent_only.md"
+guidance_file="$script_dir/../main_agent_only.md"
 
 if [[ ! -f "$guidance_file" ]]; then
     exit 0
