@@ -15,6 +15,7 @@
 # Re-include tracked top-level entries.
 !/.gitignore
 !/AGENTS.md
+!/main_agent_only.md
 !/docs
 !/README.md
 !/RTK.md
