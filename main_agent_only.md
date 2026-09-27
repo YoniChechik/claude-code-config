@@ -21,13 +21,17 @@
 - >2 subagent failures in a row- just run it yourself in the FG.
 
 ## Subagent types
-For short and easy tasks, use sonnet.
-The default setup for all subagents is opus (claude-opus) with effort high — mainly for long coding sessions.
-A SUBAGENT CAN **NOT** SPIN ANOTHER SUBAGENT INSIDE IT! MAX 1 LAYER DEEP
+Use opus for planning and long coding sessions.
+Use sonnet for short and easy tasks / when runnnig "fast new-feature"
+
+## subagent scope
+Each subagent should do one task/step out of a full feature plan.
 
 ## Parallelism
 Default to parallel work. Before starting any multi-step task, always think about how to split it across multiple subagents running in parallel — do not default to a serial plan. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
 
 # Feature Development — MANDATORY WORKFLOW
+
+the. "/new-feature" skill is the most basic skil we have- and we use it 95% of the time. this should be invoced on new features. here it is printed in trhe main prompt as well:
 
 @skills/new-feature/SKILL.md
