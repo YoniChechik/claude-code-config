@@ -23,6 +23,13 @@
 #   main agent starts or resumes. To inject context, this hook MUST run
 #   synchronously (no "async": true in settings.json) and print a JSON object
 #   on stdout following the SessionStart "hookSpecificOutput" schema.
+#
+#   The guidance file itself uses "@path" lines (matching CLAUDE.md's own
+#   `@`-import convention, e.g. "@skills/new-feature/SKILL.md") to pull in
+#   other files. Claude Code's native `@`-import only applies to memory files
+#   it loads itself, not to a hook's stdout — so this script expands those
+#   lines itself before emitting JSON, resolving each referenced path
+#   relative to the repo root.
 # ============================================================================
 
 # Strict mode:
@@ -48,12 +55,32 @@ if [[ ! -f "$guidance_file" ]]; then
 fi
 
 # ----------------------------------------------------------------------------
-# Step 3: Emit the guidance as SessionStart "additionalContext".
-#   Built with `jq -n --rawfile` (not printf/%s) so the file content's
-#   quotes, backticks, and newlines are always escaped correctly into valid
-#   JSON — this file grows without this script needing to change.
+# Step 3: Expand "@path" reference lines in the guidance file.
+#   Each line that is only "@<relative-path>" gets replaced by the full
+#   content of that file, resolved relative to the repo root
+#   ($script_dir/..). A missing referenced file leaves the line untouched
+#   instead of failing the hook.
 # ----------------------------------------------------------------------------
-jq -n --rawfile guidance "$guidance_file" '{
+repo_root="$script_dir/.."
+expanded=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^@(.+)$ ]]; then
+        ref_path="$repo_root/${BASH_REMATCH[1]}"
+        if [[ -f "$ref_path" ]]; then
+            expanded+="$(cat "$ref_path")"$'\n'
+            continue
+        fi
+    fi
+    expanded+="$line"$'\n'
+done <"$guidance_file"
+
+# ----------------------------------------------------------------------------
+# Step 4: Emit the expanded guidance as SessionStart "additionalContext".
+#   Built with `jq -n --arg` (not --rawfile, since the content is now an
+#   expanded string, not a file) so quotes, backticks, and newlines are
+#   always escaped correctly into valid JSON.
+# ----------------------------------------------------------------------------
+jq -n --arg guidance "$expanded" '{
     hookSpecificOutput: {
         hookEventName: "SessionStart",
         additionalContext: $guidance
