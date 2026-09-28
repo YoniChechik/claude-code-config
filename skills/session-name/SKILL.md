@@ -225,6 +225,21 @@ contain a backslash, but it can still contain a literal double quote, which
 would otherwise break out of the AppleScript string literal — escape both
 characters defensively before interpolating:
 
+`write text`'s own `newline` parameter (default: appends a trailing return)
+is NOT enough to actually submit the command — confirmed empirically
+2026-09-28: injecting `write text "/rename Name"` (with or without a
+separate follow-up `write text` of just a carriage return) leaves the text
+sitting unsubmitted in Claude Code's input box every time, even though the
+text itself appears correctly. Claude Code's own CLI evidently does not
+treat a `write text`-delivered newline as "submit" the same way it treats a
+genuine, individually-arriving keypress. The only mechanism confirmed to
+actually submit it is a real OS-level key event via `System Events`, which
+requires OS keyboard focus — so this step must explicitly select the target
+session's window/tab and activate iTerm2 first. Only fire the key event once
+iTerm2 has actually confirmed frontmost, so a focus change that lands
+somewhere unexpected (another app, a dialog) never gets a stray Return typed
+into it — worst case is the same as today's silent no-op, never worse:
+
 ```bash
 if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]] && [[ -z "${CMUX_SURFACE_ID:-}" ]]; then
     NAME_ESCAPED="${NAME//\\/\\\\}"
@@ -236,20 +251,32 @@ tell application "iTerm2"
         repeat with t in tabs of w
             repeat with s in sessions of t
                 if unique ID of s is "$ITERM_SESSION_GUID" then
-                    tell s to write text "$NATIVE_RENAME_CMD $NAME_ESCAPED"
+                    tell s to write text "$NATIVE_RENAME_CMD $NAME_ESCAPED" newline no
+                    select w
+                    select t
+                    select s
                 end if
             end repeat
         end repeat
     end repeat
+    activate
+end tell
+delay 0.2
+tell application "System Events"
+    if (name of first process whose frontmost is true) is "iTerm2" then
+        key code 36
+    end if
 end tell
 APPLESCRIPT
 fi
 ```
 
 Skip silently (no error) whenever any of the three conditions is not met —
-same pattern as Steps 4/5/6. Running this sends a real keystroke into the
-current tab, so never fire it speculatively or as a dry run against a live
-session.
+same pattern as Steps 4/5/6. Running this briefly steals OS focus to
+iTerm2 (necessary for the real keypress — `write text` alone can target a
+background session, but `System Events` cannot) and sends a real keystroke
+into the current tab, so never fire it speculatively or as a dry run
+against a live session.
 
 ## Step 8: Report
 

@@ -56,39 +56,15 @@ _set_tab_rgb() {
         "$r" "$g" "$b" > "$target_tty" 2>/dev/null || true
 }
 
-# --- Last-painted tab state --------------------------------------------------
-# The escape sequences are write-only: a terminal cannot be asked what color a
-# tab currently has. So the painters record what they last painted, and the
-# PostToolUse reset hook consults that record to skip a pointless write when
-# nothing is actually painted. Keyed per session so two terminals never read
-# each other's state.
-_tab_state_file() {
-    printf '%s/notify_tabstate_%s' \
-        "$CLAUDE_NOTIFY_TMP_DIR" "${CLAUDE_CODE_SESSION_ID:-nosession}"
-}
-
-# Record the state just painted ("green" | "blue"). Best-effort: a failure
-# here must never change the caller's exit code or its visible behavior.
-_set_tab_state() {
-    printf '%s' "$1" > "$(_tab_state_file)" 2>/dev/null || true
-}
-
-# Echo the last painted state, or nothing if none was recorded.
-tab_state() {
-    cat "$(_tab_state_file)" 2>/dev/null || true
-}
-
 # GREEN tab: the session is fully idle, nothing else pending.
 set_tab_green() {
     _set_tab_rgb 0 255 0
-    _set_tab_state green
 }
 
 # BLUE tab: the main turn ended but background work (an armed /loop, cron, or
 # wakeup timer) is still going — the session will resume on its own.
 set_tab_blue() {
     _set_tab_rgb 0 0 255
-    _set_tab_state blue
 }
 
 # PINK tab: a Notification fired — the session needs the user's attention
@@ -96,17 +72,24 @@ set_tab_blue() {
 # background work.
 set_tab_pink() {
     _set_tab_rgb 255 105 180
-    _set_tab_state pink
 }
 
-# Clear the tab back to its terminal default. No-op (no tty write) when
-# nothing is currently painted, per the state file above.
+# Clear the tab back to its terminal default. Unconditional, no "was
+# something painted?" guard: the OSC 6 color is a property of the TERMINAL
+# TAB (tty), not of any one Claude Code session. A guard keyed on this
+# session's own state would wrongly no-op when a DIFFERENT, earlier session
+# painted the tab and then exited (e.g. session A ends, Stop paints the tab
+# green, session A's process exits; session B later starts in that same tab
+# and has never itself painted anything, so a per-session guard would leave
+# session A's stale green stuck forever). Confirmed empirically 2026-09-28:
+# a live, actively-running session with no tabstate record of its own was
+# visibly stuck green from a prior session's leftover paint. The write
+# itself is one cheap printf to a tty, so there is no real cost to always
+# issuing it.
 reset_tab_color() {
-    [ -n "$(tab_state)" ] || return 0
     local target_tty
     target_tty=$(_resolve_target_tty)
     printf '\033]6;1;bg;*;default\a' > "$target_tty" 2>/dev/null || true
-    rm -f "$(_tab_state_file)" 2>/dev/null || true
 }
 
 # --- Session name (the /session-name skill's per-session label) --------------

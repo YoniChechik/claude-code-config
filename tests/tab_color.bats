@@ -10,8 +10,7 @@
 #
 # Each script is exercised as a REAL subprocess with a hook JSON payload on
 # stdin, exactly like Claude Code runs it. CLAUDE_NOTIFY_TTY redirects the OSC
-# writes to a plain file in $BATS_TEST_TMPDIR instead of a real tty, and
-# CLAUDE_NOTIFY_TMP_DIR redirects the tab-state sidecar the same way.
+# writes to a plain file in $BATS_TEST_TMPDIR instead of a real tty.
 #
 # Assertions go through assert_contains / assert_equals rather than a bare
 # `[[ ... ]]`: bash does not fire the ERR trap for the `[[` keyword, so bats
@@ -29,7 +28,6 @@ setup() {
     TTY="$BATS_TEST_TMPDIR/fake_tty"
     : > "$TTY"
     export CLAUDE_NOTIFY_TTY="$TTY"
-    STATE_FILE="$CLAUDE_NOTIFY_TMP_DIR/notify_tabstate_testsess"
 }
 
 assert_equals() {
@@ -50,7 +48,6 @@ assert_contains() {
     run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[]}'
     assert_equals 0 "$status"
     assert_contains 'green;brightness;255' "$(cat "$TTY")"
-    assert_equals "green" "$(cat "$STATE_FILE")"
 }
 
 @test "stop: no session_crons key at all paints the tab green" {
@@ -63,7 +60,6 @@ assert_contains() {
     run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[{"id":"1","schedule":"* * * * *","recurring":true,"prompt":"loop"}]}'
     assert_equals 0 "$status"
     assert_contains 'blue;brightness;255' "$(cat "$TTY")"
-    assert_equals "blue" "$(cat "$STATE_FILE")"
 }
 
 @test "stop: malformed stdin drains cleanly, defaults to green, and exits 0" {
@@ -80,39 +76,28 @@ assert_contains() {
     assert_contains 'red;brightness;255' "$(cat "$TTY")"
     assert_contains 'green;brightness;105' "$(cat "$TTY")"
     assert_contains 'blue;brightness;180' "$(cat "$TTY")"
-    assert_equals "pink" "$(cat "$STATE_FILE")"
 }
 
 # --- post_tool_use__reset_color.sh ------------------------------------------
+#
+# reset_tab_color() is unconditional (no per-session "was anything painted?"
+# guard): the OSC 6 color is a property of the terminal TAB, not of any one
+# Claude Code session, so a session that never itself painted anything must
+# still clear a stale color left by a PREVIOUS session that used the same
+# tab. See _notify.sh's reset_tab_color() comment for the full story.
 
-@test "reset: a painted (blue) tab is cleared to default and the state file removed" {
-    echo -n "blue" > "$STATE_FILE"
+@test "reset: always clears the tab to default, even with no local paint record" {
     run bash "$RESET_SCRIPT" <<< '{"session_id":"testsess","tool_name":"Bash"}'
     assert_equals 0 "$status"
     assert_contains 'bg;*;default' "$(cat "$TTY")"
-    [ ! -e "$STATE_FILE" ]
-}
-
-@test "reset: no state painted is a true no-op, nothing written to the tty" {
-    run bash "$RESET_SCRIPT" <<< '{"session_id":"testsess","tool_name":"Bash"}'
-    assert_equals 0 "$status"
-    assert_equals "" "$(cat "$TTY")"
 }
 
 # --- user_prompt_submit__reset_color.sh -------------------------------------
 
-@test "prompt reset: a painted (green) tab is cleared at the START of a new turn" {
-    echo -n "green" > "$STATE_FILE"
+@test "prompt reset: always clears the tab to default, even with no local paint record" {
     run bash "$PROMPT_RESET_SCRIPT" <<< '{"session_id":"testsess","prompt":"hi"}'
     assert_equals 0 "$status"
     assert_contains 'bg;*;default' "$(cat "$TTY")"
-    [ ! -e "$STATE_FILE" ]
-}
-
-@test "prompt reset: no state painted is a true no-op, nothing written to the tty" {
-    run bash "$PROMPT_RESET_SCRIPT" <<< '{"session_id":"testsess","prompt":"hi"}'
-    assert_equals 0 "$status"
-    assert_equals "" "$(cat "$TTY")"
 }
 
 # --- settings.json wiring ----------------------------------------------------
