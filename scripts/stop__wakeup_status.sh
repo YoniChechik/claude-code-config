@@ -105,7 +105,7 @@ entries=$(jq -c '(.session_crons // []) | select(length>0)' <<< "$input" 2>/dev/
 # Step 7: The atomic state writer -- mktemp in the same directory, write,
 #   `mv -f` over the target, so a concurrent status_line.sh poll never
 #   observes a half-written file. Mirrors _write_state in
-#   stop__session_name_reminder.sh and `write` in rename_session.sh.
+#   stop__session_name_reminder.sh and the write step in rename_session.sh.
 # ----------------------------------------------------------------------------
 _write_sidecar() {
     local tmp
