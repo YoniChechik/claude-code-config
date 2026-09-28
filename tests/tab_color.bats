@@ -2,7 +2,9 @@
 #
 # Tests for the restored iTerm2 tab-color hooks:
 #   - scripts/stop__tab_color.sh          (Stop: green when idle, blue when a
-#                                           /loop/cron/wakeup is still armed)
+#                                           /loop/cron/wakeup is still armed
+#                                           OR a backgrounded task is still
+#                                           running/pending)
 #   - scripts/notification__tab_color.sh  (Notification: pink unconditionally)
 #   - scripts/post_tool_use__reset_color.sh (PostToolUse: clear a painted tab)
 #   - scripts/user_prompt_submit__reset_color.sh (UserPromptSubmit: clear a
@@ -60,6 +62,24 @@ assert_contains() {
     run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[{"id":"1","schedule":"* * * * *","recurring":true,"prompt":"loop"}]}'
     assert_equals 0 "$status"
     assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+}
+
+@test "stop: a running backgrounded shell (non-empty background_tasks) paints the tab blue" {
+    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","background_tasks":[{"id":"1","type":"shell","status":"running","description":"sleep 20"}]}'
+    assert_equals 0 "$status"
+    assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+}
+
+@test "stop: a pending background subagent (non-empty background_tasks) paints the tab blue" {
+    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","background_tasks":[{"id":"1","type":"subagent","status":"pending","description":"fork"}]}'
+    assert_equals 0 "$status"
+    assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+}
+
+@test "stop: empty background_tasks alongside empty session_crons paints the tab green" {
+    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[],"background_tasks":[]}'
+    assert_equals 0 "$status"
+    assert_contains 'green;brightness;255' "$(cat "$TTY")"
 }
 
 @test "stop: malformed stdin drains cleanly, defaults to green, and exits 0" {
