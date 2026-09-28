@@ -156,12 +156,37 @@ oh-my-zsh's auto-titling) — but a `Bash` tool call runs in a **fresh,
 separate subprocess** that never inherits interactive shell functions, and
 sourcing `setup.sh` from the wrong shell risks running its unrelated
 one-time installer body (see the file's own header comment). Do not call
-`title` here. Instead emit the raw OSC 1 escape directly — it needs no
-sourcing, works from any shell, and can never trigger the installer:
+`title` here.
+
+A `Bash` tool call's own stdout is also not the session's real tty (confirmed
+empirically 2026-09-28: `[ -t 1 ]` is false inside a `Bash` tool call) — it is
+a pipe the harness captures to build the tool result, so a plain
+`printf '\e]1;...'` here never reaches the actual terminal; it just shows up
+as literal escape bytes in the tool output. The escape must instead be
+written directly to the session's real pty device, discovered via the same
+`unique ID` lookup Step 7 uses (see that step for why the `w2t1p0:` prefix on
+`$ITERM_SESSION_ID` must be stripped before comparing):
 
 ```bash
-if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]]; then
-    printf '\e]1;%s\a' "$NAME"
+if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]]; then
+    ITERM_SESSION_GUID="${ITERM_SESSION_ID#*:}"
+    TTY_DEVICE=$(osascript <<APPLESCRIPT
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if unique ID of s is "$ITERM_SESSION_GUID" then
+                    return tty of s
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell
+APPLESCRIPT
+    )
+    if [[ -n "$TTY_DEVICE" ]]; then
+        printf '\e]1;%s\a' "$NAME" > "$TTY_DEVICE"
+    fi
 fi
 ```
 
@@ -187,9 +212,13 @@ This only applies when cmux is not already handling it — `$CMUX_SURFACE_ID`
 set means Step 5 already covered this session, so this step must not
 double-fire the rename command into the same pty. It also only applies
 inside plain iTerm2 (`$TERM_PROGRAM` is `iTerm.app`), and only when
-`$ITERM_SESSION_ID` is set — every iTerm2 session exports this as its own
-`unique ID`, so the AppleScript below can target this exact session (the one
-this command is itself running in) without any lookup for "current" session.
+`$ITERM_SESSION_ID` is set — every iTerm2 session exports this, but it is
+prefixed with a window/tab/pane locator (e.g. `w2t1p0:44166DB0-...`) that
+AppleScript's own `unique ID of session` does NOT include (that property
+returns the bare GUID only) — strip everything up to and including the first
+`:` before comparing, or the match never fires and `write text` silently
+no-ops (confirmed empirically 2026-09-28: exit 0, no error, no keystroke
+sent).
 
 `$NAME` is already sanitized by `_sanitize_and_cap` (Step 1) and cannot
 contain a backslash, but it can still contain a literal double quote, which
@@ -200,12 +229,13 @@ characters defensively before interpolating:
 if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]] && [[ -z "${CMUX_SURFACE_ID:-}" ]]; then
     NAME_ESCAPED="${NAME//\\/\\\\}"
     NAME_ESCAPED="${NAME_ESCAPED//\"/\\\"}"
+    ITERM_SESSION_GUID="${ITERM_SESSION_ID#*:}"
     osascript <<APPLESCRIPT
 tell application "iTerm2"
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in sessions of t
-                if unique ID of s is "$ITERM_SESSION_ID" then
+                if unique ID of s is "$ITERM_SESSION_GUID" then
                     tell s to write text "$NATIVE_RENAME_CMD $NAME_ESCAPED"
                 end if
             end repeat
