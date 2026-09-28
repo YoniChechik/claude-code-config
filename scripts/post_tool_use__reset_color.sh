@@ -6,8 +6,8 @@
 #   PostToolUse hook (every tool, no matcher) — clears a painted tab color the
 #   moment the session is running a tool again, foreground activity having
 #   resumed (either a fresh turn, or a /loop's scheduled wakeup firing and
-#   picking back up). reset_tab_color() no-ops when nothing is painted, so
-#   this costs nothing on the common case of an already-default tab.
+#   picking back up). reset_tab_color() writes the reset escape
+#   unconditionally (cheap either way), so a default tab is unaffected.
 #
 # Invariant: EVERY path ends in `exit 0` with nothing on stderr.
 # ============================================================================
