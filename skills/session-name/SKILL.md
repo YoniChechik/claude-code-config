@@ -8,11 +8,11 @@ Sets (or re-sets) the current session's display name: a short, human-readable
 label stored in a per-session sidecar file. A status line and the cmux
 workspace title read only this file — there is no fallback to the
 branch/worktree name. Where this tool also has its own native session-rename
-command (Step 5), this skill additionally triggers it inside cmux — a
-separate naming layer covering the session picker and any companion app.
-Inside iTerm2 (Step 6), it also sets the raw OS-level tab title directly.
-Safe to re-run any number of times in one session as the topic drifts; each
-run is a fresh decision, not a one-time setup step.
+command (Steps 5 and 7), this skill additionally triggers it inside cmux or
+plain iTerm2 — a separate naming layer covering the session picker and any
+companion app. Inside iTerm2 (Step 6), it also sets the raw OS-level tab
+title directly. Safe to re-run any number of times in one session as the
+topic drifts; each run is a fresh decision, not a one-time setup step.
 
 ## Step 1: Resolve the candidate name
 
@@ -173,7 +173,55 @@ If oh-my-zsh's auto-title hook fires again on the next prompt, it will
 overwrite this. That's acceptable here: the sidecar file / status line
 (Step 3) remains the durable source of truth for the session name.
 
-## Step 7: Report
+## Step 7: Trigger this tool's native rename (plain iTerm2 only)
+
+Step 5 already fires this tool's native rename inside cmux, via `cmux send`
+injecting text into the session's own pty. Plain iTerm2 (no cmux) needs the
+same trick through a different mechanism: iTerm2's own AppleScript
+automation can `write text` into a specific session, which types into that
+session's pty exactly as if the user had typed it themselves — the iTerm2
+equivalent of `cmux send`, and the only known way to fire a real `/rename`
+keystroke from inside the session it targets.
+
+This only applies when cmux is not already handling it — `$CMUX_SURFACE_ID`
+set means Step 5 already covered this session, so this step must not
+double-fire the rename command into the same pty. It also only applies
+inside plain iTerm2 (`$TERM_PROGRAM` is `iTerm.app`), and only when
+`$ITERM_SESSION_ID` is set — every iTerm2 session exports this as its own
+`unique ID`, so the AppleScript below can target this exact session (the one
+this command is itself running in) without any lookup for "current" session.
+
+`$NAME` is already sanitized by `_sanitize_and_cap` (Step 1) and cannot
+contain a backslash, but it can still contain a literal double quote, which
+would otherwise break out of the AppleScript string literal — escape both
+characters defensively before interpolating:
+
+```bash
+if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]] && [[ -z "${CMUX_SURFACE_ID:-}" ]]; then
+    NAME_ESCAPED="${NAME//\\/\\\\}"
+    NAME_ESCAPED="${NAME_ESCAPED//\"/\\\"}"
+    osascript <<APPLESCRIPT
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if unique ID of s is "$ITERM_SESSION_ID" then
+                    tell s to write text "$NATIVE_RENAME_CMD $NAME_ESCAPED"
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell
+APPLESCRIPT
+fi
+```
+
+Skip silently (no error) whenever any of the three conditions is not met —
+same pattern as Steps 4/5/6. Running this sends a real keystroke into the
+current tab, so never fire it speculatively or as a dry run against a live
+session.
+
+## Step 8: Report
 
 Tell the user the session name that is now stored (new or unchanged), and
 that they can re-run `/session-name` at any later point if the topic drifts —
