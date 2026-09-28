@@ -8,10 +8,11 @@ Sets (or re-sets) the current session's display name: a short, human-readable
 label stored in a per-session sidecar file. A status line and the cmux
 workspace title read only this file — there is no fallback to the
 branch/worktree name. Where this tool also has its own native session-rename
-command (Step 9), this skill additionally triggers it inside cmux — a
-separate naming layer covering the terminal title, the session picker, and
-any companion app. Safe to re-run any number of times in one session as the
-topic drifts; each run is a fresh decision, not a one-time setup step.
+command (Step 5), this skill additionally triggers it inside cmux — a
+separate naming layer covering the session picker and any companion app.
+Inside iTerm2 (Step 6), it also sets the raw OS-level tab title directly.
+Safe to re-run any number of times in one session as the topic drifts; each
+run is a fresh decision, not a one-time setup step.
 
 ## Step 1: Resolve the candidate name
 
@@ -139,7 +140,40 @@ Do not attempt this via raw tty `TIOCSTI` injection: macOS restricts
 a sibling process gets `EPERM` even with read/write permission on the device
 file, confirmed empirically.
 
-## Step 6: Report
+## Step 6: Set the raw iTerm2 tab title
+
+This is a fourth, independent naming surface — the actual OS-level terminal
+tab title — distinct from the sidecar file (Step 3, drives the status line),
+the cmux workspace label (Step 4), and this tool's native session name
+(Step 5, drives its own `/resume` picker and companion app). Only applies
+inside iTerm2; skip silently everywhere else, since the OSC 1 tab-title
+escape means different things (or nothing at all) in other terminals and
+multiplexers.
+
+`title`/`title-reset` are zsh functions defined in `~/.claude/setup.sh` for
+interactive use (`title "name"` pins the tab title; `title-reset` restores
+oh-my-zsh's auto-titling) — but a `Bash` tool call runs in a **fresh,
+separate subprocess** that never inherits interactive shell functions, and
+sourcing `setup.sh` from the wrong shell risks running its unrelated
+one-time installer body (see the file's own header comment). Do not call
+`title` here. Instead emit the raw OSC 1 escape directly — it needs no
+sourcing, works from any shell, and can never trigger the installer:
+
+```bash
+if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]]; then
+    printf '\e]1;%s\a' "$NAME"
+fi
+```
+
+Note: this sets the title for only the current prompt cycle, not a
+persistent override — the `TITLE_OVERRIDE` sticky flag lives in the
+interactive shell's own process memory and cannot be set from here, since
+this command runs in a short-lived subprocess that exits immediately after.
+If oh-my-zsh's auto-title hook fires again on the next prompt, it will
+overwrite this. That's acceptable here: the sidecar file / status line
+(Step 3) remains the durable source of truth for the session name.
+
+## Step 7: Report
 
 Tell the user the session name that is now stored (new or unchanged), and
 that they can re-run `/session-name` at any later point if the topic drifts —

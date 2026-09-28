@@ -1,30 +1,83 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Claude Code / shell environment setup. Dual-purpose file:
+#
+#   1. Sourced from ~/.zshrc on every interactive shell start (`source
+#      ~/.claude/setup.sh`) - defines the manual terminal-title override
+#      mechanism (`title` / `title-reset`) on top of oh-my-zsh's auto-title
+#      hooks. This half only runs when $ZSH_VERSION is set (i.e. actually
+#      being sourced by zsh) and must NEVER fall through into the installer
+#      body below - a new shell tab must not re-run installer side effects
+#      (git clone, MCP config rewrite) on every start.
+#
+#   2. Executed directly - `bash <(curl -fsSL .../setup.sh)` per README.md -
+#      as a one-time bootstrap for a fresh ~/.claude checkout: git-enables
+#      the directory and drops retired MCP registrations. This half only
+#      runs when NOT sourced from zsh.
 
-REPO_URL="https://github.com/YoniChechik/claude-code-config.git"
-CLAUDE_DIR="$HOME/.claude"
+if [ -n "${ZSH_VERSION:-}" ]; then
+  # --- Manual terminal title override (keeps oh-my-zsh auto-title by default) ---
+  # Global flag: 0 = oh-my-zsh auto-titles as usual, 1 = a manual `title` is in effect.
+  typeset -g TITLE_OVERRIDE=0
 
-# --- Git-enable ~/.claude if not already a git repo ---
-if [ ! -d "$CLAUDE_DIR/.git" ]; then
-  echo "==> Git-enabling $CLAUDE_DIR"
-  TMP_DIR="$(mktemp -d)"
-  git clone "$REPO_URL" "$TMP_DIR"
-  mv "$TMP_DIR/.git" "$CLAUDE_DIR/"
-  rm -rf "$TMP_DIR"
-  cd "$CLAUDE_DIR"
-  git reset --hard HEAD
-  echo "    Done. Continuing setup from $CLAUDE_DIR"
-fi
+  # oh-my-zsh's omz_termsupport_precmd/preexec (lib/termsupport.zsh) call its own
+  # `title` helper internally. We redefine `title` below as a public CLI, so
+  # preserve copies of the original functions with their internal `title` calls
+  # rewritten to a private alias, so auto-titling keeps working when not overridden.
+  functions[_omz_orig_title]="$functions[title]"
+  functions[_omz_orig_precmd]="${functions[omz_termsupport_precmd]//title /_omz_orig_title }"
+  functions[_omz_orig_preexec]="${functions[omz_termsupport_preexec]//title /_omz_orig_title }"
 
-# --- Drop the retired webhook MCP registration from ~/.claude.json ---
-# Older installs registered an MCP server pointing at channel/webhook.ts. That
-# file is gone, so a leftover entry makes every session start error out.
-# Python (not node) because uv/python is the only runtime this repo needs.
-# Guarded on uv: under `set -e` a missing uv would abort the whole installer
-# here and never reach the closing message below.
-if command -v uv >/dev/null 2>&1; then
-  echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
-  uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
+  add-zsh-hook -d precmd omz_termsupport_precmd
+  add-zsh-hook -d preexec omz_termsupport_preexec
+
+  _title_override_precmd() {
+    (( TITLE_OVERRIDE )) || _omz_orig_precmd
+  }
+
+  _title_override_preexec() {
+    (( TITLE_OVERRIDE )) || _omz_orig_preexec "$@"
+  }
+
+  add-zsh-hook precmd _title_override_precmd
+  add-zsh-hook preexec _title_override_preexec
+
+  # Public CLI: `title "NAME"` pins the tab title until `title-reset` runs.
+  title() {
+    TITLE_OVERRIDE=1
+    printf '\e]1;%s\a' "$1"
+  }
+
+  title-reset() {
+    TITLE_OVERRIDE=0
+  }
+
+else
+  set -euo pipefail
+
+  REPO_URL="https://github.com/YoniChechik/claude-code-config.git"
+  CLAUDE_DIR="$HOME/.claude"
+
+  # --- Git-enable ~/.claude if not already a git repo ---
+  if [ ! -d "$CLAUDE_DIR/.git" ]; then
+    echo "==> Git-enabling $CLAUDE_DIR"
+    TMP_DIR="$(mktemp -d)"
+    git clone "$REPO_URL" "$TMP_DIR"
+    mv "$TMP_DIR/.git" "$CLAUDE_DIR/"
+    rm -rf "$TMP_DIR"
+    cd "$CLAUDE_DIR"
+    git reset --hard HEAD
+    echo "    Done. Continuing setup from $CLAUDE_DIR"
+  fi
+
+  # --- Drop the retired webhook MCP registration from ~/.claude.json ---
+  # Older installs registered an MCP server pointing at channel/webhook.ts. That
+  # file is gone, so a leftover entry makes every session start error out.
+  # Python (not node) because uv/python is the only runtime this repo needs.
+  # Guarded on uv: under `set -e` a missing uv would abort the whole installer
+  # here and never reach the closing message below.
+  if command -v uv >/dev/null 2>&1; then
+    echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
+    uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
 import json
 import os
 import sys
@@ -67,11 +120,12 @@ except OSError as exc:
     sys.exit(0)
 print("    Removed mcpServers.webhook")
 PYTHON
-else
-  echo "==> Skipping webhook MCP cleanup: uv not found."
-  echo "    Install uv (https://docs.astral.sh/uv/), then re-run this script."
-fi
+  else
+    echo "==> Skipping webhook MCP cleanup: uv not found."
+    echo "    Install uv (https://docs.astral.sh/uv/), then re-run this script."
+  fi
 
-echo ""
-echo "==> Done! Restart your shell or run: source ~/.zshrc"
-echo "    Then start Claude with: claude"
+  echo ""
+  echo "==> Done! Restart your shell or run: source ~/.zshrc"
+  echo "    Then start Claude with: claude"
+fi
