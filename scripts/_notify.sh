@@ -9,8 +9,10 @@
 # OSC 6 tab-background-color escape sequences, restored in simplified form:
 # GREEN means the session stopped with nothing else pending (done, needs you);
 # BLUE means it stopped but a /loop, CronCreate, or ScheduleWakeup timer is
-# still armed (working in the background, will resume on its own). No sound,
-# no badge, no title — session-name/status_line.sh already own the title.
+# still armed (working in the background, will resume on its own); PINK means
+# a Notification fired (permission prompt, idle nudge — needs you right now).
+# No sound, no badge, no title — session-name/status_line.sh already own the
+# title.
 
 # Walk the PPID chain to find the user's real terminal device. Hooks invoked
 # from a subagent context may have a detached /dev/tty, so we climb parents
@@ -87,6 +89,14 @@ set_tab_green() {
 set_tab_blue() {
     _set_tab_rgb 0 0 255
     _set_tab_state blue
+}
+
+# PINK tab: a Notification fired — the session needs the user's attention
+# right now (permission prompt, idle nudge), which outranks any armed
+# background work.
+set_tab_pink() {
+    _set_tab_rgb 255 105 180
+    _set_tab_state pink
 }
 
 # Clear the tab back to its terminal default. No-op (no tty write) when

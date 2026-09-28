@@ -71,11 +71,13 @@ assert_contains() {
 
 # --- notification__tab_color.sh ---------------------------------------------
 
-@test "notification: always paints the tab green" {
+@test "notification: always paints the tab pink" {
     run bash "$NOTIF_SCRIPT" <<< '{"session_id":"testsess"}'
     assert_equals 0 "$status"
-    assert_contains 'green;brightness;255' "$(cat "$TTY")"
-    assert_equals "green" "$(cat "$STATE_FILE")"
+    assert_contains 'red;brightness;255' "$(cat "$TTY")"
+    assert_contains 'green;brightness;105' "$(cat "$TTY")"
+    assert_contains 'blue;brightness;180' "$(cat "$TTY")"
+    assert_equals "pink" "$(cat "$STATE_FILE")"
 }
 
 # --- post_tool_use__reset_color.sh ------------------------------------------
