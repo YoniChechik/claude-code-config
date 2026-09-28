@@ -42,6 +42,11 @@ Two real incidents drove this skill:
   persist.** An agent's Bash tool resets cwd between calls, and the whole
   point of these scripts is to work correctly regardless of the caller's
   cwd anyway (see "How the anti-nesting fix works" below).
+- **Never remind or nag the user about worktree state** (how many exist, which
+  are live vs stale/abandoned, "consider cleaning up"). The SessionStart
+  sweep (`session-maintenance.sh`) auto-closes stale ones. Only create or tear
+  down worktrees when asked or the active task needs it; report state only if
+  the user explicitly asks.
 
 ## When to use which script
 
