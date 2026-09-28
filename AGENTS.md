@@ -16,6 +16,7 @@
 14. Never use legacy or deprecated libraries/ dependencies.
 15. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
 16. NEVER use `ScheduleWakeup`/the `/loop` skill to poll for status — not for a subagent/backgrounded Bash command the harness already auto-notifies on, and not for external state either (a live deploy, a CI run). If something needs polling, push the sleep-and-recheck loop INSIDE a single backgrounded shell command and wait for that one process's own completion notification (or `Monitor` it) — never repeatedly re-invoke yourself via wakeup ticks to check status.
+17. ALWAYS run the `/session-name` skill at the very start of a session (as soon as the task is known), and run it again every time the session's scope/task changes — the label must always match what the session is currently doing right now, not what it started as.
 
 # GCLOUD AUTH
 
