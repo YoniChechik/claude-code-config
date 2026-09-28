@@ -12,4 +12,4 @@ argument-hint: "[optional forced name]"
 bash "<skill-base-dir>/rename_session.sh" "<name>"
 ```
 
-Exit 10 means the name is unchanged (fine; say so). Exit 1 means an error (report it). Otherwise report the new name. Re-run whenever the topic drifts. The iTerm2 part briefly steals focus and sends a real keystroke, so never run it as a dry run in a live session.
+Exit 10 means the name is unchanged (fine; say so). Exit 1 means an error (report it). Otherwise report the new name. Re-run whenever the topic drifts. The iTerm2 part types `/rename <name>` + Enter into this session by its `$ITERM_SESSION_ID` (no focus change), so never run it as a dry run in a live session.

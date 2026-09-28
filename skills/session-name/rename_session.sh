@@ -6,6 +6,7 @@ set -euo pipefail
 
 # Shared helpers: _sanitize_and_cap, _session_name_read
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../scripts/_notify.sh
 source "${SCRIPT_DIR}/../../scripts/_notify.sh"
 
 [[ -n "${1:-}" ]] || { echo "Usage: $0 <name>" >&2; exit 2; }
@@ -53,32 +54,29 @@ APPLESCRIPT
 )
 [[ -z "$TTY_DEVICE" ]] || printf '\e]1;%s\a' "$NAME" > "$TTY_DEVICE"
 
-# Step 5: type "/rename <name>" into the session (no newline), focus it, then press Return via
-# a real System Events key event (write text's newline does not submit; TIOCSTI is blocked on macOS)
+# Step 5: type "/rename <name>" into THIS session (by GUID, never the frontmost one), then send a
+# lone CR as a separate write so Claude Code reads it as an Enter keypress, not pasted text.
+# write text goes straight to the session's pty: no select/activate, so focus never changes.
+# The GUID is re-resolved per write: loop refs are z-order indexes that shift if the user switches windows.
 CMD="${NATIVE_RENAME_CMD:-/rename}"
 ESC="${NAME//\\/\\\\}"
 ESC="${ESC//\"/\\\"}"
 osascript <<APPLESCRIPT
-tell application "iTerm2"
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                if unique ID of s is "$GUID" then
-                    tell s to write text "$CMD $ESC" newline no
-                    select w
-                    select t
-                    select s
-                end if
+on writeTo(txt, nl)
+    tell application "iTerm2"
+        repeat with w in windows
+            repeat with t in tabs of w
+                repeat with s in sessions of t
+                    if unique ID of s is "$GUID" then
+                        tell s to write text txt newline nl
+                        return
+                    end if
+                end repeat
             end repeat
         end repeat
-    end repeat
-    activate
-end tell
-delay 0.2
-tell application "System Events"
-    -- only press Return if iTerm2 really became frontmost
-    if (name of first process whose frontmost is true) is "iTerm2" then
-        key code 36
-    end if
-end tell
+    end tell
+end writeTo
+writeTo("$CMD $ESC", false)
+delay 0.3
+writeTo("", true)
 APPLESCRIPT

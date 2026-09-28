@@ -65,3 +65,17 @@ setup() {
     [ "$status" -eq 2 ]
     [[ "$output" == *"Usage:"* ]]
 }
+
+@test "iTerm2: types /rename into the \$ITERM_SESSION_ID session, then a lone Enter, without focusing" {
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/bash\ncat >>"%s/osa.log"\n' "$BATS_TEST_TMPDIR" >"$BATS_TEST_TMPDIR/bin/osascript"
+    chmod +x "$BATS_TEST_TMPDIR/bin/osascript"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH" TERM_PROGRAM=iTerm.app ITERM_SESSION_ID="w0t0p0:ABC-GUID" \
+        run bash "$SCRIPT" 'my "x"'
+    [ "$status" -eq 0 ]
+    local log="$BATS_TEST_TMPDIR/osa.log"
+    grep -q 'unique ID of s is "ABC-GUID"' "$log"
+    grep -qF 'writeTo("/rename my \"x\"", false)' "$log"
+    grep -qF 'writeTo("", true)' "$log"
+    ! grep -qE 'activate|select |System Events|key code' "$log"
+}
