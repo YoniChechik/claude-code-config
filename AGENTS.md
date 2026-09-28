@@ -8,13 +8,14 @@
 6. NEVER use `EnterPlanMode`/`ExitPlanMode` tools. ALWAYS use the USER `/plan` skill when planning is needed.
 7. - **Never run `git worktree add` / `git worktree remove` directly**, and **never use Claude Code's built-in `EnterWorktree`/`ExitWorktree` tools**
 8. NEVER create Artifacts or invoke the `artifact-design` skill unless the user EXPLICITLY asks for an artifact.
-9. NEVER use `sleep` to wait. Use a polling for-loop with 1-sec sleep intervals instead.
+9. NEVER use `sleep` to wait for a condition. Launch the work as a background shell command (`run_in_background: true`) and let the harness's own completion notification report it back.
 10. ONLY when writing bash scripts- add comments to explain different steps since nobody really understands bash. For high level languages like Python/react/react native, no comments are needed.
 11. Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758) — e.g. `except jwt.PyJWTError, KeyError:` is VALID; parens are only required when binding via `as` — so NEVER "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which FALSELY flags it as a SyntaxError.
 12. When asking questions to the user, ALWAYS ask only one at a time and prepend the Question with short context- problam, data and then Q.
 13. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
 14. Never use legacy or deprecated libraries/ dependencies.
 15. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
+16. NEVER use `ScheduleWakeup`/the `/loop` skill to poll for the status of background work (a subagent, a backgrounded Bash command, a CI watcher, etc.) — the harness auto-notifies when it finishes. Always run the work in the background and just wait for that notification (or use the `Monitor` tool to stream it); do not schedule wakeup ticks to check on it yourself.
 
 # GCLOUD AUTH
 
