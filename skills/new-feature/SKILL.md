@@ -17,7 +17,7 @@ Pick **fast** (implement → PR → merge → validate, no planning/tests/review
 Otherwise use **full** (plan → implement → test → review → PR → merge → validate) — the default for anything with real scope or unclear boundaries. State which track was picked and why, in one line, before continuing. On the fast track, skip every step below marked "(skip if fast)".
 
 ## Step 2: Create Worktree
-Run `/create-worktree`. This also sets the terminal tab title and (inside cmux) the native session name via `/session-name`.
+Run `/create-worktree`. This also sets the terminal tab title and (inside iTerm2) the native session name via `/session-name`.
 
 ## Step 3: Plan (skip if fast)
 Run `/plan` skill.
