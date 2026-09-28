@@ -15,7 +15,7 @@
 13. Never use tables to display data to the user. Use bullet lists instead. Tables are hard to read and understand.
 14. Never use legacy or deprecated libraries/ dependencies.
 15. always prefer existing libraries over writing new code. Only write new code if the library does not exist or is not maintained.
-16. NEVER use `ScheduleWakeup`/the `/loop` skill to poll for the status of background work (a subagent, a backgrounded Bash command, a CI watcher, etc.) — the harness auto-notifies when it finishes. Always run the work in the background and just wait for that notification (or use the `Monitor` tool to stream it); do not schedule wakeup ticks to check on it yourself.
+16. NEVER use `ScheduleWakeup`/the `/loop` skill to poll for status — not for a subagent/backgrounded Bash command the harness already auto-notifies on, and not for external state either (a live deploy, a CI run). If something needs polling, push the sleep-and-recheck loop INSIDE a single backgrounded shell command and wait for that one process's own completion notification (or `Monitor` it) — never repeatedly re-invoke yourself via wakeup ticks to check status.
 
 # GCLOUD AUTH
 
