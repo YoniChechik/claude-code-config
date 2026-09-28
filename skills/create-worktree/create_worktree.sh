@@ -77,8 +77,8 @@ cd "$WORKTREE_ABS"
 bash "${SCRIPT_DIR}/setup_project_env.sh"
 cd "$REPO_ROOT"
 
-# The cmux workspace title is set by the create-worktree SKILL's Step 3, which
+# The terminal tab title is set by the create-worktree SKILL's Step 3, which
 # invokes /session-name right after this script returns — that is the single
-# place the title gets written, via `cmux rename-workspace`. Nothing to do here.
+# place the title gets written. Nothing to do here.
 
 echo "$WORKTREE_REL"

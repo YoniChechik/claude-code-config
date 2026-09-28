@@ -1,18 +1,18 @@
 ---
 name: "session-name"
-description: "Assign or update a short label describing what this session is currently doing, stored in a per-session sidecar file so a status line and the workspace title can show it; where this tool has a native rename command (e.g. Claude Code's /rename inside cmux), also triggers that so the terminal title, session picker, and any companion app pick it up too"
+description: "Assign or update a short label describing what this session is currently doing, stored in a per-session sidecar file so a status line can show it; inside iTerm2, also sets the raw OS-level tab title and triggers this tool's native rename command so the terminal title, session picker, and any companion app pick it up too"
 argument-hint: "[optional forced name]"
 ---
 
 Sets (or re-sets) the current session's display name: a short, human-readable
-label stored in a per-session sidecar file. A status line and the cmux
-workspace title read only this file — there is no fallback to the
-branch/worktree name. Where this tool also has its own native session-rename
-command (Steps 5 and 7), this skill additionally triggers it inside cmux or
-plain iTerm2 — a separate naming layer covering the session picker and any
-companion app. Inside iTerm2 (Step 6), it also sets the raw OS-level tab
-title directly. Safe to re-run any number of times in one session as the
-topic drifts; each run is a fresh decision, not a one-time setup step.
+label stored in a per-session sidecar file. A status line reads only this
+file — there is no fallback to the branch/worktree name. Where this tool also
+has its own native session-rename command (Step 5), this skill additionally
+triggers it inside iTerm2 — a separate naming layer covering the session
+picker and any companion app. Inside iTerm2 (Step 4), it also sets the raw
+OS-level tab title directly. Safe to re-run any number of times in one
+session as the topic drifts; each run is a fresh decision, not a one-time
+setup step.
 
 ## Step 1: Resolve the candidate name
 
@@ -71,84 +71,14 @@ file on a short interval and must never observe a half-written or empty file
 mid-update. The temp file is removed on any failure; reporting a new name to
 the user after a write that did not land is worse than reporting the failure.
 
-## Step 4: Rename the cmux workspace
+## Step 4: Set the raw iTerm2 tab title
 
-Terminal OSC 0/2 title escapes have no effect on cmux's sidebar (verified
-empirically — cmux does not read them), so the workspace title is set through
-cmux's own CLI instead: `cmux rename-workspace`. It defaults to the current
-workspace via `$CMUX_WORKSPACE_ID` (auto-set in every cmux terminal), so no
-explicit `--workspace` flag is needed here.
-
-When `CMUX_WORKSPACE_ID` is unset (not running inside cmux — e.g. a plain
-terminal or an unrelated wrapper), skip the rename silently rather than
-erroring: the sidecar file written in Step 3 is still the source of truth for
-the status line, so the session name is not lost, only the cmux sidebar
-label.
-
-```bash
-if [[ -n "${CMUX_WORKSPACE_ID:-}" ]] && command -v cmux >/dev/null 2>&1; then
-    cmux rename-workspace -- "$NAME" 2>/dev/null || true
-fi
-```
-
-Note: cmux's opt-in `automation.workspaceAutoNaming` setting (off by default)
-drives its OWN turn-end AI naming of workspaces for supported agents. That is
-a separate, automatic mechanism gated on a live socket setting — this skill's
-explicit rename is independent of it and runs regardless of whether that
-setting is ever turned on.
-
-## Step 5: Trigger this tool's native rename (cmux only)
-
-The sidecar file (Step 3) and cmux workspace title (Step 4) are a
-project-local naming layer — they do not touch this TOOL's own native session
-name (for Claude Code: `~/.claude/sessions/<pid>.json`'s `name` field), which
-drives the terminal title, the session/`/resume` picker, and any companion
-app. That native field typically has no exposed tool or file-edit path:
-editing a session JSON file directly, or appending a fabricated record to a
-transcript, does NOT propagate to a companion app — only the tool's own real
-native-rename command does, because it also pushes the change live over the
-session's existing connection.
-
-The command name is tool-specific: Claude Code's is `/rename`; another tool
-may use something else (e.g. `/name`). Set `NATIVE_RENAME_CMD` before running
-this skill if the default is wrong for this environment:
-
-```bash
-NATIVE_RENAME_CMD="${NATIVE_RENAME_CMD:-/rename}"
-```
-
-When running inside cmux (`$CMUX_SURFACE_ID` is set), `cmux send` delivers
-text to this session's own terminal surface exactly as if it were typed —
-cmux is the pty's actual owner, so this is not a hack, it is the documented
-path (`cmux send --help`). Use it to fire the real native rename:
-
-```bash
-if [[ -n "${CMUX_SURFACE_ID:-}" ]] && command -v cmux >/dev/null 2>&1; then
-    cmux send -- "${NATIVE_RENAME_CMD} ${NAME}\n"
-fi
-```
-
-Confirmed empirically for Claude Code (2026-09-18): this updates
-`sessions/<pid>.json`'s `name` / `nameSource:"user"` / `formerNames`, the
-`/resume` picker's title, and the Remote Control app's displayed name — all
-three at once, even mid-turn while the orchestrator is still busy. Skip
-silently when `CMUX_SURFACE_ID` is unset (not running inside cmux) — there is
-no other known path to the native field from inside a session.
-
-Do not attempt this via raw tty `TIOCSTI` injection: macOS restricts
-`TIOCSTI` to the tty's session leader (the owning process itself) or root —
-a sibling process gets `EPERM` even with read/write permission on the device
-file, confirmed empirically.
-
-## Step 6: Set the raw iTerm2 tab title
-
-This is a fourth, independent naming surface — the actual OS-level terminal
-tab title — distinct from the sidecar file (Step 3, drives the status line),
-the cmux workspace label (Step 4), and this tool's native session name
-(Step 5, drives its own `/resume` picker and companion app). Only applies
-inside iTerm2; skip silently everywhere else, since the OSC 1 tab-title
-escape means different things (or nothing at all) in other terminals and
-multiplexers.
+This is a second, independent naming surface — the actual OS-level terminal
+tab title — distinct from the sidecar file (Step 3, drives the status line)
+and this tool's native session name (Step 5, drives its own `/resume` picker
+and companion app). Only applies inside iTerm2; skip silently everywhere
+else, since the OSC 1 tab-title escape means different things (or nothing at
+all) in other terminals.
 
 `title`/`title-reset` are zsh functions defined in `~/.claude/setup.sh` for
 interactive use (`title "name"` pins the tab title; `title-reset` restores
@@ -164,7 +94,7 @@ a pipe the harness captures to build the tool result, so a plain
 `printf '\e]1;...'` here never reaches the actual terminal; it just shows up
 as literal escape bytes in the tool output. The escape must instead be
 written directly to the session's real pty device, discovered via the same
-`unique ID` lookup Step 7 uses (see that step for why the `w2t1p0:` prefix on
+`unique ID` lookup Step 5 uses (see that step for why the `w2t1p0:` prefix on
 `$ITERM_SESSION_ID` must be stripped before comparing):
 
 ```bash
@@ -198,21 +128,36 @@ If oh-my-zsh's auto-title hook fires again on the next prompt, it will
 overwrite this. That's acceptable here: the sidecar file / status line
 (Step 3) remains the durable source of truth for the session name.
 
-## Step 7: Trigger this tool's native rename (plain iTerm2 only)
+## Step 5: Trigger this tool's native rename (iTerm2 only)
 
-Step 5 already fires this tool's native rename inside cmux, via `cmux send`
-injecting text into the session's own pty. Plain iTerm2 (no cmux) needs the
-same trick through a different mechanism: iTerm2's own AppleScript
-automation can `write text` into a specific session, which types into that
-session's pty exactly as if the user had typed it themselves — the iTerm2
-equivalent of `cmux send`, and the only known way to fire a real `/rename`
-keystroke from inside the session it targets.
+The sidecar file (Step 3) does not touch this TOOL's own native session name
+(for Claude Code: `~/.claude/sessions/<pid>.json`'s `name` field), which
+drives the terminal title, the session/`/resume` picker, and any companion
+app. That native field typically has no exposed tool or file-edit path:
+editing a session JSON file directly, or appending a fabricated record to a
+transcript, does NOT propagate to a companion app — only the tool's own real
+native-rename command does, because it also pushes the change live over the
+session's existing connection.
 
-This only applies when cmux is not already handling it — `$CMUX_SURFACE_ID`
-set means Step 5 already covered this session, so this step must not
-double-fire the rename command into the same pty. It also only applies
-inside plain iTerm2 (`$TERM_PROGRAM` is `iTerm.app`), and only when
-`$ITERM_SESSION_ID` is set — every iTerm2 session exports this, but it is
+The command name is tool-specific: Claude Code's is `/rename`; another tool
+may use something else (e.g. `/name`). Set `NATIVE_RENAME_CMD` before running
+this skill if the default is wrong for this environment:
+
+```bash
+NATIVE_RENAME_CMD="${NATIVE_RENAME_CMD:-/rename}"
+```
+
+Do not attempt this via raw tty `TIOCSTI` injection: macOS restricts
+`TIOCSTI` to the tty's session leader (the owning process itself) or root —
+a sibling process gets `EPERM` even with read/write permission on the device
+file, confirmed empirically. iTerm2's own AppleScript automation is the way
+around that: it can `write text` into a specific session, which types into
+that session's pty exactly as if the user had typed it themselves — the only
+known way to fire a real `/rename` keystroke from inside the session it
+targets.
+
+This only applies inside iTerm2 (`$TERM_PROGRAM` is `iTerm.app`), and only
+when `$ITERM_SESSION_ID` is set — every iTerm2 session exports this, but it is
 prefixed with a window/tab/pane locator (e.g. `w2t1p0:44166DB0-...`) that
 AppleScript's own `unique ID of session` does NOT include (that property
 returns the bare GUID only) — strip everything up to and including the first
@@ -241,7 +186,7 @@ somewhere unexpected (another app, a dialog) never gets a stray Return typed
 into it — worst case is the same as today's silent no-op, never worse:
 
 ```bash
-if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]] && [[ -z "${CMUX_SURFACE_ID:-}" ]]; then
+if [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] && [[ -n "${ITERM_SESSION_ID:-}" ]]; then
     NAME_ESCAPED="${NAME//\\/\\\\}"
     NAME_ESCAPED="${NAME_ESCAPED//\"/\\\"}"
     ITERM_SESSION_GUID="${ITERM_SESSION_ID#*:}"
@@ -271,14 +216,13 @@ APPLESCRIPT
 fi
 ```
 
-Skip silently (no error) whenever any of the three conditions is not met —
-same pattern as Steps 4/5/6. Running this briefly steals OS focus to
-iTerm2 (necessary for the real keypress — `write text` alone can target a
-background session, but `System Events` cannot) and sends a real keystroke
-into the current tab, so never fire it speculatively or as a dry run
-against a live session.
+Skip silently (no error) whenever either condition is not met — same
+pattern as Step 4. Running this briefly steals OS focus to iTerm2 (necessary
+for the real keypress — `write text` alone can target a background session,
+but `System Events` cannot) and sends a real keystroke into the current tab,
+so never fire it speculatively or as a dry run against a live session.
 
-## Step 8: Report
+## Step 6: Report
 
 Tell the user the session name that is now stored (new or unchanged), and
 that they can re-run `/session-name` at any later point if the topic drifts —
