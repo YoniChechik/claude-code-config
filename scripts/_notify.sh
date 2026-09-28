@@ -5,6 +5,100 @@
 # be redirected without touching the real /tmp.
 : "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
 
+# --- iTerm2 tab color -------------------------------------------------------
+# OSC 6 tab-background-color escape sequences, restored in simplified form:
+# GREEN means the session stopped with nothing else pending (done, needs you);
+# BLUE means it stopped but a /loop, CronCreate, or ScheduleWakeup timer is
+# still armed (working in the background, will resume on its own). No sound,
+# no badge, no title — session-name/status_line.sh already own the title.
+
+# Walk the PPID chain to find the user's real terminal device. Hooks invoked
+# from a subagent context may have a detached /dev/tty, so we climb parents
+# until we hit a process attached to a real tty.
+find_user_tty() {
+    local pid=$PPID
+    while [ -n "$pid" ] && [ "$pid" != "1" ]; do
+        local tty
+        tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [ -n "$tty" ] && [ "$tty" != "?" ] && [ "$tty" != "??" ]; then
+            echo "/dev/$tty"
+            return 0
+        fi
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    done
+    return 1
+}
+
+# Resolve the tty to write escape sequences to. Prefers the real user tty,
+# falls back to /dev/tty. CLAUDE_NOTIFY_TTY overrides the PPID walk entirely —
+# the seam tests use to capture the raw OSC bytes a hook subprocess emits.
+_resolve_target_tty() {
+    local target_tty
+    if [ -n "${CLAUDE_NOTIFY_TTY:-}" ]; then
+        printf '%s' "$CLAUDE_NOTIFY_TTY"
+        return 0
+    fi
+    target_tty=$(find_user_tty)
+    if [ -z "$target_tty" ] || [ ! -w "$target_tty" ]; then
+        target_tty=/dev/tty
+    fi
+    printf '%s' "$target_tty"
+}
+
+# Set the iTerm2 tab background color via the OSC 6 three-channel sequence.
+# Args: <red 0-255> <green 0-255> <blue 0-255>.
+_set_tab_rgb() {
+    local r=$1 g=$2 b=$3 target_tty
+    target_tty=$(_resolve_target_tty)
+    printf '\033]6;1;bg;red;brightness;%s\a\033]6;1;bg;green;brightness;%s\a\033]6;1;bg;blue;brightness;%s\a' \
+        "$r" "$g" "$b" > "$target_tty" 2>/dev/null || true
+}
+
+# --- Last-painted tab state --------------------------------------------------
+# The escape sequences are write-only: a terminal cannot be asked what color a
+# tab currently has. So the painters record what they last painted, and the
+# PostToolUse reset hook consults that record to skip a pointless write when
+# nothing is actually painted. Keyed per session so two terminals never read
+# each other's state.
+_tab_state_file() {
+    printf '%s/notify_tabstate_%s' \
+        "$CLAUDE_NOTIFY_TMP_DIR" "${CLAUDE_CODE_SESSION_ID:-nosession}"
+}
+
+# Record the state just painted ("green" | "blue"). Best-effort: a failure
+# here must never change the caller's exit code or its visible behavior.
+_set_tab_state() {
+    printf '%s' "$1" > "$(_tab_state_file)" 2>/dev/null || true
+}
+
+# Echo the last painted state, or nothing if none was recorded.
+tab_state() {
+    cat "$(_tab_state_file)" 2>/dev/null || true
+}
+
+# GREEN tab: the session is fully idle, nothing else pending.
+set_tab_green() {
+    _set_tab_rgb 0 255 0
+    _set_tab_state green
+}
+
+# BLUE tab: the main turn ended but background work (an armed /loop, cron, or
+# wakeup timer) is still going — the session will resume on its own.
+set_tab_blue() {
+    _set_tab_rgb 0 0 255
+    _set_tab_state blue
+}
+
+# Clear the tab back to its terminal default. No-op (no tty write) when
+# nothing is currently painted, per the state file above.
+reset_tab_color() {
+    [ -n "$(tab_state)" ] || return 0
+    local target_tty
+    target_tty=$(_resolve_target_tty)
+    printf '\033]6;1;bg;*;default\a' > "$target_tty" 2>/dev/null || true
+    rm -f "$(_tab_state_file)" 2>/dev/null || true
+}
+
 # --- Session name (the /session-name skill's per-session label) --------------
 # THE single implementation of the sanitize-and-cap contract every session-name
 # site shares: this file, scripts/status_line.sh (which sources this file), and

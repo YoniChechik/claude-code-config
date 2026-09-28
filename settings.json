@@ -18,6 +18,16 @@
   },
   "feedbackDrafts" : "off",
   "hooks" : {
+    "Notification" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/notification__tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
     "PermissionRequest" : [
       {
         "hooks" : [
@@ -29,6 +39,15 @@
       }
     ],
     "PostToolUse" : [
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__reset_color.sh",
+            "type" : "command"
+          }
+        ]
+      },
       {
         "hooks" : [
           {
@@ -148,6 +167,16 @@
           {
             "async" : true,
             "command" : "bash $HOME\/.claude\/scripts\/stop__wakeup_status.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "*"
+      },
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/stop__tab_color.sh",
             "type" : "command"
           }
         ],
