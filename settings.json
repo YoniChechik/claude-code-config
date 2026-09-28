@@ -194,6 +194,17 @@
         ],
         "matcher" : "rate_limit"
       }
+    ],
+    "UserPromptSubmit" : [
+      {
+        "hooks" : [
+          {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/user_prompt_submit__reset_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
     ]
   },
   "includeCoAuthoredBy" : false,
@@ -203,6 +214,7 @@
   "permissions" : {
     "defaultMode" : "bypassPermissions"
   },
+  "preferredNotifChannel" : "notifications_disabled",
   "remoteControlAtStartup" : true,
   "showThinkingSummaries" : true,
   "skipDangerousModePermissionPrompt" : true,

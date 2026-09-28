@@ -3,8 +3,10 @@
 # Tests for the restored iTerm2 tab-color hooks:
 #   - scripts/stop__tab_color.sh          (Stop: green when idle, blue when a
 #                                           /loop/cron/wakeup is still armed)
-#   - scripts/notification__tab_color.sh  (Notification: green unconditionally)
+#   - scripts/notification__tab_color.sh  (Notification: pink unconditionally)
 #   - scripts/post_tool_use__reset_color.sh (PostToolUse: clear a painted tab)
+#   - scripts/user_prompt_submit__reset_color.sh (UserPromptSubmit: clear a
+#     painted tab the instant a new turn starts, before any tool call)
 #
 # Each script is exercised as a REAL subprocess with a hook JSON payload on
 # stdin, exactly like Claude Code runs it. CLAUDE_NOTIFY_TTY redirects the OSC
@@ -18,6 +20,7 @@
 STOP_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/stop__tab_color.sh"
 NOTIF_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/notification__tab_color.sh"
 RESET_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__reset_color.sh"
+PROMPT_RESET_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/user_prompt_submit__reset_color.sh"
 SETTINGS="${BATS_TEST_DIRNAME}/../settings.json"
 
 setup() {
@@ -96,9 +99,25 @@ assert_contains() {
     assert_equals "" "$(cat "$TTY")"
 }
 
+# --- user_prompt_submit__reset_color.sh -------------------------------------
+
+@test "prompt reset: a painted (green) tab is cleared at the START of a new turn" {
+    echo -n "green" > "$STATE_FILE"
+    run bash "$PROMPT_RESET_SCRIPT" <<< '{"session_id":"testsess","prompt":"hi"}'
+    assert_equals 0 "$status"
+    assert_contains 'bg;*;default' "$(cat "$TTY")"
+    [ ! -e "$STATE_FILE" ]
+}
+
+@test "prompt reset: no state painted is a true no-op, nothing written to the tty" {
+    run bash "$PROMPT_RESET_SCRIPT" <<< '{"session_id":"testsess","prompt":"hi"}'
+    assert_equals 0 "$status"
+    assert_equals "" "$(cat "$TTY")"
+}
+
 # --- settings.json wiring ----------------------------------------------------
 
-@test "settings.json parses and wires Stop/Notification/PostToolUse to the new scripts" {
+@test "settings.json parses and wires Stop/Notification/PostToolUse/UserPromptSubmit to the new scripts" {
     run jq . "$SETTINGS"
     assert_equals 0 "$status"
 
@@ -111,4 +130,8 @@ assert_contains() {
 
     run jq -e '.hooks.PostToolUse[].hooks[] | select(.command | contains("post_tool_use__reset_color.sh"))' "$SETTINGS"
     assert_equals 0 "$status"
+
+    run jq -e -r '.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("user_prompt_submit__reset_color.sh")) | .async' "$SETTINGS"
+    assert_equals 0 "$status"
+    assert_equals "true" "$output"
 }
