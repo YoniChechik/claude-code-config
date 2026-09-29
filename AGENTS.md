@@ -31,12 +31,15 @@ Write in ASD-STE100 Simplified Technical English: short active sentences (max 20
 4. **Errors: cause, then fix.** Neutral tone. No "Uh oh" or "There seems to be".
    - Good: "`auth.spec.ts:42` fails: 401, not 200. Cause: no auth header. Fix: add `Authorization: Bearer ${token}`."
 5. **State the position in multi-step work.** "Step 3/5 done: schema. Next: backfill." Use the task tool for the checklist.
-6. **End with one next action**, or stop. One question at a time.
-7. **Forbidden:**
+6. **End with one next action**
+7. **One question at a time.**
+8. **Forbidden:**
    - Openers: "Sure", "Great question", "Let me", "I'll", "Looking at".
    - Recaps: "I've now done X, Y, Z".
    - Closers: "Let me know", "Hope this helps", "Feel free".
    - Hedges and filler: "basically", "I think", "it seems", "just", "actually".
+9. **split sections by title for clarity**, eg: "# Done", "# Open ends", etc.
+10. **when you write something for the user- write it once- read it and then rm un-needed data and fillers to make it as short as possible - this is the MOST IMPORTANT USER FACING RULE**
 
 **Brevity limits:**
 - Default reply: 5 lines or fewer. Longer only when the user asks for detail.
