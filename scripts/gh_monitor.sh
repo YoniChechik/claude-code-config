@@ -373,6 +373,21 @@ failed_jobs_for() {
     fi
 }
 
+# Last non-empty line of a captured gh output.
+last_line() {
+    printf '%s\n' "$1" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r'
+}
+
+# True when the output ENDS with gh's own request/transport error (as opposed to
+# a check row): `Post "https://api.github.com/graphql": ... timed out`, or
+# `HTTP 502: ...`.  Anchored to the line start so a CI job name can't match.
+is_gh_transport_error() {
+    local line
+    line=$(last_line "$1")
+    [[ "$line" =~ ^((Post|Get|Put|Patch|Delete)\ \"https?://|HTTP\ [0-9]{3}) ]] || return 1
+    is_retryable 1 "$line"
+}
+
 # --- Watcher bodies ---------------------------------------------------------
 
 # push mode.  Ends at the first real CI verdict for this branch's PR.
@@ -425,8 +440,29 @@ push_body() {
     # poll instead of being missed. This costs a slower report on a real,
     # non-flaky failure (no other check can shortcut a doomed run early) in
     # exchange for never reporting a stale false failure on a flake.
-    GH_TERMINAL_RC=1 gh_call gh pr checks "$TARGET" --repo "$OWNER_REPO" --watch
-    rc=$?
+    #
+    # `gh pr checks` exits 1 for BOTH "a check failed" AND "gh itself died" (a
+    # dropped connection mid-`--watch` prints a Go net error as the last line
+    # and exits 1).  Exit 1 is declared terminal so a failing job NAME like
+    # "timeout-probe" is never text-matched into a retry, but that also turned a
+    # transport error into "CI FAILED" while every check was green or still
+    # pending (2026-10-03, PRs 3701/3703).  So classify only the LAST line: if
+    # gh's own error text is there, re-arm the watch (bounded); a real verdict
+    # ends with a check row instead.
+    local watch_attempt=1
+    while :; do
+        GH_TERMINAL_RC=1 gh_call gh pr checks "$TARGET" --repo "$OWNER_REPO" --watch
+        rc=$?
+        [[ "$rc" -eq 0 ]] && break
+        is_gh_transport_error "$GH_OUT" || break
+        if [[ "$watch_attempt" -ge "$GH_MONITOR_RETRY_MAX" ]]; then
+            die_persistent "$(short_reason "$(last_line "$GH_OUT")")"
+        fi
+        log "gh pr checks --watch died on a transport error (attempt ${watch_attempt}/${GH_MONITOR_RETRY_MAX}); re-arming"
+        watch_attempt=$((watch_attempt + 1))
+        run_watchable sleep "$GH_MONITOR_RETRY_BACKOFF"
+        bail_if_signaled $?
+    done
     if [[ "$rc" -eq 0 ]]; then
         printf 'CI passed for %s\n' "$TARGET"
         return 0
