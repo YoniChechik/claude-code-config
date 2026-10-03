@@ -523,6 +523,27 @@ DRV
     assert_eq 1 "$(call_count 'pr checks')"
 }
 
+@test "push: a transport error ending gh pr checks --watch is re-armed, not reported as FAILED" {
+    stub pr_rollup 0 "3"
+    stub pr_checks.1 1 "build	pass	3s	https://x" 'Post "https://api.github.com/graphql": read tcp 1.2.3.4:5->6.7.8.9:443: read: operation timed out'
+    stub pr_checks.2 0 "build	pass	3s	https://x"
+    run bash "$WATCHER" push "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "CI passed for feat-x" "$output"
+    assert_not_contains "CI FAILED" "$output"
+    assert_eq 2 "$(call_count 'pr checks')"
+}
+
+@test "push: a transport error that never clears escalates to a persistent error, never FAILED" {
+    stub pr_rollup 0 "3"
+    stub pr_checks 1 'Post "https://api.github.com/graphql": read: connection reset by peer'
+    run bash "$WATCHER" push "$BRANCH"
+    assert_eq 1 "$status"
+    assert_contains "persistent error" "$output"
+    assert_not_contains "CI FAILED" "$output"
+    assert_eq 3 "$(call_count 'pr checks')"
+}
+
 @test "push: 'no checks reported' from gh pr checks maps to the no-checks outcome" {
     stub pr_rollup 0 "1"
     stub pr_checks 1 "no checks reported on the 'feat-x' branch"
