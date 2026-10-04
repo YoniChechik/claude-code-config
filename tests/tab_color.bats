@@ -1,35 +1,17 @@
 #!/usr/bin/env bats
-#
-# Tests for the restored iTerm2 tab-color hooks:
-#   - scripts/stop__tab_color.sh          (Stop: green when idle, blue when a
-#                                           /loop/cron/wakeup is still armed
-#                                           OR a backgrounded task is still
-#                                           running/pending)
-#   - scripts/notification__tab_color.sh  (Notification: pink unconditionally)
-#   - scripts/post_tool_use__reset_color.sh (PostToolUse: clear a painted tab)
-#   - scripts/user_prompt_submit__reset_color.sh (UserPromptSubmit: clear a
-#     painted tab the instant a new turn starts, before any tool call)
-#
-# Each script is exercised as a REAL subprocess with a hook JSON payload on
-# stdin, exactly like Claude Code runs it. CLAUDE_NOTIFY_TTY redirects the OSC
-# writes to a plain file in $BATS_TEST_TMPDIR instead of a real tty.
-#
-# Assertions go through assert_contains / assert_equals rather than a bare
-# `[[ ... ]]`: bash does not fire the ERR trap for the `[[` keyword, so bats
-# SWALLOWS a failing non-final `[[ ... ]]` and reports the test as ok.
 
-STOP_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/stop__tab_color.sh"
-NOTIF_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/notification__tab_color.sh"
-RESET_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__reset_color.sh"
-PROMPT_RESET_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/user_prompt_submit__reset_color.sh"
+SCRIPT="${BATS_TEST_DIRNAME}/../scripts/tab_color.sh"
 SETTINGS="${BATS_TEST_DIRNAME}/../settings.json"
+BLUE_OSC=$'\033]6;1;bg;red;brightness;0\a\033]6;1;bg;green;brightness;0\a\033]6;1;bg;blue;brightness;255\a'
+PINK_OSC=$'\033]6;1;bg;red;brightness;255\a\033]6;1;bg;green;brightness;105\a\033]6;1;bg;blue;brightness;180\a'
+DEFAULT_OSC=$'\033]6;1;bg;*;default\a'
 
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
-    export CLAUDE_CODE_SESSION_ID="testsess"
     TTY="$BATS_TEST_TMPDIR/fake_tty"
     : > "$TTY"
     export CLAUDE_NOTIFY_TTY="$TTY"
+    PENDING="$BATS_TEST_TMPDIR/tab_pending_s1"
 }
 
 assert_equals() {
@@ -38,105 +20,187 @@ assert_equals() {
     return 1
 }
 
-assert_contains() {
-    case "$2" in (*"$1"*) return 0 ;; esac
-    printf 'expected to contain: %q\nactual:              %q\n' "$1" "$2" >&2
-    return 1
+fire() {
+    : > "$TTY"
+    run bash "$SCRIPT" <<< "$1"
+    assert_equals 0 "$status"
+    assert_equals "" "$output"
 }
 
-# --- stop__tab_color.sh ------------------------------------------------------
-
-@test "stop: empty session_crons paints the tab green" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[]}'
-    assert_equals 0 "$status"
-    assert_contains 'green;brightness;255' "$(cat "$TTY")"
+tab() {
+    cat "$TTY"
 }
 
-@test "stop: no session_crons key at all paints the tab green" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess"}'
-    assert_equals 0 "$status"
-    assert_contains 'green;brightness;255' "$(cat "$TTY")"
+@test "SessionStart paints pink and clears a stale pending marker" {
+    printf 'agent-x' > "$PENDING"
+    fire '{"hook_event_name":"SessionStart","session_id":"s1","source":"startup"}'
+    assert_equals "$PINK_OSC" "$(tab)"
+    [ ! -e "$PENDING" ]
 }
 
-@test "stop: an armed /loop wakeup (non-empty session_crons) paints the tab blue" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[{"id":"1","schedule":"* * * * *","recurring":true,"prompt":"loop"}]}'
-    assert_equals 0 "$status"
-    assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+@test "SessionEnd resets the tab to the terminal default" {
+    printf 'main' > "$PENDING"
+    fire '{"hook_event_name":"SessionEnd","session_id":"s1"}'
+    assert_equals "$DEFAULT_OSC" "$(tab)"
+    [ ! -e "$PENDING" ]
 }
 
-@test "stop: a running backgrounded shell (non-empty background_tasks) paints the tab blue" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","background_tasks":[{"id":"1","type":"shell","status":"running","description":"sleep 20"}]}'
-    assert_equals 0 "$status"
-    assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+@test "UserPromptSubmit paints blue" {
+    fire '{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"hi"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-@test "stop: a pending background subagent (non-empty background_tasks) paints the tab blue" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","background_tasks":[{"id":"1","type":"subagent","status":"pending","description":"fork"}]}'
-    assert_equals 0 "$status"
-    assert_contains 'blue;brightness;255' "$(cat "$TTY")"
+@test "PostToolUse paints blue" {
+    fire '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-@test "stop: empty background_tasks alongside empty session_crons paints the tab green" {
-    run bash "$STOP_SCRIPT" <<< '{"session_id":"testsess","session_crons":[],"background_tasks":[]}'
-    assert_equals 0 "$status"
-    assert_contains 'green;brightness;255' "$(cat "$TTY")"
+@test "Stop with nothing in flight paints pink" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[]}'
+    assert_equals "$PINK_OSC" "$(tab)"
 }
 
-@test "stop: malformed stdin drains cleanly, defaults to green, and exits 0" {
-    run bash "$STOP_SCRIPT" <<< 'not json'
-    assert_equals 0 "$status"
-    assert_contains 'green;brightness;255' "$(cat "$TTY")"
+@test "Stop with a running background shell paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"shell","status":"running","description":"sleep 20"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-# --- notification__tab_color.sh ---------------------------------------------
-
-@test "notification: always paints the tab pink" {
-    run bash "$NOTIF_SCRIPT" <<< '{"session_id":"testsess"}'
-    assert_equals 0 "$status"
-    assert_contains 'red;brightness;255' "$(cat "$TTY")"
-    assert_contains 'green;brightness;105' "$(cat "$TTY")"
-    assert_contains 'blue;brightness;180' "$(cat "$TTY")"
+@test "Stop with a pending background subagent paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"subagent","status":"pending","description":"fork"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-# --- post_tool_use__reset_color.sh ------------------------------------------
-#
-# reset_tab_color() is unconditional (no per-session "was anything painted?"
-# guard): the OSC 6 color is a property of the terminal TAB, not of any one
-# Claude Code session, so a session that never itself painted anything must
-# still clear a stale color left by a PREVIOUS session that used the same
-# tab. See _notify.sh's reset_tab_color() comment for the full story.
-
-@test "reset: always clears the tab to default, even with no local paint record" {
-    run bash "$RESET_SCRIPT" <<< '{"session_id":"testsess","tool_name":"Bash"}'
-    assert_equals 0 "$status"
-    assert_contains 'bg;*;default' "$(cat "$TTY")"
+@test "Stop with a running Monitor paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"monitor","status":"running","description":"tail"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-# --- user_prompt_submit__reset_color.sh -------------------------------------
-
-@test "prompt reset: always clears the tab to default, even with no local paint record" {
-    run bash "$PROMPT_RESET_SCRIPT" <<< '{"session_id":"testsess","prompt":"hi"}'
-    assert_equals 0 "$status"
-    assert_contains 'bg;*;default' "$(cat "$TTY")"
+@test "Stop with a running workflow paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"workflow","status":"running","description":"wf"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
 }
 
-# --- settings.json wiring ----------------------------------------------------
+@test "Stop with an armed /loop wakeup paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[{"id":"1","schedule":"* * * * *","recurring":true,"prompt":"loop"}],"background_tasks":[]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
 
-@test "settings.json parses and wires Stop/Notification/PostToolUse/UserPromptSubmit to the new scripts" {
-    run jq . "$SETTINGS"
-    assert_equals 0 "$status"
+@test "Stop missing the background fields paints blue rather than guessing idle" {
+    fire '{"hook_event_name":"Stop","session_id":"s1"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
 
-    run jq -e -r '.hooks.Stop[].hooks[] | select(.command | contains("stop__tab_color.sh")) | .async' "$SETTINGS"
-    assert_equals 0 "$status"
-    assert_equals "true" "$output"
+@test "Stop with null background fields paints blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":null,"background_tasks":null}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
 
-    run jq -e '.hooks.Notification[].hooks[] | select(.command | contains("notification__tab_color.sh"))' "$SETTINGS"
-    assert_equals 0 "$status"
+@test "StopFailure without background fields paints pink" {
+    fire '{"hook_event_name":"StopFailure","session_id":"s1","error":"rate_limit"}'
+    assert_equals "$PINK_OSC" "$(tab)"
+}
 
-    run jq -e '.hooks.PostToolUse[].hooks[] | select(.command | contains("post_tool_use__reset_color.sh"))' "$SETTINGS"
-    assert_equals 0 "$status"
+@test "StopFailure with a running background task paints blue" {
+    fire '{"hook_event_name":"StopFailure","session_id":"s1","background_tasks":[{"id":"1","type":"shell","status":"running","description":"x"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
 
-    run jq -e -r '.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("user_prompt_submit__reset_color.sh")) | .async' "$SETTINGS"
+@test "idle_prompt notification does not paint over a blue background-task tab" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"shell","status":"running","description":"sleep 600"}]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+    fire '{"hook_event_name":"Notification","session_id":"s1","notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+    assert_equals "" "$(tab)"
+}
+
+@test "non-human notification types never paint" {
+    for t in idle_prompt auth_success agent_completed push_notification computer_use_enter computer_use_exit quota_auto_resume_fired; do
+        fire "{\"hook_event_name\":\"Notification\",\"session_id\":\"s1\",\"notification_type\":\"$t\"}"
+        assert_equals "" "$(tab)"
+    done
+}
+
+@test "human-needed notification types paint pink" {
+    for t in permission_prompt worker_permission_prompt elicitation_dialog elicitation_url_dialog agent_needs_input quota_auto_resume_stale; do
+        fire "{\"hook_event_name\":\"Notification\",\"session_id\":\"s1\",\"notification_type\":\"$t\"}"
+        assert_equals "$PINK_OSC" "$(tab)"
+    done
+}
+
+@test "AskUserQuestion PreToolUse paints pink and its PostToolUse returns to blue" {
+    fire '{"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"AskUserQuestion"}'
+    assert_equals "$PINK_OSC" "$(tab)"
+    assert_equals "main" "$(cat "$PENDING")"
+    fire '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"AskUserQuestion"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+    [ ! -e "$PENDING" ]
+}
+
+@test "a background subagent's tool call does not paint over a pending main-thread question" {
+    fire '{"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"AskUserQuestion"}'
+    fire '{"hook_event_name":"PostToolUse","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
+    assert_equals "" "$(tab)"
+    fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"sub1"}'
+    assert_equals "" "$(tab)"
+}
+
+@test "a subagent permission request stays pink across the main turn's Stop until that subagent resumes" {
+    fire '{"hook_event_name":"PermissionRequest","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
+    assert_equals "$PINK_OSC" "$(tab)"
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[{"id":"1","type":"subagent","status":"running","description":"x"}]}'
+    assert_equals "" "$(tab)"
+    fire '{"hook_event_name":"PostToolUse","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+    [ ! -e "$PENDING" ]
+}
+
+@test "a denied tool after a permission request returns to blue via PostToolUseFailure" {
+    fire '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}'
+    fire '{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
+
+@test "a subagent that stops clears its own pending prompt" {
+    fire '{"hook_event_name":"PermissionRequest","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
+    fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"sub1"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+    [ ! -e "$PENDING" ]
+}
+
+@test "MCP elicitation paints pink and its result returns to blue" {
+    fire '{"hook_event_name":"Elicitation","session_id":"s1","mcp_server_name":"x"}'
+    assert_equals "$PINK_OSC" "$(tab)"
+    fire '{"hook_event_name":"ElicitationResult","session_id":"s1","mcp_server_name":"x"}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
+
+@test "malformed stdin exits 0 silently without painting" {
+    fire 'not json'
+    assert_equals "" "$(tab)"
+}
+
+@test "settings.json routes every tab-color event to tab_color.sh synchronously" {
+    run jq -e . "$SETTINGS"
     assert_equals 0 "$status"
-    assert_equals "true" "$output"
+    for event in SessionStart SessionEnd UserPromptSubmit PreToolUse PermissionRequest Elicitation ElicitationResult Notification PostToolUse PostToolUseFailure SubagentStop Stop StopFailure; do
+        run jq -r --arg e "$event" '[.hooks[$e][] | select(any(.hooks[]; .command | endswith("/scripts/tab_color.sh"))) | .hooks[] | (.async // false)] | map(tostring) | join(",")' "$SETTINGS"
+        assert_equals 0 "$status"
+        assert_equals "false" "$output"
+    done
+}
+
+@test "settings.json scopes the PreToolUse and SessionStart tab-color hooks" {
+    run jq -r '.hooks.PreToolUse[] | select(any(.hooks[]; .command | endswith("/scripts/tab_color.sh"))) | .matcher' "$SETTINGS"
+    assert_equals "AskUserQuestion" "$output"
+    run jq -r '.hooks.SessionStart[] | select(any(.hooks[]; .command | endswith("/scripts/tab_color.sh"))) | .matcher' "$SETTINGS"
+    assert_equals "startup|resume|clear" "$output"
+    run jq -r '[.hooks.StopFailure[] | select(any(.hooks[]; .command | endswith("/scripts/tab_color.sh"))) | .matcher // "none"] | join(",")' "$SETTINGS"
+    assert_equals "none" "$output"
+}
+
+@test "no old per-event tab-color scripts remain" {
+    for f in stop__tab_color.sh notification__tab_color.sh post_tool_use__reset_color.sh user_prompt_submit__reset_color.sh; do
+        [ ! -e "${BATS_TEST_DIRNAME}/../scripts/$f" ]
+        run grep -c "$f" "$SETTINGS"
+        assert_equals 0 "$output"
+    done
 }

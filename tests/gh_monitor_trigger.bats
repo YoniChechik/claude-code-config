@@ -563,6 +563,7 @@ EOF
 # added.
 
 @test "an rtk-rewritten gh pr merge still launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "rtk gh pr merge 456 --repo sunsay-ltd/core --squash --delete-branch"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
@@ -581,12 +582,14 @@ EOF
 }
 
 @test "rtk proxy <cmd> unwraps one level deeper and still launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "rtk proxy gh pr merge 456 --repo sunsay-ltd/core --squash"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
 }
 
 @test "rtk run <cmd> unwraps one level deeper and still launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
     run ctx "rtk run gh pr merge --auto"
     assert_eq 0 "$status"
     assert_launch_instruction merge "$output"
