@@ -19,11 +19,31 @@
   },
   "feedbackDrafts" : "off",
   "hooks" : {
+    "Elicitation" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "ElicitationResult" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
     "Notification" : [
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/notification__tab_color.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
         ]
@@ -37,14 +57,21 @@
             "type" : "command"
           }
         ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
       }
     ],
     "PostToolUse" : [
       {
         "hooks" : [
           {
-            "async" : true,
-            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__reset_color.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
         ]
@@ -130,6 +157,35 @@
           }
         ],
         "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "AskUserQuestion"
+      }
+    ],
+    "PostToolUseFailure" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "SessionEnd" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
       }
     ],
     "SessionStart" : [
@@ -151,6 +207,15 @@
           }
         ],
         "matcher" : "*"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "startup|resume|clear"
       }
     ],
     "Stop" : [
@@ -160,8 +225,7 @@
             "command" : "bash $HOME\/.claude\/scripts\/stop__session_name_reminder.sh",
             "type" : "command"
           }
-        ],
-        "matcher" : "*"
+        ]
       },
       {
         "hooks" : [
@@ -170,18 +234,15 @@
             "command" : "bash $HOME\/.claude\/scripts\/stop__wakeup_status.sh",
             "type" : "command"
           }
-        ],
-        "matcher" : "*"
+        ]
       },
       {
         "hooks" : [
           {
-            "async" : true,
-            "command" : "bash $HOME\/.claude\/scripts\/stop__tab_color.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
-        ],
-        "matcher" : "*"
+        ]
       }
     ],
     "StopFailure" : [
@@ -193,14 +254,31 @@
           }
         ],
         "matcher" : "rate_limit"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
       }
     ],
     "UserPromptSubmit" : [
       {
         "hooks" : [
           {
-            "async" : true,
-            "command" : "bash $HOME\/.claude\/scripts\/user_prompt_submit__reset_color.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
         ]
