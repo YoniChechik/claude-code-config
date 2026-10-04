@@ -36,12 +36,12 @@ _set_tab_rgb() {
         "$r" "$g" "$b" > "$target_tty" 2>/dev/null || true
 }
 
-set_tab_blue() {
-    _set_tab_rgb 0 0 255
+set_tab_yellow() {
+    _set_tab_rgb 255 215 0
 }
 
-set_tab_pink() {
-    _set_tab_rgb 255 105 180
+set_tab_blue() {
+    _set_tab_rgb 0 0 255
 }
 
 reset_tab_color() {
