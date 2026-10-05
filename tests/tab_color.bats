@@ -162,8 +162,31 @@ tab() {
 @test "a subagent that stops clears its own pending prompt" {
     fire '{"hook_event_name":"PermissionRequest","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
     fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"sub1"}'
-    assert_equals "$YELLOW_OSC" "$(tab)"
+    assert_equals "" "$(tab)"
     [ ! -e "$PENDING" ]
+}
+
+@test "a recap subagent finishing after an idle Stop keeps the tab blue" {
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+    fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"recap1","agent_type":"","session_crons":[],"background_tasks":[]}'
+    assert_equals "" "$(tab)"
+}
+
+@test "a background subagent finishing hands yellow to the notification turn, then Stop paints blue" {
+    fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"sub1","session_crons":[],"background_tasks":[{"id":"sub1","type":"subagent","status":"running","description":"x"}]}'
+    assert_equals "" "$(tab)"
+    fire '{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"<task-notification>"}'
+    assert_equals "$YELLOW_OSC" "$(tab)"
+    fire '{"hook_event_name":"Stop","session_id":"s1","session_crons":[],"background_tasks":[]}'
+    assert_equals "$BLUE_OSC" "$(tab)"
+}
+
+@test "a subagent stopping leaves another agent's pending prompt in place" {
+    fire '{"hook_event_name":"PermissionRequest","session_id":"s1","agent_id":"sub1","tool_name":"Bash"}'
+    fire '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"sub2"}'
+    assert_equals "" "$(tab)"
+    [ "$(cat "$PENDING")" = sub1 ]
 }
 
 @test "MCP elicitation paints blue and its result returns to yellow" {
