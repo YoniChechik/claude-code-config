@@ -65,7 +65,10 @@ case "$event" in
                 ;;
         esac
         ;;
-    UserPromptSubmit | PostToolUse | PostToolUseFailure | ElicitationResult | SubagentStop)
+    SubagentStop)
+        blocked_by_other_agent || clear_pending
+        ;;
+    UserPromptSubmit | PostToolUse | PostToolUseFailure | ElicitationResult)
         blocked_by_other_agent && exit 0
         clear_pending
         set_tab_yellow
