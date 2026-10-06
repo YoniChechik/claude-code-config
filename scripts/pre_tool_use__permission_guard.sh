@@ -742,6 +742,20 @@ pulumi_decide() {
             ;;
         config)
             case "$c2" in set|set-all|rm|rm-all|cp|refresh) kind=stack ;; esac ;;
+        deployment)
+            case "$c2" in
+                run) kind=stack; label="pulumi deployment run${c3:+ $c3}" ;;
+                settings) case "$c3" in init|configure|push|env|destroy) kind=stack; label="pulumi deployment settings $c3" ;; esac ;;
+            esac
+            ;;
+        policy)
+            case "$c2" in
+                publish|enable|disable|rm)
+                    ask "\`$label\` changes organization-wide Pulumi policy enforcement, which also gates production stacks — confirm this is intended."
+                    return 0
+                    ;;
+            esac
+            ;;
         env)
             case "$c2" in
                 set|edit|rotate|rm) pulumi_esc_verdict "$label" "$esc_env" "$c3" ;;
@@ -772,8 +786,9 @@ pulumi_decide() {
     elif [ -n "$yaml" ]; then
         backend=$(awk '/^backend:/{b=1;next} b&&/^[^[:space:]]/{b=0} b&&/url:/{sub(/.*url:[[:space:]]*/,""); gsub(/["\047]/,""); print; exit}' "$yaml" 2>/dev/null)
     fi
+    local local_backend=0
     case "$backend" in
-        file://*) return 0 ;;
+        file://*) local_backend=1 ;;
         *production*)
             deny "Blocked: \`$label\` runs against a production Pulumi backend. Run it manually — do not retry."
             return 0
@@ -821,7 +836,7 @@ pulumi_decide() {
 
     if [ ${#stacks[@]} -eq 0 ]; then
         ask "\`$label\` mutates a Pulumi stack the guard could not resolve (no -s/--stack, PULUMI_STACK or selected workspace stack). Confirm it is not production."
-    else
+    elif [ "$local_backend" = "0" ]; then
         ask "\`$label\` mutates the non-production stack ${stacks[*]} — confirm this is intended."
     fi
     return 0

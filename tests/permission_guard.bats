@@ -498,12 +498,38 @@ assert_decision() { # <expected> <actual>
     done
 }
 
-@test "pulumi: file:// backend is local and allowed, a production backend URL is denied" {
-    local dir="$BATS_TEST_TMPDIR/infra_file"
+@test "pulumi: file:// backend skips only the backend-URL check, prod stack names are still denied" {
+    local dir="$BATS_TEST_TMPDIR/infra_file" devdir="$BATS_TEST_TMPDIR/infra_file_dev" nodir="$BATS_TEST_TMPDIR/infra_file_none"
     make_pulumi_project "$dir" fileproj '{"stack":"production"}' "file://~/production-state"
-    assert_decision NONE "$(decide_in "$dir" "pulumi up")"
-    assert_decision NONE "$(decide_in "$PU_PROD" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up")"
+    make_pulumi_project "$devdir" filedev '{"stack":"dev"}' "file://~/production-state"
+    make_pulumi_project "$nodir" filenone "" "file://~/state"
+    assert_decision DENY "$(decide_in "$dir" "pulumi up")"
+    assert_decision DENY "$(decide_in "$PU_NONE" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up -s organization/x/production")"
+    assert_decision DENY "$(decide_in "$PU_PROD" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up")"
+    assert_decision DENY "$(decide_in "$devdir" "pulumi destroy -s main")"
+    assert_decision DENY "$(decide_in "$devdir" "pulumi refresh -s prod")"
+    assert_decision NONE "$(decide_in "$devdir" "pulumi up")"
+    assert_decision NONE "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up")"
+    assert_decision ASK "$(decide_in "$nodir" "pulumi up")"
     assert_decision DENY "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=gs://production-pulumi-state pulumi up")"
+}
+
+@test "pulumi: deployment runs and settings changes follow the resolved stack" {
+    for c in "deployment run up" "deployment run destroy" "deployment settings configure" "deployment settings destroy" "deployment settings push"; do
+        assert_decision DENY "$(decide_in "$PU_PROD" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
+        assert_decision ASK "$(decide_in "$PU_STG" "pulumi $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
+    done
+    assert_decision DENY "$(decide_in "$PU_STG" "pulumi deployment run up -s organization/core/production")"
+    assert_decision NONE "$(decide_in "$PU_PROD" "pulumi deployment settings pull")"
+}
+
+@test "pulumi: org-wide policy changes ask, local project commands have no opinion" {
+    for c in "policy publish org" "policy enable org/pack latest" "policy disable org/pack" "policy rm org/pack 1"; do
+        assert_decision ASK "$(decide_in "$PU_NONE" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in "new gcp-typescript --yes" "plugin install resource gcp" "policy ls" "policy new aws-typescript" "stack init organization/core/dev" "login gs://bucket"; do
+        assert_decision NONE "$(decide_in "$PU_PROD" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
+    done
 }
 
 @test "pulumi: the mutating set follows the resolved stack" {
