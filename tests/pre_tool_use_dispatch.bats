@@ -169,3 +169,40 @@ printf "%s" "not json at all"; exit 0
     cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
     assert_decision ALLOW "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
+
+@test "dispatcher needs no temp files: a full disk still yields the real decisions" {
+    local shim="$BATS_TEST_TMPDIR/diskfull_bin" ro="$BATS_TEST_TMPDIR/ro_tmp"
+    mkdir -p "$shim" "$ro"
+    printf '#!/bin/sh\necho "mktemp: No space left on device" >&2\nexit 1\n' > "$shim/mktemp"
+    chmod +x "$shim/mktemp"
+    chmod 500 "$ro"
+    local out_deny out_allow out_ask
+    out_deny=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "$GH $REPO $DEL foo/bar")
+    out_allow=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "echo hello")
+    out_ask=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "$GH repo archive foo/bar")
+    chmod 700 "$ro"
+    assert_decision DENY "$out_deny"
+    assert_decision ALLOW "$out_allow"
+    assert_decision ASK "$out_ask"
+}
+
+@test "a sub-check writing stderr AND a decision on stdout is still caught as a failure" {
+    local dir="$BATS_TEST_TMPDIR/both"
+    mkdir -p "$dir"
+    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    sed -i '' '1a\
+echo boom >&2
+' "$dir/pre_tool_use__base_dir_protect.sh"
+    local out
+    out=$(jq -nc --arg cwd "$WT" --arg cmd "$GH $REPO $DEL foo/bar" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' \
+        | bash "$dir/pre_tool_use__dispatch.sh")
+    [[ "$out" == *GUARD_INTERNAL_ERROR* ]]
+}
+
+@test "deny: NotebookEdit in the base checkout is blocked via the dispatcher" {
+    decide_nb() {
+        decide "$(jq -nc --arg cwd "$1" --arg fp "$2" '{tool_name:"NotebookEdit",cwd:$cwd,tool_input:{notebook_path:$fp}}')"
+    }
+    assert_decision DENY "$(decide_nb "$BASE" "$BASE/nb.ipynb")"
+    assert_decision ALLOW "$(decide_nb "$WT" "$WT/nb.ipynb")"
+}

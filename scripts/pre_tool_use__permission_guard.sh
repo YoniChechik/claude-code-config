@@ -1,35 +1,7 @@
 #!/bin/bash
 
-# PreToolUse hook: unified ask-guard that replaces all permissions.ask entries
-# in settings.json. Reads stdin JSON, extracts tool_name and tool_input.command,
-# and prompts for confirmation when the command matches a known destructive pattern.
-#
-# Also handles pulumi commands invoked with -C / --cwd flags that precede the
-# subcommand (e.g. "pulumi -C infra up"), which simple prefix rules would miss.
-#
-# Exit 0 = no opinion (let other rules decide).
-# Outputs JSON with permissionDecision=ask to trigger a confirmation prompt,
-# or permissionDecision=deny to block the model outright.
-#
-# DECISION MODEL
-# --------------
-# Every rule below RECORDS a verdict instead of exiting on the spot, and the
-# most restrictive verdict found across ALL rules wins (deny > ask > none) —
-# the same precedence the dispatcher uses to combine sibling hooks. Exiting on
-# the first match was a real bypass: the rules run in a fixed order, so a
-# compound command that tripped an early `ask` rule never reached the later
-# `deny` rule that its more dangerous half would have matched
-# (`gh repo archive x && curl -X DELETE .../repos/sunsay-ltd/y` asked instead
-# of denying).
-#
-# FAIL-CLOSED
-# -----------
-# A missing/broken shared library produces an explicit `ask`, never silence.
-# Silence means "no opinion" to the dispatcher, which means allow — so an
-# internal error must never look like silence.
-
 emit_decision() {
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
+    jq -nc --arg d "$1" --arg r "$2" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:$d,permissionDecisionReason:$r}}'
 }
 
 GUARD_INTERNAL_ERROR_MSG="GUARD_INTERNAL_ERROR: the permission guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_shell_command_guard.sh."
@@ -42,9 +14,6 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 [ -n "$COMMAND" ] || exit 0
 
-# The shared library is a HARD dependency: if it cannot be sourced, or is
-# sourced but incomplete, every rule below silently matches nothing. Fail
-# closed with a distinguishable verdict rather than emitting nothing.
 # shellcheck source=./_shell_command_guard.sh
 if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
     || ! declare -F _expand_segments >/dev/null 2>&1; then
@@ -52,11 +21,13 @@ if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null
     exit 0
 fi
 
-# --- verdict accumulation ---------------------------------------------------
+SUPABASE_PROD_REFS=(pnseoblfzeqiczmmimnr ampdktckxcbdajezxkul)
+PULUMI_PROD_STACK_NAMES=(production prod mirror main)
+
 VERDICT=""
 VERDICT_REASON=""
 
-record_verdict() { # <deny|ask> <reason>
+record_verdict() {
     case "$1" in
         deny)
             if [ "$VERDICT" != "deny" ]; then
@@ -75,48 +46,24 @@ record_verdict() { # <deny|ask> <reason>
 
 ask() { record_verdict ask "$1"; }
 
-# Hard-deny: blocks the LLM from running the command. Unlike `ask`, the user
-# is NOT prompted — the model is told to stop and ask the human to run it.
 deny() { record_verdict deny "$1"; }
 
-# --- fork-free segment matching ---------------------------------------------
-# Every rule used to run `echo "$segment" | grep -qE ...` — two forks per
-# pattern per segment, ~150 patterns, which cost ~0.3s per segment and made a
-# long chained command a practical way to time the hook out. These `case`
-# helpers do the same job with zero processes.
-
-# Every pattern below is prefix-anchored, so only the START of a segment can
-# ever match. Tests run against a truncated copy (SEGMENTS_PFX): a `case` glob
-# costs O(len), and ~150 patterns times a multi-kilobyte segment was the last
-# quadratic term left in the scan.
 GUARD_PREFIX_WINDOW=160
 
-has_prefix() { # <ws-collapsed segment prefix> <literal prefix>
+has_prefix() {
     case "$1" in
         "$2"|"$2 "*) return 0 ;;
     esac
     return 1
 }
 
-has_word() { # <ws-collapsed segment> <literal word>
+has_word() {
     case " $1 " in
         *" $2 "*) return 0 ;;
     esac
     return 1
 }
 
-# Expand the compound command into every segment the pattern rules below
-# should independently consider: each ;/&/|/newline-split top-level piece
-# (closing the bypass where `cd foo && gh pr merge ...` slipped through
-# because the full command string didn't start with `gh`), PLUS — via
-# _shell_command_guard.sh — the unwrapped body of `eval`/`bash -c` pieces and
-# the content of every `$( )`/backtick substitution, with `command`/`env`/
-# backslash/`VAR=` prefixes already stripped from each. This closes bypasses
-# like `X=$(gh repo delete foo/bar)`, `eval "gh repo delete foo/bar"`,
-# `command gh repo delete foo/bar`, and `\gh repo delete foo/bar`.
-#
-# Each segment is stored twice: raw (for rules that need the original spacing)
-# and whitespace-collapsed (for the cheap `case` prefix tests above).
 SEGMENTS=()
 SEGMENTS_WS=()
 SEGMENTS_PFX=()
@@ -128,42 +75,26 @@ while IFS= read -r seg; do
     SEGMENTS_PFX+=("${GUARD_REPLY:0:$GUARD_PREFIX_WINDOW}")
 done < <(_expand_segments "$COMMAND")
 
-# ---------------------------------------------------------------------------
-# gh — hard-deny for admin-gated commands. These bypass branch protections,
-# destroy repos, or otherwise require GitHub admin privileges; the LLM must
-# NOT run them. The user runs these manually.
-# ---------------------------------------------------------------------------
 GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, DELETE API calls, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
 
 for segment_ws in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
-    # Only inspect segments that invoke `gh`.
     has_word "$segment_ws" "gh" || continue
 
-    # 1) Any `gh ...` invocation that carries the `--admin` flag token.
-    #    Matches `gh pr merge --admin 123`, `gh pr merge 123 --admin`, etc.
     case " $segment_ws " in
         *" --admin "*|*" --admin="*|*"=--admin "*) deny "$GH_DENY_MSG" ;;
     esac
 
-    # 2) Repository deletion — irreversible, requires admin.
     if has_prefix "$segment_ws" "gh repo delete"; then
         deny "$GH_DENY_MSG"
     fi
 
-    # 3) Raw API DELETE calls via `gh api`: `-X DELETE` or `--method DELETE`
-    #    (case-insensitive on the verb — spelled as bracket classes because
-    #    macOS ships bash 3.2, which has no `${var,,}`).
     if has_prefix "$segment_ws" "gh api" \
         && [[ " $segment_ws " =~ (-X|--method)[[:space:]=]+[Dd][Ee][Ll][Ee][Tt][Ee]([[:space:]]|$) ]]; then
         deny "$GH_DENY_MSG"
     fi
 done
 
-# ---------------------------------------------------------------------------
-# gh
-# ---------------------------------------------------------------------------
 GH_PATTERNS=(
-    "gh repo delete"
     "gh repo archive"
     "gh repo unarchive"
     "gh repo rename"
@@ -208,12 +139,6 @@ for pattern in "${GH_PATTERNS[@]}"; do
     done
 done
 
-# ---------------------------------------------------------------------------
-# HTTP mutation against sunsay-ltd GitHub repos
-# Closes the bypass where curl/wget/http/xh with -X PUT/POST/PATCH/DELETE
-# was used to hit api.github.com/repos/sunsay-ltd/... directly (e.g.
-# merging a PR via the REST API when `gh pr merge` is gated).
-# ---------------------------------------------------------------------------
 for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     if [[ "$segment" =~ (^|[[:space:]])(curl|wget|http|xh)([[:space:]]) ]] && \
        [[ "$segment" =~ (-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)) ]] && \
@@ -222,9 +147,6 @@ for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     fi
 done
 
-# ---------------------------------------------------------------------------
-# gcloud
-# ---------------------------------------------------------------------------
 GCLOUD_PATTERNS=(
     "gcloud projects delete"
     "gcloud resource-manager folders delete"
@@ -325,12 +247,6 @@ for pattern in "${GCLOUD_PATTERNS[@]}"; do
     done
 done
 
-# ---------------------------------------------------------------------------
-# gcloud run — hard-deny revision-creating verbs against prod-like projects.
-# `gcloud run services update|replace|deploy|create` and bare `gcloud run
-# deploy` create a new active revision and can take down production traffic
-# (e.g. by pointing at a broken image or stale env). Must be run manually.
-# ---------------------------------------------------------------------------
 GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
 for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     if [[ "$segment" =~ gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
@@ -339,9 +255,6 @@ for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
     fi
 done
 
-# ---------------------------------------------------------------------------
-# bq
-# ---------------------------------------------------------------------------
 BQ_PATTERNS=(
     "bq rm"
     "bq truncate"
@@ -355,417 +268,577 @@ for pattern in "${BQ_PATTERNS[@]}"; do
     done
 done
 
-# ---------------------------------------------------------------------------
-# supabase
-# ---------------------------------------------------------------------------
-# --- target detection helpers -----------------------------------------------
-# Several supabase subcommands run against EITHER the local dev database (the
-# docker Postgres started by `supabase start`) or a remote one. The CLI picks
-# the target from these mutually-exclusive flags (see supabase/cli
-# internal/utils/flags/db_url.go, ParseDatabaseConfig):
-#   --linked          -> the linked cloud project (REMOTE, destructive)
-#   --proxy           -> the same cloud project, tunnelled via the Supabase API
-#   --db-url <conn>   -> an arbitrary connection string (remote UNLESS its host
-#                        is loopback, e.g. the local supabase container)
-#   --local           -> the local dev database (safe)
-# An explicitly-passed flag always wins over the subcommand's default value,
-# and passing `--linked=false` still selects the linked path in the CLI, so any
-# occurrence of the `--linked` token counts as remote here.
-# Note: `--project-ref` alone does NOT redirect the db target (it only names
-# which project `--linked` would resolve to), so it is not a remote signal.
+CTX_SEG=()
+CTX_CWD=()
+CTX_ENV=()
 
-# Strips characters that would break the printf-built JSON of ask()/deny()
-# (double quotes, backslashes, percent signs) out of interpolated text.
-supabase_json_safe() {
-    echo "$1" | tr -d '"\\%' | tr -d '\n'
-}
-
-# Echoes the raw connection string that follows --db-url, or nothing when the
-# flag is absent. Handles `--db-url X`, `--db-url=X` and quoted values.
-supabase_db_url_value() {
-    echo "$1" | sed -nE "s/.*--db-url[[:space:]=]+[\"']?([^\"'[:space:]]+).*/\1/p"
-}
-
-# Echoes the host part of the --db-url value: drops scheme, drops user:pass@,
-# drops path/query, drops :port, unwraps [::1]-style IPv6 brackets.
-supabase_db_url_host() {
-    echo "$1" | sed -E 's#^[a-zA-Z0-9+.-]+://##; s#^[^@/]*@##; s#[/?].*$##; s#:[0-9]+$##; s#^\[(.*)\]$#\1#'
-}
-
-# True when the --db-url host is loopback, i.e. the local dev database. A value
-# we cannot resolve (e.g. "$DATABASE_URL") is NOT loopback -> treated as remote.
-supabase_db_url_is_local() {
-    local url host
-    url=$(supabase_db_url_value "$1")
-    [ -n "$url" ] || return 1
-    host=$(supabase_db_url_host "$url")
-    case "$host" in
-        localhost | localhost.localdomain | 127.*.*.* | 0.0.0.0 | ::1 | host.docker.internal) return 0 ;;
-        *) return 1 ;;
+ctx_resolve_cd() {
+    local cwd="$1" target="$2" candidate resolved
+    target="${target#"${target%%[![:space:]]*}"}"
+    target="${target%"${target##*[![:space:]]}"}"
+    case "$target" in
+        ""|-|--|'$'*|'"$'*) GUARD_REPLY="$cwd"; return ;;
+        \"*\") target="${target#\"}"; target="${target%\"}" ;;
+        \'*\') target="${target#\'}"; target="${target%\'}" ;;
     esac
+    _guard_expand_home "$target"
+    target="$GUARD_REPLY"
+    if [[ "$target" == /* ]]; then candidate="$target"; else candidate="$cwd/$target"; fi
+    resolved=$(cd "$candidate" 2>/dev/null && pwd) || resolved="$cwd"
+    GUARD_REPLY="$resolved"
 }
 
-# True when ANY target-selecting flag is present. Drives the "bare call" branch
-# of the three-way policy below: no flag at all means the agent never stated its
-# intent, so the guard denies instead of trusting the CLI's implicit default.
-supabase_has_target_flag() {
-    case " $1 " in
-        *" --local "*|*" --local="*|*" --linked "*|*" --linked="*) return 0 ;;
-        *" --proxy "*|*" --proxy="*|*" --db-url "*|*" --db-url="*) return 0 ;;
-    esac
-    return 1
-}
-
-# True when the segment explicitly aims at the local dev database.
-supabase_targets_local() {
-    local seg="$1"
-    case " $seg " in
-        *" --local "*|*" --local="*) return 0 ;;
-    esac
-    case " $seg " in
-        *" --db-url "*|*" --db-url="*)
-            supabase_db_url_is_local "$seg" && return 0
-            ;;
-    esac
-    return 1
-}
-
-# Echoes a human phrase that names the remote target the segment implies, so the
-# confirmation prompt says WHAT gets hit instead of just "a remote database".
-supabase_remote_detail() {
-    local seg="$1" url host
-    case " $seg " in
-        *" --linked "*|*" --linked="*)
-            echo "--linked targets the linked cloud project"
+ctx_add() {
+    local seg="$1" cwd="$2" env="$3" i
+    for ((i = 0; i < ${#CTX_SEG[@]}; i++)); do
+        if [ "${CTX_SEG[$i]}" = "$seg" ] && [ "${CTX_CWD[$i]}" = "$cwd" ] && [ "${CTX_ENV[$i]}" = "$env" ]; then
             return
-            ;;
-        *" --proxy "*|*" --proxy="*)
-            echo "--proxy targets the linked cloud project through the Supabase API"
-            return
-            ;;
-    esac
-    url=$(supabase_db_url_value "$seg")
-    host=$(supabase_db_url_host "$url")
-    if [ -n "$host" ] && echo "$host" | grep -qE '^[A-Za-z0-9._-]+$'; then
-        echo "--db-url targets the DB at $(supabase_json_safe "$host")"
-    else
-        # Unresolvable value (shell variable, etc.) — a flag IS present, so this
-        # stays an ask, never a deny; the guard just cannot name the host.
-        echo "--db-url targets an unresolved remote DB ($(supabase_json_safe "$url"))"
-    fi
-}
-
-# --- pattern lists ----------------------------------------------------------
-# 1) Always remote / always destructive: ask unconditionally. These take no
-#    local/remote target flags, so the three-way policy does not apply to them.
-SUPABASE_PATTERNS=(
-    "supabase projects delete"
-    "supabase storage rm"
-    "supabase sso remove"
-    "supabase backups restore"
-    "supabase functions delete"
-    "supabase secrets unset"
-    "supabase domains delete"
-    "supabase vanity-subdomains delete"
-    "supabase stop"
-    "supabase migration push"
-    "supabase branches delete"
-    "supabase branches pause"
-    "supabase postgres-config delete"
-    "supabase config push"
-    "supabase ssl-enforcement update"
-    "supabase network-restrictions update"
-    "supabase network-bans remove"
-    "supabase encryption update-root-key"
-    "supabase storage mv"
-)
-
-# 2) Target-aware subcommands: each one accepts --local / --linked / --db-url,
-#    so the same command is either harmless dev-loop work or a remote mutation.
-#    The CLI's own defaults differ per subcommand (db reset / migration up /
-#    migration down / migration squash default to --local; db push and
-#    migration repair default to --linked), which makes a bare call ambiguous
-#    to read. The guard therefore ignores those defaults completely and applies
-#    ONE three-way policy to every pattern below:
-#      a) no target flag at all  -> deny; the agent must state its intent.
-#      b) --local or loopback --db-url -> allow silently, no prompt.
-#      c) --linked / --proxy / non-loopback or unresolvable --db-url -> ask,
-#         naming the remote target in the prompt.
-SUPABASE_TARGET_AWARE_PATTERNS=(
-    "supabase db reset"
-    "supabase migration up"
-    "supabase migration down"
-    "supabase migration squash"
-    "supabase db push"
-    "supabase migration repair"
-)
-
-for pattern in "${SUPABASE_PATTERNS[@]}"; do
-    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-        if has_prefix "$segment_pfx" "$pattern"; then
-            ask "supabase command requires confirmation."
         fi
     done
-done
+    CTX_SEG+=("$seg")
+    CTX_CWD+=("$cwd")
+    CTX_ENV+=("$env")
+}
 
-# Indexed loop: the match is prefix-anchored (cheap, truncated copy) but the
-# target-flag inspection below needs the WHOLE segment.
-for pattern in "${SUPABASE_TARGET_AWARE_PATTERNS[@]}"; do
-    for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
-        segment_ws="${SEGMENTS_WS[$seg_i]}"
-        has_prefix "${SEGMENTS_PFX[$seg_i]}" "$pattern" || continue
-
-        # (b) Explicitly local — the safe dev-loop path, no prompt.
-        if supabase_targets_local "$segment_ws"; then
-            continue
-        fi
-
-        # (a) Bare call — no target flag, so the effective database depends on a
-        #     per-subcommand CLI default. Refuse rather than guess.
-        if ! supabase_has_target_flag "$segment_ws"; then
-            deny "Blocked: \`${pattern}\` needs an explicit target — add --local to hit the local dev DB, or --linked/--db-url <remote> to target remote (remote will then require confirmation)."
-            continue
-        fi
-
-        # (c) A remote target is named — ask, and say which one.
-        ask "\`${pattern}\` $(supabase_remote_detail "$segment_ws") — confirm this is intended."
-    done
-done
-
-# ---------------------------------------------------------------------------
-# pulumi — hard-deny prod-stack mutations without a tight, valid --target set.
-# Must run BEFORE the generic pulumi ask-loops below: those exit on `ask`,
-# which would short-circuit this stricter deny check.
-#
-# Applies to `pulumi up`, `pulumi destroy`, `pulumi cancel` against
-# --stack production / prod / mirror / main. The intent: a model can never
-# blast a full prod stack — it must enumerate specific resource URNs, and
-# only a few of them. Bypass shapes we explicitly reject:
-#   - No --target at all (would target the whole stack).
-#   - --target-dependents (walks the dependency graph; effectively whole-stack).
-#   - --target pointing at the Stack root URN (whole-stack via root).
-#   - More than 5 --target flags (heuristic: enumerate-everything bypass).
-#   - Any --target value that isn't shaped like a fully-qualified resource URN.
-# ---------------------------------------------------------------------------
-pulumi_target_guard() {
-    local seg="$1"
-
-    # Subcommand check. We strip the leading `pulumi` and any -C / --cwd
-    # global flags (so "pulumi -C infra/core up ..." still matches "up").
-    # Uses sed -E with POSIX character classes for BSD-sed (macOS) compat.
-    local stripped
-    stripped=$(echo "$seg" \
-        | sed -E 's/^[[:space:]]*pulumi[[:space:]]+//' \
-        | sed -E 's/-C[[:space:]]+[^ ]+[[:space:]]*//g' \
-        | sed -E 's/--cwd[[:space:]]+[^ ]+[[:space:]]*//g' \
-        | sed -E 's/^[[:space:]]+//')
-    [[ "$stripped" =~ ^(up|destroy|cancel)([[:space:]]|$) ]] || return 0
-
-    # Stack check — match both `--stack X`, `--stack=X`, `-s X`, `-s=X`.
-    local stack=""
-    if [[ "$seg" =~ (--stack|[[:space:]]-s)[[:space:]]*=?[[:space:]]*([A-Za-z0-9._/-]+) ]]; then
-        stack="${BASH_REMATCH[2]}"
-    fi
-    [[ -n "$stack" ]] || return 0
-    case "$stack" in
-        production|prod|mirror|main) ;;
-        *) return 0 ;;
-    esac
-
-    local block_prefix="Blocked: pulumi against --stack $stack without a tight --target set."
-
-    # Reject --target-dependents (graph-walk bypass).
-    if [[ "$seg" =~ (^|[[:space:]])--target-dependents([[:space:]]|=|$) ]]; then
-        deny "${block_prefix} --target-dependents walks the dependency graph and is effectively whole-stack. Run manually."
-    fi
-
-    # Collect every --target / -t value (both `--target X` and `--target=X`).
-    local -a targets=()
-    # shellcheck disable=SC2206
-    local tokens=( $seg )
-    local i=0
-    local n=${#tokens[@]}
-    while [ $i -lt $n ]; do
-        local tok="${tokens[$i]}"
-        case "$tok" in
-            --target|-t)
-                i=$((i+1))
-                [ $i -lt $n ] && targets+=("${tokens[$i]}")
-                ;;
-            --target=*)
-                targets+=("${tok#--target=}")
-                ;;
-            -t=*)
-                targets+=("${tok#-t=}")
+ctx_build() {
+    local session_cwd="$1" cwd split piece rest tok val env seg i known
+    cwd="$session_cwd"
+    split="${COMMAND//;/$'\n'}"
+    split="${split//&/$'\n'}"
+    split="${split//|/$'\n'}"
+    while IFS= read -r piece; do
+        piece="${piece#"${piece%%[![:space:]]*}"}"
+        piece="${piece%"${piece##*[![:space:]]}"}"
+        [ -z "$piece" ] && continue
+        case "$piece" in
+            cd|pushd|cd[[:space:]]*|pushd[[:space:]]*)
+                rest="${piece#cd}"
+                rest="${rest#pushd}"
+                ctx_resolve_cd "$cwd" "$rest"
+                cwd="$GUARD_REPLY"
+                continue
                 ;;
         esac
-        i=$((i+1))
-    done
-
-    # Reject if no --target flags at all.
-    if [ ${#targets[@]} -eq 0 ]; then
-        deny "${block_prefix} No --target specified — would mutate the entire stack. Pulumi against prod-like stacks must enumerate specific resource URNs."
-    fi
-
-    # Heuristic: >5 targets suggests enumerate-everything bypass.
-    if [ ${#targets[@]} -gt 5 ]; then
-        deny "${block_prefix} More than 5 --target flags (${#targets[@]}); this looks like enumerate-all-URNs. Split into smaller manual runs."
-    fi
-
-    # Per-target validation.
-    local t
-    for t in "${targets[@]}"; do
-        # Strip surrounding quotes if any.
-        t="${t%\"}"; t="${t#\"}"
-        t="${t%\'}"; t="${t#\'}"
-
-        # Reject Stack-root URN (whole-stack via root).
-        if [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::pulumi:pulumi:Stack:: ]]; then
-            deny "${block_prefix} --target points at the Stack root URN ($t) — equivalent to whole-stack. Target individual resources instead."
-        fi
-
-        # Must look like a fully-qualified resource URN:
-        #   urn:pulumi:<stack>::<project>::<type>::<name>
-        # Note: <type> itself contains colons (e.g.
-        # `gcp:cloudrunv2/service:Service`), so we allow `.+` for it and pin
-        # the tail with `::<no-colon-name>$`.
-        if ! [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::.+::[^:]+$ ]]; then
-            deny "${block_prefix} --target value '$t' is not a fully-qualified resource URN (urn:pulumi:<stack>::<project>::<type>::<name>). Refusing to guess."
-        fi
+        env=""
+        rest="$piece"
+        while [ -n "$rest" ]; do
+            tok="${rest%%[[:space:]]*}"
+            if [[ "$tok" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                val="${tok#*=}"
+                val="${val#[\"\']}"
+                val="${val%[\"\']}"
+                env+="${tok%%=*}=$val"$'\n'
+            elif [ "$tok" != "env" ]; then
+                break
+            fi
+            if [ "$tok" = "$rest" ]; then rest=""; else rest="${rest#*[[:space:]]}"; fi
+            rest="${rest#"${rest%%[![:space:]]*}"}"
+        done
+        while IFS= read -r seg; do
+            [ -z "$seg" ] && continue
+            _ws_collapse "$seg"
+            ctx_add "$GUARD_REPLY" "$cwd" "$env"
+        done < <(_expand_segments "$piece")
+    done < <(printf '%s\n' "$split")
+    for seg in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
+        known=0
+        for ((i = 0; i < ${#CTX_SEG[@]}; i++)); do
+            [ "${CTX_SEG[$i]}" = "$seg" ] && { known=1; break; }
+        done
+        [ "$known" = "1" ] || ctx_add "$seg" "$session_cwd" ""
     done
 }
 
-for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
-    has_prefix "${SEGMENTS_PFX[$seg_i]}" "pulumi" || continue
-    pulumi_target_guard "${SEGMENTS_WS[$seg_i]}"
-done
+ctx_env_get() {
+    local block="$1" name="$2" line found=1 val=""
+    while [ -n "$block" ]; do
+        line="${block%%$'\n'*}"
+        block="${block#*$'\n'}"
+        case "$line" in
+            "$name="*) val="${line#*=}"; found=0 ;;
+        esac
+    done
+    if [ "$found" = "1" ] && [ -n "${!name+x}" ]; then
+        val="${!name}"
+        found=0
+    fi
+    GUARD_REPLY="$val"
+    return "$found"
+}
 
-# ---------------------------------------------------------------------------
-# pulumi — direct prefix match (covers straightforward invocations)
-# ---------------------------------------------------------------------------
-PULUMI_PATTERNS=(
-    "pulumi up"
-    "pulumi destroy"
-    "pulumi import"
-    "pulumi refresh"
-    "pulumi cancel"
-    "pulumi stack rm"
-    "pulumi stack init"
-    "pulumi stack rename"
-    "pulumi stack import"
-    "pulumi config set"
-    "pulumi config rm"
-    "pulumi state delete"
-    "pulumi state unprotect"
-    "pulumi state move"
-    "pulumi env rm"
-    "pulumi new"
-)
+ctx_abs_dir() {
+    local cwd="$1" dir="$2"
+    _guard_expand_home "$dir"
+    dir="$GUARD_REPLY"
+    [[ "$dir" == /* ]] || dir="$cwd/$dir"
+    GUARD_REPLY="$dir"
+}
 
-for pattern in "${PULUMI_PATTERNS[@]}"; do
-    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-        if has_prefix "$segment_pfx" "$pattern"; then
-            ask "pulumi command requires confirmation."
+TOOL_ARGS=()
+tool_args() {
+    local seg="$1" name="$2" i=0 n tok
+    local -a toks
+    set -f
+    # shellcheck disable=SC2206
+    toks=($seg)
+    set +f
+    n=${#toks[@]}
+    TOOL_ARGS=()
+    case "${toks[0]:-}" in
+        npx|bunx|pnpm|yarn|npm)
+            i=1
+            while [ "$i" -lt "$n" ]; do
+                tok="${toks[$i]}"
+                case "$tok" in
+                    "$name"|"$name"@*) break ;;
+                    exec|dlx|x|--|-*) i=$((i + 1)) ;;
+                    *) return 1 ;;
+                esac
+            done
+            [ "$i" -lt "$n" ] || return 1
+            ;;
+        "$name") ;;
+        *) return 1 ;;
+    esac
+    TOOL_ARGS=("${toks[@]:i+1}")
+    return 0
+}
+
+is_prod_supabase_ref() {
+    local r
+    for r in "${SUPABASE_PROD_REFS[@]}"; do
+        [ "$1" = "$r" ] && return 0
+    done
+    return 1
+}
+
+text_has_prod_supabase_ref() {
+    local r
+    for r in "${SUPABASE_PROD_REFS[@]}"; do
+        case "$1" in *"$r"*) return 0 ;; esac
+    done
+    return 1
+}
+
+supabase_find_ref_file() {
+    local dir="$1" walk="$2"
+    while :; do
+        if [ -f "$dir/supabase/.temp/project-ref" ]; then
+            GUARD_REPLY="$dir/supabase/.temp/project-ref"
+            return 0
+        fi
+        [ "$walk" = "1" ] || return 1
+        [ "$dir" = "/" ] || [ -z "$dir" ] && return 1
+        dir="${dir%/*}"
+        [ -n "$dir" ] || dir="/"
+    done
+}
+
+SB_REF=""
+supabase_resolve_ref() {
+    local flag_ref="$1" workdir="$2" cwd="$3" env="$4" start walk=1 ref
+    SB_REF=""
+    if [ -n "$flag_ref" ]; then
+        SB_REF="$flag_ref"
+        return
+    fi
+    if ctx_env_get "$env" SUPABASE_PROJECT_ID && [ -n "$GUARD_REPLY" ]; then
+        SB_REF="$GUARD_REPLY"
+        return
+    fi
+    if [ -z "$workdir" ] && ctx_env_get "$env" SUPABASE_WORKDIR && [ -n "$GUARD_REPLY" ]; then
+        workdir="$GUARD_REPLY"
+    fi
+    if [ -n "$workdir" ]; then
+        ctx_abs_dir "$cwd" "$workdir"
+        start="$GUARD_REPLY"
+        walk=0
+    else
+        start="$cwd"
+    fi
+    supabase_find_ref_file "$start" "$walk" || return
+    ref=$(tr -d '[:space:]' <"$GUARD_REPLY" 2>/dev/null)
+    SB_REF="$ref"
+}
+
+supabase_remote_verdict() {
+    local label="$1" flag_ref="$2" workdir="$3" cwd="$4" env="$5"
+    case "$flag_ref" in *'$'*) ask "\`$label\` targets a project ref given as a shell variable; the guard cannot tell whether it is production."; return ;; esac
+    supabase_resolve_ref "$flag_ref" "$workdir" "$cwd" "$env"
+    if [ -z "$SB_REF" ]; then
+        ask "\`$label\` targets a remote Supabase project the guard could not resolve (no --project-ref, SUPABASE_PROJECT_ID or supabase/.temp/project-ref). Confirm it is not production."
+    elif is_prod_supabase_ref "$SB_REF"; then
+        deny "Blocked: \`$label\` targets the PRODUCTION Supabase project ($SB_REF). Production changes must be run manually by the user — do not retry."
+    else
+        ask "\`$label\` targets the non-production Supabase project $SB_REF — confirm this is intended."
+    fi
+}
+
+supabase_db_url_verdict() {
+    local label="$1" url="$2" host
+    url="${url#[\"\']}"
+    url="${url%[\"\']}"
+    if text_has_prod_supabase_ref "$url"; then
+        deny "Blocked: \`$label\` --db-url points at the PRODUCTION Supabase database. Production changes must be run manually by the user — do not retry."
+        return
+    fi
+    case "$url" in
+        *'$'*|'')
+            ask "\`$label\` --db-url is an unresolved value ($url); the guard cannot tell whether it is production."
+            return
+            ;;
+    esac
+    host="${url#*://}"
+    host="${host##*@}"
+    host="${host%%[/?]*}"
+    case "$host" in
+        \[*\]*) host="${host#\[}"; host="${host%%\]*}" ;;
+        *) host="${host%:*}" ;;
+    esac
+    case "$host" in
+        localhost|localhost.localdomain|127.*|0.0.0.0|::1|host.docker.internal) return ;;
+    esac
+    ask "\`$label\` --db-url targets the remote database at $host — confirm this is intended."
+}
+
+supabase_decide() {
+    local seg="$1" cwd="$2" env="$3"
+    tool_args "$seg" supabase || return 0
+    local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=()
+    local n=${#args[@]} i=0 tok workdir="" db_url="" has_db_url=0 has_local=0 has_linked=0 has_proxy=0 flag_ref="" dry=0
+    while [ "$i" -lt "$n" ]; do
+        tok="${args[$i]}"
+        case "$tok" in
+            --workdir|--db-url|--project-ref|--project-id|--profile|--network-id|-o|--output|--dns-resolver)
+                i=$((i + 1))
+                case "$tok" in
+                    --workdir) workdir="${args[$i]:-}" ;;
+                    --db-url) db_url="${args[$i]:-}"; has_db_url=1 ;;
+                    --project-ref|--project-id) flag_ref="${args[$i]:-}" ;;
+                esac
+                ;;
+            --workdir=*) workdir="${tok#*=}" ;;
+            --db-url=*) db_url="${tok#*=}"; has_db_url=1 ;;
+            --project-ref=*|--project-id=*) flag_ref="${tok#*=}" ;;
+            --local|--local=*) has_local=1 ;;
+            --linked|--linked=*) has_linked=1 ;;
+            --proxy|--proxy=*) has_proxy=1 ;;
+            --dry-run|--dry-run=true) dry=1 ;;
+            -*) ;;
+            *) pos+=("$tok") ;;
+        esac
+        i=$((i + 1))
+    done
+    flag_ref="${flag_ref#[\"\']}"
+    flag_ref="${flag_ref%[\"\']}"
+    workdir="${workdir#[\"\']}"
+    workdir="${workdir%[\"\']}"
+    local c1="${pos[0]:-}" c2="${pos[1]:-}" label mode=""
+    label="supabase $c1${c2:+ $c2}"
+    case "$c1" in
+        start|stop|status|init|link) return 0 ;;
+        branches|postgres-config|domains|sso|network-restrictions|network-bans|ssl-enforcement|vanity-subdomains) mode=api ;;
+    esac
+    if [ -z "$mode" ]; then
+        case "$c1 $c2" in
+            "functions serve"|"migration new") return 0 ;;
+            "db reset"|"migration up"|"migration down"|"migration squash"|"db diff"|"db lint"|"db query"|"seed buckets"|"test db") mode=default_local ;;
+            "gen types") mode=gen_types ;;
+            "db push"|"migration repair"|"migration list"|"migration fetch"|"db dump"|"db pull"|"storage cp"|"storage mv"|"storage rm"|"inspect db") mode=default_linked ;;
+            "functions deploy"|"functions delete"|"secrets set"|"secrets unset"|"config push"|"backups restore"|"encryption update-root-key") mode=api ;;
+            "projects delete") mode=api; label="supabase projects delete"; flag_ref="${pos[2]:-$flag_ref}" ;;
+            *) return 0 ;;
+        esac
+    fi
+    if [ "$dry" = "1" ]; then
+        case "$c1 $c2" in
+            "db push"|"db dump") return 0 ;;
+        esac
+    fi
+    if [ "$mode" = "api" ]; then
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+        return 0
+    fi
+    if [ "$has_db_url" = "1" ]; then
+        supabase_db_url_verdict "$label" "$db_url"
+        return 0
+    fi
+    [ "$has_local" = "1" ] && return 0
+    if [ "$has_linked" = "1" ] || [ "$has_proxy" = "1" ]; then
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+        return 0
+    fi
+    case "$mode" in
+        default_local) return 0 ;;
+        default_linked) supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env" ;;
+        gen_types)
+            if [ -n "$flag_ref" ]; then
+                supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+            else
+                ask "\`$label\` has no target flag; pass --local for the local DB or --project-id/--linked for a remote project."
+            fi
+            ;;
+    esac
+    return 0
+}
+
+is_prod_pulumi_stack() {
+    local name="${1##*/}" p
+    for p in "${PULUMI_PROD_STACK_NAMES[@]}"; do
+        [ "$name" = "$p" ] && return 0
+    done
+    return 1
+}
+
+pulumi_find_project() {
+    local dir="$1"
+    while :; do
+        if [ -f "$dir/Pulumi.yaml" ]; then GUARD_REPLY="$dir/Pulumi.yaml"; return 0; fi
+        if [ -f "$dir/Pulumi.yml" ]; then GUARD_REPLY="$dir/Pulumi.yml"; return 0; fi
+        [ "$dir" = "/" ] || [ -z "$dir" ] && return 1
+        dir="${dir%/*}"
+        [ -n "$dir" ] || dir="/"
+    done
+}
+
+sha1_hex() {
+    if command -v sha1sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha1sum | cut -d' ' -f1
+    else
+        printf '%s' "$1" | shasum -a 1 | cut -d' ' -f1
+    fi
+}
+
+PULUMI_WS_STACKS=()
+pulumi_workspace_stacks() {
+    local yaml="$1" backend="$2" env="$3" name home path phys hash file stacks line
+    PULUMI_WS_STACKS=()
+    name=$(sed -nE 's/^name:[[:space:]]*["'\'']?([^"'\''[:space:]#]+).*/\1/p' "$yaml" 2>/dev/null | head -1)
+    [ -n "$name" ] || return 1
+    if ctx_env_get "$env" PULUMI_HOME && [ -n "$GUARD_REPLY" ]; then home="$GUARD_REPLY"; else home="$HOME/.pulumi"; fi
+    phys="$(cd "${yaml%/*}" 2>/dev/null && pwd -P)/${yaml##*/}"
+    for path in "$yaml" "$phys"; do
+        hash=$(sha1_hex "$path")
+        file="$home/workspaces/$name-$hash-workspace.json"
+        [ -f "$file" ] && break
+        file=""
+    done
+    [ -n "$file" ] || return 1
+    stacks=$(jq -r --arg b "$backend" '
+        if (.stack // "") != "" then .stack
+        elif (.stacks | type) == "object" then
+            (if $b != "" and (.stacks[$b] // "") != "" then .stacks[$b] else .stacks[] end)
+        else empty end' "$file" 2>/dev/null)
+    while IFS= read -r line; do
+        [ -n "$line" ] && PULUMI_WS_STACKS+=("$line")
+    done < <(printf '%s\n' "$stacks")
+    [ "${#PULUMI_WS_STACKS[@]}" -gt 0 ]
+}
+
+PT_REASON=""
+pulumi_targets_tight() {
+    local -a targets=("$@")
+    local t
+    if [ ${#targets[@]} -eq 0 ]; then
+        PT_REASON="No --target specified — would mutate the entire stack. Pulumi against prod-like stacks must enumerate specific resource URNs."
+        return 1
+    fi
+    if [ ${#targets[@]} -gt 5 ]; then
+        PT_REASON="More than 5 --target flags (${#targets[@]}); this looks like enumerate-all-URNs. Split into smaller manual runs."
+        return 1
+    fi
+    for t in "${targets[@]}"; do
+        t="${t%\"}"; t="${t#\"}"
+        t="${t%\'}"; t="${t#\'}"
+        if [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::pulumi:pulumi:Stack:: ]]; then
+            PT_REASON="--target points at the Stack root URN ($t) — equivalent to whole-stack. Target individual resources instead."
+            return 1
+        fi
+        if ! [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::.+::[^:]+$ ]]; then
+            PT_REASON="--target value '$t' is not a fully-qualified resource URN (urn:pulumi:<stack>::<project>::<type>::<name>). Refusing to guess."
+            return 1
         fi
     done
-done
+    return 0
+}
 
-# ---------------------------------------------------------------------------
-# pulumi — flag-prefixed variants (e.g. "pulumi -C infra up")
-# Strip -C / --cwd and other global flags, then match effective subcommand.
-# ---------------------------------------------------------------------------
-PULUMI_SEG_FOUND=0
-for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-    if has_prefix "$segment_pfx" "pulumi"; then
-        PULUMI_SEG_FOUND=1
-        break
-    fi
-done
-if [ "$PULUMI_SEG_FOUND" = "1" ]; then
-    PULUMI_WRITE_SUBCMDS=(
-        "up"
-        "destroy"
-        "refresh"
-        "import"
-        "watch"
-        "cancel"
-        "new"
-        "convert"
-        "install"
-        "login"
-        "logout"
-        "stack init"
-        "stack rm"
-        "stack rename"
-        "stack import"
-        "stack export"
-        "stack change-secrets-provider"
-        "config set"
-        "config set-all"
-        "config rm"
-        "config rm-all"
-        "config cp"
-        "config refresh"
-        "config env add"
-        "config env rm"
-        "state delete"
-        "state unprotect"
-        "state protect"
-        "state move"
-        "state rename"
-        "state repair"
-        "state upgrade"
-        "env new"
-        "env set"
-        "env rm"
-        "env clone"
-        "env edit"
-        "env version tag"
-        "env version retract"
-        "policy new"
-        "policy publish"
-        "policy enable"
-        "policy disable"
-        "policy rm"
-        "package add"
-        "plugin install"
-        "plugin rm"
-    )
-
-    for ((seg_i = 0; seg_i < ${#SEGMENTS_WS[@]}; seg_i++)); do
-        # Only consider segments that begin with `pulumi`.
-        has_prefix "${SEGMENTS_PFX[$seg_i]}" "pulumi" || continue
-        segment_ws="${SEGMENTS_WS[$seg_i]}"
-        # POSIX character classes, not \s (a GNU extension BSD/macOS sed does
-        # not support — the sed pipeline below silently no-oped on macOS
-        # before this fix, so `pulumi -C infra up` was never recognized as a
-        # write. pulumi_target_guard() above already uses this same
-        # [[:space:]] form for the identical reason.
-        EFFECTIVE=$(echo "$segment_ws" \
-            | sed -E 's/^[[:space:]]*pulumi[[:space:]]+//' \
-            | sed -E 's/-C[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/--cwd[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/-s[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/--stack[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/--color[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/-v[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/--verbose[[:space:]]+[^ ]+[[:space:]]*//g' \
-            | sed -E 's/--[a-z-]*[[:space:]]*//g' \
-            | sed -E 's/[[:space:]]+/ /g' \
-            | sed -E 's/^[[:space:]]*//')
-        for subcmd in "${PULUMI_WRITE_SUBCMDS[@]}"; do
-            if has_prefix "$EFFECTIVE" "$subcmd"; then
-                ask "pulumi command requires confirmation."
-            fi
-        done
+pulumi_esc_verdict() {
+    local label="$1" nm
+    shift
+    local -a names=()
+    for nm in "$@"; do
+        [ -n "$nm" ] && names+=("$nm")
     done
-fi
+    for nm in ${names[@]+"${names[@]}"}; do
+        nm="${nm%%@*}"
+        if is_prod_pulumi_stack "$nm"; then
+            deny "Blocked: \`$label\` mutates the PRODUCTION ESC environment $nm. Run it manually — do not retry."
+            return
+        fi
+    done
+    if [ ${#names[@]} -eq 0 ]; then
+        ask "\`$label\` mutates an ESC environment the guard could not identify — confirm it is not production."
+    else
+        ask "\`$label\` mutates the non-production ESC environment ${names[*]} — confirm this is intended."
+    fi
+}
 
-# ---------------------------------------------------------------------------
-# Emit the single most restrictive verdict recorded by ALL the rules above.
-# No output at all still means "no opinion", which the dispatcher reads as
-# allow — that path is reached only when every rule genuinely passed.
-# ---------------------------------------------------------------------------
+pulumi_decide() {
+    local seg="$1" cwd="$2" env="$3"
+    tool_args "$seg" pulumi || return 0
+    local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=() targets=() extra_stacks=()
+    local n=${#args[@]} i=0 tok val cwd_flag="" stack="" preview_only=0 create=0 target_dependents=0 esc_env=""
+    while [ "$i" -lt "$n" ]; do
+        tok="${args[$i]}"
+        val=""
+        case "$tok" in
+            -C|--cwd|-s|--stack|-t|--target|--source|--dest|--env|--color|-v|--verbose|--profiling|--tracing|--memprofilerate|-m|--message|-p|--parallel|--config-file|--secrets-provider|--exec-kind|--plan|--policy-pack|--policy-pack-config)
+                i=$((i + 1))
+                val="${args[$i]:-}"
+                case "$tok" in
+                    -C|--cwd) cwd_flag="$val" ;;
+                    -s|--stack) stack="$val" ;;
+                    -t|--target) targets+=("$val") ;;
+                    --source|--dest) extra_stacks+=("$val") ;;
+                    --env) esc_env="$val" ;;
+                esac
+                ;;
+            --cwd=*|-C=*) cwd_flag="${tok#*=}" ;;
+            -C?*) cwd_flag="${tok#-C}" ;;
+            --stack=*|-s=*) stack="${tok#*=}" ;;
+            -s?*) stack="${tok#-s}" ;;
+            --target=*|-t=*) targets+=("${tok#*=}") ;;
+            --source=*|--dest=*) extra_stacks+=("${tok#*=}") ;;
+            --env=*) esc_env="${tok#*=}" ;;
+            --preview-only|--preview-only=true) preview_only=1 ;;
+            -d)
+                if [ "${pos[0]:-} ${pos[1]:-}" = "config cp" ]; then
+                    i=$((i + 1))
+                    extra_stacks+=("${args[$i]:-}")
+                fi
+                ;;
+            --create|-c) create=1 ;;
+            --target-dependents|--target-dependents=*) target_dependents=1 ;;
+            -*) ;;
+            *) pos+=("$tok") ;;
+        esac
+        i=$((i + 1))
+    done
+    local c1="${pos[0]:-}" c2="${pos[1]:-}" c3="${pos[2]:-}" label kind=""
+    label="pulumi $c1${c2:+ $c2}"
+    case "$c1" in
+        up|cancel|watch) kind=stack; label="pulumi $c1" ;;
+        destroy|refresh|import)
+            [ "$preview_only" = "1" ] && return 0
+            kind=stack; label="pulumi $c1" ;;
+        state)
+            case "$c2" in delete|rename|move|unprotect|protect|repair|taint|untaint|upgrade) kind=stack ;; esac ;;
+        stack)
+            case "$c2" in
+                rm|rename|import|change-secrets-provider) kind=stack ;;
+                tag) case "$c3" in set|rm) kind=stack; label="pulumi stack tag $c3" ;; esac ;;
+                select) [ "$create" = "1" ] && kind=stack ;;
+            esac
+            ;;
+        config)
+            case "$c2" in set|set-all|rm|rm-all|cp|refresh) kind=stack ;; esac ;;
+        env)
+            case "$c2" in
+                set|edit|rotate|rm) pulumi_esc_verdict "$label" "$esc_env" "$c3" ;;
+                clone) pulumi_esc_verdict "$label" "$esc_env" "$c3" "${pos[3]:-}" ;;
+                version|tag)
+                    local esc_name="" k
+                    for ((k = 2; k < ${#pos[@]}; k++)); do
+                        case "${pos[$k]}" in */*) esc_name="${pos[$k]}"; break ;; esac
+                    done
+                    pulumi_esc_verdict "$label" "$esc_env" "$esc_name"
+                    ;;
+            esac
+            return 0
+            ;;
+    esac
+    [ "$kind" = "stack" ] || return 0
+
+    local projdir backend="" yaml="" s
+    if [ -n "$cwd_flag" ]; then
+        ctx_abs_dir "$cwd" "$cwd_flag"
+        projdir="$GUARD_REPLY"
+    else
+        projdir="$cwd"
+    fi
+    pulumi_find_project "$projdir" && yaml="$GUARD_REPLY"
+    if ctx_env_get "$env" PULUMI_BACKEND_URL && [ -n "$GUARD_REPLY" ]; then
+        backend="$GUARD_REPLY"
+    elif [ -n "$yaml" ]; then
+        backend=$(awk '/^backend:/{b=1;next} b&&/^[^[:space:]]/{b=0} b&&/url:/{sub(/.*url:[[:space:]]*/,""); gsub(/["\047]/,""); print; exit}' "$yaml" 2>/dev/null)
+    fi
+    case "$backend" in
+        file://*) return 0 ;;
+        *production*)
+            deny "Blocked: \`$label\` runs against a production Pulumi backend. Run it manually — do not retry."
+            return 0
+            ;;
+    esac
+
+    local -a stacks=()
+    if [ -n "$stack" ]; then
+        stacks+=("$stack")
+    elif [ "$c1" = "stack" ] && { [ "$c2" = "rm" ] || [ "$c2" = "select" ]; } && [ -n "$c3" ]; then
+        stacks+=("$c3")
+    elif ctx_env_get "$env" PULUMI_STACK && [ -n "$GUARD_REPLY" ]; then
+        stacks+=("$GUARD_REPLY")
+    elif [ -n "$yaml" ] && pulumi_workspace_stacks "$yaml" "$backend" "$env"; then
+        stacks+=("${PULUMI_WS_STACKS[@]}")
+    fi
+    if [ "$c1 $c2" = "stack rename" ] && [ -n "$c3" ]; then
+        stacks+=("$c3")
+    fi
+    stacks+=(${extra_stacks[@]+"${extra_stacks[@]}"})
+
+    for s in ${stacks[@]+"${stacks[@]}"}; do
+        case "$s" in
+            *'$'*)
+                ask "\`$label\` targets a stack given as a shell variable; the guard cannot tell whether it is production."
+                return 0
+                ;;
+        esac
+        is_prod_pulumi_stack "$s" || continue
+        local block_prefix="Blocked: \`$label\` against production stack $s."
+        case "$c1" in
+            up|destroy|refresh)
+                if [ "$target_dependents" = "1" ]; then
+                    deny "$block_prefix --target-dependents walks the dependency graph and is effectively whole-stack. Run manually."
+                elif pulumi_targets_tight ${targets[@]+"${targets[@]}"}; then
+                    ask "\`$label\` against production stack $s with a tight --target set — confirm each URN is intended."
+                else
+                    deny "$block_prefix $PT_REASON"
+                fi
+                ;;
+            *) deny "$block_prefix Production mutations must be run manually by the user — do not retry." ;;
+        esac
+        return 0
+    done
+
+    if [ ${#stacks[@]} -eq 0 ]; then
+        ask "\`$label\` mutates a Pulumi stack the guard could not resolve (no -s/--stack, PULUMI_STACK or selected workspace stack). Confirm it is not production."
+    else
+        ask "\`$label\` mutates the non-production stack ${stacks[*]} — confirm this is intended."
+    fi
+    return 0
+}
+
+case "$COMMAND" in
+    *supabase*|*pulumi*)
+        SESSION_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+        [ -n "$SESSION_CWD" ] || SESSION_CWD="$PWD"
+        ctx_build "$SESSION_CWD"
+        for ((ctx_i = 0; ctx_i < ${#CTX_SEG[@]}; ctx_i++)); do
+            supabase_decide "${CTX_SEG[$ctx_i]}" "${CTX_CWD[$ctx_i]}" "${CTX_ENV[$ctx_i]}"
+            pulumi_decide "${CTX_SEG[$ctx_i]}" "${CTX_CWD[$ctx_i]}" "${CTX_ENV[$ctx_i]}"
+        done
+        ;;
+esac
+
 if [ -n "$VERDICT" ]; then
     emit_decision "$VERDICT" "$VERDICT_REASON"
 fi
