@@ -290,6 +290,21 @@
   "inputNeededNotifEnabled" : true,
   "model" : "sonnet",
   "permissions" : {
+    "allow" : [
+      "Bash(devtrees logs *)",
+      "Bash(dig *)",
+      "Bash(gcloud logging read *)",
+      "Bash(gcloud run revisions list *)",
+      "Bash(gh run watch *)",
+      "Bash(lsof *)",
+      "Bash(screen -ls)",
+      "Bash(warp-cli status)",
+      "mcp__claude-in-chrome__find",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__expo-mcp__build_info"
+    ],
     "defaultMode" : "bypassPermissions"
   },
   "preferredNotifChannel" : "notifications_disabled",
