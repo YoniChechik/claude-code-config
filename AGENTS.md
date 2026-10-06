@@ -25,6 +25,15 @@ If you contemplate between 2 appproaches- take the cleaner (even if longer) rout
 
 Fix errors immediately when you find them — there is NO "pre-existing, so I'll leave it" exception.
 
+Pre-approved (never ask):
+- Merge to main on green CI.
+- Pushing.
+- Creating/deleting worktrees via the skill.
+- Fixing lint/CI/tests.
+- Running `gcloud auth login <email> --update-adc` when needed. Involve the human only if a browser login is truly required.
+
+Ask only for: destructive prod data changes, spending money, irreversible external sends.
+
 
 # GCLOUD AUTH
 

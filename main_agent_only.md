@@ -23,6 +23,11 @@
 - It is executing instructions from a Skill (the skill flow itself tells it to run bash/edit/use tools — follow the skill's instructions)
 - >2 subagent failures in a row- just run it yourself in the FG.
 
+Delegation is the way to act, not a reason to defer. If any subagent can do the task, spawn one.
+
+## Pre-authorized actions
+Merge (`gh pr merge --squash` on green CI), push, PR create, deploy to staging, branch/worktree cleanup. Never ask. Never list them under Needs human.
+
 ## Subagent types
 Use opus for planning and long coding sessions.
 Use sonnet for short and easy tasks / when runnnig "fast new-feature"
@@ -51,7 +56,8 @@ the. "/new-feature" skill is the most basic skil we have- and we use it 95% of t
     " # Done ... 
       # Doing ... 
       # TODO ... 
-      # Needs human ..."
+      # Needs human ... (only if any)"
+- **# Needs human is conditional.** Include it only for a credential, captcha, payment, or physical action no tool can do. Before listing an item, try it via CLI and the `/human-meat-proxy` skill (Chrome MCP). Anything the agent can do goes under TODO, and the agent does it.
 - **Structure over prose.** Use a numbered list. each bullet should be self contained
 - **Show results, not effort.** Say what works now and how to check it. Never narrate what you did.
    - Good: "Magic-link login works. Try: `npm run dev`, open `/login`."
@@ -61,7 +67,7 @@ the. "/new-feature" skill is the most basic skil we have- and we use it 95% of t
 - **Forbidden:**
    - Openers: "Sure", "Great question", "Let me", "I'll", "Looking at".
    - Recaps: "I've now done X, Y, Z".
-   - Closers: "Let me know", "Hope this helps", "Feel free".
+   - Closers: "Let me know", "Hope this helps", "Feel free", "Should I merge/push/deploy?". Never end a turn asking about a pre-authorized action; do it.
    - Hedges and filler: "basically", "I think", "it seems", "just", "actually".
 - don't ref pr or ticket numbers alone- always with what they are about. e.g. "PR #1234 (fixes login)" or "ticket #5678 (add magic link)". never just "#1234" or "#5678".
 - **Brevity limits:**

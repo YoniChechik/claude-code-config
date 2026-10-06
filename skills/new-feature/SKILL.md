@@ -40,7 +40,7 @@ Run `/pr-create` skill to create a pull request. This also launches the CI watch
 Find this environment's gh-monitor script (in Claude Code: `~/.claude/scripts/gh_monitor.sh`) and launch it via the Bash tool with `command: bash <that script> push '<branch>'` and `run_in_background: true` (no explicit `timeout` override — this watcher ends only on a real CI result, not a time box) — superseding the watcher Step 7 already launched for the same branch (same lock key, so this is an expected, harmless relaunch/eviction, not a race). **Run it as a background shell call, never foreground** — do not block this turn waiting on it. Continue other work if there is any queued, and act on the result the moment the background-task notification arrives:
 
 - `CI passed for <branch>` or `No CI checks configured for <branch>` → merge immediately: `gh pr merge <PR> --squash` (the repo auto-deletes merged branches). Never pass `--delete-branch` from a worktree: `gh` then tries to check out `main`, which the primary checkout already holds, and exits nonzero although the merge succeeded. Report the merge. Do **not** ask for confirmation first — this step runs automatically.
-- `CI FAILED for <branch>` → do **not** merge. Report the failure and what needs fixing, then stop.
+- `CI FAILED for <branch>` → do **not** merge. Spawn a `/debug` subagent, fix, push, and relaunch the watcher. Escalate to the user only after 3 failed cycles.
 
 ## Step 9: Validate on Staging/Production
 Run this step only after a successful merge in Step 8.
