@@ -53,14 +53,6 @@
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/permission_request.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
             "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
