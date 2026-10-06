@@ -65,10 +65,6 @@
 : "${GH_MONITOR_HOOK_TIMEOUT:=5}"
 HOOK_LOG="${CLAUDE_NOTIFY_TMP_DIR}/gh_monitor_hook.log"
 
-# Resolved HERE, before Step 6 `cd`s into the tool call's cwd: after that cd a
-# relative $BASH_SOURCE would resolve against the wrong directory.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # --- Step 1: read stdin once (it can only be consumed a single time). --------
 input=$(cat)
 
