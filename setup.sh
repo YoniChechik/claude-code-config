@@ -1,28 +1,8 @@
 #!/usr/bin/env bash
-# Claude Code / shell environment setup. Dual-purpose file:
-#
-#   1. Sourced from ~/.zshrc on every interactive shell start (`source
-#      ~/.claude/setup.sh`) - defines the manual terminal-title override
-#      mechanism (`title` / `title-reset`) on top of oh-my-zsh's auto-title
-#      hooks. This half only runs when $ZSH_VERSION is set (i.e. actually
-#      being sourced by zsh) and must NEVER fall through into the installer
-#      body below - a new shell tab must not re-run installer side effects
-#      (git clone, MCP config rewrite) on every start.
-#
-#   2. Executed directly - `bash <(curl -fsSL .../setup.sh)` per README.md -
-#      as a one-time bootstrap for a fresh ~/.claude checkout: git-enables
-#      the directory and drops retired MCP registrations. This half only
-#      runs when NOT sourced from zsh.
 
 if [ -n "${ZSH_VERSION:-}" ]; then
-  # --- Manual terminal title override (keeps oh-my-zsh auto-title by default) ---
-  # Global flag: 0 = oh-my-zsh auto-titles as usual, 1 = a manual `title` is in effect.
   typeset -g TITLE_OVERRIDE=0
 
-  # oh-my-zsh's omz_termsupport_precmd/preexec (lib/termsupport.zsh) call its own
-  # `title` helper internally. We redefine `title` below as a public CLI, so
-  # preserve copies of the original functions with their internal `title` calls
-  # rewritten to a private alias, so auto-titling keeps working when not overridden.
   functions[_omz_orig_title]="$functions[title]"
   functions[_omz_orig_precmd]="${functions[omz_termsupport_precmd]//title /_omz_orig_title }"
   functions[_omz_orig_preexec]="${functions[omz_termsupport_preexec]//title /_omz_orig_title }"
@@ -41,7 +21,6 @@ if [ -n "${ZSH_VERSION:-}" ]; then
   add-zsh-hook precmd _title_override_precmd
   add-zsh-hook preexec _title_override_preexec
 
-  # Public CLI: `title "NAME"` pins the tab title until `title-reset` runs.
   title() {
     TITLE_OVERRIDE=1
     printf '\e]1;%s\a' "$1"
@@ -57,7 +36,6 @@ else
   REPO_URL="https://github.com/YoniChechik/claude-code-config.git"
   CLAUDE_DIR="$HOME/.claude"
 
-  # --- Git-enable ~/.claude if not already a git repo ---
   if [ ! -d "$CLAUDE_DIR/.git" ]; then
     echo "==> Git-enabling $CLAUDE_DIR"
     TMP_DIR="$(mktemp -d)"
@@ -69,12 +47,6 @@ else
     echo "    Done. Continuing setup from $CLAUDE_DIR"
   fi
 
-  # --- Drop the retired webhook MCP registration from ~/.claude.json ---
-  # Older installs registered an MCP server pointing at channel/webhook.ts. That
-  # file is gone, so a leftover entry makes every session start error out.
-  # Python (not node) because uv/python is the only runtime this repo needs.
-  # Guarded on uv: under `set -e` a missing uv would abort the whole installer
-  # here and never reach the closing message below.
   if command -v uv >/dev/null 2>&1; then
     echo "==> Removing retired webhook MCP registration from $HOME/.claude.json"
     uv run --no-project python - "$HOME/.claude.json" <<'PYTHON'
@@ -100,10 +72,6 @@ servers = config.get("mcpServers")
 if not isinstance(servers, dict) or "webhook" not in servers:
     sys.exit(0)
 del servers["webhook"]
-# Atomic rewrite: this file holds every project, MCP server and history entry,
-# and setup.sh usually runs from inside a live Claude session that also writes
-# it. A truncating in-place write could destroy all of that on a crash or a
-# concurrent write; a sibling temp file plus os.replace cannot.
 tmp_name = ""
 try:
     mode = target.stat().st_mode & 0o777
@@ -123,6 +91,22 @@ PYTHON
   else
     echo "==> Skipping webhook MCP cleanup: uv not found."
     echo "    Install uv (https://docs.astral.sh/uv/), then re-run this script."
+  fi
+
+  if command -v shfmt >/dev/null 2>&1; then
+    echo "==> shfmt already installed ($(shfmt --version))"
+  elif command -v brew >/dev/null 2>&1; then
+    echo "==> Installing shfmt (the Bash parser the hooks use) via Homebrew"
+    if ! brew install shfmt; then
+      echo "    WARNING: brew install shfmt failed."
+      echo "    Until shfmt is installed, the PreToolUse guards ask before every Bash"
+      echo "    command and the PostToolUse Bash hooks skip. Fix brew, then re-run this script."
+    fi
+  else
+    echo "==> Skipping shfmt install: Homebrew not found."
+    echo "    Install shfmt from https://github.com/mvdan/sh/releases onto your PATH."
+    echo "    Until then, the PreToolUse guards ask before every Bash command and the"
+    echo "    PostToolUse Bash hooks skip."
   fi
 
   echo ""
