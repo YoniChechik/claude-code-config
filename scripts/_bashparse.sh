@@ -176,8 +176,12 @@ bp_parse_hook() {
     BP_CWD=""
     BP_FILE=""
     BP_N=0
-    if ! command -v shfmt >/dev/null 2>&1; then BP_ERR="shfmt not installed"; return 3; fi
     if ! command -v jq >/dev/null 2>&1; then BP_ERR="jq not installed"; return 5; fi
+    if ! command -v shfmt >/dev/null 2>&1; then
+        BP_ERR="shfmt not installed"
+        HOOK_LOG_CMD=$(printf '%s' "$1" | jq -r '.tool_input.command // "" | tostring' 2>/dev/null)
+        return 3
+    fi
     local rc
     _bp_level hook "$1" "$PWD" true "$BP_MAX_DEPTH"
     rc=$?

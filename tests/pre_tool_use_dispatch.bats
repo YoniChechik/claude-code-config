@@ -246,7 +246,7 @@ assert_logged() { # <substring>
 @test "fail closed: shfmt missing from PATH asks instead of allowing a would-be deny" {
     link_bin jq
     assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
-    assert_logged "shfmt not installed"
+    assert_logged "shfmt not installed) | $GH $REPO $DEL foo/bar"
 }
 
 @test "fail closed: shfmt missing never blocks a non-Bash tool, which needs no parse" {
