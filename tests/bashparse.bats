@@ -129,7 +129,7 @@ done
     link_bin sleep
     start=$SECONDS
     run env PATH="$BATS_TEST_TMPDIR/stubs:/usr/bin:/bin" BASHPARSE_TIMEOUT=1 "$BASH" -c 'source "$1"; bp_parse "git push" /s; echo "rc=$? err=$BP_ERR json=[$BP_JSON]"' _ "$LIB"
-    assert_eq "rc=4 err=timeout: shfmt exceeded 1s json=[]" "$output"
+    assert_eq "rc=4 err=timeout: parse exceeded 1s json=[]" "$output"
     [ $((SECONDS - start)) -lt 10 ]
 }
 
@@ -145,7 +145,7 @@ done
 
 @test "bp_parse_hook reads the command and cwd and sets HOOK_LOG_CMD" {
     run bash -c 'source "$1"; bp_parse_hook "$(jq -cn "{tool_input: {command: \"cd w && git push\"}, cwd: \"/repo\"}")" || exit 9
-        bp_find git push; echo "$BP_CMD|$HOOK_LOG_CMD|$(bp_get "${BP_MATCHES[0]}" .cwd)"' _ "$LIB"
+        bp_find git push; bp_seg "${BP_MATCHES[0]}"; echo "$BP_CMD|$HOOK_LOG_CMD|$SEG_CWD"' _ "$LIB"
     assert_eq "cd w && git push|cd w && git push|/repo/w" "$output"
 }
 
@@ -158,23 +158,23 @@ done
     assert_eq $'push=0\nmerge=3\nall=2 3\ncreate=none' "$output"
 }
 
-@test "bp_argv returns real array elements, including spaces and newlines" {
+@test "bp_seg returns real array elements, including spaces and newlines" {
     run bash -c 'source "$1"; bp_parse "gh pr create --title \"a b\" --body \"l1
-l2\"" /s; bp_argv 0; printf "<%s>" "${BP_ARGV[@]}"' _ "$LIB"
+l2\"" /s; bp_seg 0; printf "<%s>" "${SEG_ARGV[@]}"' _ "$LIB"
     assert_eq $'<gh><pr><create><--title><a b><--body><l1\nl2>' "$output"
 }
 
-@test "bp_git_sub exposes subcommand, args and effective repo directory" {
-    run bash -c 'source "$1"; bp_parse "cd /r && git -c a=b -C sub commit -m \"x y\"" /s; bp_git_sub 1
-        printf "%s|%s|%s|" "$BP_GIT_SUB" "$BP_GIT_CWD" "$BP_GIT_CWD_KNOWN"; printf "<%s>" "${BP_GIT_ARGS[@]}"
-        bp_git_sub 0 || echo " not-git"' _ "$LIB"
-    assert_eq "commit|/r/sub|true|<-m><x y> not-git" "$output"
+@test "bp_seg exposes git subcommand, args, config and effective repo directory" {
+    run bash -c 'source "$1"; bp_parse "cd /r && git -c a=b -C sub commit -m \"x y\"" /s; bp_seg 1
+        printf "%s|%s|%s|%s|" "$SEG_GIT_SUB" "$SEG_GIT_CWD" "$SEG_GIT_CWD_KNOWN" "${SEG_GIT_CONFIG[*]}"; printf "<%s>" "${SEG_GIT_ARGS[@]}"
+        bp_seg 0; echo " git=$SEG_GIT"' _ "$LIB"
+    assert_eq "commit|/r/sub|1|a=b|<-m><x y> git=0" "$output"
 }
 
 @test "bp_unknown reports every reason once" {
     run bash -c 'source "$1"; bp_parse "eval \"\$X\"; \$Y; \$Z" /s; bp_unknown && printf "%s," "${BP_UNKNOWN_REASONS[@]}"
         bp_parse "git push" /s; bp_unknown || echo none' _ "$LIB"
-    assert_eq $'dynamic command name,dynamic eval,none' "$output"
+    assert_eq $'dynamic eval,dynamic command name,none' "$output"
 }
 
 @test "bp_segments_text is one display line per segment" {
@@ -184,6 +184,6 @@ b\"" /s; bp_segments_text' _ "$LIB"
 }
 
 @test "bp_parse without a cwd uses PWD and an unknown relative cwd stays unknown" {
-    run bash -c 'cd /tmp && source "$1" && bp_parse "git push" && bp_get 0 "[.cwd, .cwd_known] | @tsv"' _ "$LIB"
-    assert_eq $'/tmp\ttrue' "$output"
+    run bash -c 'cd /tmp && source "$1" && bp_parse "git push" && bp_seg 0 && printf "%s|%s" "$SEG_CWD" "$SEG_CWD_KNOWN"' _ "$LIB"
+    assert_eq '/tmp|1' "$output"
 }

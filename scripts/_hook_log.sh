@@ -60,7 +60,7 @@ hook_log() {
     cmd=${cmd//$'\r'/\\r}
     cmd=${cmd//$'\t'/\\t}
     reason=${reason//$'\n'/\\n}
-    line="$ts $HOOK_NAME[$$] ${reason:0:200} | ${cmd:0:160}"
+    line="$ts ${HOOK_NAME}[$$] ${reason:0:200} | ${cmd:0:160}"
     if [[ ! -d $HOOK_LOG_DIR ]]; then
         mkdir -p -m 700 "$HOOK_LOG_DIR" 2>/dev/null || return 0
     fi
@@ -78,9 +78,24 @@ skip() {
     exit 0
 }
 
+hook_json_str() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    s=${s//[$'\001'-$'\037']/ }
+    REPLY="\"$s\""
+}
+
+hook_decision() {
+    hook_json_str "$2"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":%s}}\n' "$1" "$REPLY"
+}
+
 fail_closed() {
     hook_log "fail_closed: $1"
-    jq -cn --arg r "GUARD_FAIL_CLOSED: $1. Confirm manually only if you know this command is safe." \
-        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $r}}'
+    hook_decision ask "GUARD_FAIL_CLOSED: $1. Confirm manually only if you know this command is safe."
     exit 0
 }

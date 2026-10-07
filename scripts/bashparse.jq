@@ -7,7 +7,7 @@ def lit: gsub("\\\\\n"; "") | gsub("\\\\(?<c>.)"; "\(.c)"; "s");
 def dqlit: gsub("\\\\\n"; "") | gsub("\\\\(?<c>[\"\\\\$`])"; "\(.c)");
 def hdlit: gsub("\\\\\n"; "") | gsub("\\\\(?<c>[\\\\$`])"; "\(.c)");
 def ansic: gsub("\\\\n"; "\n") | gsub("\\\\t"; "\t") | gsub("\\\\(?<c>['\"\\\\])"; "\(.c)");
-def globby: test("(^|[^\\\\])[*?]|(^|[^\\\\])\\[") or test("\\{[^{}]*(,|\\.\\.)[^{}]*\\}");
+def globby: test("(^|[^\\\\])[*?]|(^|[^\\\\])\\[.+\\]") or test("\\{[^{}]*(,|\\.\\.)[^{}]*\\}");
 def base: sub("^.*/"; "");
 
 def normpath:
@@ -40,9 +40,10 @@ def substs:
 
 def mergest($a; $b):
   {cwd: $a.cwd, known: ($a.known and $b.known and $a.cwd == $b.cwd),
+   alts: (if $a.alts == null or $b.alts == null then null else ($a.alts + $b.alts | unique) end),
    gitenv: ($a.gitenv or $b.gitenv), cdpath: ($a.cdpath or $b.cdpath),
    funcs: ($a.funcs + $b.funcs | unique)};
-def lost: . + {known: false};
+def lost: . + {known: false, alts: null};
 
 def skipopts($w; $i; $witharg):
   if $i >= ($w | length) or $w[$i].dyn then $i
@@ -117,24 +118,28 @@ def gitinfo($aw; $s; $segenv):
     elif $aw[$i].dyn then $acc + {si: $i}
     else $aw[$i].s as $a
       | if $a == "-C" then gopts($i + 2; $acc | .cs += [$aw[$i + 1] // {s: "", dyn: true}])
-        elif $a == "-c" or $a == "--config-env" or $a == "--namespace" or $a == "--super-prefix" then gopts($i + 2; $acc)
+        elif $a == "-c" or $a == "--config-env" then gopts($i + 2; $acc | .cfg += [($aw[$i + 1] // {s: DYN, dyn: true}) | if .dyn then DYN else .s end])
+        elif $a | startswith("--config-env=") then gopts($i + 1; $acc | .cfg += [$a | ltrimstr("--config-env=")])
+        elif $a == "--namespace" or $a == "--super-prefix" then gopts($i + 2; $acc)
         elif $a == "--git-dir" or $a == "--work-tree" then gopts($i + 2; $acc | .override = true)
         elif ($a | startswith("--git-dir=")) or ($a | startswith("--work-tree=")) then gopts($i + 1; $acc | .override = true)
         elif $a | startswith("-") then gopts($i + 1; $acc)
         else $acc + {si: $i} end
     end;
-  gopts(1; {cs: [], override: false}) as $g
-  | (reduce $g.cs[] as $d ({cwd: $s.cwd, known: $s.known, n: 0};
-      if $d.dyn then .known = false | .n += 1
+  gopts(1; {cs: [], cfg: [], override: false}) as $g
+  | (reduce $g.cs[] as $d ({cwd: $s.cwd, known: $s.known, alts: $s.alts, n: 0};
+      if $d.dyn then .known = false | .alts = null | .n += 1
       elif $d.s == "" then .
-      elif $d.s | startswith("/") then .cwd = ($d.s | normpath) | .known = true | .n += 1
-      elif .n > 0 then .known = false | .n += 1
-      else .cwd as $b | .cwd = ($d.s | resolve($b)) | .n += 1 end)) as $gc
+      elif $d.s | startswith("/") then .cwd = ($d.s | normpath) | .known = true | .alts = [.cwd] | .n += 1
+      elif .n > 0 then .known = false | .alts = null | .n += 1
+      else .cwd as $b | .cwd = ($d.s | resolve($b))
+        | .alts = (if .alts == null then null else [.alts[] as $a | $d.s | resolve($a)] | unique end) | .n += 1 end)) as $gc
   | ($g.override or $s.gitenv or ($segenv | any(split("=")[0] as $n | GITREPOENV | any(. == $n)))) as $ov
   | {sub: (if $g.si == null then null elif $aw[$g.si].dyn then DYN else $aw[$g.si].s end),
      sub_dynamic: ($g.si != null and $aw[$g.si].dyn),
      args: (if $g.si == null then [] else [$aw[$g.si + 1:][].s] end),
-     cwd: $gc.cwd, cwd_known: ($gc.known and ($ov | not)), repo_override: $ov};
+     config: $g.cfg, cwd: $gc.cwd, cwd_known: ($gc.known and ($ov | not)),
+     cwd_alts: (if $ov then null else $gc.alts end), repo_override: $ov};
 
 def is_terminator:
   (.Cmd.Type == "CallExpr" and ((.Cmd.Args // []) | length > 0) and ((.Cmd.Args[0].Parts // []) | length == 1)
@@ -146,7 +151,7 @@ def segment($c; $s; $f):
    op_before: $c.op, pipeline_index: $c.pi, pipeline_len: $c.pl, negated: $c.neg, background: $c.bg,
    in_subshell: $c.subsh, in_group: $c.grp, in_substitution: $c.sub, in_compound: $c.comp, in_function: $c.fn,
    redirects: $f.redirects, outer_redirects: $c.outer,
-   cwd: $s.cwd, cwd_known: ($s.known and ($f.chdir | not)),
+   cwd: $s.cwd, cwd_known: ($s.known and ($f.chdir | not)), cwd_alts: (if $f.chdir then null else $s.alts end),
    git: $f.git, code: $f.code,
    unknown: (($f.reasons | length) > 0), unknown_reasons: $f.reasons,
    exit_code_belongs_to_command: $c.att};
@@ -215,12 +220,15 @@ def ev_call($c; $s; $rd):
       | (($u.wrappers - ["builtin", "command"]) | length == 0) as $plain
       | (if $cmd == "cd" and $plain then
           (skipopts($aw; 1; [])) as $j
-          | (if $j >= ($aw | length) then {cwd: $home, k: true}
-             elif $aw[$j].dyn then {cwd: $s.cwd, k: false}
-             elif $aw[$j].s == "-" then {cwd: $s.cwd, k: false}
-             elif ($aw[$j].s | test("^(/|\\.)") | not) and $s.cdpath then {cwd: $s.cwd, k: false}
-             else {cwd: ($aw[$j].s | resolve($s.cwd)), k: ($s.known)} end) as $t
-          | ($s + {cwd: $t.cwd, known: $t.k}) as $okst
+          | (if $j >= ($aw | length) then {cwd: $home, k: true, alts: [$home]}
+             elif $aw[$j].dyn then {cwd: $s.cwd, k: false, alts: null}
+             elif $aw[$j].s == "-" then {cwd: $s.cwd, k: false, alts: null}
+             elif ($aw[$j].s | test("^(/|\\.)") | not) and $s.cdpath then {cwd: $s.cwd, k: false, alts: null}
+             elif $aw[$j].s | startswith("/") then ($aw[$j].s | normpath) as $d | {cwd: $d, k: true, alts: [$d]}
+             else $aw[$j].s as $rel
+               | {cwd: ($rel | resolve($s.cwd)), k: $s.known,
+                  alts: (if $s.alts == null then null else [$s.alts[] as $b | $rel | resolve($b)] | unique end)} end) as $t
+          | ($s + {cwd: $t.cwd, known: $t.k, alts: $t.alts}) as $okst
           | {ok: $okst, any: mergest($s; $okst)}
          elif ($cmd == "pushd" or $cmd == "popd") and $plain then {ok: ($s | lost), any: ($s | lost)}
          elif $cmd == "source" or $cmd == "." then ($s | lost | .gitenv = true | .cdpath = true) as $x | {ok: $x, any: $x}
@@ -307,7 +315,76 @@ def ev_if($c; $s):
      end) as $r
   | if $bg then $r + {ok: $s, any: $s} else $r end;
 
-({Cmd: {Type: "File", Stmts: (.Stmts // [])}} | ev_stmt(
-  {att: true, sub: false, subsh: false, grp: false, comp: null, fn: null, bg: false, neg: false, op: null, pi: 0, pl: 1, outer: []};
-  {cwd: $cwd, known: $cwd_known, gitenv: false, cdpath: $cdpath, funcs: []}))
-| [.segs | to_entries[] | .value + {id: .key, depth: 0, via: null, parent: null}]
+def flat($cwd; $known):
+  ({Cmd: {Type: "File", Stmts: (.Stmts // [])}} | ev_stmt(
+    {att: true, sub: false, subsh: false, grp: false, comp: null, fn: null, bg: false, neg: false, op: null, pi: 0, pl: 1, outer: []};
+    {cwd: $cwd, known: $known, alts: (if $known then [$cwd] else null end), gitenv: false, cdpath: $cdpath, funcs: []}))
+  | [.segs | to_entries[] | .value + {id: .key, depth: 0, via: null, parent: null}];
+
+def splice($n; $f):
+  . as $p
+  | reduce range(0; $p | length) as $i ([];
+      ($i | tostring) as $key
+      | ($p[$i] | if $f[$key] then .unknown = true | .unknown_reasons += [$f[$key]] else . end) as $seg
+      | length as $ni
+      | . + [$seg + {id: $ni}]
+      | if $n[$key] then
+          ($ni + 1) as $b
+          | . + [$n[$key][]
+              | .id += $b
+              | .parent = (if .parent == null then $ni else .parent + $b end)
+              | .depth += $seg.depth + 1
+              | .via = (.via // $seg.code.via)
+              | .exit_code_belongs_to_command = (.exit_code_belongs_to_command and $seg.exit_code_belongs_to_command)
+              | .in_substitution = (.in_substitution or $seg.in_substitution)
+              | .in_function = (.in_function // $seg.in_function)
+              | .in_compound = (.in_compound // $seg.in_compound)
+              | .background = (.background or $seg.background)
+              | .negated = (.negated or $seg.negated)
+              | .in_subshell = (.in_subshell or $seg.in_subshell or $seg.code.via != "eval")
+              | .in_group = (.in_group or $seg.in_group)]
+        else . end);
+
+def bit: if . then 1 else 0 end;
+def list: length, .[];
+def flags:
+  [if .in_subshell then "S" else empty end, if .in_group then "G" else empty end,
+   if .in_substitution then "X" else empty end, if .in_function != null then "F" else empty end,
+   if .in_compound != null then "C" else empty end, if .background then "B" else empty end,
+   if .negated then "N" else empty end, if .exit_code_belongs_to_command then "A" else empty end,
+   if .unknown then "U" else empty end, if .parent != null then "P" else empty end] | join("");
+def records:
+  .[] | .id, (.cmd // ""), .cwd, (.cwd_known | bit), (.cwd_alts // [] | list), flags, (.via // ""), (.code.text // ""),
+    ([.dynamic[] | bit | tostring] | join("")),
+    (.argv | list), (.env | list), (.raw_argv | list), (.unknown_reasons | list),
+    (if .git == null then 0
+     else 1, (.git.sub // ""), (.git.sub_dynamic | bit), .git.cwd, (.git.cwd_known | bit), (.git.cwd_alts // [] | list),
+       (.git.repo_override | bit),
+       (.git.args | list), (.git.config | list) end);
+def emit($status; $tool; $cmd; $cwd; $file; $segs):
+  ($status, $tool, $cmd, $cwd, $file, ($segs | tojson), ($segs | records), "END") | (tostring, "\u0000");
+def nul: tostring | contains("\u0000");
+
+$ARGS.named as $o
+| if $o.mode == "splice" then
+    input as $p | input as $n | input as $f | ($p | splice($n; $f)) as $segs | emit("ok"; ""; ""; ""; ""; $segs)
+  elif $o.mode == "hook" then
+    input as $h
+    | [inputs] as $rest
+    | if ($h | type) != "object" or ($h.tool_input | type | IN("object", "null") | not)
+        or (($h.tool_input.command // "") | type) != "string" or (($h.cwd // "") | type) != "string"
+        or ($h.tool_input.command // "" | nul) or ($h.cwd // "" | nul)
+      then emit("badinput"; ""; ""; ""; ""; [])
+      else
+        ($h.tool_name // "" | tostring) as $tool
+        | ($h.tool_input.command // "") as $cmd
+        | (if ($h.cwd // "") == "" then $o.pwd else $h.cwd end) as $cwd
+        | ($h.tool_input.file_path // $h.tool_input.notebook_path // "" | tostring) as $file
+        | if ($rest | last | .bp_shfmt_rc) != 0 or ($rest | length) != 2 then emit("parse"; $tool; $cmd; $cwd; $file; [])
+          else ($rest[0] | flat($cwd; $cwd | startswith("/"))) as $segs | emit("ok"; $tool; $cmd; $cwd; $file; $segs) end
+      end
+  else
+    [inputs] as $rest
+    | if ($rest | last | .bp_shfmt_rc) != 0 or ($rest | length) != 2 then emit("parse"; ""; ""; $o.cwd; ""; [])
+      else ($rest[0] | flat($o.cwd; $o.known == "true")) as $segs | emit("ok"; ""; ""; $o.cwd; ""; $segs) end
+  end
