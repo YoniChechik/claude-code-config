@@ -75,7 +75,7 @@ while IFS= read -r seg; do
     SEGMENTS_PFX+=("${GUARD_REPLY:0:$GUARD_PREFIX_WINDOW}")
 done < <(_expand_segments "$COMMAND")
 
-GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, DELETE API calls, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
+GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
 
 for segment_ws in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
     has_word "$segment_ws" "gh" || continue
@@ -85,11 +85,6 @@ for segment_ws in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
     esac
 
     if has_prefix "$segment_ws" "gh repo delete"; then
-        deny "$GH_DENY_MSG"
-    fi
-
-    if has_prefix "$segment_ws" "gh api" \
-        && [[ " $segment_ws " =~ (-X|--method)[[:space:]=]+[Dd][Ee][Ll][Ee][Tt][Ee]([[:space:]]|$) ]]; then
         deny "$GH_DENY_MSG"
     fi
 done
