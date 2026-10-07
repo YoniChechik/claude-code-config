@@ -729,19 +729,25 @@ log_lines() {
     grep -c '' "$HOOK_LOG"
 }
 
-@test "every skip path writes exactly one hook_log line" {
+@test "every skipped real candidate writes exactly one skip line" {
     local before after cmd
-    for cmd in "ls -la" "git push --help" "git push" "git push --delete origin feat-x" "gh pr merge 1 2" "echo \"git push\" | tee log" "rtk"; do
+    for cmd in "git push --help" "git push" "git push --delete origin feat-x" "gh pr merge 1 2" "gh pr create --head other"; do
         before=$(log_lines)
         case "$cmd" in "git push") fire "$cmd" 1 >/dev/null ;; *) fire "$cmd" >/dev/null ;; esac
         after=$(log_lines)
         assert_eq $((before + 1)) "$after" || { echo "cmd: $cmd" >&2; return 1; }
         tail -1 "$HOOK_LOG" | grep -q " skip: " || { echo "no skip line for: $cmd" >&2; return 1; }
     done
-    before=$(log_lines)
+}
+
+@test "non-candidates write no log line" {
+    local cmd
+    for cmd in "ls -la" "git status" "echo \"git push\" | tee log" "git commit -m 'run gh pr merge later'" "rtk"; do
+        fire "$cmd" >/dev/null
+        [ ! -s "$HOOK_LOG" ] || { echo "logged for: $cmd" >&2; cat "$HOOK_LOG" >&2; return 1; }
+    done
     fire "git push" 0 "" "" "Write" >/dev/null
-    assert_eq $((before + 1)) "$(log_lines)"
-    assert_contains "skip: not a Bash tool call" "$(tail -1 "$HOOK_LOG")"
+    [ ! -s "$HOOK_LOG" ]
 }
 
 @test "a non-Bash tool call never triggers" {

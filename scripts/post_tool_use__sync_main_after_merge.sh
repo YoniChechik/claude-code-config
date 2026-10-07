@@ -3,19 +3,19 @@
 HOOK_DIR=.
 [[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
 
-source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
-source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
-
 IFS= read -r -d '' input
 
 case "$input" in
     *gh*pr*merge*) ;;
-    *) skip "no candidate substring" ;;
+    *) exit 0 ;;
 esac
 
-bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
-[ "$BP_TOOL" = "Bash" ] || skip "not a Bash tool call"
-bp_find gh pr merge || skip "no gh pr merge command"
+source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
+source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
+
+bp_hook_prepare "$input" || skip "parse failed: $BP_ERR"
+[ "$BP_TOOL" = "Bash" ] || exit 0
+bp_find gh pr merge || exit 0
 
 cwd=""
 for i in "${BP_MATCHES[@]}"; do

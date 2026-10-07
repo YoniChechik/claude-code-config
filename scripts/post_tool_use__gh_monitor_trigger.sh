@@ -4,21 +4,21 @@
 HOOK_DIR=.
 [[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
 
-source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
-source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
-
 IFS= read -r -d '' input
 
 case "$input" in
     *git*push* | *gh*pr*create* | *gh*pr*merge*) ;;
-    *) skip "no candidate substring" ;;
+    *) exit 0 ;;
 esac
+
+source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
+source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
 
 mapfile -d '' resp < <(printf '%s' "$input" | jq -j '(.tool_name // "" | tostring), "\u0000",
     (.tool_response.exit_code // "" | tostring), "\u0000",
     ((.tool_response.stdout // "" | tostring) + "\n" + (.tool_response.stderr // "" | tostring)), "\u0000"' 2>/dev/null)
 ((${#resp[@]} == 3)) || skip "bad hook input JSON"
-[[ ${resp[0]} == Bash ]] || skip "not a Bash tool call"
+[[ ${resp[0]} == Bash ]] || exit 0
 EXIT_CODE=${resp[1]}
 OUTPUT=${resp[2]}
 
@@ -27,7 +27,7 @@ bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
 bp_find git push && PUSHES=("${BP_MATCHES[@]}") || PUSHES=()
 bp_find gh pr create && CREATES=("${BP_MATCHES[@]}") || CREATES=()
 bp_find gh pr merge && MERGES=("${BP_MATCHES[@]}") || MERGES=()
-((${#PUSHES[@]} + ${#CREATES[@]} + ${#MERGES[@]} > 0)) || skip "no git push, gh pr create or gh pr merge command"
+((${#PUSHES[@]} + ${#CREATES[@]} + ${#MERGES[@]} > 0)) || exit 0
 
 run_timeout() {
     local secs="$1"

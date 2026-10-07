@@ -56,9 +56,9 @@ Until `shfmt` is on the `PATH`, the PreToolUse guards ask before every Bash comm
 
 **How the hooks use it.**
 
-Every skip, fail-closed ask and guard decision is one line in `${CLAUDE_HOOK_LOG_DIR:-~/.claude/logs}/hooks.log`.
+Every fail-closed path, guard decision and skipped real candidate is one line in `${CLAUDE_HOOK_LOG_DIR:-~/.claude/logs}/hooks.log`. The PostToolUse hooks log nothing for a command that is not a candidate: the cheap substring filter, a non-Bash tool and a parse that finds no `git push`, `gh pr create` or `gh pr merge` all exit silently.
 
 - `pre_tool_use__dispatch.sh` parses once and runs both guards on that parse. Any parse failure asks (`GUARD_FAIL_CLOSED`). Non-Bash tools skip the parse, so a missing `shfmt` never blocks an `Edit`.
 - `pre_tool_use__permission_guard.sh` and `pre_tool_use__base_dir_protect.sh` match argv, so quoted text and quoted heredoc bodies are never commands. An `unknown` segment asks unless its reason is `source`, or `indirect exec` with no guarded tool in its words. The base-dir guard denies a git write in a subshell, substitution, function or nested shell, denies `--git-dir`/`--work-tree`, allows a write only when every `cwd_alts` entry is a worktree, and asks when some candidate is not.
-- `post_tool_use__gh_monitor_trigger.sh` finds `git push`, `gh pr create` and `gh pr merge` anywhere in a compound command. When `A` is not set it needs evidence: `HEAD == @{push}` for a push, a PR URL in the output for a create, PR state `MERGED` for a merge (always). Every skip writes one `skip:` line, and duplicate watchers for the same branch collapse into one.
+- `post_tool_use__gh_monitor_trigger.sh` finds `git push`, `gh pr create` and `gh pr merge` anywhere in a compound command. When `A` is not set it needs evidence: `HEAD == @{push}` for a push, a PR URL in the output for a create, PR state `MERGED` for a merge (always). Every skipped candidate writes one `skip:` line, and duplicate watchers for the same branch collapse into one.
 - `post_tool_use__sync_main_after_merge.sh` syncs only after a parsed `gh pr merge`, from that segment's directory.
