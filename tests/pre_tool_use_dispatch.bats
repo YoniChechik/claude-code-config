@@ -22,6 +22,9 @@ setup() {
     REPO="rep""o"
     DEL="del""ete"
     C="com""mit"
+
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    HOOK_LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
 }
 
 # decide <payload-json> -> ALLOW | ASK | DENY
@@ -115,7 +118,7 @@ dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
     cp "$(SCRIPTS_DIR)"/pre_tool_use__dispatch.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__base_dir_protect.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__permission_guard.sh "$dir/"
-    # _shell_command_guard.sh deliberately NOT copied.
+    # _hook_log.sh, _bashparse.sh and bashparse.jq deliberately NOT copied.
     assert_decision ASK "$(dispatch_in "$dir" "$WT" "$GH $REPO $DEL foo/bar")"
 }
 
@@ -131,7 +134,7 @@ dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
 @test "ask: a sub-check that writes to stderr is not trusted to have passed" {
     local dir="$BATS_TEST_TMPDIR/noisy"
     mkdir -p "$dir"
-    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     # A guard that leaks a diagnostic hit something it did not expect, so its
     # silence on stdout proves nothing. Injected at the top, because the script
     # exits long before its last line on a clean pass.
@@ -144,7 +147,7 @@ echo "unexpected diagnostic" >&2
 @test "ask: a sub-check that exits non-zero is not trusted to have passed" {
     local dir="$BATS_TEST_TMPDIR/rc"
     mkdir -p "$dir"
-    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 exit 42
 ' "$dir/pre_tool_use__permission_guard.sh"
@@ -154,7 +157,7 @@ exit 42
 @test "ask: a sub-check emitting an unrecognizable decision is not forwarded" {
     local dir="$BATS_TEST_TMPDIR/junk"
     mkdir -p "$dir"
-    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 printf "%s" "not json at all"; exit 0
 ' "$dir/pre_tool_use__permission_guard.sh"
@@ -166,7 +169,7 @@ printf "%s" "not json at all"; exit 0
     # "nothing matched" path, which is silence plus exit 0.
     local dir="$BATS_TEST_TMPDIR/healthy"
     mkdir -p "$dir"
-    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     assert_decision ALLOW "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
 
@@ -189,7 +192,7 @@ printf "%s" "not json at all"; exit 0
 @test "a sub-check writing stderr AND a decision on stdout is still caught as a failure" {
     local dir="$BATS_TEST_TMPDIR/both"
     mkdir -p "$dir"
-    cp "$(SCRIPTS_DIR)"/*.sh "$dir/"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 echo boom >&2
 ' "$dir/pre_tool_use__base_dir_protect.sh"
@@ -205,4 +208,105 @@ echo boom >&2
     }
     assert_decision DENY "$(decide_nb "$BASE" "$BASE/nb.ipynb")"
     assert_decision ALLOW "$(decide_nb "$WT" "$WT/nb.ipynb")"
+}
+
+STUBS() { echo "$BATS_TEST_TMPDIR/stubs"; }
+
+stub_bin() { # <name> <body>
+    mkdir -p "$(STUBS)"
+    printf '#!/bin/bash\n%s\n' "$2" >"$(STUBS)/$1"
+    chmod +x "$(STUBS)/$1"
+}
+
+link_bin() { # <name>
+    mkdir -p "$(STUBS)"
+    ln -sf "$(command -v "$1")" "$(STUBS)/$1"
+}
+
+dispatch_with_path() { # <PATH> <payload-json> [env assignments...] -> ALLOW | ASK | DENY
+    local path="$1" payload="$2" out
+    shift 2
+    out=$(printf '%s' "$payload" | env PATH="$path" "$@" "$BASH" "$HOOK")
+    if [ -z "$out" ]; then
+        echo "ALLOW"
+    else
+        printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z'
+    fi
+}
+
+bash_payload() { jq -nc --arg cwd "$1" --arg cmd "$2" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}'; }
+
+assert_logged() { # <substring>
+    grep -qF -- "$1" "$HOOK_LOG" && return 0
+    echo "hooks.log does not contain: $1" >&2
+    cat "$HOOK_LOG" >&2 2>/dev/null
+    return 1
+}
+
+@test "fail closed: shfmt missing from PATH asks instead of allowing a would-be deny" {
+    link_bin jq
+    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
+    assert_logged "shfmt not installed"
+}
+
+@test "fail closed: shfmt missing never blocks a non-Bash tool, which needs no parse" {
+    link_bin jq
+    local payload
+    payload=$(jq -nc --arg cwd "$WT" --arg fp "$WT/README.md" '{tool_name:"Write",cwd:$cwd,tool_input:{file_path:$fp}}')
+    assert_decision ALLOW "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$payload")"
+}
+
+@test "fail closed: hook input that is not JSON asks" {
+    assert_decision ASK "$(decide '{"tool_name":"Bash","tool_input":{"command":')"
+    assert_logged "bad hook input JSON"
+}
+
+@test "fail closed: hook input whose command is not a string asks" {
+    assert_decision ASK "$(decide '{"tool_name":"Bash","cwd":"/","tool_input":{"command":["git","push"]}}')"
+}
+
+@test "fail closed: the flattening jq failing asks" {
+    link_bin shfmt
+    local real_jq
+    real_jq=$(command -v jq)
+    stub_bin jq "case \"\$*\" in *bashparse.jq*) echo 'jq: error: boom' >&2; exit 5 ;; esac; exec $real_jq \"\$@\""
+    assert_decision ASK "$(dispatch_with_path "$(STUBS):$PATH" "$(bash_payload "$WT" "echo hello")")"
+    assert_logged "jq failed"
+}
+
+@test "fail closed: a hung shfmt times out and asks" {
+    link_bin jq
+    stub_bin shfmt 'exec sleep 30'
+    local start=$SECONDS
+    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")" BASHPARSE_TIMEOUT=1)"
+    [ $((SECONDS - start)) -lt 10 ]
+    assert_logged "timeout: parse exceeded 1s"
+}
+
+@test "fail closed: shfmt exiting nonzero asks" {
+    link_bin jq
+    stub_bin shfmt 'echo "1:1: something broke" >&2; exit 1'
+    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")")"
+    assert_logged "parse error: 1:1: something broke"
+}
+
+@test "fail closed: a command bash cannot parse asks" {
+    assert_decision ASK "$(bash_decide "$WT" "echo \"unterminated")"
+    assert_logged "parse error"
+}
+
+@test "the dispatcher parses once and both guards still decide from that one parse" {
+    local calls="$BATS_TEST_TMPDIR/shfmt_calls" real_shfmt
+    real_shfmt=$(command -v shfmt)
+    stub_bin shfmt "echo x >>$calls; exec $real_shfmt \"\$@\""
+    assert_decision DENY "$(dispatch_with_path "$(STUBS):$PATH" "$(bash_payload "$BASE" "git $C -am y && $GH repo archive foo/bar")")"
+    [ "$(wc -l <"$calls" | tr -d ' ')" = "1" ]
+}
+
+@test "an inherited BP_READY=1 cannot make the dispatcher or a guard skip the parse" {
+    local out
+    out=$(bash_payload "$WT" "$GH $REPO $DEL foo/bar" | BP_READY=1 BP_RC=0 BP_TOOL=Write bash "$HOOK" | jq -r .hookSpecificOutput.permissionDecision)
+    assert_decision deny "$out"
+    out=$(bash_payload "$WT" "$GH $REPO $DEL foo/bar" | BP_READY=1 BP_RC=0 BP_TOOL=Write bash "$(SCRIPTS_DIR)/pre_tool_use__permission_guard.sh" | jq -r .hookSpecificOutput.permissionDecision)
+    assert_decision deny "$out"
 }

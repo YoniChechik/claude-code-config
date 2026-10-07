@@ -6,11 +6,6 @@
 
 set -euo pipefail
 
-# Config-dir override matches the convention already established in
-# _shell_command_guard.sh, since this file is meant to be symlinked into
-# another tool's config directory rather than copied, and that tool's own
-# shared-scripts directory doesn't necessarily sit at the same RELATIVE path
-# from this file (e.g. Claude Code's scripts/ vs. a per-extension layout).
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 # --- Step 1: Fetch latest state from origin ---

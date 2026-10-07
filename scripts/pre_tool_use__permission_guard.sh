@@ -1,25 +1,19 @@
 #!/bin/bash
 
-emit_decision() {
-    jq -nc --arg d "$1" --arg r "$2" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:$d,permissionDecisionReason:$r}}'
-}
+GUARD_DIR=.
+[[ ${BASH_SOURCE[0]} == */* ]] && GUARD_DIR=${BASH_SOURCE[0]%/*}
+GUARD_INTERNAL_ERROR_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"GUARD_INTERNAL_ERROR: the permission guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_bashparse.sh."}}'
 
-GUARD_INTERNAL_ERROR_MSG="GUARD_INTERNAL_ERROR: the permission guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_shell_command_guard.sh."
-
-INPUT=$(cat)
-
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-[ "$TOOL_NAME" = "Bash" ] || exit 0
-
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-[ -n "$COMMAND" ] || exit 0
-
-# shellcheck source=./_shell_command_guard.sh
-if ! source "$(dirname "${BASH_SOURCE[0]}")/_shell_command_guard.sh" 2>/dev/null \
-    || ! declare -F _expand_segments >/dev/null 2>&1; then
-    emit_decision ask "$GUARD_INTERNAL_ERROR_MSG"
-    exit 0
+if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
+    IFS= read -r -d '' INPUT
+    if ! source "$GUARD_DIR/_hook_log.sh" 2>/dev/null || ! source "$GUARD_DIR/_bashparse.sh" 2>/dev/null; then
+        printf '%s\n' "$GUARD_INTERNAL_ERROR_JSON"
+        exit 0
+    fi
+    bp_hook_prepare "$INPUT"
 fi
+((BP_RC == 0)) || fail_closed "the permission guard could not parse the command ($BP_ERR)"
+[[ $BP_TOOL == Bash ]] || exit 0
 
 SUPABASE_PROD_REFS=(pnseoblfzeqiczmmimnr ampdktckxcbdajezxkul)
 PULUMI_PROD_STACK_NAMES=(production prod mirror main)
@@ -48,7 +42,10 @@ ask() { record_verdict ask "$1"; }
 
 deny() { record_verdict deny "$1"; }
 
-GUARD_PREFIX_WINDOW=160
+GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
+GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
+GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|curl|wget|http|xh|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
+DYN=$'\xef\xbf\xbd'
 
 has_prefix() {
     case "$1" in
@@ -57,37 +54,55 @@ has_prefix() {
     return 1
 }
 
-has_word() {
-    case " $1 " in
-        *" $2 "*) return 0 ;;
-    esac
-    return 1
+env_get() {
+    local e found=1
+    REPLY=""
+    for e in ${SEG_ENV[@]+"${SEG_ENV[@]}"}; do
+        case "$e" in
+            "$1="*) REPLY="${e#*=}"; found=0 ;;
+        esac
+    done
+    if [ "$found" = "1" ] && [ -n "${!1+x}" ]; then
+        REPLY="${!1}"
+        found=0
+    fi
+    REPLY="${REPLY//$DYN/\$}"
+    return "$found"
 }
 
-SEGMENTS=()
-SEGMENTS_WS=()
-SEGMENTS_PFX=()
-while IFS= read -r seg; do
-    [ -z "$seg" ] && continue
-    SEGMENTS+=("$seg")
-    _ws_collapse "$seg"
-    SEGMENTS_WS+=("$GUARD_REPLY")
-    SEGMENTS_PFX+=("${GUARD_REPLY:0:$GUARD_PREFIX_WINDOW}")
-done < <(_expand_segments "$COMMAND")
-
-GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
-
-for segment_ws in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
-    has_word "$segment_ws" "gh" || continue
-
-    case " $segment_ws " in
-        *" --admin "*|*" --admin="*|*"=--admin "*) deny "$GH_DENY_MSG" ;;
-    esac
-
-    if has_prefix "$segment_ws" "gh repo delete"; then
-        deny "$GH_DENY_MSG"
+abs_dir() {
+    local cwd="$1" dir="$2"
+    REPLY=""
+    if [[ "$dir" == /* ]]; then
+        REPLY="$dir"
+    elif [ -n "$cwd" ]; then
+        REPLY="$cwd/$dir"
     fi
-done
+}
+
+TOOL_ARGS=()
+tool_args() {
+    local name="$1" i=0 n=${#W[@]} tok
+    TOOL_ARGS=()
+    case "${W[0]:-}" in
+        npx|bunx|pnpm|yarn|npm)
+            i=1
+            while [ "$i" -lt "$n" ]; do
+                tok="${W[$i]}"
+                case "$tok" in
+                    "$name"|"$name"@*) break ;;
+                    exec|dlx|x|--|-*) i=$((i + 1)) ;;
+                    *) return 1 ;;
+                esac
+            done
+            [ "$i" -lt "$n" ] || return 1
+            ;;
+        "$name") ;;
+        *) return 1 ;;
+    esac
+    TOOL_ARGS=("${W[@]:i+1}")
+    return 0
+}
 
 GH_PATTERNS=(
     "gh repo archive"
@@ -125,22 +140,6 @@ GH_PATTERNS=(
     "gh auth logout"
     "gh alias delete"
 )
-
-for pattern in "${GH_PATTERNS[@]}"; do
-    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-        if has_prefix "$segment_pfx" "$pattern"; then
-            ask "gh command requires confirmation."
-        fi
-    done
-done
-
-for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
-    if [[ "$segment" =~ (^|[[:space:]])(curl|wget|http|xh)([[:space:]]) ]] && \
-       [[ "$segment" =~ (-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)) ]] && \
-       [[ "$segment" =~ api\.github\.com/repos/sunsay-ltd ]]; then
-        deny "Blocked: HTTP mutation (POST/PUT/PATCH/DELETE) against api.github.com/repos/sunsay-ltd. Use the gh CLI with explicit user approval — do not bypass via raw HTTP."
-    fi
-done
 
 GCLOUD_PATTERNS=(
     "gcloud projects delete"
@@ -234,170 +233,10 @@ GCLOUD_PATTERNS=(
     "gcloud services disable"
 )
 
-for pattern in "${GCLOUD_PATTERNS[@]}"; do
-    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-        if has_prefix "$segment_pfx" "$pattern"; then
-            ask "gcloud command requires confirmation."
-        fi
-    done
-done
-
-GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
-for segment in ${SEGMENTS[@]+"${SEGMENTS[@]}"}; do
-    if [[ "$segment" =~ gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
-       [[ "$segment" =~ --project[[:space:]]*=?[[:space:]]*${GCLOUD_RUN_PROTECTED_PROJECTS} ]]; then
-        deny "Blocked: gcloud run revision-creating verb (update/replace/deploy/create) against a protected project (production-490411 / staging-480220 / mirror-production-496017). Requires explicit user execution — do not retry."
-    fi
-done
-
 BQ_PATTERNS=(
     "bq rm"
     "bq truncate"
 )
-
-for pattern in "${BQ_PATTERNS[@]}"; do
-    for segment_pfx in ${SEGMENTS_PFX[@]+"${SEGMENTS_PFX[@]}"}; do
-        if has_prefix "$segment_pfx" "$pattern"; then
-            ask "bq command requires confirmation."
-        fi
-    done
-done
-
-CTX_SEG=()
-CTX_CWD=()
-CTX_ENV=()
-
-ctx_resolve_cd() {
-    local cwd="$1" target="$2" candidate resolved
-    target="${target#"${target%%[![:space:]]*}"}"
-    target="${target%"${target##*[![:space:]]}"}"
-    case "$target" in
-        ""|-|--|'$'*|'"$'*) GUARD_REPLY="$cwd"; return ;;
-        \"*\") target="${target#\"}"; target="${target%\"}" ;;
-        \'*\') target="${target#\'}"; target="${target%\'}" ;;
-    esac
-    _guard_expand_home "$target"
-    target="$GUARD_REPLY"
-    if [[ "$target" == /* ]]; then candidate="$target"; else candidate="$cwd/$target"; fi
-    resolved=$(cd "$candidate" 2>/dev/null && pwd) || resolved="$cwd"
-    GUARD_REPLY="$resolved"
-}
-
-ctx_add() {
-    local seg="$1" cwd="$2" env="$3" i
-    for ((i = 0; i < ${#CTX_SEG[@]}; i++)); do
-        if [ "${CTX_SEG[$i]}" = "$seg" ] && [ "${CTX_CWD[$i]}" = "$cwd" ] && [ "${CTX_ENV[$i]}" = "$env" ]; then
-            return
-        fi
-    done
-    CTX_SEG+=("$seg")
-    CTX_CWD+=("$cwd")
-    CTX_ENV+=("$env")
-}
-
-ctx_build() {
-    local session_cwd="$1" cwd split piece rest tok val env seg i known
-    cwd="$session_cwd"
-    split="${COMMAND//;/$'\n'}"
-    split="${split//&/$'\n'}"
-    split="${split//|/$'\n'}"
-    while IFS= read -r piece; do
-        piece="${piece#"${piece%%[![:space:]]*}"}"
-        piece="${piece%"${piece##*[![:space:]]}"}"
-        [ -z "$piece" ] && continue
-        case "$piece" in
-            cd|pushd|cd[[:space:]]*|pushd[[:space:]]*)
-                rest="${piece#cd}"
-                rest="${rest#pushd}"
-                ctx_resolve_cd "$cwd" "$rest"
-                cwd="$GUARD_REPLY"
-                continue
-                ;;
-        esac
-        env=""
-        rest="$piece"
-        while [ -n "$rest" ]; do
-            tok="${rest%%[[:space:]]*}"
-            if [[ "$tok" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-                val="${tok#*=}"
-                val="${val#[\"\']}"
-                val="${val%[\"\']}"
-                env+="${tok%%=*}=$val"$'\n'
-            elif [ "$tok" != "env" ]; then
-                break
-            fi
-            if [ "$tok" = "$rest" ]; then rest=""; else rest="${rest#*[[:space:]]}"; fi
-            rest="${rest#"${rest%%[![:space:]]*}"}"
-        done
-        while IFS= read -r seg; do
-            [ -z "$seg" ] && continue
-            _ws_collapse "$seg"
-            ctx_add "$GUARD_REPLY" "$cwd" "$env"
-        done < <(_expand_segments "$piece")
-    done < <(printf '%s\n' "$split")
-    for seg in ${SEGMENTS_WS[@]+"${SEGMENTS_WS[@]}"}; do
-        known=0
-        for ((i = 0; i < ${#CTX_SEG[@]}; i++)); do
-            [ "${CTX_SEG[$i]}" = "$seg" ] && { known=1; break; }
-        done
-        [ "$known" = "1" ] || ctx_add "$seg" "$session_cwd" ""
-    done
-}
-
-ctx_env_get() {
-    local block="$1" name="$2" line found=1 val=""
-    while [ -n "$block" ]; do
-        line="${block%%$'\n'*}"
-        block="${block#*$'\n'}"
-        case "$line" in
-            "$name="*) val="${line#*=}"; found=0 ;;
-        esac
-    done
-    if [ "$found" = "1" ] && [ -n "${!name+x}" ]; then
-        val="${!name}"
-        found=0
-    fi
-    GUARD_REPLY="$val"
-    return "$found"
-}
-
-ctx_abs_dir() {
-    local cwd="$1" dir="$2"
-    _guard_expand_home "$dir"
-    dir="$GUARD_REPLY"
-    [[ "$dir" == /* ]] || dir="$cwd/$dir"
-    GUARD_REPLY="$dir"
-}
-
-TOOL_ARGS=()
-tool_args() {
-    local seg="$1" name="$2" i=0 n tok
-    local -a toks
-    set -f
-    # shellcheck disable=SC2206
-    toks=($seg)
-    set +f
-    n=${#toks[@]}
-    TOOL_ARGS=()
-    case "${toks[0]:-}" in
-        npx|bunx|pnpm|yarn|npm)
-            i=1
-            while [ "$i" -lt "$n" ]; do
-                tok="${toks[$i]}"
-                case "$tok" in
-                    "$name"|"$name"@*) break ;;
-                    exec|dlx|x|--|-*) i=$((i + 1)) ;;
-                    *) return 1 ;;
-                esac
-            done
-            [ "$i" -lt "$n" ] || return 1
-            ;;
-        "$name") ;;
-        *) return 1 ;;
-    esac
-    TOOL_ARGS=("${toks[@]:i+1}")
-    return 0
-}
 
 is_prod_supabase_ref() {
     local r
@@ -419,7 +258,7 @@ supabase_find_ref_file() {
     local dir="$1" walk="$2"
     while :; do
         if [ -f "$dir/supabase/.temp/project-ref" ]; then
-            GUARD_REPLY="$dir/supabase/.temp/project-ref"
+            REPLY="$dir/supabase/.temp/project-ref"
             return 0
         fi
         [ "$walk" = "1" ] || return 1
@@ -429,37 +268,37 @@ supabase_find_ref_file() {
     done
 }
 
-SB_REF=""
 supabase_resolve_ref() {
-    local flag_ref="$1" workdir="$2" cwd="$3" env="$4" start walk=1 ref
+    local flag_ref="$1" workdir="$2" cwd="$3" start walk=1 ref
     SB_REF=""
     if [ -n "$flag_ref" ]; then
         SB_REF="$flag_ref"
         return
     fi
-    if ctx_env_get "$env" SUPABASE_PROJECT_ID && [ -n "$GUARD_REPLY" ]; then
-        SB_REF="$GUARD_REPLY"
+    if env_get SUPABASE_PROJECT_ID && [ -n "$REPLY" ]; then
+        SB_REF="$REPLY"
         return
     fi
-    if [ -z "$workdir" ] && ctx_env_get "$env" SUPABASE_WORKDIR && [ -n "$GUARD_REPLY" ]; then
-        workdir="$GUARD_REPLY"
+    if [ -z "$workdir" ] && env_get SUPABASE_WORKDIR && [ -n "$REPLY" ]; then
+        workdir="$REPLY"
     fi
     if [ -n "$workdir" ]; then
-        ctx_abs_dir "$cwd" "$workdir"
-        start="$GUARD_REPLY"
+        abs_dir "$cwd" "$workdir"
+        start="$REPLY"
         walk=0
     else
         start="$cwd"
     fi
+    [ -n "$start" ] || return
     supabase_find_ref_file "$start" "$walk" || return
-    ref=$(tr -d '[:space:]' <"$GUARD_REPLY" 2>/dev/null)
+    ref=$(tr -d '[:space:]' <"$REPLY" 2>/dev/null)
     SB_REF="$ref"
 }
 
 supabase_remote_verdict() {
-    local label="$1" flag_ref="$2" workdir="$3" cwd="$4" env="$5"
+    local label="$1" flag_ref="$2" workdir="$3" cwd="$4"
     case "$flag_ref" in *'$'*) ask "\`$label\` targets a project ref given as a shell variable; the guard cannot tell whether it is production."; return ;; esac
-    supabase_resolve_ref "$flag_ref" "$workdir" "$cwd" "$env"
+    supabase_resolve_ref "$flag_ref" "$workdir" "$cwd"
     if [ -z "$SB_REF" ]; then
         ask "\`$label\` targets a remote Supabase project the guard could not resolve (no --project-ref, SUPABASE_PROJECT_ID or supabase/.temp/project-ref). Confirm it is not production."
     elif is_prod_supabase_ref "$SB_REF"; then
@@ -471,8 +310,6 @@ supabase_remote_verdict() {
 
 supabase_db_url_verdict() {
     local label="$1" url="$2" host
-    url="${url#[\"\']}"
-    url="${url%[\"\']}"
     if text_has_prod_supabase_ref "$url"; then
         deny "Blocked: \`$label\` --db-url points at the PRODUCTION Supabase database. Production changes must be run manually by the user — do not retry."
         return
@@ -497,8 +334,8 @@ supabase_db_url_verdict() {
 }
 
 supabase_decide() {
-    local seg="$1" cwd="$2" env="$3"
-    tool_args "$seg" supabase || return 0
+    local cwd="$1"
+    tool_args supabase || return 0
     local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=()
     local n=${#args[@]} i=0 tok workdir="" db_url="" has_db_url=0 has_local=0 has_linked=0 has_proxy=0 flag_ref="" dry=0
     while [ "$i" -lt "$n" ]; do
@@ -524,10 +361,6 @@ supabase_decide() {
         esac
         i=$((i + 1))
     done
-    flag_ref="${flag_ref#[\"\']}"
-    flag_ref="${flag_ref%[\"\']}"
-    workdir="${workdir#[\"\']}"
-    workdir="${workdir%[\"\']}"
     local c1="${pos[0]:-}" c2="${pos[1]:-}" label mode=""
     label="supabase $c1${c2:+ $c2}"
     case "$c1" in
@@ -551,7 +384,7 @@ supabase_decide() {
         esac
     fi
     if [ "$mode" = "api" ]; then
-        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd"
         return 0
     fi
     if [ "$has_db_url" = "1" ]; then
@@ -560,15 +393,15 @@ supabase_decide() {
     fi
     [ "$has_local" = "1" ] && return 0
     if [ "$has_linked" = "1" ] || [ "$has_proxy" = "1" ]; then
-        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd"
         return 0
     fi
     case "$mode" in
         default_local) return 0 ;;
-        default_linked) supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env" ;;
+        default_linked) supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" ;;
         gen_types)
             if [ -n "$flag_ref" ]; then
-                supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$env"
+                supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd"
             else
                 ask "\`$label\` has no target flag; pass --local for the local DB or --project-id/--linked for a remote project."
             fi
@@ -588,8 +421,8 @@ is_prod_pulumi_stack() {
 pulumi_find_project() {
     local dir="$1"
     while :; do
-        if [ -f "$dir/Pulumi.yaml" ]; then GUARD_REPLY="$dir/Pulumi.yaml"; return 0; fi
-        if [ -f "$dir/Pulumi.yml" ]; then GUARD_REPLY="$dir/Pulumi.yml"; return 0; fi
+        if [ -f "$dir/Pulumi.yaml" ]; then REPLY="$dir/Pulumi.yaml"; return 0; fi
+        if [ -f "$dir/Pulumi.yml" ]; then REPLY="$dir/Pulumi.yml"; return 0; fi
         [ "$dir" = "/" ] || [ -z "$dir" ] && return 1
         dir="${dir%/*}"
         [ -n "$dir" ] || dir="/"
@@ -606,11 +439,11 @@ sha1_hex() {
 
 PULUMI_WS_STACKS=()
 pulumi_workspace_stacks() {
-    local yaml="$1" backend="$2" env="$3" name home path phys hash file stacks line
+    local yaml="$1" backend="$2" name home path phys hash file stacks line
     PULUMI_WS_STACKS=()
     name=$(sed -nE 's/^name:[[:space:]]*["'\'']?([^"'\''[:space:]#]+).*/\1/p' "$yaml" 2>/dev/null | head -1)
     [ -n "$name" ] || return 1
-    if ctx_env_get "$env" PULUMI_HOME && [ -n "$GUARD_REPLY" ]; then home="$GUARD_REPLY"; else home="$HOME/.pulumi"; fi
+    if env_get PULUMI_HOME && [ -n "$REPLY" ]; then home="$REPLY"; else home="$HOME/.pulumi"; fi
     phys="$(cd "${yaml%/*}" 2>/dev/null && pwd -P)/${yaml##*/}"
     for path in "$yaml" "$phys"; do
         hash=$(sha1_hex "$path")
@@ -643,8 +476,6 @@ pulumi_targets_tight() {
         return 1
     fi
     for t in "${targets[@]}"; do
-        t="${t%\"}"; t="${t#\"}"
-        t="${t%\'}"; t="${t#\'}"
         if [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::pulumi:pulumi:Stack:: ]]; then
             PT_REASON="--target points at the Stack root URN ($t) — equivalent to whole-stack. Target individual resources instead."
             return 1
@@ -679,8 +510,8 @@ pulumi_esc_verdict() {
 }
 
 pulumi_decide() {
-    local seg="$1" cwd="$2" env="$3"
-    tool_args "$seg" pulumi || return 0
+    local cwd="$1"
+    tool_args pulumi || return 0
     local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=() targets=() extra_stacks=()
     local n=${#args[@]} i=0 tok val cwd_flag="" stack="" preview_only=0 create=0 target_dependents=0 esc_env=""
     while [ "$i" -lt "$n" ]; do
@@ -769,15 +600,14 @@ pulumi_decide() {
     [ "$kind" = "stack" ] || return 0
 
     local projdir backend="" yaml="" s
+    projdir="$cwd"
     if [ -n "$cwd_flag" ]; then
-        ctx_abs_dir "$cwd" "$cwd_flag"
-        projdir="$GUARD_REPLY"
-    else
-        projdir="$cwd"
+        abs_dir "$cwd" "$cwd_flag"
+        projdir="$REPLY"
     fi
-    pulumi_find_project "$projdir" && yaml="$GUARD_REPLY"
-    if ctx_env_get "$env" PULUMI_BACKEND_URL && [ -n "$GUARD_REPLY" ]; then
-        backend="$GUARD_REPLY"
+    pulumi_find_project "$projdir" && yaml="$REPLY"
+    if env_get PULUMI_BACKEND_URL && [ -n "$REPLY" ]; then
+        backend="$REPLY"
     elif [ -n "$yaml" ]; then
         backend=$(awk '/^backend:/{b=1;next} b&&/^[^[:space:]]/{b=0} b&&/url:/{sub(/.*url:[[:space:]]*/,""); gsub(/["\047]/,""); print; exit}' "$yaml" 2>/dev/null)
     fi
@@ -795,9 +625,9 @@ pulumi_decide() {
         stacks+=("$stack")
     elif [ "$c1" = "stack" ] && { [ "$c2" = "rm" ] || [ "$c2" = "select" ]; } && [ -n "$c3" ]; then
         stacks+=("$c3")
-    elif ctx_env_get "$env" PULUMI_STACK && [ -n "$GUARD_REPLY" ]; then
-        stacks+=("$GUARD_REPLY")
-    elif [ -n "$yaml" ] && pulumi_workspace_stacks "$yaml" "$backend" "$env"; then
+    elif env_get PULUMI_STACK && [ -n "$REPLY" ]; then
+        stacks+=("$REPLY")
+    elif [ -n "$yaml" ] && pulumi_workspace_stacks "$yaml" "$backend"; then
         stacks+=("${PULUMI_WS_STACKS[@]}")
     fi
     if [ "$c1 $c2" = "stack rename" ] && [ -n "$c3" ]; then
@@ -837,20 +667,81 @@ pulumi_decide() {
     return 0
 }
 
-case "$COMMAND" in
-    *supabase*|*pulumi*)
-        SESSION_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-        [ -n "$SESSION_CWD" ] || SESSION_CWD="$PWD"
-        ctx_build "$SESSION_CWD"
-        for ((ctx_i = 0; ctx_i < ${#CTX_SEG[@]}; ctx_i++)); do
-            supabase_decide "${CTX_SEG[$ctx_i]}" "${CTX_CWD[$ctx_i]}" "${CTX_ENV[$ctx_i]}"
-            pulumi_decide "${CTX_SEG[$ctx_i]}" "${CTX_CWD[$ctx_i]}" "${CTX_ENV[$ctx_i]}"
-        done
-        ;;
-esac
+check_unknown() {
+    local r raw
+    for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
+        case "$r" in
+            source) ;;
+            "indirect exec")
+                printf -v raw '%s ' ${SEG_RAW[@]+"${SEG_RAW[@]}"}
+                if [[ "$raw" =~ $GUARDED_TOOLS_RE ]]; then
+                    ask "This command hands a guarded tool (${BASH_REMATCH[2]}) to xargs/find/parallel, so the guard cannot check it. Confirm it is safe."
+                fi
+                ;;
+            *) ask "The guard cannot see what part of this command runs ($r). Confirm it is safe." ;;
+        esac
+    done
+}
+
+check_segment() {
+    local j pattern text w
+    W=(${SEG_ARGV[@]+"${SEG_ARGV[@]}"})
+    for ((j = 0; j < ${#W[@]}; j++)); do
+        [ "${SEG_DYN:j:1}" = "1" ] && W[j]="${W[j]//$DYN/\$}"
+    done
+    [ -n "$SEG_CMD" ] && W[0]="$SEG_CMD"
+    text="${W[*]}"
+
+    case "$SEG_FLAGS" in *U*) check_unknown ;; esac
+
+    case "$SEG_CMD" in
+        gh)
+            for w in "${W[@]:1}"; do
+                case "$w" in
+                    --admin|--admin=*|*=--admin) deny "$GH_DENY_MSG" ;;
+                esac
+            done
+            has_prefix "$text" "gh repo delete" && deny "$GH_DENY_MSG"
+            for pattern in "${GH_PATTERNS[@]}"; do
+                has_prefix "$text" "$pattern" && ask "gh command requires confirmation."
+            done
+            ;;
+        curl|wget|http|xh)
+            if [[ "$text" =~ (-X[[:space:]]*|--request[[:space:]=]+)(POST|PUT|PATCH|DELETE)([[:space:]]|$) ]] && \
+               [[ "$text" =~ api\.github\.com/repos/sunsay-ltd ]]; then
+                deny "Blocked: HTTP mutation (POST/PUT/PATCH/DELETE) against api.github.com/repos/sunsay-ltd. Use the gh CLI with explicit user approval — do not retry via raw HTTP."
+            fi
+            ;;
+        gcloud)
+            for pattern in "${GCLOUD_PATTERNS[@]}"; do
+                has_prefix "$text" "$pattern" && ask "gcloud command requires confirmation."
+            done
+            if [[ "$text" =~ ^gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
+               [[ "$text" =~ --project[[:space:]]*=?[[:space:]]*${GCLOUD_RUN_PROTECTED_PROJECTS} ]]; then
+                deny "Blocked: gcloud run revision-creating verb (update/replace/deploy/create) against a protected project (production-490411 / staging-480220 / mirror-production-496017). Requires explicit user execution — do not retry."
+            fi
+            ;;
+        bq)
+            for pattern in "${BQ_PATTERNS[@]}"; do
+                has_prefix "$text" "$pattern" && ask "bq command requires confirmation."
+            done
+            ;;
+    esac
+
+    local cwd=""
+    [ "$SEG_CWD_KNOWN" = "1" ] && cwd="$SEG_CWD"
+    supabase_decide "$cwd"
+    pulumi_decide "$cwd"
+}
+
+for ((seg_i = 0; seg_i < BP_N; seg_i++)); do
+    bp_seg "$seg_i"
+    check_segment
+done
 
 if [ -n "$VERDICT" ]; then
-    emit_decision "$VERDICT" "$VERDICT_REASON"
+    hook_log "$VERDICT: $VERDICT_REASON"
+    hook_decision "$VERDICT" "$VERDICT_REASON"
 fi
 
 exit 0
