@@ -23,6 +23,7 @@ setup() {
     INSTANCES="instanc""es"
 
     unset SUPABASE_PROJECT_ID SUPABASE_WORKDIR PULUMI_STACK PULUMI_BACKEND_URL
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
     export PULUMI_HOME="$BATS_TEST_TMPDIR/pulumi_home"
     mkdir -p "$PULUMI_HOME/workspaces"
 
@@ -126,7 +127,7 @@ assert_decision() { # <expected> <actual>
 
 # =============================================================================
 # BYPASS REGRESSIONS: every one of these silently fell through to NONE before
-# the shared _shell_command_guard.sh normalization/expansion pass. A DENY or
+# the shared shell parser (scripts/_bashparse.sh). A DENY or
 # ASK here is required; NONE is the exact bug this suite exists to catch.
 # =============================================================================
 
@@ -307,7 +308,7 @@ assert_decision() { # <expected> <actual>
 }
 
 @test "ask: a broken shared library fails closed instead of silently allowing" {
-    # With _shell_command_guard.sh unavailable every rule matches nothing, which
+    # With _bashparse.sh unavailable every rule matches nothing, which
     # is indistinguishable from a clean pass unless the guard says so.
     local dir="$BATS_TEST_TMPDIR/brokenlib"
     mkdir -p "$dir"
@@ -567,4 +568,61 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production --target api")"
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production -t $urn -t $urn -t $urn -t $urn -t $urn -t $urn")"
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi cancel -s production --target $urn")"
+}
+
+# =============================================================================
+# QUOTED TEXT IS DATA. The parser reads argv, so a guarded phrase inside a
+# quoted argument or a quoted heredoc body is never a command.
+# =============================================================================
+
+@test "none: --admin inside a quoted PR body is not the --admin flag" {
+    assert_decision NONE "$(decide "$GH pr create --title t --body \"never use --admin here\"")"
+}
+
+@test "none: a pipe and a repo delete inside an echoed string" {
+    assert_decision NONE "$(decide "echo \"a | $GH $REPO $DEL x\"")"
+}
+
+@test "none: a quoted heredoc body that mentions a repo delete" {
+    assert_decision NONE "$(decide "cat <<'EOF'
+$GH $REPO $DEL x
+EOF")"
+}
+
+@test "deny: bash -c with a single-quoted repo delete" {
+    assert_decision DENY "$(decide "bash -c '$GH $REPO $DEL x'")"
+}
+
+@test "deny: a heredoc fed to bash that runs a repo delete" {
+    assert_decision DENY "$(decide "bash <<'EOF'
+$GH $REPO $DEL x
+EOF")"
+}
+
+@test "deny: --admin as a real flag on a later pipeline member" {
+    assert_decision DENY "$(decide "echo ok | $GH pr merge 1 --admin")"
+}
+
+@test "ask: a guarded tool handed to xargs cannot be checked" {
+    assert_decision ASK "$(decide "echo foo/bar | xargs $GH $REPO $DEL")"
+}
+
+@test "ask: a dynamic command name cannot be checked" {
+    assert_decision ASK "$(decide "\$TOOL $REPO $DEL foo/bar")"
+}
+
+@test "ask: dynamic code handed to eval cannot be checked" {
+    assert_decision ASK "$(decide "eval \"\$CMD\"")"
+}
+
+@test "none: sourcing a script is treated like running one" {
+    assert_decision NONE "$(decide "source ./env.sh && echo ok")"
+}
+
+@test "none: a test bracket with a variable is an ordinary command" {
+    assert_decision NONE "$(decide "[ \"\$X\" = done ] && echo ok")"
+}
+
+@test "ask: a command that cannot be parsed fails closed" {
+    assert_decision ASK "$(decide "echo \"unterminated")"
 }

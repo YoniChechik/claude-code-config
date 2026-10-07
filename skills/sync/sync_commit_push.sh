@@ -5,9 +5,6 @@
 
 set -euo pipefail
 
-# Config-dir override matches the convention already established in
-# _shell_command_guard.sh, since this file is meant to be symlinked into
-# another tool's config directory rather than copied.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 # ──────────────────────────────────────────────────────────────

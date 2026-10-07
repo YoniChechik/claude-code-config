@@ -47,6 +47,8 @@ setup() {
     C="com""mit"
     P="pu""sh"
     A="a""dd"
+
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
 }
 
 # decide <payload-json> -> ALLOW | DENY
@@ -459,8 +461,7 @@ EOF"
 
 # =============================================================================
 # DENIED: prefix-wrapper bypasses of GIT_WRITE_PATTERN, closed by the shared
-# _shell_command_guard.sh normalization (_strip_leading_wrappers /
-# _strip_git_global_flags). Every one of these silently ALLOWED before that
+# shell parser (wrapper unwrapping and git global-option normalization). Every one of these silently ALLOWED before that
 # library existed — this is the exact bypass list from the security review.
 # =============================================================================
 
@@ -741,4 +742,58 @@ EOF"
         body="$body This is sentence $i of a perfectly ordinary (and quite wordy) commit message."
     done
     assert_decision ALLOW "$(bash_decide "$WT" "git $C -m \"refactor: something real.$body\"")"
+}
+
+# =============================================================================
+# QUOTED TEXT AND HEREDOC BODIES ARE DATA in the base repo too, while real
+# nested shells and subshells keep failing closed.
+# =============================================================================
+
+@test "allow: a separator and a git write inside an echoed string in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "echo \"x; git $C -m y\"")"
+}
+
+@test "allow: a quoted cat heredoc that mentions a forced push in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "cat <<'EOF'
+git $P --force
+EOF")"
+}
+
+@test "deny: a subshell push is refused even from a worktree" {
+    assert_decision DENY "$(bash_decide "$WT" "(git $P)")"
+}
+
+@test "deny: bash -c push is refused even from a worktree" {
+    assert_decision DENY "$(bash_decide "$WT" "bash -c \"git $P\"")"
+}
+
+@test "deny: git config keys are case-insensitive, so an Alias override is still unsafe" {
+    assert_decision DENY "$(bash_decide "$BASE" "git -C $WT -c Alias.zz=$C zz -m x")"
+}
+
+@test "deny: --git-dir pointing at the base repo from a worktree" {
+    assert_decision DENY "$(bash_decide "$WT" "git --git-dir=$BASE/.git $C -m x")"
+}
+
+@test "ask: a git write after a dynamic cd cannot be placed" {
+    assert_decision ASK "$(bash_decide "$WT" "cd \"\$DIR\" && git $C -m x")"
+}
+
+@test "ask: a git write after a cd that may have failed could land in the base repo" {
+    assert_decision ASK "$(bash_decide "$BASE" "cd $WT/mobile; git $C -m x")"
+    assert_decision ASK "$(bash_decide "$BASE" "cd $WT && git $A -A; git $P")"
+}
+
+@test "allow: a cd that may have failed when every candidate directory is a worktree" {
+    assert_decision ALLOW "$(bash_decide "$WT" "cd mobile; git $C -m x")"
+    assert_decision ALLOW "$(bash_decide "$WT" "cd $FEATWT
+git $C -m x")"
+}
+
+@test "allow: cd into a worktree subdir with && keeps the directory known" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT/mobile && git $C -m x")"
+}
+
+@test "ask: an unparseable command fails closed" {
+    assert_decision ASK "$(bash_decide "$BASE" "echo \"unterminated")"
 }

@@ -13,6 +13,8 @@
 HOOK="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__sync_main_after_merge.sh"
 
 setup() {
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    HOOK_LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
     ORIGIN="$BATS_TEST_TMPDIR/origin.git"
     git init --quiet --bare -b main "$ORIGIN"
 
@@ -86,4 +88,46 @@ fire() {
     run fire "gh pr merge 12 --squash --delete-branch" 1 "$WT"
     [ "$status" -eq 0 ]
     [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
+}
+
+@test "gh pr merge mentioned inside a commit message never syncs and logs nothing" {
+    before="$(git -C "$PRIMARY" rev-parse HEAD)"
+    run fire 'git commit -m "docs: run gh pr merge 12 after review" && echo ok' 0 "$WT"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$before" ]
+    [ ! -s "$HOOK_LOG" ]
+}
+
+@test "cd into the worktree, merge and pipe to tail syncs from the cd target" {
+    run fire "cd $WT && gh pr merge 1 --squash 2>&1 | tail -3" 0 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
+    grep -q "sync: [^ ]*/primary " "$HOOK_LOG"
+}
+
+@test "a cwd outside any repo skips with a logged reason" {
+    before="$(git -C "$PRIMARY" rev-parse HEAD)"
+    run fire "gh pr merge 1" 0 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$before" ]
+    grep -q "skip: not a git repo: $BATS_TEST_TMPDIR" "$HOOK_LOG"
+}
+
+@test "an unrelated command logs nothing" {
+    run fire "ls -la" 0 "$WT"
+    [ "$status" -eq 0 ]
+    [ ! -s "$HOOK_LOG" ]
+}
+
+@test "gh pr merge --help is a skipped candidate and is logged" {
+    run fire "gh pr merge --help" 0 "$WT"
+    [ "$status" -eq 0 ]
+    grep -q "skip: no gh pr merge with a known directory and no help flag" "$HOOK_LOG"
+}
+
+@test "a non-Bash tool whose payload mentions gh pr merge logs nothing" {
+    payload=$(jq -nc --arg cwd "$WT" '{tool_name:"Write",tool_input:{file_path:"/x",content:"gh pr merge 1"},cwd:$cwd}')
+    run bash -c 'printf "%s" "$1" | bash "$2"' _ "$payload" "$HOOK"
+    [ "$status" -eq 0 ]
+    [ ! -s "$HOOK_LOG" ]
 }
