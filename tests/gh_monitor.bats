@@ -585,6 +585,7 @@ DRV
 }
 
 @test "merge: a PR merged mid-wait is picked up on a later poll" {
+    export GH_MONITOR_MERGE_WAIT_MAX=30
     stub pr_state.1 0 "OPEN "
     stub pr_state.2 0 "MERGED cafe1234"
     stub repo_default 0 "main"
