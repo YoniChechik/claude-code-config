@@ -1,81 +1,45 @@
 #!/usr/bin/env bash
-#
-# PostToolUse:Bash hook — after a `gh pr merge` command runs, immediately
-# sync the PRIMARY checkout (never a worktree) to origin/main, instead of
-# leaving it stale until the next SessionStart. The base-dir guard forbids
-# agents from writing to the primary checkout directly, so without this a
-# mid-session merge (including this hook's own PR) leaves the base repo's
-# scripts/skills stale for the rest of the session, and for any other
-# concurrent session.
-#
-# Deliberately permissive, unlike post_tool_use__gh_monitor_trigger.sh: that
-# hook's false positives launch a background watcher for the WRONG branch, a
-# real correctness bug, so it parses the command's exact shape. Here an extra
-# or missed sync is harmless — reset --hard origin/main is a no-op when
-# nothing changed, and a missed one just waits for the next SessionStart —
-# so this does not need that same exact-shape parsing.
-#
-# Deliberately does NOT gate on tool_response.exit_code, for the same reason:
-# `gh pr merge --squash --delete-branch`, run from a worktree while another
-# worktree (typically the primary checkout) has the target branch checked
-# out, reliably exits nonzero on gh's own post-merge local branch-switch step
-# ("failed to run git: fatal: 'main' is already used by worktree...") EVEN
-# THOUGH the remote merge itself fully succeeded — confirmed live, repeatedly,
-# in this repo's own merge workflow. Gating on exit_code == 0 meant this hook
-# never fired in practice. An extra sync attempt after a command that merely
-# LOOKS like `gh pr merge` but didn't actually merge anything is equally
-# harmless, so there is no exit-code check to get wrong here.
-#
-# Output: none, ever. Syncing the primary checkout is invisible infrastructure
-# the agent never needs to react to, so this hook emits no additionalContext
-# and no systemMessage. Every step is best-effort and non-blocking: a broken
-# sync must never surface as a tool error or slow down the real command.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK_DIR=.
+[[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
 
-input=$(cat)
+source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
+source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
 
-# Cheap early exit before any subprocess: the settings.json matcher is a bare
-# "Bash", so this runs on EVERY Bash tool call.
+IFS= read -r -d '' input
+
 case "$input" in
-    *"gh pr merge"*) ;;
-    *) exit 0 ;;
+    *gh*pr*merge*) ;;
+    *) skip "no candidate substring" ;;
 esac
 
-tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
-[ "$tool_name" = "Bash" ] || exit 0
+bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
+[ "$BP_TOOL" = "Bash" ] || skip "not a Bash tool call"
+bp_find gh pr merge || skip "no gh pr merge command"
 
-cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
-[ -n "$cmd" ] || exit 0
+cwd=""
+for i in "${BP_MATCHES[@]}"; do
+    bp_seg "$i"
+    for w in "${SEG_ARGV[@]}"; do
+        case "$w" in -h | --help | --help=*) continue 2 ;; esac
+    done
+    [ "$SEG_CWD_KNOWN" = "1" ] || continue
+    cwd="$SEG_CWD"
+    break
+done
+[ -n "$cwd" ] || skip "no gh pr merge with a known directory and no help flag"
 
-# Must actually be a `gh pr merge` invocation, not e.g. `gh pr merge --help`
-# or a string that merely mentions it inside a commit message / PR body.
-case "$cmd" in
-    *"gh pr merge"*) ;;
-    *) exit 0 ;;
-esac
-if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|=|$)'; then
-    exit 0
-fi
-
-cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
-[ -n "$cwd" ] || exit 0
-
-# Resolve the PRIMARY checkout from the merge's own repo: the shared .git dir
-# a worktree's git-dir sits under, or cwd itself when cwd IS the primary
-# checkout. `--path-format=absolute` needs git 2.31+; fall back to resolving a
-# relative answer against cwd on an older git.
 common_dir=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
     || common_dir=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null)
-[ -n "$common_dir" ] || exit 0
+[ -n "$common_dir" ] || skip "not a git repo: $cwd"
 case "$common_dir" in
     /*) ;;
     *) common_dir="$cwd/$common_dir" ;;
 esac
-primary_root=$(cd "$(dirname "$common_dir")" 2>/dev/null && pwd) || exit 0
+primary_root=$(cd "${common_dir%/*}" 2>/dev/null && pwd) || skip "primary checkout not found for $common_dir"
 
-# shellcheck source=./_git_sync.sh
-source "${SCRIPT_DIR}/_git_sync.sh" 2>/dev/null || exit 0
+source "$HOOK_DIR/_git_sync.sh" 2>/dev/null || skip "_git_sync.sh missing"
+hook_log "sync: $primary_root"
 _sync_primary_checkout_to_origin_main "$primary_root"
 
 exit 0
