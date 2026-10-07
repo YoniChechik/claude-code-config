@@ -117,10 +117,6 @@ bp_parse_hook() {
     bp_parse "$BP_CMD" "${f[1]:-$PWD}"
 }
 
-bp_count() {
-    jq length <<<"$BP_JSON"
-}
-
 bp_find() {
     local all=false
     if [[ ${1:-} == --all ]]; then all=true; shift; fi
