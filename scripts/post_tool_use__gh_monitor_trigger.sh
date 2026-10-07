@@ -1,99 +1,34 @@
 #!/usr/bin/env bash
-#
-# PostToolUse:Bash hook — auto-launch the one-shot gh_monitor watcher.
-#
-# After a Bash tool call that (a) really succeeded and (b) matches one of a
-# DELIBERATELY NARROW set of command shapes, this hook injects an instruction
-# for CLAUDE (never the user) to start scripts/gh_monitor.sh in
-# the background for the branch the command acted on. "Really succeeded" for
-# push/create means the local exit code; for merge it means the PR's real
-# state (see Step 4a/Step 8) — `gh`'s own exit code is not reliable there.
-#
-# The three triggers:
-#   1. `git push` of the current branch, when that branch already has an OPEN
-#      PR                                          -> push-mode watcher
-#   2. `gh pr create` for the current branch       -> push-mode watcher
-#   3. `gh pr merge` of the current branch's PR,
-#      or of an explicitly named PR, verified MERGED
-#      regardless of gh's own local exit code       -> merge-mode watcher
-#
-# Trigger contract (intentional limitation): a hook cannot reliably parse
-# arbitrary shell. `cd elsewhere && git push`, `git -C other push`, a
-# multi-ref push, a raw GraphQL mutation — none of those can be resolved from
-# this hook's own cwd, so NONE of them trigger anything. BUT an explicit
-# `--repo`/`-R owner/repo` on `gh pr create`/`gh pr merge`, and an explicit
-# positional PR number/URL/branch on `gh pr merge`, ARE trusted outright
-# instead of being treated as out of contract: the caller named that target
-# directly, in a command that already succeeded, so there is nothing to
-# verify it against cwd for — see shape_ok_create/shape_ok_merge below. The
-# hook triggers on that explicit-target shape, or on the plain "current
-# branch of the repo at the hook's cwd" shape, and silently skips everything
-# else — there is no manual fallback, so a missed trigger means nobody
-# launches a watcher at all.
-#
-# One carve-out to that "not ONE simple command" limitation (Step 3b): a
-# `--body "$(cat <<'EOF' ... EOF )"` heredoc substitution with a QUOTED
-# delimiter is provably inert (no expansion happens inside it at all), so it
-# is neutralized to a placeholder before the shape checks run, rather than
-# rejecting the whole command over its own internal `$(`/newlines. An
-# UNQUOTED delimiter is NOT neutralized and still rejects the command, since
-# its body can contain real `$(...)`/`` ` ``/`$VAR` expansion.
-#
-# A second carve-out (Step 5a2): `rtk hook claude` -- this repo's own
-# PreToolUse hook, registered on the identical "Bash" matcher -- silently
-# rewrites `gh pr merge`/`gh pr create` into `rtk gh pr merge ...`/
-# `rtk gh pr create ...` before they execute, and PostToolUse sees that
-# REWRITTEN command as tool_input.command (per the hooks docs: PostToolUse's
-# tool_input is "the arguments sent to the tool", not the literal text Claude
-# typed). Confirmed live: this silently ate EVERY `gh pr merge`/`gh pr
-# create` trigger across a full session, while a hand-crafted test payload
-# (built from the literal, un-rewritten command) worked fine -- the
-# discrepancy that flagged this bug. An `rtk `/`rtk proxy `/`rtk run ` prefix
-# is unwrapped before the shape checks (Step 5a2) so the underlying `gh`/
-# `git` shape still matches.
-#
-# Output is hookSpecificOutput.additionalContext ONLY — no systemMessage, so
-# nothing is ever surfaced to the user. Every git/gh call the hook makes is
-# time-boxed and FAILS OPEN: on any error, empty answer or timeout the hook
-# logs one line and exits 0 without triggering. A flaky `gh` must never block
-# or break the user's real command.
 
-# --- Tunables / paths -------------------------------------------------------
-# Both are env-overridable so the test suite can point the log somewhere else
-# and shrink the time box without really waiting 5s.
-: "${CLAUDE_NOTIFY_TMP_DIR:=/tmp}"
 : "${GH_MONITOR_HOOK_TIMEOUT:=5}"
-HOOK_LOG="${CLAUDE_NOTIFY_TMP_DIR}/gh_monitor_hook.log"
+HOOK_DIR=.
+[[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
 
-# --- Step 1: read stdin once (it can only be consumed a single time). --------
-input=$(cat)
+source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
+source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
 
-# --- Step 2: cheap early exit, zero subprocesses. ----------------------------
-# The settings.json matcher for this hook is a bare "Bash", so it runs on EVERY
-# Bash tool call. A plain `case` substring match on the raw JSON text rejects
-# the overwhelmingly common irrelevant call for free; only a command that could
-# possibly match Step 5's precise shapes pays for the jq/git/gh forks below.
+IFS= read -r -d '' input
+
 case "$input" in
-    *"git push"* | *"gh pr create"* | *"gh pr merge"* | *"createPullRequest"* | *"mergePullRequest"*) ;;
-    *) exit 0 ;;
+    *git*push* | *gh*pr*create* | *gh*pr*merge*) ;;
+    *) skip "no candidate substring" ;;
 esac
 
-# --- helpers ----------------------------------------------------------------
+mapfile -d '' resp < <(printf '%s' "$input" | jq -j '(.tool_name // "" | tostring), "\u0000",
+    (.tool_response.exit_code // "" | tostring), "\u0000",
+    ((.tool_response.stdout // "" | tostring) + "\n" + (.tool_response.stderr // "" | tostring)), "\u0000"' 2>/dev/null)
+((${#resp[@]} == 3)) || skip "bad hook input JSON"
+[[ ${resp[0]} == Bash ]] || skip "not a Bash tool call"
+EXIT_CODE=${resp[1]}
+OUTPUT=${resp[2]}
 
-# One fail-open log line. Never writes to stdout: stdout is the hook's JSON
-# channel, and a stray byte there is a protocol error.
-hook_log() {
-    printf '%s gh_monitor_trigger: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >>"$HOOK_LOG" 2>/dev/null
-    return 0
-}
+bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
 
-# Run an EXTERNAL command with a hard time box, portably.
-# `timeout`/`gtimeout` are GNU coreutils and are absent on a stock macOS, which
-# is this repo's primary platform — so when neither exists we background the
-# command in its own watchdog pair and TERM it ourselves. The watchdog's own
-# stdout is closed off to /dev/null; otherwise it would hold the caller's
-# command-substitution pipe open for the full time box even after the real
-# command had already exited.
+bp_find git push && PUSHES=("${BP_MATCHES[@]}") || PUSHES=()
+bp_find gh pr create && CREATES=("${BP_MATCHES[@]}") || CREATES=()
+bp_find gh pr merge && MERGES=("${BP_MATCHES[@]}") || MERGES=()
+((${#PUSHES[@]} + ${#CREATES[@]} + ${#MERGES[@]} > 0)) || skip "no git push, gh pr create or gh pr merge command"
+
 run_timeout() {
     local secs="$1"
     shift
@@ -105,14 +40,6 @@ run_timeout() {
         gtimeout "${secs}s" "$@"
         return $?
     fi
-    # Job control (`set -m`) puts the backgrounded command in a process group of
-    # its own whose pgid is its pid, so the watchdog can signal the command AND
-    # every child it spawned. That matters for more than tidiness: `gh` is
-    # called inside a command substitution, and any surviving grandchild keeps
-    # that substitution's pipe open for its whole lifetime — which would defeat
-    # the time box entirely. Job control is switched back off immediately: the
-    # child is already in its own group by then, and leaving it on would print
-    # job-completion notices for the rest of the hook.
     local had_m=0
     case "$-" in *m*) had_m=1 ;; esac
     set -m
@@ -135,376 +62,192 @@ run_timeout() {
     return "$rc"
 }
 
-# --- Step 3: parse the PostToolUse payload. ---------------------------------
-# Shape (per the hooks docs, and mirrored by every other hook in this repo):
-#   { tool_name, tool_input: {command}, tool_response: {exit_code, stdout,
-#     stderr}, cwd }
-tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
-[ "$tool_name" = "Bash" ] || exit 0
+in_dir() {
+    local dir="$1"
+    shift
+    (cd "$dir" 2>/dev/null && run_timeout "$GH_MONITOR_HOOK_TIMEOUT" "$@" 2>/dev/null)
+}
 
-cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
-exit_code=$(printf '%s' "$input" | jq -r '.tool_response.exit_code // empty' 2>/dev/null)
-tool_stdout=$(printf '%s' "$input" | jq -r '.tool_response.stdout // empty' 2>/dev/null)
-tool_stderr=$(printf '%s' "$input" | jq -r '.tool_response.stderr // empty' 2>/dev/null)
-CWD=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
+note_skip() {
+    hook_log "skip: $1"
+    return 1
+}
 
-[ -n "$cmd" ] || exit 0
-
-# --- Step 3b: neutralize safe, QUOTED-delimiter heredoc command substitutions. ---
-# `--body "$(cat <<'EOF' ... EOF )"` -- this environment's own recommended
-# shape for a multi-line PR body/commit message, precisely to dodge OTHER
-# hooks' false-positives on git-words in prose -- trips Step 4c's "not ONE
-# simple command" gate below for the wrong reason. `$(` and the heredoc's
-# internal newlines ARE real metacharacters in general, but a SINGLE- or
-# DOUBLE-quoted heredoc delimiter suppresses ALL expansion inside the body --
-# no `$VAR`, no `$(...)`, no backtick -- so that body is inert literal text
-# that cannot retarget the repo/branch, which is the actual risk Step 4c
-# guards against. Replace each such heredoc substitution with an opaque,
-# single-word placeholder BEFORE Step 4c/5 ever see the command, so the
-# flag's VALUE still reads as exactly one token (matching how
-# shape_ok_create/shape_ok_merge already skip over a --body/--title value)
-# instead of poisoning the whole command's shape check. `/s` (DOTALL) lets
-# `.` cross the heredoc's internal newlines; the non-greedy `.*?` stops at
-# the FIRST line that is exactly the delimiter, matching real heredoc
-# semantics. An UNQUOTED delimiter (`<<EOF`, real expansion happens inside
-# the body) is deliberately NOT matched here and still falls through to Step
-# 4c's rejection, unchanged -- this only neutralizes the provably-inert
-# form. `\x27` stands in for a literal single-quote inside the perl
-# character class, since the outer perl program is itself single-quoted in
-# this shell command.
-cmd_for_parsing=$(printf '%s' "$cmd" | perl -0777 -pe 's/\$\(\s*cat\s+<<-?\s*([\x27"])([A-Za-z_][A-Za-z0-9_]*)\1\s*\n.*?\n\s*\2\s*\n?\)/HEREDOC_LITERAL_BODY/gs' 2>/dev/null)
-[ -n "$cmd_for_parsing" ] || cmd_for_parsing="$cmd"
-
-# --- Step 4: the two universal gates. ---------------------------------------
-# (a) The command must actually have SUCCEEDED — for push/create (Step 5c
-#     below), which have no other way to confirm success. Merge is the one
-#     exception: `gh pr merge --delete-branch`, run (as this hook always is)
-#     from the very worktree of the branch being merged, tries to switch
-#     that worktree's local HEAD to the base branch after deleting the
-#     source branch — and when another worktree (typically the primary
-#     checkout) already has the base branch checked out, git refuses
-#     ("fatal: 'main' is already used by worktree ..."). `gh` surfaces that
-#     as a nonzero exit even though the REMOTE merge fully succeeded —
-#     confirmed live, repeatedly (the same `gh` behavior
-#     post_tool_use__sync_main_after_merge.sh's own doc comment independently
-#     hit and documented). Trusting local exit_code alone therefore silently
-#     dropped the merge trigger on this repo's own everyday merge shape. So
-#     EXIT_OK is recorded here but NOT enforced for merge; Step 8 instead
-#     verifies the PR's real state via `gh pr view`, which is authoritative
-#     regardless of what the local exit code says.
-EXIT_OK=0
-[ "$exit_code" = "0" ] && EXIT_OK=1
-
-# (b) A help invocation performs no action. The token boundaries matter: a
-#     naive substring test would treat `git push origin push-harder` or
-#     `git reset -hard` as a help call.
-if printf '%s' "$cmd_for_parsing" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|=|$)'; then
-    exit 0
-fi
-
-# (c) Anything that is not ONE simple command is out of contract: a pipeline, a
-#     `&&` chain, a command substitution or a redirect can move the effective
-#     repo/branch in ways this hook cannot follow. Checked against the
-#     HEREDOC-NEUTRALIZED command (Step 3b) so a safe, literal multi-line
-#     --body/--title value doesn't trip this on its own newlines/`$(` — any
-#     OTHER `;`/`&`/`|`/backtick/`$(`/`>`/`<`/newline outside that one
-#     recognized heredoc shape still rejects the command exactly as before.
-# shellcheck disable=SC2016  # `$(` here is a literal two-byte pattern, not an expansion.
-case "$cmd_for_parsing" in
-    *";"* | *"&"* | *"|"* | *'`'* | *'$('* | *">"* | *"<"* | *$'\n'*) exit 0 ;;
-esac
-
-# --- Step 5a: which of the three triggers could this be? --------------------
-# Tokenize into argv-shaped words. `read -a` only splits on IFS whitespace and
-# has NO concept of quoting, so `gh pr create --title "flip all five DEV-746
-# ..."` (any multi-word --title/--body/etc value -- the overwhelmingly common
-# case for this hook) exploded into one token per word, which then failed
-# shape_ok_create() on the very next bare word after `--title` and silently
-# skipped the trigger. `xargs -n1` DOES honor single/double quotes the way the
-# real shell that ran `$cmd_for_parsing` already did, which is all we need --
-# every metacharacter that would make a fuller shell-grammar parse necessary
-# ($(), backtick, `;`, `&`, `|`, redirects, newlines) was already rejected by
-# Step 4c above (on the heredoc-neutralized command, Step 3b), and xargs
-# performs no `$VAR`/`~` expansion or globbing, so a literal token is exactly
-# what comes out. Tokenizing `cmd_for_parsing` rather than the original
-# `cmd` means a neutralized `--body "HEREDOC_LITERAL_BODY"` reads as one
-# clean value token, exactly like any other quoted --body string already did.
-if ! tokens_str=$(printf '%s' "$cmd_for_parsing" | xargs -n1 2>/dev/null); then
-    hook_log "could not tokenize command (unbalanced quoting?); skipping: $cmd"
-    exit 0
-fi
-tokens=()
-while IFS= read -r line; do
-    tokens+=("$line")
-done <<<"$tokens_str"
-
-# --- Step 5a2: unwrap an `rtk` proxy prefix. ---------------------------------
-# See the header comment above for why this is needed: `rtk hook claude`
-# rewrites `gh pr merge`/`gh pr create` into `rtk gh pr merge ...`/`rtk gh pr
-# create ...` before they run, so tokens[0] is "rtk", not "gh"/"git", and the
-# case match below would otherwise silently miss every rewritten call. `rtk
-# proxy <cmd>`/`rtk run <cmd>` (RTK.md's own documented raw-passthrough forms)
-# unwrap the same way, one extra token deep.
-if [ "${tokens[0]:-}" = "rtk" ]; then
-    tokens=("${tokens[@]:1}")
-    case "${tokens[0]:-}" in
-        proxy | run) tokens=("${tokens[@]:1}") ;;
-    esac
-fi
-
-KIND=""     # the gh_monitor.sh mode to launch: push | merge
-ACTION=""   # which trigger matched, for the message's opening sentence
-case "${tokens[0]:-} ${tokens[1]:-} ${tokens[2]:-}" in
-    "git push "*) KIND="push"; ACTION="push" ;;
-    "gh pr create") KIND="push"; ACTION="create" ;;
-    "gh pr merge") KIND="merge"; ACTION="merge" ;;
-    *) exit 0 ;;
-esac
-
-# --- Step 5b: push/create must have actually succeeded locally. -------------
-# Merge is deliberately excluded — see Step 4a; its success is verified
-# independently in Step 8 instead of trusted from the local exit code.
-if [ "$ACTION" != "merge" ]; then
-    [ "$EXIT_OK" = "1" ] || exit 0
-fi
-
-# --- Step 5c: a no-op push has nothing to watch. ----------------------------
-if [ "$ACTION" = "push" ]; then
-    case "$tool_stdout$tool_stderr" in
-        *"Everything up-to-date"*) exit 0 ;;
-    esac
-fi
-
-# --- Step 6: resolve the current branch from the hook's OWN cwd. ------------
-# `cd` rather than `git -C`, because `gh` resolves its repo from the process
-# cwd too and must see the same directory the tool call ran in.
-#
-# Needed for push and create unconditionally (their target IS "the current
-# branch of the repo at cwd", even when create's PR lands in an explicit
-# --repo via a fork workflow). For merge it is needed only as the FALLBACK
-# selector — skipped entirely when the command already carries its own
-# explicit target, so a merge run from a detached HEAD or an unrelated cwd
-# still triggers as long as it named its target itself.
 resolve_branch() {
-    [ -n "$CWD" ] || { hook_log "no cwd in the hook payload; skipping"; return 1; }
-    cd "$CWD" 2>/dev/null || { hook_log "cwd does not exist: $CWD"; return 1; }
-    BRANCH=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" git branch --show-current 2>/dev/null)
-    if [ -z "$BRANCH" ]; then
-        hook_log "could not resolve the current branch in $CWD; skipping"
-        return 1
-    fi
+    [ -d "$1" ] || note_skip "cwd does not exist: $1" || return
+    BRANCH=$(in_dir "$1" git branch --show-current)
+    [ -n "$BRANCH" ] || note_skip "could not resolve the current branch in $1"
+}
+
+has_help_flag() {
+    local w
+    for w in "${SEG_ARGV[@]}"; do
+        case "$w" in -h | --help | --help=*) return 0 ;; esac
+    done
+    return 1
+}
+
+common_gate() {
+    has_help_flag && { note_skip "$1: help flag"; return; }
+    case "$SEG_FLAGS" in
+        *B*) note_skip "$1: backgrounded"; return ;;
+        *N*) note_skip "$1: negated"; return ;;
+    esac
     return 0
 }
 
-# --- Step 7: the narrowed per-trigger shape checks. -------------------------
-# Each returns non-zero for "out of contract" — which always means skip
-# silently, never guess at a target.
+safe_word() {
+    [[ $1 =~ ^[A-Za-z0-9._/#:+@-]+$ ]]
+}
 
-# `git push`: bare, or force-only, or exactly `<remote> <currentbranch>`.
-# Rejected: `--delete`/`-d`, any `src:dst` refspec (a `:`-prefixed one deletes),
-# more than one ref, any other flag, any differing branch.
-shape_ok_push() {
-    local i t
-    local positional=()
-    for ((i = 2; i < ${#tokens[@]}; i++)); do
-        t="${tokens[$i]}"
+INSTR_KEYS=()
+INSTR_REPOS=()
+INSTR_LEADS=()
+add_instruction() {
+    local kind="$1" selector="$2" repo="$3" lead="$4" k
+    safe_word "$selector" || { note_skip "$kind: unsafe selector $selector"; return; }
+    [ -z "$repo" ] || safe_word "$repo" || { note_skip "$kind: unsafe repo $repo"; return; }
+    for k in "${!INSTR_KEYS[@]}"; do
+        if [ "${INSTR_KEYS[k]}" = "$kind|$selector" ]; then
+            [ -n "${INSTR_REPOS[k]}" ] || INSTR_REPOS[k]="$repo"
+            return 0
+        fi
+    done
+    INSTR_KEYS+=("$kind|$selector")
+    INSTR_REPOS+=("$repo")
+    INSTR_LEADS+=("$lead")
+}
+
+pr_state() {
+    local dir="$1" state rc
+    shift
+    state=$(in_dir "$dir" gh pr view "$@" --json state -q .state)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        note_skip "gh pr view failed (rc=$rc) for $1"
+        return 1
+    fi
+    PR_STATE=${state//[[:space:]]/}
+}
+
+handle_push() {
+    bp_seg "$1"
+    common_gate push || return
+    [[ $SEG_DYN != *1* ]] || { note_skip "push: dynamic argument"; return; }
+    [ "$SEG_GIT_OVERRIDE" = "0" ] || { note_skip "push: --git-dir/--work-tree override"; return; }
+    [ "$SEG_GIT_CWD_KNOWN" = "1" ] || { note_skip "push: unknown directory"; return; }
+    local attrib=0 dir="$SEG_GIT_CWD" t
+    local -a positional=()
+    [[ $SEG_FLAGS == *A* ]] && attrib=1
+    if ((attrib)) && [ "$EXIT_CODE" != "0" ]; then note_skip "push: exit code $EXIT_CODE"; return; fi
+    case "$OUTPUT" in *"Everything up-to-date"*) note_skip "push: everything up-to-date"; return ;; esac
+    for t in "${SEG_GIT_ARGS[@]}"; do
         case "$t" in
-            -f | --force | --force-with-lease | --force-with-lease=*) ;;
-            -*) return 1 ;;
+            -f | --force | --force-with-lease | --force-with-lease=* | -u | --set-upstream | -q | --quiet | -v | --verbose | --no-verify | --progress) ;;
+            -*) note_skip "push: unsupported flag $t"; return ;;
             *) positional+=("$t") ;;
         esac
     done
+    resolve_branch "$dir" || return
     case "${#positional[@]}" in
-        0) return 0 ;;
+        0) ;;
         2)
-            # A refspec of any kind (including the `:branch` delete form) is
-            # not a plain branch name and is therefore out of contract.
-            case "${positional[1]}" in *:*) return 1 ;; esac
-            [ "${positional[1]}" = "$BRANCH" ] || return 1
-            # The remote must be a plain remote NAME, not a URL or a path.
-            case "${positional[0]}" in *:* | */*) return 1 ;; esac
-            return 0
+            case "${positional[0]}" in *:* | */*) note_skip "push: remote is a URL or path"; return ;; esac
+            [ "${positional[1]}" = "$BRANCH" ] || [ "${positional[1]}" = "HEAD" ] || { note_skip "push: refspec ${positional[1]} is not the current branch"; return; }
             ;;
-        *) return 1 ;;
+        *) note_skip "push: ${#positional[@]} positional arguments"; return ;;
     esac
+    if ((!attrib)); then
+        local heads
+        heads=$(in_dir "$dir" git rev-parse HEAD '@{push}')
+        [[ $heads == *$'\n'* && ${heads%%$'\n'*} == "${heads#*$'\n'}" ]] || { note_skip "push: exit code not attributable and HEAD != @{push}"; return; }
+    fi
+    pr_state "$dir" "$BRANCH" || return
+    [ "$PR_STATE" = "OPEN" ] || { note_skip "push: PR state $PR_STATE"; return; }
+    add_instruction push "$BRANCH" "" "A \`git push\` to '${BRANCH}' with an open PR just succeeded."
 }
 
-# `gh pr create`: no `--head` other than the current branch, no positional
-# argument. Flags that only decorate the PR (title, body, labels, draft, ...)
-# cannot retarget it, so they stay in contract; their VALUES are stepped over
-# so a value never reads as a positional. An explicit `--repo`/`-R` is
-# TRUSTED (captured into CREATE_REPO) rather than rejected — the caller named
-# the destination repo directly (a fork-workflow `gh pr create --repo
-# upstream/repo` still pushes from cwd's own current branch, so BRANCH is
-# still the right --head to expect).
-CREATE_REPO=""
-shape_ok_create() {
-    local i t
-    for ((i = 3; i < ${#tokens[@]}; i++)); do
-        t="${tokens[$i]}"
+handle_create() {
+    bp_seg "$1"
+    common_gate create || return
+    [ "$SEG_CWD_KNOWN" = "1" ] || { note_skip "create: unknown directory"; return; }
+    local i t repo="" head="" url_repo="" dyn
+    resolve_branch "$SEG_CWD" || return
+    for ((i = 3; i < ${#SEG_ARGV[@]}; i++)); do
+        t="${SEG_ARGV[i]}"
+        dyn="${SEG_DYN:i:1}"
         case "$t" in
-            --repo | -R)
-                i=$((i + 1))
-                CREATE_REPO="${tokens[$i]:-}"
-                [ -n "$CREATE_REPO" ] || return 1
-                ;;
-            --repo=*)
-                CREATE_REPO="${t#--repo=}"
-                [ -n "$CREATE_REPO" ] || return 1
-                ;;
-            --head | -H)
-                i=$((i + 1))
-                [ "${tokens[$i]:-}" = "$BRANCH" ] || return 1
-                ;;
-            --head=*) [ "${t#--head=}" = "$BRANCH" ] || return 1 ;;
-            -t | --title | -b | --body | -F | --body-file | -B | --base | -a | --assignee | -l | --label | -r | --reviewer | -m | --milestone | -p | --project | -T | --template)
-                i=$((i + 1))
-                ;;
+            --repo | -R) i=$((i + 1)); repo="${SEG_ARGV[i]:-}"; [ "${SEG_DYN:i:1}" = "0" ] && [ -n "$repo" ] || { note_skip "create: bad --repo"; return; } ;;
+            --repo=*) [ "$dyn" = "0" ] || { note_skip "create: dynamic --repo"; return; }; repo="${t#--repo=}" ;;
+            --head | -H) i=$((i + 1)); head="${SEG_ARGV[i]:-}"; [ "${SEG_DYN:i:1}" = "0" ] || { note_skip "create: dynamic --head"; return; } ;;
+            --head=*) [ "$dyn" = "0" ] || { note_skip "create: dynamic --head"; return; }; head="${t#--head=}" ;;
+            -t | --title | -b | --body | -F | --body-file | -B | --base | -a | --assignee | -l | --label | -r | --reviewer | -m | --milestone | -p | --project | -T | --template) i=$((i + 1)) ;;
             -*) ;;
-            *) return 1 ;;
+            *) note_skip "create: positional argument $t"; return ;;
         esac
     done
-    return 0
+    [ -z "$head" ] || [ "$head" = "$BRANCH" ] || { note_skip "create: --head $head is not the current branch"; return; }
+    if [[ $OUTPUT =~ https://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/[0-9]+ ]] && [[ $OUTPUT != *"already exists"* ]]; then
+        url_repo="${BASH_REMATCH[1]}"
+    elif [[ $SEG_FLAGS != *A* ]]; then
+        note_skip "create: exit code not attributable and no PR URL in the output"
+        return
+    elif [ "$EXIT_CODE" != "0" ]; then
+        note_skip "create: exit code $EXIT_CODE"
+        return
+    fi
+    add_instruction push "$BRANCH" "${repo:-$url_repo}" "A \`gh pr create\` for '${BRANCH}' just succeeded, so its PR is open."
 }
 
-# `gh pr merge`: an explicit `--repo`/`-R` is TRUSTED (captured into
-# MERGE_REPO) rather than rejected, and AT MOST ONE positional argument — the
-# PR number, URL or branch selector `gh pr merge` itself accepts — is TRUSTED
-# as the explicit target (captured into MERGE_TARGET) rather than being
-# treated as out of contract. `gh` accepting this shape already proves it
-# resolved that positional to a real PR selector, so there is nothing left
-# to verify it against the current branch for — Step 8's `gh pr view`
-# separately confirms the PR that selector names is actually MERGED, since
-# (per Step 4a) the local exit code alone is not reliable for that. A SECOND
-# positional stays out of contract: nothing in `gh pr merge`'s grammar takes
-# two, so that shape is unrecognized, not a second selector.
-MERGE_REPO=""
-MERGE_TARGET=""
-shape_ok_merge() {
-    local i t
-    for ((i = 3; i < ${#tokens[@]}; i++)); do
-        t="${tokens[$i]}"
+handle_merge() {
+    bp_seg "$1"
+    common_gate merge || return
+    local i t repo="" target=""
+    for ((i = 3; i < ${#SEG_ARGV[@]}; i++)); do
+        t="${SEG_ARGV[i]}"
         case "$t" in
-            --repo | -R)
-                i=$((i + 1))
-                MERGE_REPO="${tokens[$i]:-}"
-                [ -n "$MERGE_REPO" ] || return 1
-                ;;
-            --repo=*)
-                MERGE_REPO="${t#--repo=}"
-                [ -n "$MERGE_REPO" ] || return 1
-                ;;
-            -b | --body | -F | --body-file | -t | --subject | --match-head-commit | --author-email)
-                i=$((i + 1))
-                ;;
+            --repo | -R) i=$((i + 1)); repo="${SEG_ARGV[i]:-}"; [ "${SEG_DYN:i:1}" = "0" ] && [ -n "$repo" ] || { note_skip "merge: bad --repo"; return; } ;;
+            --repo=*) [ "${SEG_DYN:i:1}" = "0" ] || { note_skip "merge: dynamic --repo"; return; }; repo="${t#--repo=}" ;;
+            -b | --body | -F | --body-file | -t | --subject | --match-head-commit | --author-email) i=$((i + 1)) ;;
             -*) ;;
             *)
-                [ -z "$MERGE_TARGET" ] || return 1
-                MERGE_TARGET="$t"
+                [ "${SEG_DYN:i:1}" = "0" ] || { note_skip "merge: dynamic target"; return; }
+                [ -z "$target" ] || { note_skip "merge: two positional arguments"; return; }
+                target="$t"
                 ;;
         esac
     done
-    return 0
+    local dir="$SEG_CWD"
+    if [ -z "$target" ] || [ -z "$repo" ]; then
+        [ "$SEG_CWD_KNOWN" = "1" ] || { note_skip "merge: unknown directory"; return; }
+    fi
+    if [ -z "$target" ]; then
+        resolve_branch "$dir" || return
+        target="$BRANCH"
+    fi
+    [ -d "$dir" ] || dir=/
+    local -a view=("$target")
+    [ -z "$repo" ] || view+=(--repo "$repo")
+    pr_state "$dir" "${view[@]}" || return
+    [ "$PR_STATE" = "MERGED" ] || { note_skip "merge: PR state $PR_STATE"; return; }
+    add_instruction merge "$target" "$repo" "A \`gh pr merge\` of '${target}' just succeeded."
 }
 
-case "$ACTION" in
-    push)
-        resolve_branch || exit 0
-        shape_ok_push || exit 0
-        ;;
-    create)
-        resolve_branch || exit 0
-        shape_ok_create || exit 0
-        ;;
-    merge)
-        shape_ok_merge || exit 0
-        if [ -z "$MERGE_TARGET" ]; then
-            resolve_branch || exit 0
-            MERGE_TARGET="$BRANCH"
-        fi
-        ;;
-esac
+for i in "${PUSHES[@]}"; do handle_push "$i"; done
+for i in "${CREATES[@]}"; do handle_create "$i"; done
+for i in "${MERGES[@]}"; do handle_merge "$i"; done
 
-# --- Step 8: precheck the real PR state via `gh pr view`. -------------------
-# `gh pr create` needs no precheck (the PR was just created, so it is open).
-# Push requires OPEN. Merge requires MERGED — checked here rather than
-# trusted from the local exit code, per Step 4a: `gh`'s own exit code is not
-# reliable for merge specifically, but the PR's real state always is.
-if [ "$ACTION" = "push" ]; then
-    pr_state=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" gh pr view "$BRANCH" --json state -q .state 2>/dev/null)
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-        hook_log "gh pr view failed (rc=$rc) for $BRANCH; skipping"
-        exit 0
-    fi
-    pr_state=${pr_state//[[:space:]]/}
-    [ "$pr_state" = "OPEN" ] || exit 0
-elif [ "$ACTION" = "merge" ]; then
-    # Only needed when MERGE_TARGET came from the cwd-branch fallback (Step
-    # 7 already `cd`'d there via resolve_branch); when the target was fully
-    # explicit that `cd` never ran, and `gh pr view` needs the same cwd `gh`
-    # itself would have resolved from if MERGE_REPO is also empty. Harmless
-    # to repeat if already there.
-    # Fail-open on purpose: if this cd fails, `gh pr view` below still runs
-    # from wherever cwd already is and its own rc!=0 handling covers it.
-    [ -n "$CWD" ] && { cd "$CWD" 2>/dev/null || true; }
-    merge_view_args=("$MERGE_TARGET" --json state -q .state)
-    [ -z "$MERGE_REPO" ] || merge_view_args+=(--repo "$MERGE_REPO")
-    pr_state=$(run_timeout "$GH_MONITOR_HOOK_TIMEOUT" gh pr view "${merge_view_args[@]}" 2>/dev/null)
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-        hook_log "gh pr view failed (rc=$rc) for merge target $MERGE_TARGET; skipping"
-        exit 0
-    fi
-    pr_state=${pr_state//[[:space:]]/}
-    [ "$pr_state" = "MERGED" ] || exit 0
-fi
+((${#INSTR_KEYS[@]} > 0)) || exit 0
 
-# --- Step 9: emit the launch instruction (additionalContext ONLY). ----------
-# The opening sentence names what just happened; the rest is identical for all
-# three triggers apart from the mode. SELECTOR is what gh_monitor.sh's
-# second positional gets: the current branch for push/create, or the
-# resolved merge target (an explicit PR number/URL/branch, or the current
-# branch as fallback) for merge. REPO_FLAG, when non-empty, is an explicit
-# --repo this hook was told to trust, forwarded to gh_monitor.sh so IT
-# also targets that repo instead of resolving one from its own cwd.
-case "$ACTION" in
-    push)
-        SELECTOR="$BRANCH"
-        REPO_FLAG=""
-        lead="A \`git push\` to '${BRANCH}' with an open PR just succeeded."
-        ;;
-    create)
-        SELECTOR="$BRANCH"
-        REPO_FLAG="$CREATE_REPO"
-        lead="A \`gh pr create\` for '${BRANCH}' just succeeded, so its PR is open."
-        ;;
-    merge)
-        SELECTOR="$MERGE_TARGET"
-        REPO_FLAG="$MERGE_REPO"
-        lead="A \`gh pr merge\` of '${MERGE_TARGET}' just succeeded."
-        ;;
-esac
+text=""
+for k in "${!INSTR_KEYS[@]}"; do
+    kind="${INSTR_KEYS[k]%%|*}"
+    selector="${INSTR_KEYS[k]#*|}"
+    repo_flag=""
+    [ -z "${INSTR_REPOS[k]}" ] || repo_flag=" --repo '${INSTR_REPOS[k]}'"
+    text+="${text:+$'\n\n'}${INSTR_LEADS[k]} Launch the $kind watcher: call the Bash tool with \`command: bash ~/.claude/scripts/gh_monitor.sh $kind '$selector'$repo_flag\` and \`run_in_background: true\` (no explicit \`timeout\` override — this watcher ends only on a real CI result, not a time box). You do not need to check for an existing watcher first — the script's own lock evicts any stale one automatically."
+    hook_log "trigger: $kind $selector${INSTR_REPOS[k]:+ --repo ${INSTR_REPOS[k]}}"
+done
 
-jq -n \
-    --arg lead "$lead" \
-    --arg selector "$SELECTOR" \
-    --arg kind "$KIND" \
-    --arg repo_flag "$REPO_FLAG" \
-    '{
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: (
-          $lead
-          + " Launch the " + $kind + " watcher: call the Bash tool with "
-          + "`command: bash ~/.claude/scripts/gh_monitor.sh "
-          + $kind + " '"'"'" + $selector + "'"'"'"
-          + (if $repo_flag == "" then "" else " --repo '"'"'" + $repo_flag + "'"'"'" end)
-          + "` and `run_in_background: true` "
-          + "(no explicit `timeout` override — this watcher ends only on a real "
-          + "CI result, not a time box). You do not need to check for an "
-          + "existing watcher first — the script'"'"'s own lock evicts any "
-          + "stale one automatically."
-        )
-      }
-    }'
+hook_json_str "$text"
+printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' "$REPLY"

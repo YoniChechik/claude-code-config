@@ -8,7 +8,7 @@
 #     stdin.  Only `gh` and `git` are substituted, as PATH-shadowing stubs
 #     (same convention as gh_monitor.bats): the suite must never touch the
 #     network and must never depend on the checkout's real branch.
-#   - CLAUDE_NOTIFY_TMP_DIR redirects the hook's fail-open log into
+#   - CLAUDE_HOOK_LOG_DIR redirects the shared hook log into
 #     BATS_TEST_TMPDIR, so a live hook's real log is never read or written.
 #   - The KEY/SLUG the assertions expect are recomputed through the SHIPPED
 #     helpers in scripts/_notify.sh, never hardcoded, so the test cannot drift
@@ -23,7 +23,8 @@ NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
-    HOOK_LOG="$BATS_TEST_TMPDIR/gh_monitor_hook.log"
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR"
+    HOOK_LOG="$BATS_TEST_TMPDIR/hooks.log"
 
     # Short enough that the fail-open timeout test finishes in ~1s, long enough
     # that a loaded machine never trips it on a healthy stub.
@@ -33,7 +34,8 @@ setup() {
     # calling git/gh; it does not have to be a real repo, because both are
     # stubbed.
     REPO="$BATS_TEST_TMPDIR/repo"
-    mkdir -p "$REPO"
+    W="$BATS_TEST_TMPDIR/w"
+    mkdir -p "$REPO" "$W"
 
     BRANCH="feat-x"
 
@@ -126,8 +128,11 @@ write_git_stub() {
     cat >"$BIN/git" <<'STUB'
 #!/bin/bash
 printf '%s\n' "$*" >>"$GIT_STUB_DIR/calls.log"
-[ "$1 $2" = "branch --show-current" ] || exit 1
-f="$GIT_STUB_DIR/branch"
+case "$*" in
+    "branch --show-current") f="$GIT_STUB_DIR/branch" ;;
+    "rev-parse HEAD @{push}") f="$GIT_STUB_DIR/heads" ;;
+    *) exit 1 ;;
+esac
 [ -f "$f" ] || exit 1
 rc=$(head -n 1 "$f")
 [ "$rc" = "HANG" ] && { sleep 30; exit 0; }
@@ -372,13 +377,13 @@ EOF
     assert_launch_instruction push "$output"
 }
 
-@test "gh pr create with a heredoc --body (UNQUOTED delimiter) stays out of contract" {
+@test "gh pr create with a heredoc --body (UNQUOTED delimiter) launches a push watcher" {
     run ctx 'gh pr create --title Fix --body "$(cat <<EOF
 some body text
 EOF
 )"'
     assert_eq 0 "$status"
-    [ -z "$output" ]
+    assert_launch_instruction push "$output"
 }
 
 @test "a heredoc --body followed by a real dangerous command still stays out of contract" {
@@ -607,16 +612,136 @@ EOF
     assert_eq "" "$output"
 }
 
-@test "a compound command containing a push does not trigger" {
-    run ctx "cd /elsewhere && git push"
+@test "a compound push into a directory that does not exist does not trigger, and is logged" {
+    run ctx "cd /elsewhere-that-does-not-exist && git push"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "cwd does not exist: /elsewhere-that-does-not-exist" "$output"
+}
+
+@test "cd W && git push launches a push watcher for W's branch" {
+    run ctx "cd $W && git push"
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "git -C W push launches a push watcher" {
+    run ctx "git -C $W push"
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "a piped push without HEAD == @{push} evidence does not trigger, and is logged" {
+    run ctx "git push | tee /tmp/log"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "HEAD != @{push}" "$output"
+}
+
+@test "a piped push whose HEAD matches @{push} launches a push watcher" {
+    printf '0\nabc123\nabc123\n' >"$GIT_STUB_DIR/heads"
+    run ctx "git push -u origin HEAD 2>&1 | tail -20"
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+}
+
+@test "a piped push whose HEAD differs from @{push} does not trigger" {
+    printf '0\nabc123\ndef456\n' >"$GIT_STUB_DIR/heads"
+    run ctx "git push 2>&1 | tail -2; git log --oneline -1"
     assert_eq 0 "$status"
     assert_eq "" "$output"
 }
 
-@test "a piped command containing a push does not trigger" {
-    run ctx "git push | tee /tmp/log"
+@test "cd W && gh pr create ... 2>&1 | tail -3 launches a push watcher from the PR URL in stdout" {
+    run ctx 'cd '"$W"' && gh pr create --title "feat(x): a b" --body "$(cat <<'"'"'EOF'"'"'
+- a | b; c && d
+EOF
+)" 2>&1 | tail -3' 0 "https://github.com/o/r/pull/42"
+    assert_eq 0 "$status"
+    assert_contains "A \`gh pr create\` for 'feat-x' just succeeded" "$output"
+    assert_launch_instruction push "$output" "$BRANCH" "o/r"
+}
+
+@test "a failed gh pr create piped to tail does not trigger, and is logged" {
+    run ctx 'cd '"$W"' && gh pr create --title t --body b 2>&1 | tail -3' 0 "pull request create failed: GraphQL: No commits between main and feat-x"
     assert_eq 0 "$status"
     assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "create: exit code not attributable and no PR URL in the output" "$output"
+}
+
+@test "a gh pr create that reports an already-existing PR does not trigger" {
+    run ctx 'gh pr create --fill 2>&1 | tail -3' 0 "a pull request for branch \"feat-x\" into branch \"main\" already exists:
+https://github.com/o/r/pull/7"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+}
+
+@test "a piped push followed by gh pr create yields exactly one push watcher" {
+    printf '0\nabc\nabc\n' >"$GIT_STUB_DIR/heads"
+    run ctx 'git push -u origin HEAD 2>&1 | tail -2; gh pr create --title a --body "$(cat <<'"'"'EOF'"'"'
+x
+EOF
+)"'
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+    run grep -o "gh_monitor.sh push" <<<"$output"
+    assert_eq 1 "${#lines[@]}"
+}
+
+@test "gh pr merge piped to tail then followed by gh pr view still launches a merge watcher" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge 3644 --squash 2>&1 | tail -5; echo ---; gh pr view 3644 --json state"
+    assert_eq 0 "$status"
+    assert_launch_instruction merge "$output" "3644"
+}
+
+@test "git push inside a quoted heredoc commit message is not a push; the real one triggers once" {
+    run ctx 'git add . && git commit -F - <<'"'"'EOF'"'"'
+msg; git push
+EOF
+git push'
+    assert_eq 0 "$status"
+    assert_launch_instruction push "$output"
+    run grep -o "gh_monitor.sh push" <<<"$output"
+    assert_eq 1 "${#lines[@]}"
+}
+
+@test "gh pr merge mentioned inside a commit message does not trigger" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx 'git commit -m "fix: mention gh pr merge here" && echo ok'
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+}
+
+@test "a backgrounded push does not trigger, and is logged" {
+    run ctx "git push origin feat-x &"
+    assert_eq 0 "$status"
+    assert_eq "" "$output"
+    run cat "$HOOK_LOG"
+    assert_contains "push: backgrounded" "$output"
+}
+
+log_lines() {
+    [ -f "$HOOK_LOG" ] || { echo 0; return; }
+    grep -c '' "$HOOK_LOG"
+}
+
+@test "every skip path writes exactly one hook_log line" {
+    local before after cmd
+    for cmd in "ls -la" "git push --help" "git push" "git push --delete origin feat-x" "gh pr merge 1 2" "echo \"git push\" | tee log" "rtk"; do
+        before=$(log_lines)
+        case "$cmd" in "git push") fire "$cmd" 1 >/dev/null ;; *) fire "$cmd" >/dev/null ;; esac
+        after=$(log_lines)
+        assert_eq $((before + 1)) "$after" || { echo "cmd: $cmd" >&2; return 1; }
+        tail -1 "$HOOK_LOG" | grep -q " skip: " || { echo "no skip line for: $cmd" >&2; return 1; }
+    done
+    before=$(log_lines)
+    fire "git push" 0 "" "" "Write" >/dev/null
+    assert_eq $((before + 1)) "$(log_lines)"
+    assert_contains "skip: not a Bash tool call" "$(tail -1 "$HOOK_LOG")"
 }
 
 @test "a non-Bash tool call never triggers" {
