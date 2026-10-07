@@ -1,0 +1,136 @@
+{"name": "01 plain push", "cmd": "git push", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}]}
+{"name": "02 push with refspec", "cmd": "git push origin feat-x", "has": [{"argv": ["git", "push", "origin", "feat-x"], "exit_code_belongs_to_command": true}]}
+{"name": "03 push piped to tail", "cmd": "git push -u origin HEAD 2>&1 | tail -20", "has": [{"cmd": "git", "git.sub": "push", "pipeline_index": 0, "pipeline_len": 2, "exit_code_belongs_to_command": false}, {"cmd": "tail", "exit_code_belongs_to_command": true}]}
+{"name": "04 piped push then log", "cmd": "git push -q 2>&1 | tail -2; git log --oneline -1", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "05 heredoc commit message then push", "cmd": "git add -A && git commit -m \"$(cat <<'EOF'\nx; y | z\nEOF\n)\" && git push", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}, {"cmd": "cat", "in_substitution": true}], "none": [{"cmd": "y"}, {"cmd": "z"}], "count": [{"match": {"cmd": "git", "git.sub": "push"}, "n": 1}]}
+{"name": "06 cd then push", "cmd": "cd /w && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/w", "cwd_known": true, "op_before": "&&"}]}
+{"name": "07 subshell push or echo", "cmd": "(cd /w && git push) || echo fail", "has": [{"cmd": "git", "git.sub": "push", "in_subshell": true, "cwd": "/w", "cwd_known": true, "exit_code_belongs_to_command": false}, {"cmd": "echo", "exit_code_belongs_to_command": false}]}
+{"name": "08 group with redirect", "cmd": "{ git push; } 2>&1", "has": [{"cmd": "git", "git.sub": "push", "in_group": true, "exit_code_belongs_to_command": true}]}
+{"name": "09 backgrounded push", "cmd": "git push origin HEAD:refs/heads/x &", "has": [{"cmd": "git", "git.sub": "push", "background": true, "exit_code_belongs_to_command": false}]}
+{"name": "10 push in for loop", "cmd": "for b in a c; do git push origin $b; done", "has": [{"cmd": "git", "git.sub": "push", "in_compound": "ForClause", "dynamic": [false, false, false, true], "exit_code_belongs_to_command": false}]}
+{"name": "11 git -C", "cmd": "git -C /x push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd": "/x", "git.cwd_known": true, "cwd": "/start"}]}
+{"name": "12 echo git push into tee", "cmd": "echo \"git push\" | tee log", "none": [{"cmd": "git"}]}
+{"name": "13 commit message mentions merge", "cmd": "git commit -m \"fix: mention gh pr merge here\" && echo ok", "has": [{"cmd": "git", "argv[3]": "fix: mention gh pr merge here"}], "none": [{"cmd": "gh"}]}
+{"name": "14 bash -c push", "cmd": "bash -c 'git push origin main'", "has": [{"argv": ["git", "push", "origin", "main"], "via": "bash -c", "depth": 1, "parent": 0, "exit_code_belongs_to_command": true}, {"cmd": "bash", "unknown": false}]}
+{"name": "15 push and create inside if", "cmd": "if git push; then gh pr create --fill; fi", "has": [{"cmd": "git", "git.sub": "push", "in_compound": "IfClause", "exit_code_belongs_to_command": false}, {"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "in_compound": "IfClause", "exit_code_belongs_to_command": false}]}
+{"name": "16 simple create", "cmd": "gh pr create --title \"a b\" --body \"x\"", "has": [{"argv": ["gh", "pr", "create", "--title", "a b", "--body", "x"], "exit_code_belongs_to_command": true}]}
+{"name": "17 rtk wrapped create", "cmd": "rtk gh pr create --title \"x y\" --fill", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "wrappers": ["rtk"], "raw_argv": ["rtk", "gh", "pr", "create", "--title", "x y", "--fill"]}]}
+{"name": "18 cd create heredoc body piped", "cmd": "cd W && gh pr create --title \"feat(x): a b\" --body \"$(cat <<'EOF'\n- a | b; c && d\nEOF\n)\" 2>&1 | tail -3", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "cwd": "/start/W", "cwd_known": true, "pipeline_index": 0, "pipeline_len": 2, "exit_code_belongs_to_command": false, "argv[4]": "feat(x): a b"}], "none": [{"cmd": "b"}, {"cmd": "c"}, {"cmd": "d"}]}
+{"name": "19 body-file heredoc mentions merge", "cmd": "gh pr create --title t --body-file - <<'EOF'\nmentions gh pr merge 12\nEOF", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "redirects[0].heredoc.quoted": true, "redirects[0].heredoc.body": "mentions gh pr merge 12\n"}], "none": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge"}], "count": [{"match": {"cmd": "gh"}, "n": 1}]}
+{"name": "20 unquoted heredoc substitution runs", "cmd": "gh pr create --body \"$(cat <<EOF\n$(git log -1)\nEOF\n)\"", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "dynamic": [false, false, false, false, true]}, {"argv": ["git", "log", "-1"], "in_substitution": true, "exit_code_belongs_to_command": false}]}
+{"name": "21 push then create", "cmd": "git push -u origin HEAD 2>&1 | tail -2; gh pr create --title a --body \"$(cat <<'EOF'\nx\nEOF\n)\"", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}, {"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "exit_code_belongs_to_command": true}], "count": [{"match": {"cmd": "git", "git.sub": "push"}, "n": 1}, {"match": {"cmd": "gh", "argv[1]": "pr", "argv[2]": "create"}, "n": 1}]}
+{"name": "22 continuation lines", "cmd": "gh pr create --repo o/r \\\n --head fix-x \\\n --title \"Fix: y\" \\\n --body z", "has": [{"argv": ["gh", "pr", "create", "--repo", "o/r", "--head", "fix-x", "--title", "Fix: y", "--body", "z"]}]}
+{"name": "23 quotes decoded", "cmd": "gh pr create --title \"it's \\\"quoted\\\"\" --body 'a $(b) `c`'", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "argv[4]": "it's \"quoted\"", "argv[6]": "a $(b) `c`", "dynamic": [false, false, false, false, false, false, false]}], "none": [{"cmd": "b"}, {"cmd": "c"}]}
+{"name": "24 help flag stays in argv", "cmd": "gh pr create -h", "has": [{"argv": ["gh", "pr", "create", "-h"]}]}
+{"name": "25 -h inside a quoted title", "cmd": "gh pr create --title \"flag -h in text\"", "has": [{"argv": ["gh", "pr", "create", "--title", "flag -h in text"]}]}
+{"name": "26 merge with number", "cmd": "gh pr merge 3435 --squash --delete-branch", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[3]": "3435", "exit_code_belongs_to_command": true}]}
+{"name": "27 merge piped then view", "cmd": "gh pr merge 3644 --squash 2>&1 | tail -5; echo ---; gh pr view 3644 --json state", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[3]": "3644", "exit_code_belongs_to_command": false}], "count": [{"match": {"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge"}, "n": 1}]}
+{"name": "28 merge newline view", "cmd": "gh pr merge 1 --squash --delete-branch\ngh pr view 1 --json state", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "op_before": null, "exit_code_belongs_to_command": false}, {"cmd": "gh", "argv[2]": "view", "op_before": ";"}]}
+{"name": "29 cd then merge", "cmd": "cd /r && gh pr merge 3411 --squash --delete-branch 2>&1", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "cwd": "/r", "exit_code_belongs_to_command": true}]}
+{"name": "30 detach then merge then view", "cmd": "git checkout --detach HEAD && gh pr merge 3484 --squash --delete-branch; gh pr view 3484", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[3]": "3484", "exit_code_belongs_to_command": false}]}
+{"name": "31 merge and view", "cmd": "gh pr merge 3642 --squash && gh pr view 3642 --json state --jq .", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[3]": "3642", "exit_code_belongs_to_command": false}]}
+{"name": "32 stacked wrappers", "cmd": "GH_TOKEN=x env FOO=1 time command gh pr merge 12 --squash", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv": ["gh", "pr", "merge", "12", "--squash"], "wrappers": ["env", "time", "command"], "env": ["GH_TOKEN=x", "FOO=1"]}]}
+{"name": "33 merge with repo flag", "cmd": "gh pr merge --repo o/r --squash", "has": [{"argv": ["gh", "pr", "merge", "--repo", "o/r", "--squash"]}]}
+{"name": "34 merge with number and repo", "cmd": "gh pr merge 2960 --repo sunsay-ltd/core --squash --delete-branch", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[3]": "2960"}]}
+{"name": "35 merge auto", "cmd": "gh pr merge 3425 --squash --delete-branch --auto 2>&1", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "argv[6]": "--auto", "redirects[0].op": ">&"}]}
+{"name": "36 two positionals", "cmd": "gh pr merge 1 2", "has": [{"argv": ["gh", "pr", "merge", "1", "2"]}]}
+{"name": "37 python string mentions merge", "cmd": "python3 -c \"p={'command': \\\"gh pr merge 3407\\\"}\"", "has": [{"cmd": "python3", "unknown": false}], "none": [{"cmd": "gh"}]}
+{"name": "38 jq payload piped to a hook script", "cmd": "jq -n '{tool_input:{command:\"gh pr create --title t\"}}' | bash ~/.claude/scripts/post_tool_use__gh_monitor_trigger.sh", "has": [{"cmd": "bash", "argv[1]": "/home/u/.claude/scripts/post_tool_use__gh_monitor_trigger.sh", "unknown": false}], "none": [{"cmd": "gh"}]}
+{"name": "39 delete refspec", "cmd": "git push origin :old-branch", "has": [{"argv": ["git", "push", "origin", ":old-branch"]}]}
+{"name": "40 negated dry run", "cmd": "! git push --dry-run", "has": [{"cmd": "git", "git.sub": "push", "negated": true, "exit_code_belongs_to_command": false}]}
+{"name": "41 view then merge piped to cat", "cmd": "gh pr view 3 && gh pr merge 3 --squash | cat", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "merge", "pipeline_len": 2, "exit_code_belongs_to_command": false}]}
+{"name": "42 commit -F heredoc mentions push", "cmd": "git add . && git commit -F - <<'EOF'\nmsg; git push\nEOF\ngit push", "has": [{"cmd": "git", "git.sub": "push", "op_before": ";", "exit_code_belongs_to_command": true}], "count": [{"match": {"cmd": "git", "git.sub": "push"}, "n": 1}]}
+{"name": "adv echo with pipe before gh", "cmd": "echo \"a | gh repo delete x\"", "none": [{"cmd": "gh"}], "count": [{"match": {}, "n": 1}]}
+{"name": "adv quoted semicolon", "cmd": "echo \"x; git commit -m y\"", "none": [{"cmd": "git"}]}
+{"name": "adv heredoc containing git push", "cmd": "cat <<'EOF'\ngit push --force\nEOF", "none": [{"cmd": "git"}]}
+{"name": "adv commit message containing push", "cmd": "git commit -m \"x; git push\"", "has": [{"git.sub": "commit", "argv[3]": "x; git push"}], "count": [{"match": {"cmd": "git"}, "n": 1}]}
+{"name": "adv body mentions admin flag", "cmd": "gh pr create --body \"never use --admin here\"", "has": [{"cmd": "gh", "argv[1]": "pr", "argv[2]": "create", "argv": ["gh", "pr", "create", "--body", "never use --admin here"]}], "count": [{"match": {}, "n": 1}]}
+{"name": "adv zsh-only syntax", "cmd": "echo ${(f)x}", "error": 2}
+{"name": "adv unterminated quote", "cmd": "echo \"unterminated", "error": 2}
+{"name": "adv variable as command name", "cmd": "$GIT push", "has": [{"unknown": true, "unknown_reasons": ["dynamic command name"], "cmd": null}]}
+{"name": "adv xargs runs git push", "cmd": "echo a | xargs git push", "has": [{"cmd": "xargs", "unknown": true, "unknown_reasons": ["indirect exec"]}]}
+{"name": "adv find -exec", "cmd": "find . -name x -exec rm {} +", "has": [{"cmd": "find", "unknown_reasons": ["indirect exec"]}]}
+{"name": "adv shell-fed quoted heredoc", "cmd": "bash <<'EOF'\ngit push\nEOF", "has": [{"cmd": "git", "git.sub": "push", "via": "heredoc", "parent": 0, "depth": 1, "exit_code_belongs_to_command": true}, {"cmd": "bash", "unknown": false}]}
+{"name": "nest substitution as command", "cmd": "$(echo git) push", "has": [{"unknown_reasons": ["substitution as command"], "argv[1]": "push"}, {"argv": ["echo", "git"], "in_substitution": true}]}
+{"name": "nest backticks as command", "cmd": "`which git` push origin", "has": [{"unknown_reasons": ["substitution as command"]}, {"argv": ["which", "git"], "in_substitution": true}]}
+{"name": "nest depth limit at depth 1", "cmd": "bash -c \"bash -c 'git push'\"", "depth": 1, "has": [{"argv": ["bash", "-c", "git push"], "depth": 1, "unknown_reasons": ["depth limit"]}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "nest default depth limit is 4", "cmd": "bash -c 'bash -c '\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'git push'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"''\"'\"''", "has": [{"depth": 4, "unknown_reasons": ["depth limit"]}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "nest four levels are parsed", "cmd": "bash -c 'bash -c '\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'git push'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"''\"'\"''", "has": [{"cmd": "git", "git.sub": "push", "depth": 4, "exit_code_belongs_to_command": true}]}
+{"name": "nest source", "cmd": "source ./env.sh && git push", "has": [{"cmd": "source", "unknown_reasons": ["source"]}, {"cmd": "git", "git.sub": "push", "cwd_known": false, "git.cwd_known": false}]}
+{"name": "nest dot", "cmd": ". ./env.sh; git push", "has": [{"cmd": ".", "unknown_reasons": ["source"]}, {"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "nest static eval", "cmd": "eval \"git push origin main\"", "has": [{"cmd": "git", "git.sub": "push", "via": "eval", "in_subshell": false, "exit_code_belongs_to_command": true}, {"cmd": "eval", "unknown": false}]}
+{"name": "nest dynamic eval", "cmd": "eval \"$CMD\"", "has": [{"cmd": "eval", "unknown_reasons": ["dynamic eval"]}]}
+{"name": "nest eval loses cwd", "cmd": "eval 'cd /x' && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "nest dynamic bash -c", "cmd": "bash -c \"$CMD\"", "has": [{"cmd": "bash", "unknown_reasons": ["dynamic shell code"]}]}
+{"name": "nest sh -ec", "cmd": "sh -ec 'git push'", "has": [{"cmd": "git", "git.sub": "push", "via": "sh -c"}]}
+{"name": "nest dynamic shell heredoc", "cmd": "bash <<EOF\ngit push $X\nEOF", "has": [{"cmd": "bash", "unknown_reasons": ["dynamic shell heredoc"]}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "nest unquoted static shell heredoc", "cmd": "bash <<EOF\ngit push\nEOF", "has": [{"cmd": "git", "git.sub": "push", "via": "heredoc"}]}
+{"name": "nest shell reads piped stdin", "cmd": "echo 'git push' | bash", "has": [{"cmd": "bash", "unknown_reasons": ["shell reads stdin"]}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "nest shell reads file on stdin", "cmd": "bash < script.sh", "has": [{"cmd": "bash", "unknown_reasons": ["shell reads stdin"]}]}
+{"name": "nest herestring to shell", "cmd": "sh <<<'git push'", "has": [{"cmd": "git", "git.sub": "push", "via": "herestring"}]}
+{"name": "nest env -S", "cmd": "env -S 'git push'", "has": [{"unknown_reasons": ["env -S"]}]}
+{"name": "nest bash runs a script file", "cmd": "bash scripts/run.sh", "has": [{"cmd": "bash", "unknown": false, "code": null}]}
+{"name": "nest nested parse error", "cmd": "bash -c 'echo \"x'", "has": [{"cmd": "bash", "unknown_reasons": ["nested parse error"]}]}
+{"name": "nest cd inside bash -c does not leak", "cmd": "bash -c 'cd /x' && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/start", "cwd_known": true}]}
+{"name": "cwd cd then semicolon is unknown", "cmd": "cd /w; git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd cd or exit keeps it known", "cmd": "cd /w || exit 1; git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/w", "cwd_known": true}]}
+{"name": "cwd conditional cd", "cmd": "test -d /w && cd /w; git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd cd in if condition", "cmd": "if cd /w; then git push; fi; git status", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/w", "cwd_known": true}, {"git.sub": "status", "cwd_known": false}]}
+{"name": "cwd cd dash", "cmd": "cd - && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd dynamic cd", "cmd": "cd \"$D\" && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd relative cd", "cmd": "cd sub && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/start/sub", "cwd_known": true}]}
+{"name": "cwd relative cd with CDPATH in the environment", "cmd": "cd sub && git push", "env": {"CDPATH": "/elsewhere"}, "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd CDPATH assigned in the command", "cmd": "CDPATH=/elsewhere; cd sub && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd dot-relative cd ignores CDPATH", "cmd": "cd ./sub && git push", "env": {"CDPATH": "/elsewhere"}, "has": [{"cmd": "git", "git.sub": "push", "cwd": "/start/sub", "cwd_known": true}]}
+{"name": "cwd pushd", "cmd": "pushd /w && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd popd", "cmd": "popd && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd cd home", "cmd": "cd && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/home/u", "cwd_known": true}]}
+{"name": "cwd cd tilde", "cmd": "cd ~/w && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/home/u/w", "cwd_known": true}]}
+{"name": "cwd cd dotdot", "cmd": "cd .. && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/", "cwd_known": true}]}
+{"name": "cwd chained cds", "cmd": "cd /a && cd b && git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/a/b", "cwd_known": true}]}
+{"name": "cwd subshell cd does not leak", "cmd": "(cd /w); git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/start", "cwd_known": true}]}
+{"name": "cwd piped cd does not leak", "cmd": "cd /w | cat; git push", "has": [{"cmd": "git", "git.sub": "push", "cwd": "/start", "cwd_known": true}]}
+{"name": "cwd function call loses cwd", "cmd": "f() { cd /x; }; f; git push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd unknown start", "cmd": "git push", "cwd": "relative", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false}]}
+{"name": "cwd relative git -C", "cmd": "git -C a push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd": "/start/a", "git.cwd_known": true}]}
+{"name": "cwd stacked relative git -C", "cmd": "git -C a -C b push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd_known": false}]}
+{"name": "cwd absolute git -C after unknown cd", "cmd": "cd \"$D\"; git -C /x push", "has": [{"cmd": "git", "git.sub": "push", "cwd_known": false, "git.cwd": "/x", "git.cwd_known": true}]}
+{"name": "cwd git -C tilde", "cmd": "git -C ~/repo push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd": "/home/u/repo"}]}
+{"name": "cwd --git-dir", "cmd": "git --git-dir=/x/.git push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd_known": false, "git.repo_override": true}]}
+{"name": "cwd --work-tree", "cmd": "git --work-tree /y status", "has": [{"git.sub": "status", "git.cwd_known": false}]}
+{"name": "cwd GIT_DIR prefix", "cmd": "GIT_DIR=/x/.git git push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd_known": false}]}
+{"name": "cwd exported GIT_DIR", "cmd": "export GIT_DIR=/x/.git; git push", "has": [{"cmd": "git", "git.sub": "push", "git.cwd_known": false}]}
+{"name": "cwd git global options", "cmd": "git -c core.x=1 --no-pager -C /r push --force", "has": [{"git.sub": "push", "git.args": ["--force"], "git.cwd": "/r"}]}
+{"name": "hd unquoted body is data except substitution", "cmd": "cat <<EOF\ngit push\n$(git status)\nEOF", "has": [{"argv": ["git", "status"], "in_substitution": true}, {"cmd": "cat", "redirects[0].heredoc.quoted": false, "redirects[0].heredoc.body_dynamic": true}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "hd dash heredoc strips tabs", "cmd": "cat <<-EOF\n\tgit push\n\tEOF", "has": [{"cmd": "cat", "redirects[0].heredoc.dash": true, "redirects[0].heredoc.body": "git push\n"}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "hd shell-fed dash heredoc", "cmd": "bash <<-'EOF'\n\tgit push\n\tEOF", "has": [{"cmd": "git", "git.sub": "push", "via": "heredoc"}]}
+{"name": "hd multiple heredocs on one command", "cmd": "cat <<A <<B\na git push\nA\nb $(git log)\nB", "has": [{"argv": ["git", "log"], "in_substitution": true}, {"cmd": "cat", "redirects[1].heredoc.body_dynamic": true, "redirects[0].heredoc.body": "a git push\n"}], "none": [{"cmd": "git", "git.sub": "push"}]}
+{"name": "hd heredocs on two commands", "cmd": "cat <<A; cat <<B\ngit push\nA\ngit merge\nB", "none": [{"cmd": "git"}], "count": [{"match": {"cmd": "cat"}, "n": 2}]}
+{"name": "hd nested heredoc inside substitution inside heredoc", "cmd": "cat <<A\n$(cat <<B\ninner $(git push)\nB\n)\nA", "has": [{"cmd": "git", "git.sub": "push", "in_substitution": true}], "count": [{"match": {"cmd": "git", "git.sub": "push"}, "n": 1}]}
+{"name": "hd quoted heredoc substitution is inert", "cmd": "cat <<'EOF'\n$(git push)\nEOF", "none": [{"cmd": "git"}]}
+{"name": "hd backslash delimiter is quoted", "cmd": "cat <<\\EOF\n$(git push)\nEOF", "has": [{"redirects[0].heredoc.quoted": true}], "none": [{"cmd": "git"}]}
+{"name": "hd shell-fed heredoc inside substitution", "cmd": "x=$(bash <<'EOF'\ngit push\nEOF\n)", "has": [{"cmd": "git", "git.sub": "push", "via": "heredoc", "in_substitution": true, "exit_code_belongs_to_command": false}]}
+{"name": "ex pipeline last member", "cmd": "git log | git push", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}]}
+{"name": "ex or right side", "cmd": "false || git push", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "ex or left side", "cmd": "git push || echo failed", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "ex and left side", "cmd": "git push && echo ok", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}, {"cmd": "echo", "exit_code_belongs_to_command": true}]}
+{"name": "ex and right side", "cmd": "git add . && git push", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}]}
+{"name": "ex before a semicolon", "cmd": "git push; echo done", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "ex subshell", "cmd": "(git push)", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}]}
+{"name": "ex substitution", "cmd": "x=$(git push)", "has": [{"cmd": "git", "git.sub": "push", "in_substitution": true, "exit_code_belongs_to_command": false}]}
+{"name": "ex function body", "cmd": "f() { git push; }; f", "has": [{"cmd": "git", "git.sub": "push", "in_function": "f", "exit_code_belongs_to_command": false}]}
+{"name": "ex time keyword", "cmd": "time -p git push", "has": [{"cmd": "git", "git.sub": "push", "argv": ["git", "push"], "exit_code_belongs_to_command": true}]}
+{"name": "ex nested last", "cmd": "bash -c 'git add .; git push'", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": true}]}
+{"name": "ex nested not last", "cmd": "bash -c 'git push; echo x'", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "ex nested under non-attributable parent", "cmd": "bash -c 'git push' | tail", "has": [{"cmd": "git", "git.sub": "push", "exit_code_belongs_to_command": false}]}
+{"name": "wr sudo timeout nice nohup", "cmd": "sudo -u root timeout 5 nice -n 3 nohup git push", "has": [{"cmd": "git", "git.sub": "push", "argv": ["git", "push"], "wrappers": ["sudo", "timeout", "nice", "nohup"]}]}
+{"name": "wr command -v is a lookup", "cmd": "command -v git", "has": [{"cmd": "command", "argv": ["command", "-v", "git"], "wrappers": []}]}
+{"name": "wr rtk proxy", "cmd": "rtk proxy git push", "has": [{"cmd": "git", "git.sub": "push", "wrappers": ["rtk proxy"]}]}
+{"name": "wr absolute argv0", "cmd": "/usr/bin/git push", "has": [{"cmd": "git", "git.sub": "push", "argv": ["/usr/bin/git", "push"]}]}
+{"name": "wr dynamic env assignment", "cmd": "env FOO=$x git push", "has": [{"cmd": "git", "git.sub": "push", "env": ["FOO=�"], "unknown": false}]}
+{"name": "wd glob is dynamic", "cmd": "git add *.py", "has": [{"git.sub": "add", "dynamic": [false, false, true]}]}
+{"name": "wd brace expansion is dynamic", "cmd": "echo {a,b}", "has": [{"dynamic": [false, true]}]}
+{"name": "wd escaped glob is literal", "cmd": "echo \\*", "has": [{"argv": ["echo", "*"], "dynamic": [false, false]}]}
+{"name": "wd process substitution", "cmd": "diff <(git show a) <(git show b)", "count": [{"match": {"git.sub": "show", "in_substitution": true}, "n": 2}]}
+{"name": "wd declaration with substitution", "cmd": "export X=$(git rev-parse HEAD)", "has": [{"argv": ["export", "X=�"], "dynamic": [false, true]}, {"git.sub": "rev-parse", "in_substitution": true}]}
+{"name": "wd ansi-c quoting", "cmd": "echo $'a\\nb'", "has": [{"argv": ["echo", "a\nb"]}]}
