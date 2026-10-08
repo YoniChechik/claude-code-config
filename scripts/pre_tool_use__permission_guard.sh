@@ -12,7 +12,14 @@ if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
     fi
     bp_hook_prepare "$INPUT"
 fi
-((BP_RC == 0)) || fail_closed "the permission guard could not parse the command ($BP_ERR)"
+GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|curl|wget|http|xh|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
+if ((BP_RC != 0)); then
+    if [[ ${BP_CMD:-${HOOK_LOG_CMD:-}} =~ $GUARDED_TOOLS_RE ]]; then
+        hook_log "ask: unparseable command mentions ${BASH_REMATCH[2]} ($BP_ERR)"
+        hook_decision ask "The permission guard could not parse this command ($BP_ERR) and it mentions ${BASH_REMATCH[2]}. Confirm it is safe."
+    fi
+    exit 0
+fi
 [[ $BP_TOOL == Bash ]] || exit 0
 
 SUPABASE_PROD_REFS=(pnseoblfzeqiczmmimnr ampdktckxcbdajezxkul)
@@ -44,7 +51,6 @@ deny() { record_verdict deny "$1"; }
 
 GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
 GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
-GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|curl|wget|http|xh|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
 DYN=$'\xef\xbf\xbd'
 
 has_prefix() {
@@ -668,18 +674,11 @@ pulumi_decide() {
 }
 
 check_unknown() {
-    local r raw
+    local r
+    [[ $BP_CMD =~ $GUARDED_TOOLS_RE ]] || return 0
     for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
-        case "$r" in
-            source) ;;
-            "indirect exec")
-                printf -v raw '%s ' ${SEG_RAW[@]+"${SEG_RAW[@]}"}
-                if [[ "$raw" =~ $GUARDED_TOOLS_RE ]]; then
-                    ask "This command hands a guarded tool (${BASH_REMATCH[2]}) to xargs/find/parallel, so the guard cannot check it. Confirm it is safe."
-                fi
-                ;;
-            *) ask "The guard cannot see what part of this command runs ($r). Confirm it is safe." ;;
-        esac
+        [ "$r" = source ] && continue
+        ask "The guard cannot see what part of this command runs ($r), and the command mentions ${BASH_REMATCH[2]}. Confirm it is safe."
     done
 }
 

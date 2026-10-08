@@ -164,16 +164,6 @@ redacted() {
     assert_contains "skip: not a candidate" "$output"
 }
 
-@test "fail_closed logs and emits a PreToolUse ask decision" {
-    run bash -c 'source "$1"; fail_closed "parser failed"; echo unreachable' _ "$LIB"
-    assert_eq 0 "$status"
-    assert_eq ask "$(jq -r .hookSpecificOutput.permissionDecision <<<"$output")"
-    assert_eq PreToolUse "$(jq -r .hookSpecificOutput.hookEventName <<<"$output")"
-    assert_contains "parser failed" "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$output")"
-    run cat "$LOG"
-    assert_contains "fail_closed: parser failed" "$output"
-}
-
 @test "an unwritable log directory never fails the hook" {
     export CLAUDE_HOOK_LOG_DIR=/dev/null/nope
     run bash -c 'source "$1"; hook_log r c; echo after' _ "$LIB"

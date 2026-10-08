@@ -93,9 +93,3 @@ hook_decision() {
     hook_json_str "$2"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":%s}}\n' "$1" "$REPLY"
 }
-
-fail_closed() {
-    hook_log "fail_closed: $1"
-    hook_decision ask "GUARD_FAIL_CLOSED: $1. Confirm manually only if you know this command is safe."
-    exit 0
-}

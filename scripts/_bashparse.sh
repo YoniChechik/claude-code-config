@@ -247,6 +247,9 @@ bp_seg() {
     n=${BP_F[p]}
     SEG_REASONS=("${BP_F[@]:p+1:n}")
     p=$((p + 1 + n))
+    n=${BP_F[p]}
+    SEG_WRITES=("${BP_F[@]:p+1:n}")
+    p=$((p + 1 + n))
     SEG_GIT=${BP_F[p]}
     p=$((p + 1))
     if ((SEG_GIT)); then
