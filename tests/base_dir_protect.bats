@@ -1,46 +1,13 @@
 #!/usr/bin/env bats
-#
-# Verification matrix for the base-dir-protect PreToolUse guard
-# (scripts/pre_tool_use__base_dir_protect.sh).
-#
-# Every case feeds a real hook-input JSON payload to the real hook script and
-# asserts the permission decision, so the guard is exercised exactly the way the
-# harness exercises it.
-#
-# The suite is deliberately two-sided, because this guard has two failure modes
-# that pull in opposite directions:
-#
-#   - too strict -> it denies legitimate work. The guard matches the LITERAL TEXT
-#     of a bash command, so prose inside a commit message or a heredoc body used
-#     to read as executable git. A commit was once denied purely because its
-#     message contained the phrase "(which refuses git -C pointing outside...)".
-#
-#   - too loose  -> it lets a git write reach the base repo. The command
-#     substitution cases below are the ones that must never regress: `$(...)`
-#     still executes inside DOUBLE quotes, so double-quoted spans cannot simply
-#     be ignored the way single-quoted spans and heredoc bodies can.
-#
-# Fixtures are built in $BATS_TEST_TMPDIR rather than pointed at a real checkout,
-# because the hook resolves `cd` and `git -C` targets with a real `cd`, and the
-# file-edit branch walks up looking for a `.git` marker.
-#
-# The git write subcommand tokens are assembled at runtime (C="com""mit"), so
-# this file's own text cannot trip the guard if the suite is ever launched from a
-# shell one-liner that the guard gets to inspect.
 
 setup() {
     HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts/pre_tool_use__base_dir_protect.sh"
 
     BASE="$BATS_TEST_TMPDIR/core"
-    # Harness agent worktree and /create-worktree feature worktree — both live under
-    # the same <repo>/.claude/worktrees/ container and get identical treatment.
     WT="$BASE/.claude/worktrees/agent-a0fc5448517fe2aec"
     FEATWT="$BASE/.claude/worktrees/feat"
-    # The retired clone location. Kept as a fixture purely to pin that it is now DENIED.
     OLDCLONE="$BASE/_clones/feat"
 
-    # `.git` marker makes $BASE look like a real repo to the file-edit branch;
-    # without it every path under it counts as "outside a git repo" and is allowed.
     mkdir -p "$BASE/.git" "$BASE/mobile" "$WT/mobile" "$FEATWT/mobile" "$OLDCLONE/mobile" \
         "$BASE/.claude/worktrees" "$BASE/myclaude/worktrees/x"
 
@@ -51,7 +18,6 @@ setup() {
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
 }
 
-# decide <payload-json> -> ALLOW | DENY
 decide() {
     local out
     out=$(printf '%s' "$1" | bash "$HOOK")
@@ -62,13 +28,11 @@ decide() {
     fi
 }
 
-# bash_decide <cwd> <command> -> ALLOW | DENY
 bash_decide() {
     decide "$(jq -nc --arg cwd "$1" --arg cmd "$2" \
         '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}')"
 }
 
-# file_decide <tool_name> <cwd> <file_path> -> ALLOW | DENY
 file_decide() {
     decide "$(jq -nc --arg t "$1" --arg cwd "$2" --arg fp "$3" \
         '{tool_name:$t,cwd:$cwd,tool_input:{file_path:$fp}}')"
@@ -80,12 +44,6 @@ assert_decision() { # <expected> <actual>
         return 1
     fi
 }
-
-# =============================================================================
-# ALLOWED: worktrees under <repo>/.claude/worktrees/ are the ONLY legitimate
-# isolated workspace — both harness agent worktrees and /create-worktree feature
-# worktrees.
-# =============================================================================
 
 @test "deny: NotebookEdit (notebook_path) in the base checkout" {
     assert_decision DENY "$(decide "$(jq -nc --arg cwd "$BASE" --arg fp "$BASE/mobile/a.ipynb" \
@@ -125,14 +83,6 @@ assert_decision() { # <expected> <actual>
     assert_decision ALLOW "$(bash_decide "$BASE" "git status")"
 }
 
-# =============================================================================
-# ALLOWED: narrow pull-only sync shapes in the base repo (not a worktree). Each
-# one only adopts state already on origin, or deletes untracked cruft — never
-# writes content this session authored, so the worktree confinement does not
-# apply. These are the exact commands _sync_primary_checkout_to_origin_main
-# runs.
-# =============================================================================
-
 @test "allow: checkout -f main in the base repo" {
     assert_decision ALLOW "$(bash_decide "$BASE" "git checkout -f main")"
 }
@@ -156,12 +106,6 @@ assert_decision() { # <expected> <actual>
 @test "allow: the full base-repo sync sequence chained together" {
     assert_decision ALLOW "$(bash_decide "$BASE" "git checkout -f main && git fetch origin --prune && git reset --hard origin/main && git clean -fd")"
 }
-
-# =============================================================================
-# DENIED: near-miss variants of the pull-only sync shapes. Each one differs
-# from the exact allowed shape in the one way that would let it write content
-# this session authored, or content from somewhere other than origin.
-# =============================================================================
 
 @test "deny: checkout of a non-default branch in the base repo" {
     assert_decision DENY "$(bash_decide "$BASE" "git checkout -f some-other-branch")"
@@ -211,10 +155,6 @@ assert_decision() { # <expected> <actual>
     assert_decision ALLOW "$(bash_decide "$BASE" "git -C $FEATWT $A -A")"
 }
 
-# =============================================================================
-# DENIED: the base repo working tree
-# =============================================================================
-
 @test "deny: Write to base repo README.md" {
     assert_decision DENY "$(file_decide Write "$BASE" "$BASE/README.md")"
 }
@@ -242,10 +182,6 @@ assert_decision() { # <expected> <actual>
 @test "deny: cd out of the worktree, then git write" {
     assert_decision DENY "$(bash_decide "$WT" "cd $BASE && git $C -m x")"
 }
-
-# =============================================================================
-# DENIED: lookalike paths and shell-level bypasses
-# =============================================================================
 
 @test "deny: file edit in the worktrees CONTAINER dir" {
     assert_decision DENY "$(file_decide Write "$BASE" "$BASE/.claude/worktrees/NOTES.md")"
@@ -279,14 +215,7 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(bash_decide "$WT" "bash -c 'git $C -m x'")"
 }
 
-# =============================================================================
-# ALLOWED: prose is not code. Quoted text and heredoc bodies never execute, so
-# they must not be read as a git invocation. These are the false positives the
-# sanitizer fixes; every one of them was DENIED before it existed.
-# =============================================================================
-
 @test "allow: commit message containing a parenthetical git -C phrase" {
-    # The exact real-world failure: a commit message describing the guard itself.
     cmd="git $C -m \"Combined with the harness isolation guard (which refuses a git -C pointing outside the worktree), agents could write nowhere.\""
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
 }
@@ -297,8 +226,6 @@ assert_decision() { # <expected> <actual>
 }
 
 @test "allow: commit message containing a pipe and a parenthetical git phrase" {
-    # The pipe splits the message across segments; the fragment starting with `(`
-    # used to look like a subshell lead.
     cmd="git $C -m \"note: a | b (and then git $C -m x) is prose\""
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
 }
@@ -334,19 +261,12 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
 }
 
-# =============================================================================
-# DENIED: real command substitutions. `$(...)` and backticks execute, including
-# inside double quotes, so the sanitizer must keep them. A regression here is a
-# real bypass, not a papercut.
-# =============================================================================
-
 @test "deny: \$(git -C <base>) substitution in command position" {
     cmd="\$(git -C $BASE $C -m x)"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
 
 @test "deny: \$(git -C <base>) substitution with no trailing args" {
-    # Pins the `)` boundary: the subcommand is the last token before the paren.
     cmd="\$(git -C $BASE $C)"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
@@ -372,22 +292,16 @@ EOF"
 }
 
 @test "deny: subshell git write is refused even when it targets the worktree" {
-    # Pinned conservative behaviour: a git write reached through a substitution is
-    # denied on sight, without trusting the -C target.
     cmd="\$(git -C $WT $C -m x)"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
 
 @test "allow: commit message interpolating a READ-ONLY git substitution" {
-    # The write check is scoped to the inside of the span, so a `git log` span no
-    # longer inherits the guilt of a `commit` sitting outside it.
     cmd="git $C -m \"\$(git log -1 --format=%s)\""
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
 }
 
 @test "allow: read-only substitution with a write word elsewhere in the command" {
-    # The case that bit a live session: \$(git log ...) plus the word "commit"
-    # appearing in an unrelated comment.
     cmd="MSG=\$(git log -1 --format=%B)   # reconstruct the real $C message
 echo \"\$MSG\""
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
@@ -398,11 +312,6 @@ echo \"\$MSG\""
     assert_decision ALLOW "$(bash_decide "$BASE" "$cmd")"
 }
 
-# =============================================================================
-# DENIED: a write OUTSIDE a substitution span is not the span scan's job — the
-# per-segment scan owns it, and these pin that hand-off.
-# =============================================================================
-
 @test "deny: read-only substitution followed by a real base-repo git -C write" {
     cmd="\$(git log -1) && git -C $BASE $C -m x"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
@@ -412,13 +321,6 @@ echo \"\$MSG\""
     cmd="\$(git rev-parse HEAD) && cd $BASE && git $C -m x"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
-
-# =============================================================================
-# DENIED: `eval` / `sh -c` arguments are CODE, not data. A shell re-parses that
-# quoted string, so the sanitizer must keep it. Nested inside a substitution
-# these dodge the segment-anchored eval / -c checks entirely, which makes the
-# span scan the only thing in their way.
-# =============================================================================
 
 @test "deny: bash -c with a double-quoted git write, nested in a substitution" {
     cmd="\$(bash -c \"git -C $BASE $C -m x\")"
@@ -451,19 +353,11 @@ echo \"\$MSG\""
 }
 
 @test "deny: heredoc fed to a shell that runs a base-repo git write" {
-    # The body IS executed here, but the plain per-segment scan catches the write
-    # line on its own merits.
     cmd="bash <<'EOF'
 git -C $BASE $C -m x
 EOF"
     assert_decision DENY "$(bash_decide "$WT" "$cmd")"
 }
-
-# =============================================================================
-# DENIED: prefix-wrapper bypasses of GIT_WRITE_PATTERN, closed by the shared
-# shell parser (wrapper unwrapping and git global-option normalization). Every one of these silently ALLOWED before that
-# library existed — this is the exact bypass list from the security review.
-# =============================================================================
 
 @test "deny: command builtin prefix on a base-repo git write" {
     assert_decision DENY "$(bash_decide "$BASE" "command git $C -am y")"
@@ -501,13 +395,6 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$BASE" "command git status")"
 }
 
-# =============================================================================
-# PATH TRAVERSAL on the file-edit branch. The worktree check used to run on the
-# RAW file_path string, so a path that spells out a worktree prefix and then
-# climbs back out of it matched character for character while pointing at the
-# base repo. Every one of these must DENY.
-# =============================================================================
-
 @test "deny: file path that traverses out of a worktree back into the base repo" {
     assert_decision DENY "$(file_decide Write "$BASE" "$WT/../../../README.md")"
 }
@@ -527,12 +414,6 @@ EOF"
 @test "allow: a .. that stays inside the worktree" {
     assert_decision ALLOW "$(file_decide Write "$WT" "$WT/mobile/../mobile/foo.ts")"
 }
-
-# =============================================================================
-# GIT ALLOWLIST. The old denylist named a handful of write subcommands, so every
-# subcommand it had not heard of wrote to the base repo unchallenged. The model
-# is inverted: only known-read subcommands pass.
-# =============================================================================
 
 @test "deny: git --paginate before the subcommand" {
     assert_decision DENY "$(bash_decide "$BASE" "git --paginate $C -am y")"
@@ -575,7 +456,6 @@ EOF"
 }
 
 @test "deny: a -c alias override is not laundered by pointing -C at a worktree" {
-    # An alias body can run ANY command, so -C is no evidence about what it does.
     assert_decision DENY "$(bash_decide "$BASE" "git -C $WT -c alias.zz=$C zz -m x")"
 }
 
@@ -592,12 +472,8 @@ EOF"
 }
 
 @test "deny: env with an argument-taking flag before git" {
-    # The env prefix stripper used to skip `-u` but not its argument, leaving
-    # `FOO` in command position and the real git invocation unexamined.
     assert_decision DENY "$(bash_decide "$BASE" "env -u FOO git $C -am y")"
 }
-
-# --- and the read side of the allowlist must keep working in the base repo ---
 
 @test "allow: git log in the base repo" {
     assert_decision ALLOW "$(bash_decide "$BASE" "git log --oneline -5")"
@@ -677,12 +553,6 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$WT" "git config user.name me")"
 }
 
-# =============================================================================
-# SHELL GRAMMAR. A command body wrapped in a brace group or an if/while/for
-# construct is still a command; the segment splitter used to hand the guard a
-# segment starting with `{` or `then` and give up on it.
-# =============================================================================
-
 @test "deny: brace group around a base-repo git write" {
     assert_decision DENY "$(bash_decide "$BASE" "{ git $C -am y; }")"
 }
@@ -698,12 +568,6 @@ EOF"
 @test "deny: for/do around a base-repo git write" {
     assert_decision DENY "$(bash_decide "$BASE" "for i in 1; do git $C -am y; done")"
 }
-
-# =============================================================================
-# HEREDOCS. A QUOTED delimiter makes the body inert data; an UNQUOTED one still
-# runs every substitution inside it before the body reaches stdin. Dropping both
-# bodies meant `cat <<EOF` / `$(git commit)` / `EOF` produced no decision.
-# =============================================================================
 
 @test "deny: unquoted heredoc delimiter whose body runs a git write" {
     cmd="cat <<EOF
@@ -742,12 +606,6 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$WT" "$cmd")"
 }
 
-# =============================================================================
-# SHELL-CODE ARGUMENTS. An end-anchored `-c "(.*)"$` match is defeated by a
-# trailing argv word, by combined short flags, and by an absolute path to the
-# interpreter.
-# =============================================================================
-
 @test "deny: bash -c with trailing argv after the code string" {
     assert_decision DENY "$(bash_decide "$WT" "bash -c \"git -C $BASE $C -m x\" sentinel")"
 }
@@ -768,11 +626,6 @@ EOF"
     done
     assert_decision ALLOW "$(bash_decide "$WT" "git $C -m \"refactor: something real.$body\"")"
 }
-
-# =============================================================================
-# QUOTED TEXT AND HEREDOC BODIES ARE DATA in the base repo too, while real
-# nested shells and subshells keep failing closed.
-# =============================================================================
 
 @test "allow: a separator and a git write inside an echoed string in the base repo" {
     assert_decision ALLOW "$(bash_decide "$BASE" "echo \"x; git $C -m y\"")"
@@ -867,6 +720,12 @@ git $C -m x")"
     printf 'build/\n' >"$repo/.gitignore"
     assert_decision ALLOW "$(bash_decide "$repo" "mkdir -p build && echo x > build/out.txt")"
     assert_decision DENY "$(bash_decide "$repo" "echo x > src.txt")"
+}
+
+@test "allow: git writes in a directory that is not inside any repo" {
+    local scratch="$BATS_TEST_TMPDIR/scratch"
+    mkdir -p "$scratch"
+    assert_decision ALLOW "$(bash_decide "$scratch" "git init -q x && git -C x $C --allow-empty -m x")"
 }
 
 @test "ask: a file write whose directory may be the base repo" {

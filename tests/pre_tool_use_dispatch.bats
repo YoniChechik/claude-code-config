@@ -1,15 +1,4 @@
 #!/usr/bin/env bats
-#
-# Verification matrix for the PreToolUse dispatcher
-# (scripts/pre_tool_use__dispatch.sh), which merges
-# pre_tool_use__base_dir_protect.sh and pre_tool_use__permission_guard.sh into
-# one hook entry. These tests pin the COMBINATION logic (deny > ask > allow,
-# matching how Claude Code itself combines multiple PreToolUse hook results)
-# — the individual checks' own behavior is already covered by
-# base_dir_protect.bats and permission_guard.bats.
-#
-# Destructive-verb tokens assembled at runtime, same convention as the other
-# suites in this directory.
 
 setup() {
     HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts/pre_tool_use__dispatch.sh"
@@ -27,7 +16,6 @@ setup() {
     HOOK_LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
 }
 
-# decide <payload-json> -> ALLOW | ASK | DENY
 decide() {
     local out
     out=$(printf '%s' "$1" | bash "$HOOK")
@@ -87,17 +75,6 @@ assert_decision() { # <expected> <actual>
     assert_decision ALLOW "$(file_decide Write "$WT" "$WT/README.md")"
 }
 
-# =============================================================================
-# FAIL-CLOSED. The dispatcher's contract is "empty output = no opinion = allow",
-# which made every internal failure look exactly like a clean pass: with the
-# shared library missing, a sub-check that should have DENIED emitted nothing
-# and the command was silently allowed. A sub-check is trusted only when it
-# exits 0 AND writes nothing to stderr; anything else becomes ASK.
-#
-# `broken_dir` builds a scripts/ directory that is complete except for the one
-# thing under test, so the dispatcher runs exactly as it does in production.
-# =============================================================================
-
 SCRIPTS_DIR() { echo "$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts"; }
 
 dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
@@ -118,7 +95,6 @@ dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
     cp "$(SCRIPTS_DIR)"/pre_tool_use__dispatch.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__base_dir_protect.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__permission_guard.sh "$dir/"
-    # _hook_log.sh, _bashparse.sh and bashparse.jq deliberately NOT copied.
     assert_decision ASK "$(dispatch_in "$dir" "$WT" "$GH $REPO $DEL foo/bar")"
 }
 
@@ -135,9 +111,6 @@ dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
     local dir="$BATS_TEST_TMPDIR/noisy"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
-    # A guard that leaks a diagnostic hit something it did not expect, so its
-    # silence on stdout proves nothing. Injected at the top, because the script
-    # exits long before its last line on a clean pass.
     sed -i '' '1a\
 echo "unexpected diagnostic" >&2
 ' "$dir/pre_tool_use__base_dir_protect.sh"
@@ -165,8 +138,6 @@ printf "%s" "not json at all"; exit 0
 }
 
 @test "allow: a healthy no-rule-matched pass still means allow" {
-    # The whole point of failing closed is that it must NOT swallow the normal
-    # "nothing matched" path, which is silence plus exit 0.
     local dir="$BATS_TEST_TMPDIR/healthy"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
