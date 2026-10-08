@@ -35,21 +35,28 @@ all_in_worktree() {
 }
 
 git_branch_args_are_read() {
-    local tok expect_value=0
+    local tok expect_value=0 list_mode=0 positional=0
     for tok in "$@"; do
         if [ "$expect_value" = "1" ]; then
             expect_value=0
             continue
         fi
         case "$tok" in
-            --contains|--no-contains|--points-at|--merged|--no-merged|--sort|--format|--color)
+            --contains|--no-contains|--points-at|--merged|--no-merged)
+                list_mode=1
                 expect_value=1 ;;
-            -a|-r|-v|-vv|-q|--all|--remotes|--list|-l|--show-current|--verbose|--quiet|\
-            --contains=*|--no-contains=*|--points-at=*|--merged=*|--no-merged=*|--sort=*|--format=*|--color=*|--no-color) ;;
-            *) return 1 ;;
+            --sort|--format|--color)
+                expect_value=1 ;;
+            --list|-l|-v|-vv|--verbose|\
+            --contains=*|--no-contains=*|--points-at=*|--merged=*|--no-merged=*)
+                list_mode=1 ;;
+            -a|-r|-q|--all|--remotes|--show-current|--quiet|-i|--ignore-case|--omit-empty|\
+            --sort=*|--format=*|--color=*|--no-color) ;;
+            -*) return 1 ;;
+            *) positional=1 ;;
         esac
     done
-    return 0
+    [ "$positional" = "0" ] || [ "$list_mode" = "1" ]
 }
 
 git_branch_delete_is_merged() {
@@ -103,8 +110,11 @@ git_subcommand_is_read() {
         rev-parse|rev-list|ls-files|ls-tree|ls-remote|cat-file|show-ref|for-each-ref|\
         merge-base|name-rev|shortlog|grep|whatchanged|count-objects|check-ignore|\
         check-attr|verify-commit|verify-tag|version|help|cherry|range-diff|\
-        show-branch|var|fetch|worktree)
+        show-branch|var|fetch)
             return 0 ;;
+        worktree)
+            [ "$first" = "list" ] && return 0
+            return 1 ;;
         branch)
             git_branch_args_are_read "$@" && return 0
             git_branch_delete_is_merged "$repo_dir" "$@"

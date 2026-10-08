@@ -627,11 +627,36 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$BASE" "git fetch --all")"
 }
 
-@test "allow: git worktree, the sanctioned escape hatch, from the base repo" {
-    # /create-worktree itself runs this from the base repo; denying it would
-    # make the guard impossible to comply with.
+@test "allow: git worktree list from the base repo" {
     assert_decision ALLOW "$(bash_decide "$BASE" "git worktree list")"
-    assert_decision ALLOW "$(bash_decide "$BASE" "git worktree $A .claude/worktrees/x -b x")"
+}
+
+@test "deny: direct git worktree writes from the base repo (only the worktree scripts may run them)" {
+    assert_decision DENY "$(bash_decide "$BASE" "git worktree $A .claude/worktrees/x -b x")"
+    assert_decision DENY "$(bash_decide "$BASE" "git worktree remove .claude/worktrees/x")"
+    assert_decision DENY "$(bash_decide "$BASE" "git worktree prune")"
+}
+
+@test "allow: git branch --list/-v/--merged with a pattern in the base repo" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch --list 'worktree-agent-*'")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch -l 'feat-*'")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch -v 'feat-*'")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "git branch --merged main 'feat-*'")"
+}
+
+@test "deny: git branch with a name but no list flag in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "git branch newb")"
+    assert_decision DENY "$(bash_decide "$BASE" "git branch -a newb")"
+    assert_decision DENY "$(bash_decide "$BASE" "git branch -m old new")"
+    assert_decision DENY "$(bash_decide "$BASE" "git branch --list -D foo")"
+}
+
+@test "allow: read-only git after a cd that may fail, with a branch pattern" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && git worktree list | grep x; git branch --list 'wt-*'; git log origin/main..HEAD --oneline | head")"
+}
+
+@test "ask: git write after a cd that may fail" {
+    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && true; git commit -m x")"
 }
 
 @test "allow: git config --get in the base repo" {
