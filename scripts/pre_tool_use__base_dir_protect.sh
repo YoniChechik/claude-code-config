@@ -25,11 +25,20 @@ in_worktree() {
     return 1
 }
 
-all_in_worktree() {
+repo_root() {
+    REPO_ROOT="$1"
+    while [ "$REPO_ROOT" != "/" ] && [ -n "$REPO_ROOT" ] && [ ! -e "$REPO_ROOT/.git" ]; do
+        REPO_ROOT="${REPO_ROOT%/*}"
+    done
+    [ -e "$REPO_ROOT/.git" ]
+}
+
+all_outside_base() {
     local d
     (($# > 0)) || return 1
     for d in "$@"; do
-        in_worktree "$d" || return 1
+        in_worktree "$d" && continue
+        repo_root "$d" && return 1
     done
     return 0
 }
@@ -202,7 +211,7 @@ check_git() {
     esac
     if [ "$SEG_GIT_OVERRIDE" = "1" ]; then
         record deny "$DENY_GIT_MSG"
-    elif all_in_worktree ${alts[@]+"${alts[@]}"}; then
+    elif all_outside_base ${alts[@]+"${alts[@]}"}; then
         return 0
     elif [ "${#alts[@]}" = "1" ]; then
         record deny "$DENY_GIT_MSG"
@@ -236,7 +245,7 @@ for p in sys.argv[2:]:
 }
 
 in_base_repo() {
-    local p="$1" dir
+    local p="$1"
     case "$p" in
         "$HOME"/.claude/projects/*/memory/*) return 1 ;;
     esac
@@ -244,13 +253,9 @@ in_base_repo() {
         */.claude/worktrees/*/*) return 1 ;;
         */.claude/worktrees/?*) [ -e "$p/.git" ] && return 1 ;;
     esac
-    dir="$p"
-    while [ "$dir" != "/" ] && [ -n "$dir" ] && [ ! -e "$dir/.git" ]; do
-        dir="${dir%/*}"
-    done
-    [ -e "$dir/.git" ] || return 1
-    [ "$p" = "$dir" ] && return 0
-    ! git -C "$dir" check-ignore -q -- "$p" 2>/dev/null
+    repo_root "$p" || return 1
+    [ "$p" = "$REPO_ROOT" ] && return 0
+    ! git -C "$REPO_ROOT" check-ignore -- "$p" "$p/" >/dev/null 2>&1
 }
 
 check_writes() {
