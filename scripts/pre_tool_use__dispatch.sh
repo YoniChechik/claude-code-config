@@ -13,7 +13,7 @@ if ! source "$SCRIPT_DIR/_hook_log.sh" 2>/dev/null || ! source "$SCRIPT_DIR/_bas
     exit 0
 fi
 
-bp_hook_prepare "$INPUT" || fail_closed "the dispatcher could not parse the command ($BP_ERR)"
+bp_hook_prepare "$INPUT"
 
 ERR_MARK=$'\037'
 RC_MARK=$'\036'

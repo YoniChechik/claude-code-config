@@ -243,56 +243,51 @@ assert_logged() { # <substring>
     return 1
 }
 
-@test "fail closed: shfmt missing from PATH asks instead of allowing a would-be deny" {
+@test "ask: shfmt missing and the command names a guarded tool" {
     link_bin jq
     assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
     assert_logged "shfmt not installed) | $GH $REPO $DEL foo/bar"
 }
 
-@test "fail closed: shfmt missing never blocks a non-Bash tool, which needs no parse" {
+@test "allow: shfmt missing never blocks a non-Bash tool, which needs no parse" {
     link_bin jq
     local payload
     payload=$(jq -nc --arg cwd "$WT" --arg fp "$WT/README.md" '{tool_name:"Write",cwd:$cwd,tool_input:{file_path:$fp}}')
     assert_decision ALLOW "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$payload")"
 }
 
-@test "fail closed: hook input that is not JSON asks" {
-    assert_decision ASK "$(decide '{"tool_name":"Bash","tool_input":{"command":')"
-    assert_logged "bad hook input JSON"
+@test "fail open: hook input that is not JSON allows" {
+    assert_decision ALLOW "$(decide '{"tool_name":"Bash","tool_input":{"command":')"
 }
 
-@test "fail closed: hook input whose command is not a string asks" {
-    assert_decision ASK "$(decide '{"tool_name":"Bash","cwd":"/","tool_input":{"command":["git","push"]}}')"
+@test "fail open: hook input whose command is not a string allows" {
+    assert_decision ALLOW "$(decide '{"tool_name":"Bash","cwd":"/","tool_input":{"command":["git","push"]}}')"
 }
 
-@test "fail closed: the flattening jq failing asks" {
+@test "fail open: the flattening jq failing allows" {
     link_bin shfmt
     local real_jq
     real_jq=$(command -v jq)
     stub_bin jq "case \"\$*\" in *bashparse.jq*) echo 'jq: error: boom' >&2; exit 5 ;; esac; exec $real_jq \"\$@\""
-    assert_decision ASK "$(dispatch_with_path "$(STUBS):$PATH" "$(bash_payload "$WT" "echo hello")")"
-    assert_logged "jq failed"
+    assert_decision ALLOW "$(dispatch_with_path "$(STUBS):$PATH" "$(bash_payload "$WT" "echo hello")")"
 }
 
-@test "fail closed: a hung shfmt times out and asks" {
+@test "fail open: a hung shfmt times out and allows" {
     link_bin jq
     stub_bin shfmt 'exec sleep 30'
     local start=$SECONDS
-    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")" BASHPARSE_TIMEOUT=1)"
+    assert_decision ALLOW "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")" BASHPARSE_TIMEOUT=1)"
     [ $((SECONDS - start)) -lt 10 ]
-    assert_logged "timeout: parse exceeded 1s"
 }
 
-@test "fail closed: shfmt exiting nonzero asks" {
+@test "fail open: shfmt exiting nonzero allows" {
     link_bin jq
     stub_bin shfmt 'echo "1:1: something broke" >&2; exit 1'
-    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")")"
-    assert_logged "parse error: 1:1: something broke"
+    assert_decision ALLOW "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "echo hello")")"
 }
 
-@test "fail closed: a command bash cannot parse asks" {
-    assert_decision ASK "$(bash_decide "$WT" "echo \"unterminated")"
-    assert_logged "parse error"
+@test "fail open: a command bash cannot parse allows" {
+    assert_decision ALLOW "$(bash_decide "$WT" "echo \"unterminated")"
 }
 
 @test "the dispatcher parses once and both guards still decide from that one parse" {

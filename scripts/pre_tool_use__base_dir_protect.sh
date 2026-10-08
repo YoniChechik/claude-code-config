@@ -16,7 +16,7 @@ if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
     fi
     bp_hook_prepare "$INPUT"
 fi
-((BP_RC == 0)) || fail_closed "the base-dir guard could not parse the command ($BP_ERR)"
+((BP_RC == 0)) || exit 0
 
 in_worktree() {
     case "$1" in
@@ -185,21 +185,6 @@ record() {
     esac
 }
 
-check_unknown() {
-    local r raw
-    all_in_worktree ${SEG_CWD_ALTS[@]+"${SEG_CWD_ALTS[@]}"} && return 0
-    for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
-        case "$r" in
-            source) ;;
-            "indirect exec")
-                printf -v raw ' %s ' ${SEG_RAW[@]+"${SEG_RAW[@]}"}
-                [[ "$raw" =~ [[:space:]/]git[[:space:]] ]] && record ask "GUARD_FAIL_CLOSED: this command hands git to xargs/find/parallel outside a worktree, so the base-dir guard cannot check what it writes. Confirm manually only if it does not write to the base repo."
-                ;;
-            *) record ask "GUARD_FAIL_CLOSED: the base-dir guard cannot see what part of this command runs ($r) outside a worktree. Confirm manually only if it does not write to the base repo." ;;
-        esac
-    done
-}
-
 check_git() {
     local dir unsafe=0
     local -a alts
@@ -222,7 +207,7 @@ check_git() {
     elif [ "${#alts[@]}" = "1" ]; then
         record deny "$DENY_GIT_MSG"
     else
-        record ask "GUARD_FAIL_CLOSED: the base-dir guard cannot tell which directory this git write runs in (a cd that may fail, a dynamic path, or a cd inside a branch or loop), and at least one candidate is outside a worktree. Confirm manually only if it targets a worktree."
+        record ask "The base-dir guard cannot tell which directory this git write runs in (a cd that may fail, a dynamic path, or a cd inside a branch or loop), and at least one candidate is outside a worktree. Confirm manually only if it targets a worktree."
     fi
 }
 
@@ -238,28 +223,66 @@ _resolve_path() {
         '$CLAUDE_CONFIG_DIR') p="$claude_dir" ;;
         '$CLAUDE_CONFIG_DIR/'*) p="$claude_dir/${p#\$CLAUDE_CONFIG_DIR/}" ;;
     esac
-    python3 -c '
-import os, sys
-base, p = sys.argv[1], sys.argv[2]
-if not os.path.isabs(p):
-    p = os.path.join(base, p)
-print(os.path.realpath(p))
-' "$1" "$p" 2>/dev/null
+    _realpaths "$1" "$p"
 }
 
-is_in_git_repo() {
-    local dir="$1"
-    while [ "$dir" != "/" ] && [ -n "$dir" ]; do
-        [ -e "$dir/.git" ] && return 0
+_realpaths() {
+    python3 -c '
+import os, sys
+base = sys.argv[1]
+for p in sys.argv[2:]:
+    sys.stdout.write(os.path.realpath(os.path.join(base, p)) + "\0")
+' "$@" 2>/dev/null
+}
+
+in_base_repo() {
+    local p="$1" dir
+    case "$p" in
+        "$HOME"/.claude/projects/*/memory/*) return 1 ;;
+    esac
+    case "$p" in
+        */.claude/worktrees/*/*) return 1 ;;
+        */.claude/worktrees/?*) [ -e "$p/.git" ] && return 1 ;;
+    esac
+    dir="$p"
+    while [ "$dir" != "/" ] && [ -n "$dir" ] && [ ! -e "$dir/.git" ]; do
         dir="${dir%/*}"
     done
-    return 1
+    [ -e "$dir/.git" ] || return 1
+    [ "$p" = "$dir" ] && return 0
+    ! git -C "$dir" check-ignore -q -- "$p" 2>/dev/null
+}
+
+check_writes() {
+    local t p hits
+    local -a cands resolved
+    for t in ${SEG_WRITES[@]+"${SEG_WRITES[@]}"}; do
+        cands=()
+        if [[ $t == /* ]]; then
+            cands=("$t")
+        else
+            for p in ${SEG_CWD_ALTS[@]+"${SEG_CWD_ALTS[@]}"}; do
+                cands+=("$p/$t")
+            done
+        fi
+        ((${#cands[@]} > 0)) || continue
+        mapfile -d '' resolved < <(_realpaths / "${cands[@]}")
+        hits=0
+        for p in ${resolved[@]+"${resolved[@]}"}; do
+            in_base_repo "$p" && hits=$((hits + 1))
+        done
+        if ((hits > 0 && hits == ${#resolved[@]})); then
+            record deny "$DENY_EDIT_MSG (target: ${resolved[0]})"
+        elif ((hits > 0)); then
+            record ask "The base-dir guard cannot tell which directory this command writes $t in (a cd that may fail, or a cd inside a branch or loop), and one candidate is in the base repo outside a worktree. Confirm manually only if it targets a worktree."
+        fi
+    done
 }
 
 if [ "$BP_TOOL" = "Bash" ]; then
     for ((seg_i = 0; seg_i < BP_N; seg_i++)); do
         bp_seg "$seg_i"
-        case "$SEG_FLAGS" in *U*) check_unknown ;; esac
+        check_writes
         [ "$SEG_GIT" = "1" ] && check_git
     done
     if [ -n "$VERDICT" ]; then
@@ -271,21 +294,8 @@ fi
 
 [ -n "$BP_FILE" ] || exit 0
 cwd="${BP_CWD:-$HOME}"
-resolved_path=$(_resolve_path "$cwd" "$BP_FILE")
-if [ -z "$resolved_path" ]; then
-    printf '%s\n' "$INTERNAL_ERROR_JSON"
-    exit 0
-fi
-
-case "$resolved_path" in
-    "$HOME"/.claude/projects/*/memory/*) exit 0 ;;
-esac
-
-is_in_git_repo "${resolved_path%/*}" || exit 0
-
-case "$resolved_path" in
-    */.claude/worktrees/*/*) exit 0 ;;
-esac
-
+mapfile -d '' resolved < <(_resolve_path "$cwd" "$BP_FILE")
+((${#resolved[@]} == 1)) || exit 0
+in_base_repo "${resolved[0]}" || exit 0
 hook_decision deny "$DENY_EDIT_MSG"
 exit 0

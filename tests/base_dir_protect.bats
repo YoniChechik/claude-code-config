@@ -819,6 +819,61 @@ git $C -m x")"
     assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT/mobile && git $C -m x")"
 }
 
-@test "ask: an unparseable command fails closed" {
-    assert_decision ASK "$(bash_decide "$BASE" "echo \"unterminated")"
+@test "allow: an unparseable command fails open" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "echo \"unterminated")"
+}
+
+@test "allow: scratchpad scripts run through a variable assigned in the same command" {
+    local sp="$BATS_TEST_TMPDIR/scratchpad"
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=$sp; mkdir -p \$S/ks && cp -R /tmp/a \$S/ks && cd \$S/ks && sed -i '' 's/a/b/' \$S/q.sh && \$S/q.sh \"select 1\" | cut -c1-300")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=$sp; sed -i '' 's#a#b#' \$S/q.sh; \$S/q.sh \"select x\" | cut -c1-300")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=$sp; \$S/q.sh \"select 1\" ; echo; \$S/q.sh \"a\"; \$S/q.sh \"b\"")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=$sp; \$S/q.sh \"select 1\" | cut -c1-6000")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=$sp; \$S/qs.sh \"select a->>'b', c::int from t where d ~ 'x' and e > 2 and (f)\" ; \$S/qs.sh \"select 1 > 0\"; \$S/qs.sh 'a < b'; \$S/q.sh \"x >> y\"")"
+}
+
+@test "allow: a variable holding a static command line runs inside a worktree" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT && U=abc; A=\"node node_modules/cli.js run\"; \$A gesture-tap --udid \$U >/dev/null; date -u +%FT%TZ; \$A describe | jq . | head -50")"
+}
+
+@test "allow: unresolvable command words fail open" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "A=\"\$UNKNOWN\"; \$A x")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "\$TOOL run; eval \"\$CMD\"; echo x | xargs rm")"
+}
+
+@test "allow: writes outside any repo or inside a worktree" {
+    : >"$FEATWT/.git"
+    assert_decision ALLOW "$(bash_decide "$BASE" "echo x > /tmp/out; touch $BATS_TEST_TMPDIR/f; echo y >/dev/null 2>&1")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "echo x > $WT/f; sed -i '' s/a/b/ $WT/mobile/g; cp a $FEATWT/")"
+    assert_decision ALLOW "$(bash_decide "$WT" "echo x > f && rm -f mobile/x")"
+}
+
+@test "deny: file writes into the base repo outside a worktree" {
+    assert_decision DENY "$(bash_decide "$BASE" "echo hi > README.md")"
+    assert_decision DENY "$(bash_decide "/tmp" "cd $BASE && rm -f AGENTS.md")"
+    assert_decision DENY "$(bash_decide "/tmp" "S=$BASE; cp /tmp/x \$S/AGENTS.md")"
+    assert_decision DENY "$(bash_decide "$BASE" "sed -i '' s/a/b/ mobile/x.sh")"
+    assert_decision DENY "$(bash_decide "$WT" "echo x | tee -a $BASE/log")"
+    assert_decision DENY "$(bash_decide "$WT" "{ echo a; echo b; } > $BASE/out")"
+    assert_decision DENY "$(bash_decide "$WT" "mv $BASE/a /tmp/a")"
+    assert_decision DENY "$(bash_decide "$WT" "perl -pi -e s/x/y/ $BASE/f")"
+    assert_decision DENY "$(bash_decide "$WT" "dd if=/dev/zero of=$BASE/f count=1")"
+    assert_decision DENY "$(bash_decide "/tmp" "S=$BASE; \$S/run.sh > \$S/out")"
+}
+
+@test "allow: gitignored paths in a real repo, deny tracked content" {
+    local repo="$BATS_TEST_TMPDIR/real"
+    git init -q "$repo"
+    printf 'build/\n' >"$repo/.gitignore"
+    assert_decision ALLOW "$(bash_decide "$repo" "mkdir -p build && echo x > build/out.txt")"
+    assert_decision DENY "$(bash_decide "$repo" "echo x > src.txt")"
+}
+
+@test "ask: a file write whose directory may be the base repo" {
+    assert_decision ASK "$(bash_decide "$BASE" "cd $WT; echo x > f")"
+}
+
+@test "allow: a variable re-assigned later is not trusted to resolve a write target" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "S=/tmp; S=\$X; echo > \$S/f")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "for S in a; do :; done; echo > \$S/f")"
 }

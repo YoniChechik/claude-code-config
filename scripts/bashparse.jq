@@ -2,6 +2,10 @@ def DYN: "\uFFFD";
 def SHELLS: ["bash", "sh", "zsh", "dash", "ksh", "mksh"];
 def TERMINATORS: ["exit", "return"];
 def GITREPOENV: ["GIT_DIR", "GIT_WORK_TREE"];
+def SPECIALVARS: ["IFS", "PATH", "PWD", "OLDPWD", "HOME", "CDPATH", "RANDOM", "SRANDOM", "SECONDS", "LINENO", "REPLY",
+  "OPTARG", "OPTIND", "HISTCMD", "PPID", "UID", "EUID", "SHLVL", "EPOCHSECONDS", "EPOCHREALTIME", "GLOBIGNORE",
+  "SHELLOPTS", "BASHOPTS", "ENV", "BASH_ENV", "PS4", "FUNCNAME", "GROUPS", "DIRSTACK", "PIPESTATUS"];
+def PLAINPARAM: ["Type", "Pos", "End", "Dollar", "Short", "Param", "Rbrace"];
 
 def lit: gsub("\\\\\n"; "") | gsub("\\\\(?<c>.)"; "\(.c)"; "s");
 def dqlit: gsub("\\\\\n"; "") | gsub("\\\\(?<c>[\"\\\\$`])"; "\(.c)");
@@ -16,22 +20,51 @@ def normpath:
   | "/" + join("/");
 def resolve($b): if startswith("/") then normpath else ($b + "/" + .) | normpath end;
 
-def part($dq):
+def pvar($v):
+  if .Type == "ParamExp" and ((keys - PLAINPARAM) | length) == 0 and (.Param.Value as $n | $v | has($n))
+  then $v[.Param.Value] else null end;
+
+def part($dq; $v):
   if .Type == "Lit" then {s: (.Value | if $dq then dqlit else lit end), dyn: (($dq | not) and (.Value | globby))}
   elif .Type == "SglQuoted" then {s: (if .Dollar then (.Value | ansic) else .Value end), dyn: false}
-  elif .Type == "DblQuoted" then ([.Parts[]? | part(true)] | {s: (map(.s) | join("")), dyn: (map(.dyn) | any)})
+  elif .Type == "DblQuoted" then ([.Parts[]? | part(true; $v)] | {s: (map(.s) | join("")), dyn: (map(.dyn) | any)})
+  elif pvar($v) != null then pvar($v) as $x | {s: $x, dyn: (($dq | not) and ($x == "" or ($x | test("\\s")) or ($x | globby)))}
   else {s: DYN, dyn: true} end;
 
-def word:
+def word($v):
   if . == null then {s: "", dyn: false}
   else (.Parts // []) as $p
-    | ([$p[] | part(false)] | {s: (map(.s) | join("")), dyn: (map(.dyn) | any)}) as $w
+    | ([$p[] | part(false; $v)] | {s: (map(.s) | join("")), dyn: (map(.dyn) | any)}) as $w
     | if ($p | length) > 0 and $p[0].Type == "Lit" and ($p[0].Value | test("^~(/|$)"))
       then $w + {s: ($home + ($w.s | .[1:]))}
       elif ($p | length) > 0 and $p[0].Type == "Lit" and ($p[0].Value | test("^~"))
       then $w + {dyn: true}
       else $w end
   end;
+
+def words($v):
+  if . != null and ((.Parts // []) | length) == 1 and (.Parts[0] | pvar($v)) != null and (.Parts[0] | pvar($v) | globby | not)
+  then [.Parts[0] | pvar($v) | splits("[ \t\n]+") | select(. != "") | {s: ., dyn: false}]
+  else [word($v)] end;
+
+def eligible:
+  . as $root
+  | [$root | .. | objects | .Assigns? // empty | .[] | .Name.Value] as $all
+  | [$root | .. | objects | select(.Type == "CallExpr" and ((.Args // []) | length) == 0) | .Assigns[]
+      | select(((.Append // false) | not) and .Index == null and .Array == null) | .Name.Value] as $plain
+  | ([$root | .. | objects | select(.Type == "DeclClause") | .Args[]? | .Name.Value // empty]
+     + [$root | .. | objects | select(.Type == "ForClause") | .Loop.Name.Value? // empty]
+     + [$root | .. | objects | select(.Type == "CoprocClause") | .Name.Value? // empty]
+     + [$root | .. | objects | select(.Type == "ParamExp" and ((keys - PLAINPARAM) | length) > 0) | .Param.Value]
+     + [$root | .. | objects | select((.Parts | type) == "array" and (.Parts | length) == 1 and .Parts[0].Type == "Lit")
+         | .Parts[0].Value | capture("^(?<n>[A-Za-z_][A-Za-z0-9_]*)(\\[.*\\])?(\\+?=.*)?$") | .n]) as $bad
+  | if [$root | .. | objects | select(.Type == "DeclClause") | .Args[]? | .Value.Parts[0].Value? // empty] | any(test("^[-+][a-zA-Z]*n"))
+    then []
+    else [$plain | unique[] | select(. as $n
+        | ([$all[] | select(. == $n)] | length) == 1
+        and ($bad | any(. == $n) | not)
+        and (SPECIALVARS | any(. == $n) | not)
+        and (test("^(BASH|COMP|HIST|READLINE)") | not))] end;
 
 def substs:
   if type == "object" then (if .Type == "CmdSubst" or .Type == "ProcSubst" then . else (.[] | substs) end)
@@ -42,8 +75,9 @@ def mergest($a; $b):
   {cwd: $a.cwd, known: ($a.known and $b.known and $a.cwd == $b.cwd),
    alts: (if $a.alts == null or $b.alts == null then null else ($a.alts + $b.alts | unique) end),
    gitenv: ($a.gitenv or $b.gitenv), cdpath: ($a.cdpath or $b.cdpath),
-   funcs: ($a.funcs + $b.funcs | unique)};
-def lost: . + {known: false, alts: null};
+   funcs: ($a.funcs + $b.funcs | unique), elig: $a.elig,
+   vars: ($a.vars | with_entries(select(.key as $k | $b.vars | has($k) and .[$k] == $a.vars[$k])))};
+def lost: . + {known: false, alts: null, vars: {}};
 
 def skipopts($w; $i; $witharg):
   if $i >= ($w | length) or $w[$i].dyn then $i
@@ -109,8 +143,8 @@ def hdoc_of:
   | {quoted: $quoted, dash: (.Op == "<<-"), body_dynamic: ($bdyn and ($quoted | not)),
      body: (if $body != null and .Op == "<<-" then ($body | gsub("(?m)^\t+"; "")) else $body end)};
 
-def redir:
-  (.Word | word) as $t
+def redir($v):
+  (.Word | word($v)) as $t
   | {op: .Op, fd: (.N.Value // null), target: $t.s, target_dynamic: $t.dyn,
      heredoc: (if .Op == "<<" or .Op == "<<-" then hdoc_of else null end)};
 
@@ -143,6 +177,59 @@ def gitinfo($aw; $s; $segenv):
      config: $g.cfg, cwd: $gc.cwd, cwd_known: ($gc.known and ($ov | not)),
      cwd_alts: (if $ov then null else $gc.alts end), repo_override: $ov};
 
+def WRITEOPS: [">", ">>", "&>", "&>>", ">|", "<>"];
+def rwrites: [.[] | . as $r | select(($r.target_dynamic | not)
+  and ((WRITEOPS | any(. == $r.op)) or ($r.op == ">&" and ($r.target | test("^([0-9]+|-)$") | not)))) | $r.target];
+
+def posargs($aw; $witharg):
+  def go($i; $opts; $acc):
+    if $i >= ($aw | length) then $acc
+    elif $opts and ($aw[$i].dyn | not) and $aw[$i].s == "--" then go($i + 1; false; $acc)
+    elif $opts and ($aw[$i].dyn | not) and ($aw[$i].s | startswith("-")) and $aw[$i].s != "-" then
+      (if $witharg | any(. == $aw[$i].s) then go($i + 2; $opts; $acc) else go($i + 1; $opts; $acc) end)
+    else go($i + 1; $opts; $acc + [$aw[$i]]) end;
+  go(1; true; []);
+
+def optvals($aw; $short; $long):
+  [range(1; $aw | length) as $i | $aw[$i] | select(.dyn | not) | .s as $t
+    | if $t == $short then ($aw[$i + 1] // empty)
+      elif $t | startswith($long + "=") then {s: ($t | ltrimstr($long + "=")), dyn: false}
+      else empty end];
+
+def inplacefiles($aw; $scriptflags; $sepsuffix):
+  def go($i; $opts; $inpl; $script; $acc):
+    if $i >= ($aw | length) then (if $inpl | not then [] elif $script then $acc else $acc[1:] end)
+    else $aw[$i] as $w
+      | if $w.dyn or ($opts | not) then go($i + 1; $opts; $inpl; $script; $acc + [$w])
+        elif $w.s == "--" then go($i + 1; false; $inpl; $script; $acc)
+        elif $w.s == "-i" and $sepsuffix and ($aw[$i + 1] // null) != null and ($aw[$i + 1].dyn | not)
+          and ($aw[$i + 1].s | test("^(\\.[A-Za-z0-9_.~-]*)?$")) then go($i + 2; $opts; true; $script; $acc)
+        elif $w.s | test("^--in-place") then go($i + 1; $opts; true; $script; $acc)
+        elif $w.s | test("^--(expression|file)=") then go($i + 1; $opts; $inpl; true; $acc)
+        elif $w.s == "--expression" or $w.s == "--file" then go($i + 2; $opts; $inpl; true; $acc)
+        elif $w.s | test("^-[a-zA-Z]") then
+          ($w.s | test("^-[^i]*[" + $scriptflags + "]$")) as $sf
+          | go($i + (if $sf then 2 else 1 end); $opts; ($inpl or ($w.s | test("^-[a-zA-Z]*i"))); ($script or $sf); $acc)
+        else go($i + 1; $opts; $inpl; $script; $acc + [$w]) end
+    end;
+  go(1; true; false; false; []);
+
+def argwrites($cmd; $aw):
+  (if $cmd == "tee" then posargs($aw; [])
+   elif ["rm", "rmdir", "touch", "mkdir", "unlink", "shred"] | any(. == $cmd) then posargs($aw; ["-m", "--mode", "-r", "-d", "-t"])
+   elif $cmd == "truncate" then posargs($aw; ["-s", "-r"])
+   elif ["chmod", "chown", "chgrp"] | any(. == $cmd) then posargs($aw; [])[1:]
+   elif $cmd == "mv" then posargs($aw; ["-t", "-S"]) + optvals($aw; "-t"; "--target-directory")
+   elif ["cp", "ln", "install", "rsync"] | any(. == $cmd) then
+     optvals($aw; "-t"; "--target-directory") as $t
+     | (if ($t | length) > 0 then $t else posargs($aw; ["-t", "-S", "-m", "-o", "-g", "-e", "--suffix"])[-1:] end)
+     | map(select(.dyn or (.s | test("^[^/]*:") | not)))
+   elif $cmd == "sed" then inplacefiles($aw; "ef"; true)
+   elif $cmd == "perl" then inplacefiles($aw; "eE"; false)
+   elif $cmd == "dd" then [$aw[1:][] | select((.dyn | not) and (.s | startswith("of="))) | {s: (.s | ltrimstr("of=")), dyn: false}]
+   else [] end)
+  | [.[] | select(.dyn | not) | .s];
+
 def is_terminator:
   (.Cmd.Type == "CallExpr" and ((.Cmd.Args // []) | length > 0) and ((.Cmd.Args[0].Parts // []) | length == 1)
     and .Cmd.Args[0].Parts[0].Type == "Lit" and (.Cmd.Args[0].Parts[0].Value as $v | TERMINATORS | any(. == $v)))
@@ -154,7 +241,7 @@ def segment($c; $s; $f):
    in_subshell: $c.subsh, in_group: $c.grp, in_substitution: $c.sub, in_compound: $c.comp, in_function: $c.fn,
    redirects: $f.redirects, outer_redirects: $c.outer,
    cwd: $s.cwd, cwd_known: ($s.known and ($f.chdir | not)), cwd_alts: (if $f.chdir then null else $s.alts end),
-   git: $f.git, code: $f.code,
+   git: $f.git, code: $f.code, writes: ($c.owr + $f.writes),
    unknown: (($f.reasons | length) > 0), unknown_reasons: $f.reasons,
    exit_code_belongs_to_command: $c.att};
 
@@ -170,18 +257,23 @@ def ev_stmts($c; $s):
     end;
 
 def subst_segs($c; $s):
-  [substs | .Stmts // [] | ev_stmts($c + {sub: true, att: false, op: null, pi: 0, pl: 1, bg: false, neg: false, outer: []}; $s) | .segs[]];
+  [substs | .Stmts // [] | ev_stmts($c + {sub: true, att: false, op: null, pi: 0, pl: 1, bg: false, neg: false, outer: [], owr: []}; $s) | .segs[]];
 
 def pipe_items: if .Cmd.Type == "BinaryCmd" and (.Cmd.Op == "|" or .Cmd.Op == "|&") and ((.Negated // false) | not) and ((.Background // false) | not) and ((.Redirs // []) | length == 0)
   then (.Cmd.X | pipe_items) + [{op: .Cmd.Op, st: .Cmd.Y}] else [{op: null, st: .}] end;
 
 def ev_call($c; $s; $rd):
   . as $ce
-  | ((.Args // []) | map(word)) as $w
-  | [(.Assigns // [])[] | {n: .Name.Value, v: ((.Value // null) | word)}] as $as
+  | [(.Args // []) | to_entries[] | .key as $k | .value | words($s.vars)[] | . + {src: $k}] as $w
+  | [(.Assigns // [])[] | {n: .Name.Value, v: ((.Value // null) | word($s.vars))}] as $as
   | ([$ce.Args, $ce.Assigns, $rd] | subst_segs($c; $s)) as $sub
   | if ($w | length) == 0 then
-      ($s | .gitenv = (.gitenv or ([$as[].n] | any(. as $n | GITREPOENV | any(. == $n)))) | .cdpath = (.cdpath or ([$as[].n] | any(. == "CDPATH")))) as $s2
+      (reduce ($ce.Assigns // [])[] as $a ($s;
+          $a.Name.Value as $n
+          | ((($a.Value // null) | word(.vars))) as $x
+          | if (.elig | any(. == $n)) and ($x.dyn | not) and (($a.Append // false) | not) and $a.Index == null and $a.Array == null
+            then .vars[$n] = $x.s else .vars |= del(.[$n]) end)
+       | .gitenv = (.gitenv or ([$as[].n] | any(. as $n | GITREPOENV | any(. == $n)))) | .cdpath = (.cdpath or ([$as[].n] | any(. == "CDPATH")))) as $s2
       | {segs: $sub, ok: $s2, any: $s2}
     else
       unwrap($w; 0; {wrappers: [], env: [], unknown: [], chdir: false}) as $u
@@ -189,10 +281,10 @@ def ev_call($c; $s; $rd):
       | ($aw | map(.s)) as $argv
       | ($aw | map(.dyn)) as $dyn
       | (if ($argv | length) > 0 and ($dyn[0] | not) then ($argv[0] | base) else null end) as $cmd
-      | ([$rd[] | redir]) as $redirs
+      | ([$rd[] | redir($s.vars)]) as $redirs
       | ([$as[] | .n + "=" + .v.s] + $u.env) as $env
       | (if ($aw | length) > 0 and $dyn[0] then
-          (if ([$ce.Args[$u.i].Parts[]? | select(.Type == "CmdSubst")] | length) > 0 then ["substitution as command"] else ["dynamic command name"] end)
+          (if ([$ce.Args[$aw[0].src].Parts[]? | select(.Type == "CmdSubst")] | length) > 0 then ["substitution as command"] else ["dynamic command name"] end)
          else [] end) as $r0
       | ($u.unknown + $r0
          + (if $cmd == "source" or $cmd == "." then ["source"] else [] end)
@@ -218,7 +310,7 @@ def ev_call($c; $s; $rd):
          else {code: null, r: []} end) as $nest
       | (if $cmd == "git" then gitinfo($aw; $s; $env) else null end) as $git
       | segment($c; $s; {argv: $argv, dyn: $dyn, cmd: $cmd, raw: [$w[].s], wrappers: $u.wrappers, env: $env,
-          redirects: $redirs, chdir: $u.chdir, git: $git, code: $nest.code, reasons: ($r1 + $nest.r)}) as $seg
+          writes: (($redirs | rwrites) + argwrites($cmd; $aw)), redirects: $redirs, chdir: $u.chdir, git: $git, code: $nest.code, reasons: ($r1 + $nest.r)}) as $seg
       | (($u.wrappers - ["builtin", "command"]) | length == 0) as $plain
       | (if $cmd == "cd" and $plain then
           (skipopts($aw; 1; [])) as $j
@@ -244,13 +336,13 @@ def ev_call($c; $s; $rd):
 def ev_decl($c; $s; $rd):
   . as $d
   | ([$d.Args, $rd] | subst_segs($c; $s)) as $sub
-  | [$d.Args[]? | if .Name and (.Naked | not) then {s: (.Name.Value + "=" + ((.Value // null) | word | .s)), dyn: ((.Value // null) | word | .dyn) or (.Array != null)}
+  | [$d.Args[]? | if .Name and (.Naked | not) then {s: (.Name.Value + "=" + ((.Value // null) | word($s.vars) | .s)), dyn: ((.Value // null) | word($s.vars) | .dyn) or (.Array != null)}
                   elif .Name then {s: .Name.Value, dyn: false}
-                  else (.Value | word) end] as $aw
+                  else (.Value | word($s.vars)) end] as $aw
   | ([$d.Args[]?.Name.Value // empty]) as $names
   | segment($c; $s; {argv: ([$d.Variant.Value] + [$aw[].s]), dyn: ([false] + [$aw[].dyn]), cmd: $d.Variant.Value, raw: ([$d.Variant.Value] + [$aw[].s]),
-      wrappers: [], env: [], redirects: [$rd[] | redir], chdir: false, git: null, code: null, reasons: []}) as $seg
-  | ($s | .gitenv = (.gitenv or ($names | any(. as $n | GITREPOENV | any(. == $n)))) | .cdpath = (.cdpath or ($names | any(. == "CDPATH")))) as $s2
+      wrappers: [], env: [], writes: ([$rd[] | redir($s.vars)] | rwrites), redirects: [$rd[] | redir($s.vars)], chdir: false, git: null, code: null, reasons: []}) as $seg
+  | ($s | .vars |= delpaths([$names[] | [.]]) | .gitenv = (.gitenv or ($names | any(. as $n | GITREPOENV | any(. == $n)))) | .cdpath = (.cdpath or ($names | any(. == "CDPATH")))) as $s2
   | {segs: ([$seg] + $sub), ok: $s2, any: $s2};
 
 def ev_if($c; $s):
@@ -268,7 +360,9 @@ def ev_if($c; $s):
   | ($st.Background // false) as $bg
   | ($c + {neg: ($c.neg or $neg), bg: ($c.bg or $bg), att: ($c.att and ($neg | not) and ($bg | not))}) as $c2
   | ($st.Redirs // []) as $rd
-  | ($c2 + {outer: ($c2.outer + [$rd[].Op])}) as $co
+  | ($c2 + {outer: ($c2.outer + [$rd[].Op]),
+      owr: ($c2.owr + [[$rd[] | redir($s.vars)] | rwrites[]
+        | if startswith("/") then normpath elif $s.known then resolve($s.cwd) else empty end])}) as $co
   | ($st.Cmd // null) as $cmd
   | (if $cmd == null then {segs: ($rd | subst_segs($c2; $s)), ok: $s, any: $s}
      elif $cmd.Type == "CallExpr" then ($cmd | ev_call($c2; $s; $rd))
@@ -318,9 +412,10 @@ def ev_if($c; $s):
   | if $bg then $r + {ok: $s, any: $s} else $r end;
 
 def flat($cwd; $known):
-  ({Cmd: {Type: "File", Stmts: (.Stmts // [])}} | ev_stmt(
-    {att: true, sub: false, subsh: false, grp: false, comp: null, fn: null, bg: false, neg: false, op: null, pi: 0, pl: 1, outer: []};
-    {cwd: $cwd, known: $known, alts: (if $known then [$cwd] else null end), gitenv: false, cdpath: $cdpath, funcs: []}))
+  eligible as $elig
+  | ({Cmd: {Type: "File", Stmts: (.Stmts // [])}} | ev_stmt(
+    {att: true, sub: false, subsh: false, grp: false, comp: null, fn: null, bg: false, neg: false, op: null, pi: 0, pl: 1, outer: [], owr: []};
+    {cwd: $cwd, known: $known, alts: (if $known then [$cwd] else null end), gitenv: false, cdpath: $cdpath, funcs: [], vars: {}, elig: $elig}))
   | [.segs | to_entries[] | .value + {id: .key, depth: 0, via: null, parent: null}];
 
 def splice($n; $f):
@@ -358,7 +453,7 @@ def flags:
 def records:
   .[] | .id, (.cmd // ""), .cwd, (.cwd_known | bit), (.cwd_alts // [] | list), flags, (.via // ""), (.code.text // ""),
     ([.dynamic[] | bit | tostring] | join("")),
-    (.argv | list), (.env | list), (.raw_argv | list), (.unknown_reasons | list),
+    (.argv | list), (.env | list), (.raw_argv | list), (.unknown_reasons | list), (.writes | list),
     (if .git == null then 0
      else 1, (.git.sub // ""), (.git.sub_dynamic | bit), .git.cwd, (.git.cwd_known | bit), (.git.cwd_alts // [] | list),
        (.git.repo_override | bit),
