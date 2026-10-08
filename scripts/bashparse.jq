@@ -86,17 +86,19 @@ def unwrap($w; $i; $acc):
   end;
 
 def shellmode($a):
-  def go($i; $c):
-    if $i >= ($a | length) then (if $c then {mode: "c", idx: null} else {mode: "stdin"} end)
+  def go($i; $c; $n):
+    if $i >= ($a | length) then (if $n then {mode: "info"} elif $c then {mode: "c", idx: null} else {mode: "stdin"} end)
     elif $a[$i].dyn then (if $c then {mode: "c", idx: $i} else {mode: "file"} end)
-    elif $a[$i].s == "--" or $a[$i].s == "-" then go($i + 1; $c)
-    elif ["-o", "+o", "-O", "+O", "--rcfile", "--init-file"] | any(. == $a[$i].s) then go($i + 2; $c)
-    elif $a[$i].s | test("^-[a-zA-Z]*c[a-zA-Z]*$") then go($i + 1; true)
-    elif $a[$i].s | test("^-[a-zA-Z]*s[a-zA-Z]*$") then go($i + 1; $c)
-    elif ($a[$i].s | startswith("-")) or ($a[$i].s | startswith("+")) then go($i + 1; $c)
+    elif $a[$i].s == "--" or $a[$i].s == "-" then go($i + 1; $c; $n)
+    elif ["-o", "+o", "-O", "+O", "--rcfile", "--init-file"] | any(. == $a[$i].s) then go($i + 2; $c; $n)
+    elif ["--version", "--help"] | any(. == $a[$i].s) then {mode: "info"}
+    elif $a[$i].s | test("^\\+[a-zA-Z]*n") then go($i + 1; $c; false)
+    elif $a[$i].s | test("^-[a-zA-Z]*$") then go($i + 1; ($c or ($a[$i].s | test("c"))); ($n or ($a[$i].s | test("n"))))
+    elif ($a[$i].s | startswith("-")) or ($a[$i].s | startswith("+")) then go($i + 1; $c; $n)
+    elif $n then {mode: "info"}
     elif $c then {mode: "c", idx: $i}
     else {mode: "file"} end;
-  go(1; false);
+  go(1; false; false);
 
 def hdoc_of:
   (.Word | [.Parts[]? | select(.Type != "Lit" or (.Value | test("\\\\")))] | length > 0) as $quoted
