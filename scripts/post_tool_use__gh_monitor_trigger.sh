@@ -284,7 +284,18 @@ merge_text() {
     hook_log "spawned: merge $selector --repo $watched_repo${AGENT_ID:+ (subagent $AGENT_ID)}"
     local lead="A \`gh pr merge\` of '${selector}' on ${watched_repo} just succeeded. A detached post-merge watcher is ALREADY running for it: it waits for every workflow run on the merge commit, including the release/deploy cascade that starts after the merge, and its verdict comes from the GitHub API run conclusions. Do NOT start \`gh_monitor.sh merge\` yourself (that would restart the watch)."
     if [ -n "$AGENT_ID" ]; then
-        REPLY="${lead} You are a subagent: do not wait for the deploys, and never say they passed. Your final report MUST contain this line verbatim, so the main session can wait for the verdict: \"PR '${selector}' on ${watched_repo} is merged; its deploy is NOT verified yet. Main session: run \`${wait_cmd}\` with \`run_in_background: true\` and wait for its verdict before reporting it deployed.\" Only if you are still busy with other work when it finishes, you may call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` and include its output in your report."
+        local info number="" sha="" title="" pr_label merged_as
+        info=$(in_dir "$dir" gh pr view "$selector" --repo "$watched_repo" --json number,title,mergeCommit \
+            -q '"\(.number)\t\(.mergeCommit.oid // "")\t\(.title)"') || info=""
+        IFS=$'\t' read -r number sha title <<<"$info"
+        [[ $number =~ ^[0-9]+$ ]] || number=""
+        [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || sha=""
+        title=${title//\"/\'}
+        pr_label="PR ${number:-$selector}"
+        [ -z "$title" ] || pr_label+=" (${title})"
+        merged_as=${sha:-"a merge commit not known yet (the watcher's verdict names it)"}
+        local send="IMMEDIATELY, before any other step, call the SendMessage tool with \`to: \"main\"\` and this message: \"${pr_label} on ${watched_repo} merged as ${merged_as}. Main session: run the exact command \`${wait_cmd}\` with \`run_in_background: true\`, and do not report it deployed until it returns a verdict.\""
+        REPLY="${lead} You are a subagent: do not wait for the deploys, and never say they passed. ${send} Then continue. Your final report MUST contain this line verbatim, so the main session can wait for the verdict: \"PR '${selector}' on ${watched_repo} is merged; its deploy is NOT verified yet. Main session: run \`${wait_cmd}\` with \`run_in_background: true\` and wait for its verdict before reporting it deployed.\" Only if you are still busy with other work when it finishes, you may call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` and include its output in your report."
     else
         REPLY="${lead} Its deploy is NOT verified yet: do not tell the user that it is deployed, shipped or live until the verdict arrives. Call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` (no explicit \`timeout\` override; it returns when the watcher's verdict is written). When it completes, report the verdict to the user exactly as printed: the PR number and what it is about, the merge commit sha, and each workflow's conclusion."
         : >"$meta.announced"

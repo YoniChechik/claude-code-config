@@ -92,6 +92,7 @@ case "$1 $2" in
     "repo view") key=repo_name ;;
     "pr view")   key=pr_state ;;
 esac
+case "$*" in (*mergeCommit*) key=pr_info ;; esac
 printf '%s\n' "$*" >>"$GH_STUB_DIR/calls.log"
 [ -n "$key" ] || { echo "gh stub: unroutable call: $*" >&2; exit 99; }
 f="$GH_STUB_DIR/$key"
@@ -174,6 +175,17 @@ assert_merge_spawned() {
     assert_contains "Its deploy is NOT verified yet: do not tell the user that it is deployed, shipped or live until the verdict arrives" "$output"
     [ -e "$BATS_TEST_TMPDIR/gh_monitor_watch_merge_3951.meta.announced" ] \
         || { echo "main-session merge should be marked announced" >&2; return 1; }
+    assert_not_contains "SendMessage" "$output"
+    assert_not_contains "You are a subagent" "$output"
+}
+
+@test "a subagent merge whose PR details cannot be read still orders the SendMessage with the selector and the wait command" {
+    gh_stub pr_state 0 "MERGED"
+    FIRE_AGENT_ID=sub1 run ctx "gh pr merge feat-x --squash"
+    assert_eq 0 "$status"
+    assert_contains "IMMEDIATELY, before any other step, call the SendMessage tool with \`to: \"main\"\`" "$output"
+    assert_contains "\"PR feat-x on o/r merged as a merge commit not known yet (the watcher's verdict names it). Main session: run the exact command \`bash /x/gh_monitor.sh wait feat-x --repo o/r\`" "$output"
+    assert_contains "Your final report MUST contain this line verbatim" "$output"
 }
 
 @test "merge with --repo before the PR number spawns the watcher with both" {
@@ -186,8 +198,11 @@ assert_merge_spawned() {
 
 @test "a subagent merge spawns the watcher, tells the subagent not to wait, and leaves it unannounced for the main session" {
     gh_stub pr_state 0 "MERGED"
+    gh_stub pr_info 0 $'3951\tabc1234def5678\tfeat: add "thing"'
     FIRE_AGENT_ID=sub1 run ctx "cd /tmp && rtk gh pr merge 3951 --repo sunsay-ltd/core --squash --delete-branch 2>&1 | tail -3"
     assert_eq 0 "$status"
+    assert_contains "pr view 3951 --repo sunsay-ltd/core --json number,title,mergeCommit" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "IMMEDIATELY, before any other step, call the SendMessage tool with \`to: \"main\"\` and this message: \"PR 3951 (feat: add 'thing') on sunsay-ltd/core merged as abc1234def5678. Main session: run the exact command \`bash /x/gh_monitor.sh wait 3951 --repo sunsay-ltd/core\` with \`run_in_background: true\`, and do not report it deployed until it returns a verdict.\"" "$output"
     assert_contains "merge 3951 --repo sunsay-ltd/core --detach|session=s1" "$(cat "$MON_CALLS")"
     assert_contains "You are a subagent: do not wait for the deploys" "$output"
     assert_contains "never say they passed" "$output"
