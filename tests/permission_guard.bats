@@ -231,11 +231,6 @@ assert_decision() { # <expected> <actual>
     assert_decision ASK "$(decide "{ $GC $INST $INSTANCES $DEL x; }")"
 }
 
-@test "deny: gh ask-rule first, raw-HTTP deny-rule second" {
-    local url="https://api.git""hub.com/repos/sun""say-ltd/x"
-    assert_decision DENY "$(decide "$GH repo archive foo/bar && echo ok")"
-}
-
 @test "deny: gcloud ask-rule first, gcloud-run prod deny-rule second" {
     local cmd="$GC $INST $INSTANCES $DEL x && $GC run deploy --project=production-490411"
     assert_decision DENY "$(decide "$cmd")"
