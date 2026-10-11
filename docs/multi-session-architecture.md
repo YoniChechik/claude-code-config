@@ -128,10 +128,13 @@ regression, just the same real-world limit the daemon always had.
                         a conclusion and the set is stable past the settle
                         window, then writes ONE report (PR number + title,
                         merge sha, one line per workflow) to RESULT
-8. main session Stop hook (`stop__gh_monitor_relay.sh`) → any unannounced
-                        META for this session: blocks once, handing the main
-                        agent either the finished verdict or the waiter
-                        command to run in the background
+8. main session relay (`gh_monitor_relay.sh`, PostToolUse on the Agent
+   tool and Stop) → any unannounced META for this session: handed once
+                        to the main agent (as context when a subagent
+                        returns, as a Stop block otherwise) with either the
+                        finished verdict or the waiter command to run in the
+                        background, and an order not to report the PR
+                        deployed before the verdict
 ```
 
 ASCII view of two windows running at the same time:
@@ -382,9 +385,26 @@ through files keyed by session id:
 `gh_monitor.sh wait <PR> --repo <r>` blocks until RESULT exists and prints it
 (or reports that no watcher holds the lock). The main session runs it as a
 background Bash task, so the harness's own completion notification delivers
-the verdict. `stop__gh_monitor_relay.sh` (Stop hook, main agent only — subagents
-fire SubagentStop) closes the gap when the merge happened in a subagent: on the
-main agent's next turn end it blocks once per unannounced META of its session.
+the verdict. `gh_monitor_relay.sh` closes the gap when the merge happened in a subagent.
+Hooks fired inside a subagent carry its `agent_id` and the main session's
+`session_id` (verified live 2026-10-11), so a subagent's merge writes a META
+tagged with the main session, and the relay ignores any payload that has an
+`agent_id`. It runs on two main-agent events:
+
+- PostToolUse on the `Agent` tool: when a foreground subagent returns, the
+  pending watch arrives as context before the main agent writes its reply.
+  The docs name this as the way to inject context into the parent; a
+  SubagentStop block would only keep the subagent running.
+- Stop: the backstop for every other path (a background subagent, whose
+  completion arrives as a notification rather than a tool result). It blocks
+  once per unannounced META at the end of the main agent's next turn.
+
+The subagent is also told to copy the `wait` command verbatim into its final
+report, so the main agent sees it in the report itself. Once the main agent
+starts the waiter in the background, the harness's completion notification
+wakes it even when idle. Not covered: a subagent that merges and then keeps
+working for a long time leaves the main agent unaware until the subagent
+returns or the main agent ends a turn.
 
 ### `run` mode
 
