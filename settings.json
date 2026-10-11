@@ -282,6 +282,12 @@
   "inputNeededNotifEnabled" : true,
   "model" : "sonnet",
   "permissions" : {
+    "allow" : [
+      "Bash(rm:*)",
+      "Bash(sh -c:*)",
+      "Bash(bash -c:*)",
+      "Bash(zsh -c:*)"
+    ],
     "defaultMode" : "bypassPermissions"
   },
   "preferredNotifChannel" : "notifications_disabled",
