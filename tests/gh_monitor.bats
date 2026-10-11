@@ -634,9 +634,11 @@ DRV
     export GH_MONITOR_DEPLOY_POLL=1
     merged_pr
     api_runs_fixture "11:CI:completed:success:1:push"
+    local t0; t0=$(date +%s)
     run bash "$WATCHER" merge "$BRANCH"
     assert_contains "Post-merge CI PASSED" "$output"
-    [ "$(call_count 'actions/runs')" -ge 3 ] || { echo "verdict came before the settle window" >&2; return 1; }
+    [ $(($(date +%s) - t0)) -ge 3 ] || { echo "verdict came before the settle window" >&2; return 1; }
+    [ "$(call_count 'actions/runs')" -ge 2 ] || { echo "expected the settle window to span polls" >&2; return 1; }
 }
 
 @test "merge: scheduled and issue_comment runs on the same sha are ignored" {
