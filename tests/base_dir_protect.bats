@@ -531,8 +531,8 @@ EOF"
     assert_decision ALLOW "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && git worktree list | grep x; git branch --list 'wt-*'; git log origin/main..HEAD --oneline | head")"
 }
 
-@test "ask: git write after a cd that may fail" {
-    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && true; git commit -m x")"
+@test "deny: git write after a cd that may fail" {
+    assert_decision DENY "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && true; git commit -m x")"
 }
 
 @test "allow: git config --get in the base repo" {
@@ -653,14 +653,14 @@ EOF")"
     assert_decision DENY "$(bash_decide "$WT" "git --git-dir=$BASE/.git $C -m x")"
 }
 
-@test "ask: a git write after a dynamic cd cannot be placed" {
-    assert_decision ASK "$(bash_decide "$WT" "cd \"\$DIR\" && git $C -m x")"
+@test "deny: a git write after a dynamic cd cannot be placed" {
+    assert_decision DENY "$(bash_decide "$WT" "cd \"\$DIR\" && git $C -m x")"
 }
 
-@test "ask: a git write after a cd that may have failed could land in the base repo" {
-    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; git $C -m x")"
-    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && git $A -A; git $P")"
-    assert_decision ASK "$(bash_decide "$BASE" "cd ./.claude/worktrees/missing; git $C -m x")"
+@test "deny: a git write after a cd that may have failed could land in the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; git $C -m x")"
+    assert_decision DENY "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && git $A -A; git $P")"
+    assert_decision DENY "$(bash_decide "$BASE" "cd ./.claude/worktrees/missing; git $C -m x")"
 }
 
 @test "allow: a literal absolute cd into an existing worktree holds across ; and pipes" {
@@ -669,9 +669,9 @@ EOF")"
     assert_decision ALLOW "$(bash_decide "$BASE" "cd \"$WT\" && pnpm test 2>&1 | tail -8; grep -rn apple --include=*.py app -il | head; git $A -A a b && git $C -qm msg && git $P -q -u origin feat 2>&1 | tail -2")"
 }
 
-@test "ask/deny: a literal absolute cd does not hide branches, loops, or a base-repo target" {
-    assert_decision ASK "$(bash_decide "$BASE" "if true; then cd $WT; fi; git $C -m x")"
-    assert_decision ASK "$(bash_decide "$BASE" "for d in a; do cd $WT; done; git $C -m x")"
+@test "deny: a literal absolute cd does not hide branches, loops, or a base-repo target" {
+    assert_decision DENY "$(bash_decide "$BASE" "if true; then cd $WT; fi; git $C -m x")"
+    assert_decision DENY "$(bash_decide "$BASE" "for d in a; do cd $WT; done; git $C -m x")"
     assert_decision DENY "$(bash_decide "$WT" "cd $BASE; git $C -m x")"
     assert_decision DENY "$(bash_decide "$BASE" "git $C -m x")"
 }
@@ -742,12 +742,29 @@ git $C -m x")"
     assert_decision ALLOW "$(bash_decide "$scratch" "git init -q x && git -C x $C --allow-empty -m x")"
 }
 
-@test "ask: a file write whose directory may be the base repo" {
-    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; echo x > f")"
+@test "deny: a file write whose directory may be the base repo" {
+    assert_decision DENY "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; echo x > f")"
     assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT; echo x > f")"
 }
 
 @test "allow: a variable re-assigned later is not trusted to resolve a write target" {
     assert_decision ALLOW "$(bash_decide "$BASE" "S=/tmp; S=\$X; echo > \$S/f")"
     assert_decision ALLOW "$(bash_decide "$BASE" "for S in a; do :; done; echo > \$S/f")"
+}
+
+@test "deny: an ambiguous git write names each offending cd and the git -C rewrite" {
+    local out
+    out=$(jq -nc --arg cwd "$BASE" --arg cmd "cd mobile && pnpm test 2>&1 | tail -6; cd .. && git $A -A && git $C -m x" \
+        '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' | bash "$HOOK" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+    [[ $out == *'`cd mobile` is a relative cd'* ]]
+    [[ $out == *'`cd ..` is a relative cd'* ]]
+    [[ $out == *'git -C /abs/path/.claude/worktrees/<name>'* ]]
+}
+
+@test "deny: a dynamic cd and a cd inside a loop are each explained" {
+    local out
+    out=$(jq -nc --arg cwd "$BASE" --arg cmd "cd \"\$DIR\"; for d in a; do cd $WT; done; git $C -m x" \
+        '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' | bash "$HOOK" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+    [[ $out == *'`cd <dynamic>` has a dynamic target'* ]]
+    [[ $out == *"\`cd $WT\` runs inside an if/for/while/case block"* ]]
 }

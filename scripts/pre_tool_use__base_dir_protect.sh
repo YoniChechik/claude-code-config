@@ -4,7 +4,7 @@ GUARD_DIR=.
 [[ ${BASH_SOURCE[0]} == */* ]] && GUARD_DIR=${BASH_SOURCE[0]%/*}
 DENY_GIT_MSG="DENIED: Git write operation attempted outside a git worktree. Direct writes to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) For feature/implementation work, run '/create-worktree <feature-description>' then follow the Feature Development — MANDATORY WORKFLOW (plan → implement → test → review → PR → merge → validate). For a non-feature one-off with no PR planned, run '/create-worktree <feature-description>' directly instead — this creates an isolated git worktree under .claude/worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt your git operation inside that worktree."
 DENY_EDIT_MSG="DENIED: File edit/write attempted outside a git worktree inside a git repo. Direct edits to the base repo are forbidden. You MUST use the worktree+PR workflow: (1) For feature/implementation work, run '/create-worktree <feature-description>' then follow the Feature Development — MANDATORY WORKFLOW (plan → implement → test → review → PR → merge → validate). For a non-feature one-off with no PR planned, run '/create-worktree <feature-description>' directly instead — this creates an isolated git worktree under .claude/worktrees/<feature-name>/ on a new branch and switches your working directory into it. (2) Re-attempt the file edit inside that worktree. Never edit files directly in the base repo directory."
-INTERNAL_ERROR_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"GUARD_INTERNAL_ERROR: the base-dir guard could not complete its checks, so it is failing closed. Ask the user to run this manually or to repair scripts/_bashparse.sh."}}'
+INTERNAL_ERROR_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD_INTERNAL_ERROR: the base-dir guard could not load scripts/_hook_log.sh or scripts/_bashparse.sh, so it is failing closed. Rewriting the command will not help: stop and tell the user the guard libraries next to scripts/pre_tool_use__base_dir_protect.sh are missing or broken and must be repaired."}}'
 UNSAFE_GIT_CONFIG_RE='^(alias\.|include\.path=|includeif\.|core\.pager=|core\.editor=|core\.sshcommand=|core\.hookspath=|core\.fsmonitor=|uploadpack\.|protocol\.)'
 DYN=$'\xef\xbf\xbd'
 
@@ -185,13 +185,67 @@ git_config_is_unsafe() {
     return 1
 }
 
-VERDICT=""
 VERDICT_REASON=""
-record() {
-    case "$1" in
-        deny) [ "$VERDICT" = "deny" ] || { VERDICT=deny; VERDICT_REASON="$2"; } ;;
-        ask) [ -n "$VERDICT" ] || { VERDICT=ask; VERDICT_REASON="$2"; } ;;
-    esac
+record_deny() {
+    [ -n "$VERDICT_REASON" ] || VERDICT_REASON="$1"
+}
+
+CD_PROBLEMS=""
+CD_N=0
+add_problem() {
+    CD_N=$((CD_N + 1))
+    CD_PROBLEMS+="${CD_PROBLEMS:+ }($CD_N) $1"
+}
+
+shown() {
+    printf '%s' "${1//$DYN/<dynamic>}"
+}
+
+collect_cd_problems() {
+    local i=$1 j k tgt dyn frag
+    CD_PROBLEMS=""
+    CD_N=0
+    for ((j = 0; j < i; j++)); do
+        bp_seg "$j"
+        [[ $SEG_FLAGS == *X* ]] && continue
+        case "$SEG_CMD" in
+            pushd|popd|source|.|eval)
+                add_problem "\`$(shown "${SEG_RAW[*]}")\` changes the working directory in a way the guard cannot follow; remove it."
+                continue ;;
+            cd) ;;
+            *) continue ;;
+        esac
+        tgt="" dyn=0
+        for ((k = 1; k < ${#SEG_ARGV[@]}; k++)); do
+            [[ ${SEG_DYN:k:1} == 0 ]] && case "${SEG_ARGV[k]}" in -L|-P|-e|-@|--) continue ;; esac
+            tgt=${SEG_ARGV[k]}
+            dyn=${SEG_DYN:k:1}
+            break
+        done
+        frag="\`$(shown "${SEG_RAW[*]}")\`"
+        if [[ $SEG_FLAGS == *[CFG]* ]]; then
+            add_problem "$frag runs inside an if/for/while/case block, a { } group, or a function, so whether it ran is unknown; never cd inside a branch or loop before a git write."
+        elif [[ $dyn == 1 || $tgt == *"$DYN"* || $tgt == "-" || $tgt == *'$'* ]]; then
+            add_problem "$frag has a dynamic target (variable, \$(...), glob, or cd -) the guard cannot resolve; write the literal absolute path instead."
+        elif [[ -z $tgt ]]; then
+            add_problem "$frag has no target; write the literal absolute path instead."
+        elif [[ $tgt != /* ]]; then
+            add_problem "$frag is a relative cd, so the guard cannot be sure it succeeded or where it landed; use a literal absolute path, never cd .. or cd <subdir>."
+        elif [[ ! -d $tgt ]]; then
+            add_problem "$frag targets a directory that does not exist, so the cd may fail and leave the shell in the base repo; create the worktree first or cd to an existing worktree path."
+        fi
+    done
+    bp_seg "$i"
+}
+
+git_c_problems() {
+    local k v
+    for ((k = 1; k < ${#SEG_RAW[@]}; k++)); do
+        [ "${SEG_RAW[k - 1]}" = "-C" ] || continue
+        v=${SEG_RAW[k]}
+        [[ $v == /* && $v != *"$DYN"* ]] && continue
+        add_problem "\`git -C $(shown "$v")\` is not a literal absolute path; pass the full absolute worktree path."
+    done
 }
 
 check_git() {
@@ -207,16 +261,18 @@ check_git() {
         [ "$SEG_GIT_SUB_DYN" = "1" ] || ! git_subcommand_is_read "$SEG_GIT_SUB" "$dir" ${SEG_GIT_ARGS[@]+"${SEG_GIT_ARGS[@]}"} || return 0
     fi
     case "$SEG_FLAGS" in
-        *S*|*X*|*F*|*P*) record deny "$DENY_GIT_MSG"; return 0 ;;
+        *S*|*X*|*F*|*P*) record_deny "$DENY_GIT_MSG"; return 0 ;;
     esac
     if [ "$SEG_GIT_OVERRIDE" = "1" ]; then
-        record deny "$DENY_GIT_MSG"
+        record_deny "$DENY_GIT_MSG"
     elif all_outside_base ${alts[@]+"${alts[@]}"}; then
         return 0
     elif [ "${#alts[@]}" = "1" ]; then
-        record deny "$DENY_GIT_MSG"
+        record_deny "$DENY_GIT_MSG"
     else
-        record ask "The base-dir guard cannot tell which directory this git write runs in (a cd that may fail, a dynamic path, or a cd inside a branch or loop), and at least one candidate is outside a worktree. Confirm manually only if it targets a worktree."
+        collect_cd_problems "$seg_i"
+        git_c_problems
+        record_deny "DENIED: the base-dir guard cannot prove which directory \`git $(shown "$SEG_GIT_SUB")\` runs in, and at least one possible directory is outside a worktree. Problems: ${CD_PROBLEMS:-the starting directory could not be determined (a cd chained after a command that may fail, a CDPATH lookup, or a shell function call).} Rewrite: drop every cd before the git write and run each git write as its own Bash call with a literal absolute worktree path, e.g. \`git -C /abs/path/.claude/worktrees/<name> add -A\`, then a separate \`git -C /abs/path/.claude/worktrees/<name> commit -m ...\`, then \`git -C /abs/path/.claude/worktrees/<name> push ...\`. Never use relative cd (cd .., cd subdir), variables, \$(...), ~, or globs in a cd or -C path, and never put a cd inside an if/for/while/case block or after || / && before a git write. Run non-git steps (tests, builds) in a separate Bash call."
     fi
 }
 
@@ -277,9 +333,10 @@ check_writes() {
             in_base_repo "$p" && hits=$((hits + 1))
         done
         if ((hits > 0 && hits == ${#resolved[@]})); then
-            record deny "$DENY_EDIT_MSG (target: ${resolved[0]})"
+            record_deny "$DENY_EDIT_MSG (target: ${resolved[0]})"
         elif ((hits > 0)); then
-            record ask "The base-dir guard cannot tell which directory this command writes $t in (a cd that may fail, or a cd inside a branch or loop), and one candidate is in the base repo outside a worktree. Confirm manually only if it targets a worktree."
+            collect_cd_problems "$seg_i"
+            record_deny "DENIED: the base-dir guard cannot prove where this command writes $t, and one possible location is in the base repo outside a worktree. Problems: ${CD_PROBLEMS:-the starting directory could not be determined (a cd chained after a command that may fail, a CDPATH lookup, or a shell function call).} Rewrite: write to a literal absolute path inside a worktree, e.g. \`... > /abs/path/.claude/worktrees/<name>/$t\`, and drop the cd. Never use relative cd (cd .., cd subdir), variables, \$(...), ~, or globs in a cd target, and never put a cd inside an if/for/while/case block or after || / && before the write."
         fi
     done
 }
@@ -290,9 +347,9 @@ if [ "$BP_TOOL" = "Bash" ]; then
         check_writes
         [ "$SEG_GIT" = "1" ] && check_git
     done
-    if [ -n "$VERDICT" ]; then
-        hook_log "$VERDICT: base-dir guard"
-        hook_decision "$VERDICT" "$VERDICT_REASON"
+    if [ -n "$VERDICT_REASON" ]; then
+        hook_log "deny: base-dir guard"
+        hook_decision deny "$VERDICT_REASON"
     fi
     exit 0
 fi
