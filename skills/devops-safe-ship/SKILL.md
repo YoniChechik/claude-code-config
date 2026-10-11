@@ -113,8 +113,10 @@ up to the trigger; the human pulls it (business hours, pre-announced, aware).
   iteration (target ~3s avg); never a single long `sleep`, never
   `run_in_background=true` on Bash *inside a subagent* (use shell `&` + `wait`).
 - **CI watcher** per push/merge (this environment's gh-monitor script — in Claude Code,
-  `bash ~/.claude/scripts/gh_monitor.sh push|merge <branch>` — auto-launched by the
-  PostToolUse hook after `git push`/`gh pr create`/`gh pr merge`; the same script also
+  `bash ~/.claude/scripts/gh_monitor.sh push <branch>` auto-launched by the
+  PostToolUse hook after `git push`/`gh pr create`; after `gh pr merge` the hook detaches
+  the post-merge deploy watcher itself and the main session waits on it with
+  `gh_monitor.sh wait <PR> --repo <r>` in the background; the same script also
   watches an arbitrary dispatched workflow run via `gh_monitor.sh run <run-id>` or
   `gh_monitor.sh run <workflow-file> --dispatch`)
   — one-shot per event, not a persistent daemon; re-launch it on every "behind" alert.

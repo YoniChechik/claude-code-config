@@ -111,15 +111,27 @@ regression, just the same real-world limit the daemon always had.
                       → prints exactly ONE line to stdout, then exits; the
                         Bash background task's completion notification
                         relays it to the session
-6. claude runs `gh pr merge`
-                      → same hook fires again, this time on the narrowed
-                        merge shape → instructs a `merge`-mode launch instead
-                      → different kind ⇒ different LOCKFILE ⇒ fully
-                        independent from the push watcher; nothing about it
-                        is read, stopped, or overwritten
+6. claude (main session OR a subagent) runs `gh pr merge`
+                      → same hook fires on the merge shape (any of: PR
+                        number, branch, URL, `--repo` before/after, rtk
+                        prefix) and itself runs
+                        `gh_monitor.sh merge <PR> --repo <r> --detach`
+                      → the driver writes the session-tagged META file and
+                        re-execs the watcher in its own session (perl
+                        setsid), so it outlives the hook and the subagent
+                      → main session: told to run `gh_monitor.sh wait …` in
+                        the background (META marked announced)
+                      → subagent: told NOT to wait; META stays unannounced
 7. merge watcher runs → waits (bounded, 6h) for the PR to actually merge,
-                        then finds and watches the post-merge run(s) on the
-                        default branch, then exits with its own report(s)
+                        then polls the API for every workflow run, check run
+                        and commit status on the merge commit until all have
+                        a conclusion and the set is stable past the settle
+                        window, then writes ONE report (PR number + title,
+                        merge sha, one line per workflow) to RESULT
+8. main session Stop hook (`stop__gh_monitor_relay.sh`) → any unannounced
+                        META for this session: blocks once, handing the main
+                        agent either the finished verdict or the waiter
+                        command to run in the background
 ```
 
 ASCII view of two windows running at the same time:
@@ -330,14 +342,49 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    30-minute cap) — long enough to cover a slow CI pipeline across a full
    working day, short enough to bound a forgotten/leaked process to a
    concrete lifetime rather than leaving it truly infinite.
-2. **Post-merge discovery** (default 120s appearance grace, 20-run snapshot
-   cap): resolve the default branch, then poll `gh run list` for the first
-   run(s) on the merge commit. Nothing found within the grace window →
-   report and exit. Otherwise take **one snapshot** (never re-polled) of up
-   to 20 run ids and watch each once, announcing pass/fail per run. A run
-   that registers after that snapshot, or a fan-out past 20, is an accepted
-   scope limit — not a design gap this system tries to close.
-3. Exit 0 regardless of the verdicts — reporting them *is* the successful job.
+2. **Post-merge verdict** (poll every 30s, 5 min settle, 4h bound): each poll
+   takes one snapshot of the merge commit straight from the REST API —
+   `actions/runs?head_sha=<sha>` (paginated), `commits/<sha>/check-runs?filter=all`
+   (paginated) and `commits/<sha>/status` — and judges it on CONCLUSIONS, never
+   on `gh run watch` exit codes (a dropped connection there used to turn green
+   deploys into "FAILED"). Rules: an item is finished exactly when it has a
+   conclusion (a run stuck at `in_progress` with conclusion `success` is
+   finished and green); only the LATEST attempt of a run, or the newest check
+   run per (app, name), counts, so a failed first attempt fixed by a re-run is
+   not a failure; `failure`, `cancelled`, `timed_out`, `action_required` and
+   `startup_failure` fail; Actions check runs are skipped (their workflow run
+   is authoritative) and runs from unrelated events on the same sha
+   (`schedule`, `issue_comment`, …) are ignored. The verdict is declared only
+   when nothing is pending, the settle window since the watch started has
+   passed (release/deploy cascades register a minute or more after the merge)
+   and the set of items did not change since the previous poll. No run at all
+   within the 120s appearance grace → report and exit. A failed snapshot is
+   retried on the next poll; 10 consecutive failures escalate to the
+   persistent-error line. Past the 4h bound → a TIMED OUT report listing every
+   item's state.
+3. The report goes to stdout AND to `/tmp/gh_monitor_result_merge_<SLUG>-<KEY>`
+   (atomic rename). Exit 0 regardless of the verdict — reporting it *is* the
+   successful job.
+
+### Reaching the main session
+
+A merge is often run by a subagent, whose PostToolUse context and background
+tasks die with it. So the hook never asks the merging agent to keep a watcher
+alive: it detaches the watcher itself, and the main session learns about it
+through files keyed by session id:
+
+```
+/tmp/gh_monitor_watch_merge_<SLUG>-<KEY>.meta            session, target, repo, result path, waiter command
+/tmp/gh_monitor_watch_merge_<SLUG>-<KEY>.meta.announced  the main session has been told
+/tmp/gh_monitor_result_merge_<SLUG>-<KEY>                the final report
+```
+
+`gh_monitor.sh wait <PR> --repo <r>` blocks until RESULT exists and prints it
+(or reports that no watcher holds the lock). The main session runs it as a
+background Bash task, so the harness's own completion notification delivers
+the verdict. `stop__gh_monitor_relay.sh` (Stop hook, main agent only — subagents
+fire SubagentStop) closes the gap when the merge happened in a subagent: on the
+main agent's next turn end it blocks once per unannounced META of its session.
 
 ### `run` mode
 
@@ -354,11 +401,13 @@ selected by whether `--dispatch` is given:
    list --workflow <workflow-file>` (same appearance-grace constants as
    merge's post-merge discovery) for the first run created at or after that
    timestamp. Nothing appears within the grace window → report and exit.
-3. Either shape converges here: `gh run watch <run-id> --exit-status`. Pass →
-   `CI run <id> passed for <owner/repo>`. Fail → `CI run <id> FAILED for
-   <owner/repo>`, plus a best-effort `— failed jobs: <names>` suffix from `gh
-   run view --json jobs` (never lets a failure to fetch that list mask the
-   real pass/fail verdict already known from `gh run watch`'s own exit code).
+3. Either shape converges here: poll `gh run view <run-id> --json
+   status,conclusion` (15s) until the run has a conclusion. `success`,
+   `neutral` or `skipped` → `CI run <id> passed for <owner/repo> (<conclusion>)`.
+   Anything else → `CI run <id> FAILED for <owner/repo> (<conclusion>)`, plus a
+   best-effort `— failed jobs: <names>` suffix from `gh run view --json jobs`.
+   A failed poll is retried on the next one (10 consecutive failures escalate),
+   so a dropped connection can never become a FAILED verdict.
 4. Exit 0 regardless of the verdict — reporting it *is* the successful job.
 
 Unlike `push`/`merge`, `run` is never launched by the PostToolUse hook — there
@@ -379,7 +428,7 @@ Each call's raw output is captured into a fresh per-call temp file for
 classification, then appended to the watcher's log — never classified by
 grepping a shared log tail that could still hold a previous invocation's
 leftover text. Some call sites declare specific exit codes as *always*
-terminal (`gh pr checks --watch`/`gh run watch --exit-status` both use exit 1
+terminal (`gh pr checks --watch` uses exit 1
 to mean "CI is red"), checked before any text matching, so a CI job literally
 named `timeout-probe` can never be misread as a transient timeout and retried
 into a false pass.

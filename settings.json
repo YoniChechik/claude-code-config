@@ -222,6 +222,14 @@
       {
         "hooks" : [
           {
+            "command" : "bash $HOME\/.claude\/scripts\/stop__gh_monitor_relay.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
             "async" : true,
             "command" : "bash $HOME\/.claude\/scripts\/stop__wakeup_status.sh",
             "type" : "command"
