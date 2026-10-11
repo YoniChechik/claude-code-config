@@ -658,8 +658,22 @@ EOF")"
 }
 
 @test "ask: a git write after a cd that may have failed could land in the base repo" {
-    assert_decision ASK "$(bash_decide "$BASE" "cd $WT/mobile; git $C -m x")"
-    assert_decision ASK "$(bash_decide "$BASE" "cd $WT && git $A -A; git $P")"
+    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; git $C -m x")"
+    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing && git $A -A; git $P")"
+    assert_decision ASK "$(bash_decide "$BASE" "cd ./.claude/worktrees/missing; git $C -m x")"
+}
+
+@test "allow: a literal absolute cd into an existing worktree holds across ; and pipes" {
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT/mobile; git $C -m x")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT && git $A -A; git $P")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd \"$WT\" && pnpm test 2>&1 | tail -8; grep -rn apple --include=*.py app -il | head; git $A -A a b && git $C -qm msg && git $P -q -u origin feat 2>&1 | tail -2")"
+}
+
+@test "ask/deny: a literal absolute cd does not hide branches, loops, or a base-repo target" {
+    assert_decision ASK "$(bash_decide "$BASE" "if true; then cd $WT; fi; git $C -m x")"
+    assert_decision ASK "$(bash_decide "$BASE" "for d in a; do cd $WT; done; git $C -m x")"
+    assert_decision DENY "$(bash_decide "$WT" "cd $BASE; git $C -m x")"
+    assert_decision DENY "$(bash_decide "$BASE" "git $C -m x")"
 }
 
 @test "allow: a cd that may have failed when every candidate directory is a worktree" {
@@ -729,7 +743,8 @@ git $C -m x")"
 }
 
 @test "ask: a file write whose directory may be the base repo" {
-    assert_decision ASK "$(bash_decide "$BASE" "cd $WT; echo x > f")"
+    assert_decision ASK "$(bash_decide "$BASE" "cd $BASE/.claude/worktrees/missing; echo x > f")"
+    assert_decision ALLOW "$(bash_decide "$BASE" "cd $WT; echo x > f")"
 }
 
 @test "allow: a variable re-assigned later is not trusted to resolve a write target" {

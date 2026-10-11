@@ -318,12 +318,13 @@ def ev_call($c; $s; $rd):
              elif $aw[$j].dyn then {cwd: $s.cwd, k: false, alts: null}
              elif $aw[$j].s == "-" then {cwd: $s.cwd, k: false, alts: null}
              elif ($aw[$j].s | test("^(/|\\.)") | not) and $s.cdpath then {cwd: $s.cwd, k: false, alts: null}
-             elif $aw[$j].s | startswith("/") then ($aw[$j].s | normpath) as $d | {cwd: $d, k: true, alts: [$d]}
+             elif $aw[$j].s | startswith("/") then ($aw[$j].s | normpath) as $d
+               | {cwd: $d, k: true, alts: [$d], sure: any($ARGS.positional[]; normpath == $d)}
              else $aw[$j].s as $rel
                | {cwd: ($rel | resolve($s.cwd)), k: $s.known,
                   alts: (if $s.alts == null then null else [$s.alts[] as $b | $rel | resolve($b)] | unique end)} end) as $t
           | ($s + {cwd: $t.cwd, known: $t.k, alts: $t.alts}) as $okst
-          | {ok: $okst, any: mergest($s; $okst)}
+          | {ok: $okst, any: (if $t.sure then $okst else mergest($s; $okst) end)}
          elif ($cmd == "pushd" or $cmd == "popd") and $plain then {ok: ($s | lost), any: ($s | lost)}
          elif $cmd == "source" or $cmd == "." then ($s | lost | .gitenv = true | .cdpath = true) as $x | {ok: $x, any: $x}
          elif $cmd == "eval" then ($s | lost | .gitenv = true | .cdpath = true) as $x | {ok: $x, any: $x}
