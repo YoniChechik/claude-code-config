@@ -37,9 +37,22 @@ _bp_watch() {
     return "$rc"
 }
 
+_bp_dirs() {
+    local p
+    while IFS= read -r p; do
+        [[ -d $p && -x $p ]] && printf '%s\0' "$p"
+    done < <(printf '%s' "$1" | grep -oE '/[^][:space:]"'"'"';&|<>()`$*?[]*' | sort -u)
+}
+
 _bp_pipe() {
-    local mode=$1 data=$2 rc cdpath=false
+    local mode=$1 data=$2 rc cdpath=false text=""
+    local -a dirs=()
     [[ -n ${CDPATH:-} ]] && cdpath=true
+    case $mode in
+        hook) text=$(printf '%s' "$data" | jq -j '.tool_input.command | strings' 2>/dev/null) ;;
+        plain) text=$data ;;
+    esac
+    [[ -n $text ]] && mapfile -d '' dirs < <(_bp_dirs "$text")
     {
         if [[ $mode == hook ]]; then
             printf '%s\n' "$data"
@@ -54,7 +67,7 @@ _bp_pipe() {
             printf '%s\n' "$data"
         fi
     } | jq -n -j --arg mode "$mode" --arg cwd "$3" --arg known "$4" --arg pwd "$PWD" --arg home "$HOME" \
-        --argjson cdpath "$cdpath" -f "$BP_FILTER"
+        --argjson cdpath "$cdpath" -f "$BP_FILTER" --args ${dirs[@]+"${dirs[@]}"}
 }
 
 _bp_stream() {
