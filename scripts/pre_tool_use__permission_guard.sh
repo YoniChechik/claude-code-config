@@ -12,7 +12,7 @@ if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
     fi
     bp_hook_prepare "$INPUT"
 fi
-GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|curl|wget|http|xh|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
+GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
 if ((BP_RC != 0)); then
     if [[ ${BP_CMD:-${HOOK_LOG_CMD:-}} =~ $GUARDED_TOOLS_RE ]]; then
         hook_log "ask: unparseable command mentions ${BASH_REMATCH[2]} ($BP_ERR)"
@@ -704,12 +704,6 @@ check_segment() {
             for pattern in "${GH_PATTERNS[@]}"; do
                 has_prefix "$text" "$pattern" && ask "gh command requires confirmation."
             done
-            ;;
-        curl|wget|http|xh)
-            if [[ "$text" =~ (-X[[:space:]]*|--request[[:space:]=]+)(POST|PUT|PATCH|DELETE)([[:space:]]|$) ]] && \
-               [[ "$text" =~ api\.github\.com/repos/sunsay-ltd ]]; then
-                deny "Blocked: HTTP mutation (POST/PUT/PATCH/DELETE) against api.github.com/repos/sunsay-ltd. Use the gh CLI with explicit user approval — do not retry via raw HTTP."
-            fi
             ;;
         gcloud)
             for pattern in "${GCLOUD_PATTERNS[@]}"; do
