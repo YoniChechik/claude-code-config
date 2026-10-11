@@ -114,6 +114,15 @@
       {
         "hooks" : [
           {
+            "command" : "bash $HOME\/.claude\/scripts\/gh_monitor_relay.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Agent|Task"
+      },
+      {
+        "hooks" : [
+          {
             "async" : true,
             "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__sync_main_after_merge.sh",
             "type" : "command"
@@ -222,7 +231,7 @@
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/stop__gh_monitor_relay.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/gh_monitor_relay.sh",
             "type" : "command"
           }
         ]

@@ -171,6 +171,7 @@ assert_merge_spawned() {
     assert_merge_spawned "$output" "3951"
     assert_eq 1 "$(grep -c . "$MON_CALLS")"
     assert_contains "cwd=$REPO" "$(cat "$MON_CALLS")"
+    assert_contains "Its deploy is NOT verified yet: do not tell the user that it is deployed, shipped or live until the verdict arrives" "$output"
     [ -e "$BATS_TEST_TMPDIR/gh_monitor_watch_merge_3951.meta.announced" ] \
         || { echo "main-session merge should be marked announced" >&2; return 1; }
 }
@@ -189,7 +190,9 @@ assert_merge_spawned() {
     assert_eq 0 "$status"
     assert_contains "merge 3951 --repo sunsay-ltd/core --detach|session=s1" "$(cat "$MON_CALLS")"
     assert_contains "You are a subagent: do not wait for the deploys" "$output"
-    assert_contains "The main session is told about this watch automatically" "$output"
+    assert_contains "never say they passed" "$output"
+    assert_contains "Your final report MUST contain this line verbatim" "$output"
+    assert_contains "PR '3951' on sunsay-ltd/core is merged; its deploy is NOT verified yet. Main session: run \`bash /x/gh_monitor.sh wait 3951 --repo sunsay-ltd/core\` with \`run_in_background: true\` and wait for its verdict before reporting it deployed." "$output"
     [ ! -e "$BATS_TEST_TMPDIR/gh_monitor_watch_merge_3951.meta.announced" ] \
         || { echo "a subagent merge must stay unannounced" >&2; return 1; }
 }
