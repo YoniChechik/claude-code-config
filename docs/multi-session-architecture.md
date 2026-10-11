@@ -399,12 +399,16 @@ tagged with the main session, and the relay ignores any payload that has an
   completion arrives as a notification rather than a tool result). It blocks
   once per unannounced META at the end of the main agent's next turn.
 
-The subagent is also told to copy the `wait` command verbatim into its final
-report, so the main agent sees it in the report itself. Once the main agent
+The subagent is first told to call `SendMessage` with `to: "main"` immediately,
+before any other step, naming the PR (number, title when `gh pr view` returns
+it), the merge sha and the exact `wait` command, so the main session hears about
+the merge while the subagent is still working. It is also told to copy the
+`wait` command verbatim into its final report, so the main agent sees it in the
+report itself. Once the main agent
 starts the waiter in the background, the harness's completion notification
-wakes it even when idle. Not covered: a subagent that merges and then keeps
-working for a long time leaves the main agent unaware until the subagent
-returns or the main agent ends a turn.
+wakes it even when idle. A subagent that ignores the SendMessage order and keeps working for a long
+time still leaves the main agent unaware until it returns or the main agent
+ends a turn.
 
 ### `run` mode
 
