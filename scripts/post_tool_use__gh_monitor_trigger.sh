@@ -3,6 +3,7 @@
 : "${GH_MONITOR_HOOK_TIMEOUT:=5}"
 HOOK_DIR=.
 [[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
+: "${GH_MONITOR_SCRIPT:=$HOOK_DIR/gh_monitor.sh}"
 
 IFS= read -r -d '' input
 
@@ -16,11 +17,15 @@ source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
 
 mapfile -d '' resp < <(printf '%s' "$input" | jq -j '(.tool_name // "" | tostring), "\u0000",
     (.tool_response.exit_code // "" | tostring), "\u0000",
-    ((.tool_response.stdout // "" | tostring) + "\n" + (.tool_response.stderr // "" | tostring)), "\u0000"' 2>/dev/null)
-((${#resp[@]} == 3)) || skip "bad hook input JSON"
+    ((.tool_response.stdout // "" | tostring) + "\n" + (.tool_response.stderr // "" | tostring)), "\u0000",
+    (.session_id // "" | tostring), "\u0000",
+    (.agent_id // "" | tostring), "\u0000"' 2>/dev/null)
+((${#resp[@]} == 5)) || skip "bad hook input JSON"
 [[ ${resp[0]} == Bash ]] || exit 0
 EXIT_CODE=${resp[1]}
 OUTPUT=${resp[2]}
+SESSION_ID=${resp[3]}
+AGENT_ID=${resp[4]}
 
 bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
 
@@ -230,16 +235,73 @@ handle_merge() {
     [ -z "$repo" ] || view+=(--repo "$repo")
     pr_state "$dir" "${view[@]}" || return
     [ "$PR_STATE" = "MERGED" ] || { note_skip "merge: PR state $PR_STATE"; return; }
-    add_instruction merge "$target" "$repo" "A \`gh pr merge\` of '${target}' just succeeded."
+    add_merge "$target" "$repo" "$dir"
+}
+
+MERGE_TARGETS=()
+MERGE_REPOS=()
+MERGE_DIRS=()
+add_merge() {
+    local selector="$1" repo="$2" dir="$3" k
+    safe_word "$selector" || { note_skip "merge: unsafe selector $selector"; return; }
+    [ -z "$repo" ] || safe_word "$repo" || { note_skip "merge: unsafe repo $repo"; return; }
+    for k in "${!MERGE_TARGETS[@]}"; do
+        if [ "${MERGE_TARGETS[k]}" = "$selector" ]; then
+            [ -n "${MERGE_REPOS[k]}" ] || MERGE_REPOS[k]="$repo"
+            return 0
+        fi
+    done
+    MERGE_TARGETS+=("$selector")
+    MERGE_REPOS+=("$repo")
+    MERGE_DIRS+=("$dir")
+}
+
+meta_field() {
+    local line
+    line=$(grep -m 1 "^$2=" "$1" 2>/dev/null) || return 1
+    printf '%s' "${line#*=}"
+}
+
+merge_text() {
+    local selector="$1" repo="$2" dir="$3" meta wait_cmd watched_repo
+    local -a args=(merge "$selector")
+    [ -z "$repo" ] || args+=(--repo "$repo")
+    args+=(--detach)
+    meta=$(
+        cd "$dir" 2>/dev/null || exit 0
+        [ -z "$SESSION_ID" ] || export CLAUDE_CODE_SESSION_ID="$SESSION_ID"
+        run_timeout "$GH_MONITOR_HOOK_TIMEOUT" bash "$GH_MONITOR_SCRIPT" "${args[@]}" 2>/dev/null | tail -n 1
+    )
+    if [ -z "$meta" ] || [ ! -f "$meta" ]; then
+        hook_log "spawn failed: merge $selector${repo:+ --repo $repo}"
+        local repo_flag=""
+        [ -z "$repo" ] || repo_flag=" --repo '$repo'"
+        REPLY="A \`gh pr merge\` of '${selector}' just succeeded, but the detached post-merge watcher could not be started. Start it yourself: call the Bash tool with \`command: bash ~/.claude/scripts/gh_monitor.sh merge '${selector}'${repo_flag}\` and \`run_in_background: true\` (no explicit \`timeout\` override). When it completes, report its full verdict (PR number and title, merge commit, every workflow's conclusion) to the main session / the user."
+        return 0
+    fi
+    wait_cmd=$(meta_field "$meta" wait_cmd)
+    watched_repo=$(meta_field "$meta" repo)
+    hook_log "spawned: merge $selector --repo $watched_repo${AGENT_ID:+ (subagent $AGENT_ID)}"
+    local lead="A \`gh pr merge\` of '${selector}' on ${watched_repo} just succeeded. A detached post-merge watcher is ALREADY running for it: it waits for every workflow run on the merge commit, including the release/deploy cascade that starts after the merge, and its verdict comes from the GitHub API run conclusions. Do NOT start \`gh_monitor.sh merge\` yourself (that would restart the watch)."
+    if [ -n "$AGENT_ID" ]; then
+        REPLY="${lead} You are a subagent: do not wait for the deploys. The main session is told about this watch automatically when its turn ends and receives the final verdict (PR number and title, merge commit sha, each workflow's conclusion). In your final report, say that PR '${selector}' on ${watched_repo} was merged and its deploy watch is running. Only if you are still busy with other work when it finishes, you may call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` and include its output in your report."
+    else
+        REPLY="${lead} Call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` (no explicit \`timeout\` override; it returns when the watcher's verdict is written). When it completes, report the verdict to the user exactly as printed: the PR number and what it is about, the merge commit sha, and each workflow's conclusion."
+        : >"$meta.announced"
+    fi
 }
 
 for i in "${PUSHES[@]}"; do handle_push "$i"; done
 for i in "${CREATES[@]}"; do handle_create "$i"; done
 for i in "${MERGES[@]}"; do handle_merge "$i"; done
 
-((${#INSTR_KEYS[@]} > 0)) || exit 0
+((${#INSTR_KEYS[@]} + ${#MERGE_TARGETS[@]} > 0)) || exit 0
 
 text=""
+for k in "${!MERGE_TARGETS[@]}"; do
+    merge_text "${MERGE_TARGETS[k]}" "${MERGE_REPOS[k]}" "${MERGE_DIRS[k]}"
+    text+="${text:+$'\n\n'}$REPLY"
+done
 for k in "${!INSTR_KEYS[@]}"; do
     kind="${INSTR_KEYS[k]%%|*}"
     selector="${INSTR_KEYS[k]#*|}"

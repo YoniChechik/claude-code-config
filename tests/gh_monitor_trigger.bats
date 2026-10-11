@@ -1,22 +1,4 @@
 #!/usr/bin/env bats
-#
-# Tests for scripts/post_tool_use__gh_monitor_trigger.sh — the PostToolUse:Bash
-# hook that auto-launches the one-shot CI watcher.
-#
-# Strategy:
-#   - The REAL hook is run end to end, fed a real PostToolUse JSON payload on
-#     stdin.  Only `gh` and `git` are substituted, as PATH-shadowing stubs
-#     (same convention as gh_monitor.bats): the suite must never touch the
-#     network and must never depend on the checkout's real branch.
-#   - CLAUDE_HOOK_LOG_DIR redirects the shared hook log into
-#     BATS_TEST_TMPDIR, so a live hook's real log is never read or written.
-#   - The KEY/SLUG the assertions expect are recomputed through the SHIPPED
-#     helpers in scripts/_notify.sh, never hardcoded, so the test cannot drift
-#     from the paths the watcher really creates.
-#
-# Assertions go through helper functions, never a bare `[[ ... ]]`: bash does
-# not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
-# non-final `[[ ... ]]` and reports the test as ok.
 
 HOOK="${BATS_TEST_DIRNAME}/../scripts/post_tool_use__gh_monitor_trigger.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
@@ -26,13 +8,8 @@ setup() {
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR"
     HOOK_LOG="$BATS_TEST_TMPDIR/hooks.log"
 
-    # Short enough that the fail-open timeout test finishes in ~1s, long enough
-    # that a loaded machine never trips it on a healthy stub.
     export GH_MONITOR_HOOK_TIMEOUT=2
 
-    # The directory the payload's `cwd` points at. The hook cd's into it before
-    # calling git/gh; it does not have to be a real repo, because both are
-    # stubbed.
     REPO="$BATS_TEST_TMPDIR/repo"
     W="$BATS_TEST_TMPDIR/w"
     mkdir -p "$REPO" "$W"
@@ -48,19 +25,30 @@ setup() {
     write_git_stub
     export PATH="$BIN:$PATH"
 
-    # Sourced BEFORE the first set_branch: that helper recomputes KEY/SLUG
-    # through these same shipped functions.
     # shellcheck source=../scripts/_notify.sh
     source "$NOTIFY_SH"
 
-    # The happy-path answers every test starts from; individual tests override
-    # the one fixture they are about.
     set_branch "$BRANCH"
     gh_stub repo_name 0 "o/r"
     gh_stub pr_state 0 "OPEN"
-}
 
-# --- assertion helpers ------------------------------------------------------
+    MON_CALLS="$BATS_TEST_TMPDIR/monitor_calls.log"
+    export MON_CALLS
+    export GH_MONITOR_SCRIPT="$BIN/fake_gh_monitor.sh"
+    cat >"$GH_MONITOR_SCRIPT" <<'MON'
+#!/bin/bash
+printf '%s|session=%s|cwd=%s\n' "$*" "${CLAUDE_CODE_SESSION_ID:-}" "$PWD" >>"$MON_CALLS"
+[ -n "${FAKE_MONITOR_FAIL:-}" ] && exit 1
+target=$2
+repo=o/r
+[ "$3" = --repo ] && repo=$4
+meta="$CLAUDE_NOTIFY_TMP_DIR/gh_monitor_watch_merge_${target//[^A-Za-z0-9]/_}.meta"
+printf 'session=%s\ntarget=%s\nrepo=%s\nresult=%s\nwait_cmd=bash /x/gh_monitor.sh wait %s --repo %s\n' \
+    "${CLAUDE_CODE_SESSION_ID:-}" "$target" "$repo" "$meta.result" "$target" "$repo" >"$meta"
+printf '%s\n' "$meta"
+MON
+    chmod +x "$GH_MONITOR_SCRIPT"
+}
 
 assert_contains() {
     case "$2" in (*"$1"*) return 0 ;; esac
@@ -80,9 +68,6 @@ assert_eq() {
     return 1
 }
 
-# --- stubs ------------------------------------------------------------------
-
-# Write one stubbed answer. Args: <key> <exit code|HANG> <stdout lines...>.
 gh_stub() {
     local key="$1" rc="$2"
     shift 2
@@ -90,8 +75,6 @@ gh_stub() {
     return 0
 }
 
-# The branch `git branch --show-current` reports, and the KEY/SLUG that go with
-# it. Args: <branch> [exit code|HANG].
 set_branch() {
     local b="$1" rc="${2:-0}"
     { printf '%s\n' "$rc"; [ -n "$b" ] && printf '%s\n' "$b"; } >"$GIT_STUB_DIR/branch"
@@ -101,9 +84,6 @@ set_branch() {
     return 0
 }
 
-# Both stubs share one fixture format: line 1 is the exit code (or the literal
-# HANG, which sleeps far past any time box so the hook's own watchdog is what
-# ends the call), the rest is stdout.
 write_gh_stub() {
     cat >"$BIN/gh" <<'STUB'
 #!/bin/bash
@@ -142,20 +122,16 @@ STUB
     chmod +x "$BIN/git"
 }
 
-# --- driving the hook -------------------------------------------------------
-
-# Feed the hook one PostToolUse payload.
-# Args: <command> [exit code] [tool stdout] [tool stderr] [tool name]
 fire() {
     local cmd="$1" ec="${2:-0}" so="${3:-}" se="${4:-}" tn="${5:-Bash}"
     jq -nc --arg t "$tn" --arg c "$cmd" --arg cwd "$REPO" \
-        --argjson ec "$ec" --arg so "$so" --arg se "$se" \
-        '{tool_name:$t,cwd:$cwd,tool_input:{command:$c},
-          tool_response:{exit_code:$ec,stdout:$so,stderr:$se}}' \
+        --argjson ec "$ec" --arg so "$so" --arg se "$se" --arg aid "${FIRE_AGENT_ID:-}" \
+        '{session_id:"s1",tool_name:$t,cwd:$cwd,tool_input:{command:$c},
+          tool_response:{exit_code:$ec,stdout:$so,stderr:$se}}
+         + (if $aid == "" then {} else {agent_id:$aid} end)' \
         | bash "$HOOK"
 }
 
-# The additionalContext the hook emitted, or "" when it did not trigger.
 ctx() {
     local out
     out=$(fire "$@") || return "$?"
@@ -163,15 +139,7 @@ ctx() {
     printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty'
 }
 
-# A trigger must name the right mode and carry the exact background-launch
-# phrasing. Args: <mode> <context text> [selector] [repo].
-# <selector> defaults to $BRANCH (the plain-case launch target); pass it
-# explicitly when the trigger carries its own explicit PR number/URL/branch.
-# <repo>, when given, asserts the launch command also forwards an explicit
-# `--repo <repo>` to gh_monitor.sh.
-# shellcheck disable=SC2016  # The backticks below are LITERAL text the hook
-# emits for the agent to read — expanding them here would defeat the point of
-# the assertion.
+# shellcheck disable=SC2016
 assert_launch_instruction() {
     local kind="$1" text="$2" selector="${3:-$BRANCH}" repo="${4:-}"
     local expect="bash ~/.claude/scripts/gh_monitor.sh ${kind} '${selector}'"
@@ -182,7 +150,59 @@ assert_launch_instruction() {
     return 0
 }
 
-# --- the exit-code-0 gate ---------------------------------------------------
+assert_merge_spawned() {
+    local text="$1" selector="${2:-$BRANCH}" repo="${3:-}"
+    local expect="merge ${selector}"
+    [ -n "$repo" ] && expect="${expect} --repo ${repo}"
+    expect="${expect} --detach|session=s1"
+    assert_contains "$expect" "$(cat "$MON_CALLS" 2>/dev/null)" || return 1
+    assert_contains "detached post-merge watcher is ALREADY running" "$text" || return 1
+    assert_contains "Do NOT start \`gh_monitor.sh merge\` yourself" "$text" || return 1
+    assert_contains "bash /x/gh_monitor.sh wait ${selector} --repo ${repo:-o/r}" "$text" || return 1
+    assert_contains '`run_in_background: true`' "$text" || return 1
+    assert_contains "the PR number and what it is about, the merge commit sha, and each workflow's conclusion" "$text" || return 1
+    return 0
+}
+
+@test "merge spawns exactly one detached watcher in the command's cwd and marks it announced for the main session" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge 3951 --squash"
+    assert_eq 0 "$status"
+    assert_merge_spawned "$output" "3951"
+    assert_eq 1 "$(grep -c . "$MON_CALLS")"
+    assert_contains "cwd=$REPO" "$(cat "$MON_CALLS")"
+    [ -e "$BATS_TEST_TMPDIR/gh_monitor_watch_merge_3951.meta.announced" ] \
+        || { echo "main-session merge should be marked announced" >&2; return 1; }
+}
+
+@test "merge with --repo before the PR number spawns the watcher with both" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge --repo sunsay-ltd/core 3951 --squash"
+    assert_eq 0 "$status"
+    assert_merge_spawned "$output" "3951" "sunsay-ltd/core"
+    assert_contains "pr view 3951 --repo sunsay-ltd/core" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
+@test "a subagent merge spawns the watcher, tells the subagent not to wait, and leaves it unannounced for the main session" {
+    gh_stub pr_state 0 "MERGED"
+    FIRE_AGENT_ID=sub1 run ctx "cd /tmp && rtk gh pr merge 3951 --repo sunsay-ltd/core --squash --delete-branch 2>&1 | tail -3"
+    assert_eq 0 "$status"
+    assert_contains "merge 3951 --repo sunsay-ltd/core --detach|session=s1" "$(cat "$MON_CALLS")"
+    assert_contains "You are a subagent: do not wait for the deploys" "$output"
+    assert_contains "The main session is told about this watch automatically" "$output"
+    [ ! -e "$BATS_TEST_TMPDIR/gh_monitor_watch_merge_3951.meta.announced" ] \
+        || { echo "a subagent merge must stay unannounced" >&2; return 1; }
+}
+
+@test "if the detached watcher cannot be spawned the agent is told to start it itself" {
+    gh_stub pr_state 0 "MERGED"
+    FAKE_MONITOR_FAIL=1 run ctx "gh pr merge 3951 --repo sunsay-ltd/core"
+    assert_eq 0 "$status"
+    assert_contains "could not be started" "$output"
+    assert_contains "bash ~/.claude/scripts/gh_monitor.sh merge '3951' --repo 'sunsay-ltd/core'" "$output"
+    assert_contains '`run_in_background: true`' "$output"
+    assert_contains "spawn failed: merge 3951" "$(cat "$HOOK_LOG")"
+}
 
 @test "a FAILED git push never triggers, however well its text matches" {
     run ctx "git push" 1
@@ -197,37 +217,24 @@ assert_launch_instruction() {
 }
 
 @test "a FAILED gh pr merge whose PR is still OPEN does not trigger" {
-    # Merge no longer trusts the local exit code alone (see the regression
-    # tests below) — it verifies real PR state instead. A nonzero exit AND a
-    # real non-MERGED state is a genuine failure, and still does not trigger.
     gh_stub pr_state 0 "OPEN"
     run ctx "gh pr merge --auto" 128
     assert_eq 0 "$status"
     assert_eq "" "$output"
 }
 
-# --- the merge exit-code-vs-real-state regression (worktree branch clash) ---
-#
-# `gh pr merge --delete-branch`, run from the very worktree of the branch
-# being merged, tries to switch that worktree to the base branch after
-# deleting the source branch. When another worktree (typically the primary
-# checkout) already has the base branch checked out, git refuses and `gh`
-# exits nonzero even though the remote merge fully succeeded. Trusting the
-# local exit code alone silently dropped the trigger on this repo's own
-# everyday merge shape — confirmed live, repeatedly.
-
 @test "a gh pr merge that exits nonzero but IS really merged still triggers" {
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --squash --delete-branch" 1
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output"
+    assert_merge_spawned "$output"
 }
 
 @test "a gh pr merge with an explicit target that exits nonzero but IS really merged still triggers" {
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 456 --repo sunsay-ltd/core --squash --delete-branch" 1
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+    assert_merge_spawned "$output" "456" "sunsay-ltd/core"
 }
 
 @test "a merge precheck failure (gh pr view itself fails) does not trigger and is logged" {
@@ -238,8 +245,6 @@ assert_launch_instruction() {
     run cat "$HOOK_LOG"
     assert_contains "gh pr view failed" "$output"
 }
-
-# --- the --help / -h exclusion ----------------------------------------------
 
 @test "gh pr merge --help does not trigger even though it exits 0" {
     run ctx "gh pr merge --help"
@@ -273,8 +278,6 @@ assert_launch_instruction() {
     assert_launch_instruction push "$output"
 }
 
-# --- the no-op push exclusion -----------------------------------------------
-
 @test "a push reporting 'Everything up-to-date' on stdout does not trigger" {
     run ctx "git push" 0 "Everything up-to-date"
     assert_eq 0 "$status"
@@ -286,8 +289,6 @@ assert_launch_instruction() {
     assert_eq 0 "$status"
     assert_eq "" "$output"
 }
-
-# --- the branch-delete exclusion --------------------------------------------
 
 @test "git push --delete does not trigger" {
     run ctx "git push --delete origin feat-x"
@@ -306,8 +307,6 @@ assert_launch_instruction() {
     assert_eq 0 "$status"
     assert_eq "" "$output"
 }
-
-# --- the narrowed positive shapes -------------------------------------------
 
 @test "a plain git push with an OPEN PR launches a push watcher" {
     run ctx "git push"
@@ -339,8 +338,6 @@ assert_launch_instruction() {
     assert_eq 0 "$status"
     assert_contains "A \`gh pr create\` for 'feat-x' just succeeded" "$output"
     assert_launch_instruction push "$output"
-    # The PR was just created, so its state needs no lookup. No gh call at
-    # all happens on this path, so calls.log is never even created.
     assert_not_contains "pr view" "$(cat "$GH_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
@@ -351,11 +348,6 @@ assert_launch_instruction() {
 }
 
 @test "gh pr create with a multi-word quoted --title still launches a push watcher" {
-    # Regression test: `read -a` (the tokenizer this hook used to use) has no
-    # concept of quoting, so a multi-word --title value exploded into one
-    # token per word and the very next bare word after --title read as an
-    # unexpected positional argument, silently defeating the trigger. This is
-    # the overwhelmingly common real shape (every PR title has spaces).
     run ctx 'gh pr create --title "feat(x): flip five flags on production" --body-file /tmp/body.md'
     assert_eq 0 "$status"
     assert_launch_instruction push "$output"
@@ -369,7 +361,6 @@ assert_launch_instruction() {
 
 @test "gh pr create with a heredoc --body (quoted delimiter) still launches a push watcher" {
     run ctx 'gh pr create --title Fix --body "$(cat <<'"'"'EOF'"'"'
-## Summary
 Some body text; with a semicolon and | a pipe and > a redirect char, all literal inside the heredoc.
 EOF
 )"'
@@ -399,28 +390,25 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge"
     assert_eq 0 "$status"
-    assert_contains "A \`gh pr merge\` of 'feat-x' just succeeded." "$output"
-    assert_launch_instruction merge "$output"
+    assert_contains "A \`gh pr merge\` of 'feat-x' on o/r just succeeded." "$output"
+    assert_merge_spawned "$output"
 }
 
 @test "gh pr merge --auto launches a merge watcher" {
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --auto --squash --delete-branch"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output"
+    assert_merge_spawned "$output"
 }
 
 @test "gh pr merge with a multi-word quoted --body still launches a merge watcher" {
     gh_stub pr_state 0 "MERGED"
     run ctx 'gh pr merge --auto --body "merging after two rounds of review"'
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output"
+    assert_merge_spawned "$output"
 }
 
 @test "a merge trigger DOES run a gh pr view MERGED precheck, unlike push's OPEN precheck" {
-    # Verifies real state instead of trusting gh's own exit code (see the
-    # regression tests above) — so, unlike the old behavior, a gh call always
-    # happens here.
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --auto"
     assert_eq 0 "$status"
@@ -431,16 +419,12 @@ EOF
     run fire "git push"
     assert_eq 0 "$status"
     assert_not_contains "systemMessage" "$output"
-    # Through a file, never an interpolated string: the payload contains single
-    # quotes of its own.
     printf '%s' "$output" >"$BATS_TEST_TMPDIR/out.json"
     run jq -r 'keys | join(",")' "$BATS_TEST_TMPDIR/out.json"
     assert_eq "hookSpecificOutput" "$output"
     run jq -r '.hookSpecificOutput.hookEventName' "$BATS_TEST_TMPDIR/out.json"
     assert_eq "PostToolUse" "$output"
 }
-
-# --- out-of-scope shapes: no trigger, no guessing ---------------------------
 
 @test "git push -C otherdir does not trigger" {
     run ctx "git push -C otherdir"
@@ -506,8 +490,7 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 123 --repo owner/other"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "123" "owner/other"
-    # No branch resolution needed: the target was already fully explicit.
+    assert_merge_spawned "$output" "123" "owner/other"
     assert_not_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
@@ -515,7 +498,7 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 123 --auto"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "123"
+    assert_merge_spawned "$output" "123"
     assert_not_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
@@ -523,24 +506,21 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge https://github.com/owner/other/pull/9"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "https://github.com/owner/other/pull/9"
+    assert_merge_spawned "$output" "https://github.com/owner/other/pull/9"
 }
 
-# Regression: this is the exact real-world shape the old hook silently missed
-# -- a subagent's `gh pr merge <number> --repo sunsay-ltd/core --squash`.
 @test "gh pr merge <number> --repo owner/repo --squash launches a merge watcher with the explicit number and repo" {
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 456 --repo sunsay-ltd/core --squash"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+    assert_merge_spawned "$output" "456" "sunsay-ltd/core"
 }
 
 @test "gh pr merge --repo owner/other with NO explicit PR number falls back to the cwd branch as selector" {
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge --repo owner/other --auto"
     assert_eq 0 "$status"
-    # Repo is explicit, but the target still resolves to the current branch.
-    assert_launch_instruction merge "$output" "$BRANCH" "owner/other"
+    assert_merge_spawned "$output" "$BRANCH" "owner/other"
     assert_contains "branch --show-current" "$(cat "$GIT_STUB_DIR/calls.log" 2>/dev/null || true)"
 }
 
@@ -559,19 +539,11 @@ EOF
     assert_eq "" "$output"
 }
 
-# --- the rtk proxy-prefix unwrap ---------------------------------------------
-# Regression: `rtk hook claude` (a sibling PreToolUse hook on the same "Bash"
-# matcher) silently rewrites `gh pr merge`/`gh pr create` into
-# `rtk gh pr merge ...`/`rtk gh pr create ...` before they run, and PostToolUse
-# sees that rewritten command -- this is the real shape that silently ate
-# every merge/create trigger in production until the Step 5a2 unwrap was
-# added.
-
 @test "an rtk-rewritten gh pr merge still launches a merge watcher" {
     gh_stub pr_state 0 "MERGED"
     run ctx "rtk gh pr merge 456 --repo sunsay-ltd/core --squash --delete-branch"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+    assert_merge_spawned "$output" "456" "sunsay-ltd/core"
 }
 
 @test "an rtk-rewritten gh pr create still launches a push watcher" {
@@ -590,14 +562,14 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "rtk proxy gh pr merge 456 --repo sunsay-ltd/core --squash"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "456" "sunsay-ltd/core"
+    assert_merge_spawned "$output" "456" "sunsay-ltd/core"
 }
 
 @test "rtk run <cmd> unwraps one level deeper and still launches a merge watcher" {
     gh_stub pr_state 0 "MERGED"
     run ctx "rtk run gh pr merge --auto"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output"
+    assert_merge_spawned "$output"
 }
 
 @test "bare rtk with no further command stays out of contract" {
@@ -695,7 +667,7 @@ EOF
     gh_stub pr_state 0 "MERGED"
     run ctx "gh pr merge 3644 --squash 2>&1 | tail -5; echo ---; gh pr view 3644 --json state"
     assert_eq 0 "$status"
-    assert_launch_instruction merge "$output" "3644"
+    assert_merge_spawned "$output" "3644"
 }
 
 @test "git push inside a quoted heredoc commit message is not a push; the real one triggers once" {
@@ -762,8 +734,6 @@ log_lines() {
     assert_eq "" "$output"
 }
 
-# --- the OPEN-PR precheck ---------------------------------------------------
-
 @test "a push whose PR is MERGED does not trigger" {
     gh_stub pr_state 0 "MERGED"
     run ctx "git push"
@@ -786,8 +756,6 @@ log_lines() {
     run cat "$HOOK_LOG"
     assert_contains "gh pr view failed" "$output"
 }
-
-# --- fail-open --------------------------------------------------------------
 
 @test "a hanging gh pr view fails OPEN: no trigger, exit 0, one log line" {
     gh_stub pr_state HANG

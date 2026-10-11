@@ -45,7 +45,7 @@ Find this environment's gh-monitor script (in Claude Code: `~/.claude/scripts/gh
 ## Step 9: Validate on Staging/Production
 Run this step only after a successful merge in Step 8.
 - Find the deploy target. Check CI/CD config, deploy scripts, or docs (e.g. `.github/workflows`, `vercel.json`, `railway.json`, Pulumi stacks) for the staging or production URL.
-- Wait for the deploy to finish. Poll deploy status with the platform CLI (e.g. `gh run watch`, `vercel ls`, `pulumi stack output`).
+- Wait for the deploy to finish. In Claude Code the merge hook already started a detached post-merge watcher over every workflow run on the merge commit; wait on it with the `gh_monitor.sh wait <PR> --repo <r>` command the hook gave you (background Bash). Elsewhere poll deploy status with the platform CLI (e.g. `vercel ls`, `pulumi stack output`).
 - Exercise the changed functionality on the live environment. Curl the new or changed endpoint, run a smoke-test command, check logs, and/or use `mcp__claude-in-chrome__*` tools to click through the new UI flow when the feature has a UI. Do not stop at "the build succeeded."
 - Report the concrete result: what works, with the command or click path used to prove it, or what failed, with the actual error.
 - If the repo or feature has no staging/production deploy (e.g. a local-only tool), skip this step and say so. Do not force it.

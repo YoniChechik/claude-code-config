@@ -1,31 +1,7 @@
 #!/usr/bin/env bats
-#
-# Tests for scripts/gh_monitor.sh (the one-shot push/merge watcher)
-# and for _gh_monitor_key in scripts/_notify.sh.
-#
-# Strategy:
-#   - The REAL script is run end to end.  Only two things are substituted: `gh`
-#     is a PATH-shadowing stub (the suite must never touch the network), and
-#     every /tmp path is redirected into BATS_TEST_TMPDIR via
-#     CLAUDE_NOTIFY_TMP_DIR, so a live watcher's real files are never read,
-#     written or evicted by this suite.
-#   - Every wait/poll/timeout is env-overridable, so the 45s grace, the 6h
-#     merge-wait and the 120s run-appearance grace all complete in milliseconds.
-#   - The lock tests use REAL `lockf` holders in REAL process groups, and prove
-#     the lock is kernel-held by probing it with an independent `lockf -t 0`
-#     from the test itself — nothing about the locking is simulated.
-#   - `run_watchable` is EXTRACTED verbatim from the shipped script by marker,
-#     so a change to the function that is not reflected here fails this suite.
-#
-# Assertions go through helper functions, never a bare `[[ ... ]]`: bash does
-# not fire the ERR trap for the `[[` keyword, so bats 1.13 SWALLOWS a failing
-# non-final `[[ ... ]]` and reports the test as ok.
 
 WATCHER="${BATS_TEST_DIRNAME}/../scripts/gh_monitor.sh"
 NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
-# The script reports its own invoked path (via $SELF) in user-facing retry
-# messages, resolved to an absolute path — never a hardcoded ~/.claude
-# literal, so assertions must match against this, not a fixed string.
 WATCHER_ABS="$(cd "$(dirname "$WATCHER")" && pwd)/$(basename "$WATCHER")"
 
 setup() {
@@ -33,8 +9,6 @@ setup() {
     export CLAUDE_CODE_SESSION_ID="testsess"
     BRANCH="feat-x"
 
-    # Every timer near zero: the suite asserts the LOGIC of each bound, never
-    # that the wall clock really elapsed.
     export GH_MONITOR_CHECK_GRACE_MAX=2
     export GH_MONITOR_CHECK_GRACE_POLL=1
     export GH_MONITOR_MERGE_WAIT_MAX=2
@@ -48,9 +22,14 @@ setup() {
     export GH_MONITOR_EVICT_KILL_WAIT=3
     export GH_MONITOR_NO_PID_WAIT=10
     export GH_MONITOR_PROBE_POLL=1
+    export GH_MONITOR_MERGE_SETTLE=0
+    export GH_MONITOR_DEPLOY_POLL=0
+    export GH_MONITOR_RUN_POLL=0
+    export GH_MONITOR_WATCH_MAX=60
+    export GH_MONITOR_POLL_FAIL_MAX=3
+    export GH_MONITOR_WAIT_POLL=0
+    export GH_MONITOR_WAIT_GRACE=0
 
-    # The key/slug the watcher derives for o/r + feat-x, recomputed here through
-    # the same shipped helpers rather than hardcoded.
     # shellcheck source=../scripts/_notify.sh
     source "$NOTIFY_SH"
     KEY=$(_gh_monitor_key "o/r" "$BRANCH")
@@ -62,8 +41,9 @@ setup() {
     write_gh_stub
     export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 
-    # Always answer the owner/repo lookup every invocation starts with.
     stub repo_name 0 "o/r"
+    stub api_checks 0 '{"check_runs":[]}'
+    stub api_status 0 '{"statuses":[]}'
 
     SPAWNED_PIDS_FILE="$BATS_TEST_TMPDIR/spawned_pids"
     : >"$SPAWNED_PIDS_FILE"
@@ -77,8 +57,6 @@ teardown() {
     done <"$SPAWNED_PIDS_FILE"
     return 0
 }
-
-# --- helpers ----------------------------------------------------------------
 
 assert_contains() {
     case "$2" in (*"$1"*) return 0 ;; esac
@@ -101,8 +79,6 @@ assert_eq() {
 lockfile_for() { printf '%s/gh_monitor_lock_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
 pidfile_for() { printf '%s/gh_monitor_pid_%s_%s-%s' "$BATS_TEST_TMPDIR" "$1" "$SLUG" "$KEY"; }
 
-# Write one stubbed gh response. Args: <key> <exit code> <stdout text...>.
-# A key may be sequenced as "<key>.<n>" to answer the n-th call differently.
 stub() {
     local key="$1" rc="$2"
     shift 2
@@ -110,8 +86,6 @@ stub() {
     return 0
 }
 
-# The gh stub: routes on the subcommand, logs every call, and serves either a
-# per-call-number fixture ("<key>.<n>") or the flat one ("<key>").
 write_gh_stub() {
     cat >"$BATS_TEST_TMPDIR/bin/gh" <<'STUB'
 #!/bin/bash
@@ -136,9 +110,19 @@ case "$1 $2" in
         case "$*" in
             *databaseId*) key=run_view_exists ;;
             *jobs*) key=run_view_jobs ;;
+            *status,conclusion*) key=run_view_state ;;
         esac
         ;;
     "workflow run") key=workflow_run ;;
+esac
+case "$1" in
+    api)
+        case "$*" in
+            *actions/runs*) key=api_runs ;;
+            *check-runs*) key=api_checks ;;
+            */status*) key=api_status ;;
+        esac
+        ;;
 esac
 printf '%s\n' "$*" >>"$GH_STUB_DIR/calls.log"
 [ -n "$key" ] || { echo "gh stub: unroutable call: $*" >&2; exit 99; }
@@ -150,18 +134,61 @@ f="$GH_STUB_DIR/$key.$n"
 [ -f "$f" ] || f="$GH_STUB_DIR/$key"
 [ -f "$f" ] || { echo "gh stub: no fixture for $key: $*" >&2; exit 99; }
 rc=$(head -n 1 "$f")
-tail -n +2 "$f"
+jqexpr=""
+if [ "$1" = api ]; then
+    prev=""
+    for a in "$@"; do
+        [ "$prev" = "--jq" ] && jqexpr=$a
+        prev=$a
+    done
+fi
+if [ -n "$jqexpr" ] && [ "$rc" = 0 ]; then
+    tail -n +2 "$f" | jq -r "$jqexpr" || exit 98
+else
+    tail -n +2 "$f"
+fi
 exit "$rc"
 STUB
     chmod +x "$BATS_TEST_TMPDIR/bin/gh"
 }
 
-# How many stubbed gh calls matched a substring.
+merged_pr() {
+    stub pr_state 0 "MERGED	abc123	3951	fix(website): probe health"
+    stub api_runs 0 '{"workflow_runs":[]}'
+}
+
+runs_json() {
+    local spec id name status conclusion attempt event
+    for spec in "$@"; do
+        IFS=: read -r id name status conclusion attempt event <<<"$spec"
+        jq -nc --argjson id "$id" --arg n "$name" --arg s "$status" --arg c "$conclusion" \
+            --argjson a "$attempt" --arg e "$event" \
+            '{id:$id,name:$n,status:$s,conclusion:(if $c == "" then null else $c end),run_attempt:$a,event:$e}'
+    done | jq -sc '{workflow_runs: .}'
+}
+
+api_runs_fixture() { stub api_runs 0 "$(runs_json "$@")"; }
+
+api_runs_fixture_n() {
+    local n="$1"
+    shift
+    stub "api_runs.$n" 0 "$(runs_json "$@")"
+}
+
+api_checks_fixture() {
+    local spec id name status conclusion app
+    stub api_checks 0 "$(for spec in "$@"; do
+        IFS=: read -r id name status conclusion app <<<"$spec"
+        jq -nc --argjson id "$id" --arg n "$name" --arg s "$status" --arg c "$conclusion" --arg app "$app" \
+            '{id:$id,name:$n,status:$s,conclusion:(if $c == "" then null else $c end),app:{slug:$app}}'
+    done | jq -sc '{check_runs: .}')"
+}
+
+result_for() { printf '%s/gh_monitor_result_merge_%s-%s' "$BATS_TEST_TMPDIR" "$SLUG" "$KEY"; }
+meta_for() { printf '%s/gh_monitor_watch_merge_%s-%s.meta' "$BATS_TEST_TMPDIR" "$SLUG" "$KEY"; }
+
 call_count() { grep -c -- "$1" "$GH_STUB_DIR/calls.log" 2>/dev/null || true; }
 
-# Hold LOCKFILE for real, in its own process group, and report that pgid.
-# `set -m` puts the backgrounded `lockf` in a new group whose pgid is its PID,
-# which is exactly what the watcher's eviction path expects to signal.
 start_lock_holder() {
     local lockfile="$1" secs="$2" pidout="$3"
     cat >"$BATS_TEST_TMPDIR/holder.sh" <<'HOLD'
@@ -172,7 +199,6 @@ wait
 HOLD
     bash "$BATS_TEST_TMPDIR/holder.sh" "$lockfile" "$secs" "$pidout" &
     printf '%s\n' "$!" >>"$SPAWNED_PIDS_FILE"
-    # Wait for the holder to really own the lock before returning.
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
         if [ -s "$pidout" ] && ! lockf -t 0 -k "$lockfile" true 2>/dev/null; then
@@ -185,7 +211,6 @@ HOLD
     return 1
 }
 
-# Poll for a file to exist, up to 10s.
 wait_for_file() {
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -194,8 +219,6 @@ wait_for_file() {
     done
     return 1
 }
-
-# --- _gh_monitor_key ----------------------------------------------------------
 
 @test "_gh_monitor_key returns 10 lowercase hex chars" {
     run bash -c "source '$NOTIFY_SH'; _gh_monitor_key 'o/r' 'feat-x'"
@@ -220,9 +243,7 @@ wait_for_file() {
     return 1
 }
 
-# --- usage ------------------------------------------------------------------
-
-@test "a mode other than push|merge is a usage error, exit 2" {
+@test "a mode other than push|merge|wait|run is a usage error, exit 2" {
     run bash "$WATCHER" watch "$BRANCH"
     assert_eq 2 "$status"
     assert_contains "Usage:" "$output"
@@ -233,12 +254,6 @@ wait_for_file() {
     assert_eq 2 "$status"
 }
 
-# --- --repo override ---------------------------------------------------------
-# The PostToolUse hook trusts an explicit --repo/PR-number from the triggering
-# gh command and forwards them here; these regression tests prove the watcher
-# actually uses those explicit values downstream, rather than re-resolving
-# them from its own cwd.
-
 @test "--repo override skips the nameWithOwner lookup and keys/watches the named repo" {
     stub pr_rollup 0 "1"
     stub pr_checks 0 "ok"
@@ -246,29 +261,24 @@ wait_for_file() {
     assert_eq 0 "$status"
     assert_contains "CI passed for feat-x" "$output"
 
-    # Keyed on x/y, not o/r: the lock file name changes because the identity
-    # hash does -- proves OWNER_REPO really came from --repo, not from gh.
     local key_xy
     key_xy=$(bash -c "source '$NOTIFY_SH'; _gh_monitor_key 'x/y' '$BRANCH'")
     [ -f "$BATS_TEST_TMPDIR/gh_monitor_lock_push_${SLUG}-${key_xy}" ] \
         || { echo "expected a lock file keyed on x/y" >&2; return 1; }
 
-    # Never called gh repo view for nameWithOwner -- the override short-circuits it.
     assert_not_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
-    # Every gh call below carries the explicit repo.
     assert_contains "--repo x/y" "$(cat "$GH_STUB_DIR/calls.log")"
 }
 
 @test "merge accepts a PR number as the selector and forwards --repo to every gh call" {
-    stub pr_state 0 "MERGED deadbeef"
-    stub repo_default 0 "main"
-    stub run_list 0 "999"
-    stub run_watch 0 "ok"
+    merged_pr
+    api_runs_fixture "999:CI:completed:success:1:push"
     run bash "$WATCHER" merge "123" --repo "x/y"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI passed for the merge of 123 (run 999)" "$output"
+    assert_contains "Post-merge CI PASSED for PR #3951" "$output"
     assert_not_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
     assert_contains "--repo x/y" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "repos/x/y/actions/runs" "$(cat "$GH_STUB_DIR/calls.log")"
 }
 
 @test "with no --repo override, the watcher still self-resolves via gh repo view (unchanged plain case)" {
@@ -280,8 +290,6 @@ wait_for_file() {
     assert_contains "nameWithOwner" "$(cat "$GH_STUB_DIR/calls.log")"
     assert_contains "--repo o/r" "$(cat "$GH_STUB_DIR/calls.log")"
 }
-
-# --- lock -------------------------------------------------------------------
 
 @test "uncontended acquire runs the body and records the lock + pid files" {
     stub pr_rollup 0 "1"
@@ -296,7 +304,6 @@ wait_for_file() {
 }
 
 @test "the lock is genuinely kernel-held while the watcher body runs" {
-    # gh pr checks blocks, so the watcher sits inside the lock while we probe.
     stub pr_rollup 0 "1"
     stub pr_checks 0 "done"
     cat >"$BATS_TEST_TMPDIR/bin/gh" <<'SLOWSTUB'
@@ -315,11 +322,9 @@ SLOWSTUB
     printf '%s\n' "$!" >>"$SPAWNED_PIDS_FILE"
     wait_for_file "$(pidfile_for push)" || { echo "watcher never wrote its pidfile" >&2; return 1; }
 
-    # An INDEPENDENT lockf from the test itself must genuinely fail (75).
     run lockf -t 0 -k "$(lockfile_for push)" true
     assert_eq 75 "$status"
 
-    # And the push lock must NOT block a merge watcher's own, different lock.
     run lockf -t 0 -k "$(lockfile_for merge)" true
     assert_eq 0 "$status"
 }
@@ -329,7 +334,6 @@ SLOWSTUB
     local pidout="$BATS_TEST_TMPDIR/holderpid"
     start_lock_holder "$lock" 120 "$pidout"
     local holder_pgid; holder_pgid=$(cat "$pidout")
-    # The informational PIDFILE names the holder's REAL process group.
     printf 'pgid=%s start=%s session=other\n' "$holder_pgid" "$(date +%s)" >"$(pidfile_for push)"
 
     stub pr_rollup 0 "1"
@@ -337,7 +341,6 @@ SLOWSTUB
     run bash "$WATCHER" push "$BRANCH"
     assert_eq 0 "$status"
     assert_contains "CI passed for feat-x" "$output"
-    # The holder really is gone — eviction, not a coincidence.
     run kill -0 -- -"$holder_pgid"
     [ "$status" -ne 0 ] || { echo "holder pgid $holder_pgid survived eviction" >&2; return 1; }
 }
@@ -345,7 +348,6 @@ SLOWSTUB
 @test "contention with a missing PIDFILE falls back to lock-probe-only and still acquires" {
     local lock; lock=$(lockfile_for push)
     local pidout="$BATS_TEST_TMPDIR/holderpid"
-    # Holder exits on its own well inside GH_MONITOR_NO_PID_WAIT.
     start_lock_holder "$lock" 3 "$pidout"
     rm -f "$(pidfile_for push)"
 
@@ -360,8 +362,6 @@ SLOWSTUB
     local lock; lock=$(lockfile_for push)
     local pidout="$BATS_TEST_TMPDIR/holderpid"
     start_lock_holder "$lock" 3 "$pidout"
-    # A pgid that names nothing: signalling it is a no-op, so the lock probe --
-    # the only authority -- is what carries the acquire.
     printf 'pgid=999999 start=1 session=ghost\n' >"$(pidfile_for push)"
 
     stub pr_rollup 0 "1"
@@ -375,7 +375,6 @@ SLOWSTUB
     local lock; lock=$(lockfile_for push)
     local pidout="$BATS_TEST_TMPDIR/holderpid"
     start_lock_holder "$lock" 120 "$pidout"
-    # No PIDFILE and a short probe window: nothing to signal, holder never ends.
     rm -f "$(pidfile_for push)"
     export GH_MONITOR_NO_PID_WAIT=1
 
@@ -389,18 +388,14 @@ SLOWSTUB
     local pidout="$BATS_TEST_TMPDIR/holderpid"
     start_lock_holder "$pushlock" 120 "$pidout"
 
-    # A merge watcher runs to completion while the push lock stays held.
-    stub pr_state 0 "CLOSED "
+    stub pr_state 0 "CLOSED	-	7	t"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "PR for feat-x closed without merging" "$output"
+    assert_contains "closed without merging" "$output"
     run lockf -t 0 -k "$pushlock" true
     assert_eq 75 "$status"
 }
 
-# --- run_watchable ----------------------------------------------------------
-
-# Build a driver that sources run_watchable VERBATIM out of the shipped script.
 make_run_watchable_driver() {
     {
         echo 'set -m'
@@ -409,8 +404,6 @@ make_run_watchable_driver() {
     } >"$BATS_TEST_TMPDIR/rwdrv.sh"
 }
 
-# A stand-in for `gh`: spawns its own child, then blocks. Killing only the
-# direct child would leave the grandchild running.
 make_fake_gh_with_child() {
     cat >"$BATS_TEST_TMPDIR/fakegh.sh" <<'FAKE'
 #!/bin/bash
@@ -422,8 +415,6 @@ FAKE
     chmod +x "$BATS_TEST_TMPDIR/fakegh.sh"
 }
 
-# Launch the driver, wait for the fake gh's child, signal the driver, and
-# report the observed rc plus whether the whole tree died.
 run_watchable_signal_case() {
     local signal="$1"
     make_fake_gh_with_child
@@ -431,13 +422,6 @@ run_watchable_signal_case() {
 run_watchable "$BATS_TEST_TMPDIR/fakegh.sh" "$BATS_TEST_TMPDIR/child.pid" "$BATS_TEST_TMPDIR/gh.pid"
 printf '%s' "\$?" >"$BATS_TEST_TMPDIR/rc"
 DRV
-    # Job control MUST be on in THIS shell to launch the driver. Without it a
-    # backgrounded child inherits SIGINT/SIGQUIT as SIG_IGN, and bash cannot
-    # trap a signal that was already ignored on entry — so the driver's INT
-    # trap would never fire and the INT case would hang for a reason that has
-    # nothing to do with run_watchable. `set -m` gives the driver its own
-    # process group with default signal dispositions, which is exactly how the
-    # real watcher runs (the script sets -m itself).
     set -m
     bash "$BATS_TEST_TMPDIR/rwdrv.sh" &
     local drv=$!
@@ -461,14 +445,6 @@ DRV
     [ "$status" -ne 0 ] || { echo "gh's own child survived (pgid signalling failed)" >&2; return 1; }
 }
 
-# No SIGINT test: run_watchable only traps TERM. Nothing in this system ever
-# sends a watcher SIGINT (eviction uses TERM then KILL), and a signal that is
-# SIG_IGN "on entry" to a shell can never be
-# trapped by it (POSIX/bash) — the disposition a background job gets unless
-# its parent enables real job control before forking it, which a backgrounded
-# Bash-tool invocation with no controlling terminal cannot guarantee. That
-# would be testing an environment property, not this function's logic.
-
 @test "run_watchable: an unsignaled exit passes the real exit code through" {
     make_run_watchable_driver <<'DRV'
 run_watchable bash -c 'exit 42'
@@ -480,8 +456,6 @@ DRV
     assert_contains "rc=42" "$output"
     assert_contains "rc0=0" "$output"
 }
-
-# --- push mode --------------------------------------------------------------
 
 @test "push: an empty rollup that fills mid-grace proceeds to --watch, not 'no checks'" {
     stub pr_rollup.1 0 "0"
@@ -500,7 +474,6 @@ DRV
     run bash "$WATCHER" push "$BRANCH"
     assert_eq 0 "$status"
     assert_contains "No CI checks configured for feat-x" "$output"
-    # Never even asked gh pr checks: the grace loop is the whole verdict here.
     assert_eq 0 "$(call_count 'pr checks')"
 }
 
@@ -510,7 +483,6 @@ DRV
     run bash "$WATCHER" push "$BRANCH"
     assert_eq 0 "$status"
     assert_contains "CI FAILED for feat-x" "$output"
-    # Terminal, not retryable: exactly one attempt.
     assert_eq 1 "$(call_count 'pr checks')"
 }
 
@@ -553,108 +525,234 @@ DRV
     assert_not_contains "CI FAILED" "$output"
 }
 
-# --- merge mode, phase 1 ----------------------------------------------------
-
-@test "merge: an already-merged PR goes straight to the post-merge phase" {
-    stub pr_state 0 "MERGED deadbeef"
-    stub repo_default 0 "main"
-    stub run_list 0 "111"
-    stub run_watch 0 "ok"
+@test "merge: an already-merged PR reports PR number, title, merge sha and every workflow's conclusion" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push" "12:Deploy Backoffice Backend:completed:success:1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI passed for the merge of feat-x (run 111)" "$output"
-    # One poll only: no waiting on an already-merged PR.
+    assert_contains "Post-merge CI PASSED for PR #3951 \"fix(website): probe health\" on o/r (merge commit abc123): all 2 green" "$output"
+    assert_contains "success            CI (run 11, attempt 1, push)" "$output"
+    assert_contains "success            Deploy Backoffice Backend (run 12, attempt 1, push)" "$output"
     assert_eq 1 "$(call_count 'pr view')"
-    # Regression: `gh repo view --repo <owner/repo>` is REJECTED by the real gh
-    # CLI (unlike `gh pr view`/`gh pr create`, `gh repo view` takes the
-    # repository as a bare positional argument, never a `--repo` flag) — the
-    # stub here is too permissive to catch that on its own, so pin the exact
-    # invocation shape directly against the call log.
-    assert_contains "repo view o/r --json defaultBranchRef" "$(cat "$GH_STUB_DIR/calls.log")"
-    assert_not_contains "repo view --repo" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_eq "$output" "$(cat "$(result_for)")"
 }
 
-@test "merge: a PR closed without merging is reported and never treated as an error" {
-    stub pr_state 0 "CLOSED "
+@test "merge: the snapshot pins the exact gh api call shapes, check-runs with filter=all" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "PR for feat-x closed without merging" "$output"
-    assert_not_contains "persistent error" "$output"
-    assert_eq 1 "$(call_count 'pr view')"
-    assert_eq 0 "$(call_count 'run list')"
+    local calls; calls=$(cat "$GH_STUB_DIR/calls.log")
+    assert_contains "api --paginate repos/o/r/actions/runs?head_sha=abc123&per_page=100 --jq" "$calls"
+    assert_contains "api --paginate repos/o/r/commits/abc123/check-runs?filter=all&per_page=100 --jq" "$calls"
+    assert_contains "api repos/o/r/commits/abc123/status --jq" "$calls"
+    assert_contains "pr view feat-x --repo o/r --json state,mergeCommit,number,title" "$calls"
+    assert_not_contains "run watch" "$calls"
+    assert_not_contains "repo view --repo" "$calls"
 }
 
-@test "merge: a PR merged mid-wait is picked up on a later poll" {
-    export GH_MONITOR_MERGE_WAIT_MAX=30
-    stub pr_state.1 0 "OPEN "
-    stub pr_state.2 0 "MERGED cafe1234"
-    stub repo_default 0 "main"
-    stub run_list 0 "222"
-    stub run_watch 0 "ok"
+@test "merge: a run stuck at status in_progress but with conclusion success is finished and green" {
+    merged_pr
+    api_runs_fixture "11:Website Release:in_progress:success:1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI passed for the merge of feat-x (run 222)" "$output"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_not_contains "FAILED" "$output"
 }
 
-@test "merge: a PR still open at MERGE_WAIT_MAX times out with the retry instruction" {
-    export GH_MONITOR_MERGE_WAIT_MAX=0
-    stub pr_state 0 "OPEN "
+@test "merge: a failed first attempt followed by a green re-run is not a failure" {
+    merged_pr
+    api_runs_fixture_n 1 "11:gates:completed:failure:1:push"
+    api_runs_fixture "11:gates:completed:failure:1:push" "11:gates:completed:success:2:push"
+    api_checks_fixture "5:pr-title-lint:completed:failure:github-actions" "7:vercel:completed:failure:vercel" "8:vercel:completed:success:vercel"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "CI settled wait timed out; feat-x still not merged after 6h" "$output"
-    assert_contains "Run \`bash $WATCHER_ABS merge feat-x\` after you merge it." "$output"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "gates (run 11, attempt 2, push)" "$output"
+    assert_contains "vercel (check run, vercel)" "$output"
+    assert_not_contains "FAILED" "$output"
 }
 
-# --- merge mode, phase 2 ----------------------------------------------------
-
-@test "merge: a post-merge run that appears mid-grace is watched, not declared missing" {
-    stub pr_state 0 "MERGED abc123"
-    stub repo_default 0 "main"
-    stub run_list.1 0
-    stub run_list.2 0 "333"
-    stub run_watch 0 "ok"
+@test "merge: a real failure is reported FAILED, failing workflow listed first, exit 0" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push" "12:Deploy Backoffice Backend:completed:failure:1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI passed for the merge of feat-x (run 333)" "$output"
-    assert_not_contains "no post-merge CI run started" "$output"
+    assert_contains "Post-merge CI FAILED for PR #3951 \"fix(website): probe health\" on o/r (merge commit abc123): 1 of 2 failed" "$output"
+    assert_eq "  failure            Deploy Backoffice Backend (run 12, attempt 1, push)" "$(printf '%s\n' "$output" | sed -n 2p)"
+}
+
+@test "merge: cancelled, timed_out and action_required all count as failures" {
+    merged_pr
+    api_runs_fixture "11:A:completed:cancelled:1:push" "12:B:completed:timed_out:1:push" "13:C:completed:action_required:1:push" "14:D:completed:skipped:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "3 of 4 failed" "$output"
+}
+
+@test "merge: a non-Actions check run that failed on its latest attempt fails the verdict" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    api_checks_fixture "7:codecov:completed:success:codecov" "9:codecov:completed:failure:codecov"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "failure            codecov (check run, codecov)" "$output"
+}
+
+@test "merge: a failing commit status fails the verdict; a pending one keeps it waiting" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    stub api_status.1 0 '{"statuses":[{"id":1,"context":"ext/deploy","state":"pending"}]}'
+    stub api_status 0 '{"statuses":[{"id":2,"context":"ext/deploy","state":"failure"}]}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "failure            ext/deploy (commit status)" "$output"
+}
+
+@test "merge: runs still in progress are waited for, never reported early" {
+    merged_pr
+    api_runs_fixture_n 1 "11:CI:in_progress::1:push"
+    api_runs_fixture_n 2 "11:CI:queued::1:push"
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED" "$output"
+    [ "$(call_count 'actions/runs')" -ge 3 ] || { echo "expected at least 3 polls" >&2; return 1; }
+}
+
+@test "merge: a deploy cascade that registers after the first runs finished is included in the verdict" {
+    merged_pr
+    api_runs_fixture_n 1 "11:CI:completed:success:1:push"
+    api_runs_fixture_n 2 "11:CI:completed:success:1:push" "12:Deploy:queued::1:workflow_run"
+    api_runs_fixture "11:CI:completed:success:1:push" "12:Deploy:completed:failure:1:workflow_run"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "Deploy (run 12, attempt 1, workflow_run)" "$output"
+}
+
+@test "merge: the settle window holds the verdict even when everything is already green" {
+    export GH_MONITOR_MERGE_SETTLE=3
+    export GH_MONITOR_DEPLOY_POLL=1
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    [ "$(call_count 'actions/runs')" -ge 3 ] || { echo "verdict came before the settle window" >&2; return 1; }
+}
+
+@test "merge: scheduled and issue_comment runs on the same sha are ignored" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push" "12:Nightly:completed:failure:1:schedule" "13:Bot:completed:failure:1:issue_comment"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED for PR #3951 \"fix(website): probe health\" on o/r (merge commit abc123): all 1 green" "$output"
+    assert_not_contains "Nightly" "$output"
+}
+
+@test "merge: a transport error mid-poll is retried on the next poll, never reported as FAILED" {
+    merged_pr
+    stub api_runs.1 1 'Get "https://api.github.com/repos/o/r/actions/runs": read: connection reset by peer'
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_not_contains "FAILED" "$output"
+}
+
+@test "merge: polls that keep failing escalate to a persistent error, never FAILED" {
+    merged_pr
+    stub api_runs 1 "HTTP 502: Bad Gateway"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 1 "$status"
+    assert_contains "hit a persistent error" "$output"
+    assert_not_contains "CI FAILED" "$output"
+    assert_eq 3 "$(call_count 'actions/runs')"
+    assert_contains "hit a persistent error" "$(cat "$(result_for)")"
 }
 
 @test "merge: no post-merge run inside the appearance grace is announced as such" {
     export GH_MONITOR_RUN_APPEAR_MAX=0
-    stub pr_state 0 "MERGED abc123"
-    stub repo_default 0 "main"
-    stub run_list 0
+    merged_pr
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "PR merged; no post-merge CI run started on main within 2 min" "$output"
+    assert_contains "PR #3951 \"fix(website): probe health\" merged on o/r (merge commit abc123); no post-merge CI run started within 0s" "$output"
 }
 
-@test "merge: a failing post-merge run is announced as FAILED, exit still 0" {
-    stub pr_state 0 "MERGED abc123"
-    stub repo_default 0 "main"
-    stub run_list 0 "444"
-    stub run_watch 1 "run failed"
+@test "merge: runs still pending at the watch bound report TIMED OUT with their states" {
+    export GH_MONITOR_WATCH_MAX=0
+    merged_pr
+    api_runs_fixture "11:Deploy:waiting::1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI FAILED for the merge of feat-x (run 444)" "$output"
+    assert_contains "Post-merge CI watch TIMED OUT for PR #3951" "$output"
+    assert_contains "waiting            Deploy (run 11, attempt 1, push)" "$output"
 }
 
-@test "merge: three discovered runs produce exactly three distinct announce lines" {
-    stub pr_state 0 "MERGED abc123"
-    stub repo_default 0 "main"
-    # The duplicate id proves the in-memory dedup, not just the line count.
-    stub run_list 0 "11" "22" "33" "22"
-    stub run_watch 0 "ok"
+@test "merge: a PR closed without merging is reported and never treated as an error" {
+    stub pr_state 0 "CLOSED	-	7	some title"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_eq 3 "$(printf '%s\n' "$output" | grep -c 'Post-merge CI')"
-    assert_contains "(run 11)" "$output"
-    assert_contains "(run 22)" "$output"
-    assert_contains "(run 33)" "$output"
-    assert_eq 3 "$(call_count 'run watch')"
+    assert_contains "PR #7 \"some title\" on o/r closed without merging" "$output"
+    assert_eq 0 "$(call_count 'actions/runs')"
 }
 
-# --- error classification ---------------------------------------------------
+@test "merge: a PR merged mid-wait is picked up on a later poll" {
+    export GH_MONITOR_MERGE_WAIT_MAX=30
+    stub pr_state.1 0 "OPEN	-	3951	fix(website): probe health"
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED" "$output"
+}
+
+@test "merge: a PR still open at MERGE_WAIT_MAX times out with the retry instruction" {
+    export GH_MONITOR_MERGE_WAIT_MAX=0
+    stub pr_state 0 "OPEN	-	3951	t"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "CI settled wait timed out; feat-x still not merged after 6h" "$output"
+    assert_contains "Run \`bash $WATCHER_ABS merge feat-x --repo o/r\` after you merge it." "$output"
+}
+
+@test "merge: writes a session-tagged meta file naming the result file and the waiter command" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    local meta; meta=$(meta_for)
+    assert_contains "session=testsess" "$(cat "$meta")"
+    assert_contains "target=feat-x" "$(cat "$meta")"
+    assert_contains "repo=o/r" "$(cat "$meta")"
+    assert_contains "result=$(result_for)" "$(cat "$meta")"
+    assert_contains "wait_cmd=bash $WATCHER_ABS wait feat-x --repo o/r" "$(cat "$meta")"
+}
+
+@test "merge --detach returns at once with the meta path; the detached watcher writes the result; wait prints it" {
+    merged_pr
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH" --repo o/r --detach
+    assert_eq 0 "$status"
+    assert_eq "$(meta_for)" "$output"
+    export GH_MONITOR_WAIT_POLL=1
+    export GH_MONITOR_WAIT_GRACE=20
+    run bash "$WATCHER" wait "$BRANCH" --repo o/r
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED for PR #3951" "$output"
+    assert_contains "CI (run 11, attempt 1, push)" "$output"
+}
+
+@test "wait: no watcher and no result says so instead of hanging" {
+    export GH_MONITOR_WAIT_GRACE=0
+    run bash "$WATCHER" wait "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "No merge watcher is running for feat-x on o/r" "$output"
+    assert_contains "merge feat-x --repo o/r --detach" "$output"
+}
+
+@test "wait: an existing result is printed immediately" {
+    printf 'Post-merge CI PASSED for PR #1\n' >"$(result_for)"
+    run bash "$WATCHER" wait "$BRANCH"
+    assert_eq 0 "$status"
+    assert_eq "Post-merge CI PASSED for PR #1" "$output"
+}
 
 @test "an auth error is retried 3x and then escalates to one persistent-error line" {
     stub pr_rollup 1 "gh: Bad credentials (HTTP 401)"
@@ -692,9 +790,8 @@ DRV
     assert_contains "hit a persistent error" "$output"
     assert_not_contains "closed without merging" "$output"
     assert_not_contains "Post-merge CI" "$output"
+    assert_contains "--repo o/r\` to retry" "$output"
 }
-
-# --- log discipline ---------------------------------------------------------
 
 @test "gh chatter goes to the per-key log, never to stdout" {
     stub pr_rollup 0 "1"
@@ -705,12 +802,6 @@ DRV
     run cat "$BATS_TEST_TMPDIR/gh_monitor_push_${SLUG}-${KEY}.log"
     assert_contains "VERBOSE-GH-CHATTER" "$output"
 }
-
-# --- self-referencing paths --------------------------------------------------
-# This script is meant to be symlinked into another tool's config directory
-# (e.g. ~/.pi) rather than copied. Its retry messages must report the path it
-# was actually INVOKED through, not the real file's location, so a `.pi` user
-# is told to re-run the `.pi` path, not a `.claude` one.
 
 @test "the persistent-error retry message reports the invoked symlink path, not the real file's" {
     LINK_DIR="$BATS_TEST_TMPDIR/pi-style-link"
@@ -725,32 +816,58 @@ DRV
     assert_not_contains "$WATCHER_ABS" "$output"
 }
 
-# --- run mode: watch an already-dispatched run id ----------------------------
-
-@test "run: an existing run id that passes reports a plain pass line" {
+@test "run: an existing run id that passes reports a pass line with its conclusion" {
     stub run_view_exists 0 '{"databaseId":42}'
-    stub run_watch 0 "ok"
+    stub run_view_state 0 "completed success"
     run bash "$WATCHER" run "42"
     assert_eq 0 "$status"
-    assert_contains "CI run 42 passed for o/r" "$output"
+    assert_contains "CI run 42 passed for o/r (success)" "$output"
+    assert_contains "run view 42 --repo o/r --json status,conclusion" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_not_contains "run watch" "$(cat "$GH_STUB_DIR/calls.log")"
+}
+
+@test "run: status in_progress with conclusion success is finished and passed" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_view_state 0 "in_progress success"
+    run bash "$WATCHER" run "42"
+    assert_contains "CI run 42 passed for o/r (success)" "$output"
+}
+
+@test "run: an in-progress run is polled until it concludes" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_view_state.1 0 "in_progress "
+    stub run_view_state.2 0 "queued "
+    stub run_view_state 0 "completed success"
+    run bash "$WATCHER" run "42"
+    assert_contains "CI run 42 passed for o/r (success)" "$output"
+    assert_eq 3 "$(call_count 'status,conclusion')"
+}
+
+@test "run: a transport error while polling is not a failure" {
+    stub run_view_exists 0 '{"databaseId":42}'
+    stub run_view_state.1 1 'failed to get run: Get "https://api.github.com/repos/o/r/actions/runs/42": read: connection reset by peer'
+    stub run_view_state 0 "completed success"
+    run bash "$WATCHER" run "42"
+    assert_contains "CI run 42 passed for o/r (success)" "$output"
+    assert_not_contains "FAILED" "$output"
 }
 
 @test "run: an existing run id that fails reports FAILED plus the failing job names" {
     stub run_view_exists 0 '{"databaseId":42}'
-    stub run_watch 1 "run failed"
+    stub run_view_state 0 "completed failure"
     stub run_view_jobs 0 "build, lint"
     run bash "$WATCHER" run "42"
     assert_eq 0 "$status"
-    assert_contains "CI run 42 FAILED for o/r — failed jobs: build, lint" "$output"
+    assert_contains "CI run 42 FAILED for o/r (failure) — failed jobs: build, lint" "$output"
 }
 
 @test "run: a failure whose job list can't be fetched still reports FAILED, no job list" {
     stub run_view_exists 0 '{"databaseId":42}'
-    stub run_watch 1 "run failed"
+    stub run_view_state 0 "completed cancelled"
     stub run_view_jobs 99 "boom"
     run bash "$WATCHER" run "42"
     assert_eq 0 "$status"
-    assert_contains "CI run 42 FAILED for o/r" "$output"
+    assert_contains "CI run 42 FAILED for o/r (cancelled)" "$output"
     assert_not_contains "failed jobs" "$output"
 }
 
@@ -759,13 +876,13 @@ DRV
     run bash "$WATCHER" run "999"
     assert_eq 0 "$status"
     assert_contains "No CI run found for 999 on o/r" "$output"
-    assert_eq 0 "$(call_count 'run watch')"
+    assert_eq 0 "$(call_count 'status,conclusion')"
 }
 
 @test "run: a run id that registers mid-grace still gets watched, not declared missing" {
     stub run_view_exists.1 99 "not found"
     stub run_view_exists.2 0 '{"databaseId":42}'
-    stub run_watch 0 "ok"
+    stub run_view_state 0 "completed success"
     run bash "$WATCHER" run "42"
     assert_eq 0 "$status"
     assert_contains "CI run 42 passed for o/r" "$output"
@@ -779,12 +896,10 @@ DRV
     assert_eq 2 "$status"
 }
 
-# --- run mode: dispatch a fresh run ------------------------------------------
-
 @test "run --dispatch: dispatches, resolves the new run id, then watches it to a pass" {
     stub workflow_run 0 ""
     stub run_list 0 "77"
-    stub run_watch 0 "ok"
+    stub run_view_state 0 "completed success"
     run bash "$WATCHER" run "ci.yml" --dispatch --ref main -f env=staging
     assert_eq 0 "$status"
     assert_contains "CI run 77 passed for o/r" "$output"
@@ -794,11 +909,11 @@ DRV
 @test "run --dispatch: a dispatched run that fails reports FAILED with its job list" {
     stub workflow_run 0 ""
     stub run_list 0 "78"
-    stub run_watch 1 "run failed"
+    stub run_view_state 0 "completed failure"
     stub run_view_jobs 0 "app-backend-tests"
     run bash "$WATCHER" run "ci.yml" --dispatch
     assert_eq 0 "$status"
-    assert_contains "CI run 78 FAILED for o/r — failed jobs: app-backend-tests" "$output"
+    assert_contains "CI run 78 FAILED for o/r (failure) — failed jobs: app-backend-tests" "$output"
 }
 
 @test "run --dispatch: no run appears within the appearance grace is announced as such" {
@@ -808,14 +923,14 @@ DRV
     run bash "$WATCHER" run "ci.yml" --dispatch
     assert_eq 0 "$status"
     assert_contains "Dispatched ci.yml on o/r but no run appeared within 0s" "$output"
-    assert_eq 0 "$(call_count 'run watch')"
+    assert_eq 0 "$(call_count 'status,conclusion')"
 }
 
 @test "run --dispatch: a run that appears mid-grace is watched, not declared missing" {
     stub workflow_run 0 ""
     stub run_list.1 0
     stub run_list.2 0 "79"
-    stub run_watch 0 "ok"
+    stub run_view_state 0 "completed success"
     run bash "$WATCHER" run "ci.yml" --dispatch
     assert_eq 0 "$status"
     assert_contains "CI run 79 passed for o/r" "$output"
