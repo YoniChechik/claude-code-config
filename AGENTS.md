@@ -45,6 +45,15 @@ gcloud auth login <email> --update-adc
 
 Run this directly when a `gcloud`/`pulumi` command fails with an auth error.
 
+# VERIFICATION IS MANDATORY AND SELF-EXECUTED
+
+- Merged or "deploy succeeded" is NOT done. After merge: wait for the deploy, then exercise the change yourself on staging/live (curl, Chrome MCP, simulator via the repo's device skill, logs).
+- Never ask "do you want me to run X, or will you check?" for anything an agent can do. Do it.
+- "I could not verify" is allowed only after trying to fix the tooling (broken MCP server: diagnose and repair it, then fall back to another tool or the simulator). List it as an explicit FAILURE with the cause, never as a polite question.
+- UI-visible change: capture proof. Screenshots (before/after where possible); GIF/video if there is motion. Attach to the Linear ticket if one exists (`mcp__linear__prepare_attachment_upload` + `create_attachment_from_upload`, then `save_comment` with the proof) and to the PR (`add-images-to-pr` skill). A UI ticket is not done without it.
+- The final report states what was verified: the command or click path, the observed result, and an evidence link.
+- A session may not end with open verification TODOs. Only a credential, captcha, payment or physical action no tool can do may be handed to the user.
+
 # RTK
 
 @RTK.md

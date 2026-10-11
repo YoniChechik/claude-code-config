@@ -43,11 +43,14 @@ Find this environment's gh-monitor script (in Claude Code: `~/.claude/scripts/gh
 - `CI FAILED for <branch>` → do **not** merge. Spawn a `/debug` subagent, fix, push, and relaunch the watcher. Escalate to the user only after 3 failed cycles.
 
 ## Step 9: Validate on Staging/Production
-Run this step only after a successful merge in Step 8.
+Run this step only after a successful merge in Step 8. You run it yourself, fully automatically. Never hand validation to the user and never ask "do you want me to run it, or will you check?".
 - Find the deploy target. Check CI/CD config, deploy scripts, or docs (e.g. `.github/workflows`, `vercel.json`, `railway.json`, Pulumi stacks) for the staging or production URL.
 - Wait for the deploy to finish. In Claude Code the merge hook already started a detached post-merge watcher over every workflow run on the merge commit; wait on it with the `gh_monitor.sh wait <PR> --repo <r>` command the hook gave you (background Bash). Elsewhere poll deploy status with the platform CLI (e.g. `vercel ls`, `pulumi stack output`).
-- Exercise the changed functionality on the live environment. Curl the new or changed endpoint, run a smoke-test command, check logs, and/or use `mcp__claude-in-chrome__*` tools to click through the new UI flow when the feature has a UI. Do not stop at "the build succeeded."
-- Report the concrete result: what works, with the command or click path used to prove it, or what failed, with the actual error.
+- Exercise the changed functionality on the live environment. Curl the new or changed endpoint, run a smoke-test command, check logs, and use `mcp__claude-in-chrome__*` or the repo's simulator/device skill to click through the new UI flow when the feature has a UI. Do not stop at "the build succeeded."
+- UI-visible change: capture proof. Take screenshots (before/after where possible) and a GIF/video if there is motion. Upload them to the Linear ticket if one exists (`mcp__linear__prepare_attachment_upload` then `create_attachment_from_upload`, then `save_comment` with the media) and to the PR (`add-images-to-pr` skill). The ticket is not done without this proof.
+- If a verification tool is broken (e.g. an MCP server fails to connect), diagnose and repair it, or fall back to another tool (simulator, curl, other browser tooling). Only after that may you report "could not verify", and then as an explicit FAILURE with the cause, never as a question to the user.
+- Report the concrete result: what was verified, the command or click path used, the observed result, and the evidence link. Or what failed, with the actual error.
+- Do not end the session with open verification TODOs.
 - If the repo or feature has no staging/production deploy (e.g. a local-only tool), skip this step and say so. Do not force it.
 
 ## Step 10: Summary
