@@ -5,7 +5,7 @@ SCRIPT_DIR=.
 
 IFS= read -r -d '' INPUT
 
-INTERNAL_ERROR_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"GUARD_INTERNAL_ERROR: a PreToolUse guard failed to run to completion, so the dispatcher is failing closed. Confirm manually only if you know this command is safe, and repair the guard scripts."}}'
+INTERNAL_ERROR_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD_INTERNAL_ERROR: a PreToolUse guard crashed on this command, so the dispatcher is failing closed. Rewrite: split the command into several simpler Bash calls (one command each, literal arguments, no heredoc or eval) and retry. If a plain one-line command still hits this error, the guard scripts in ~/.claude/scripts are broken: check ~/.claude/logs/hooks.log, fix them, or stop and tell the user."}}'
 DECISION_PREFIX='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":'
 
 if ! source "$SCRIPT_DIR/_hook_log.sh" 2>/dev/null || ! source "$SCRIPT_DIR/_bashparse.sh" 2>/dev/null; then
@@ -63,7 +63,7 @@ _rank_decision() {
         "$DECISION_PREFIX"'"deny"'*'}}') RANK=3; RANK_JSON="$1" ;;
         "$DECISION_PREFIX"'"ask"'*'}}') RANK=2; RANK_JSON="$1" ;;
         "$DECISION_PREFIX"'"allow"'*'}}') ;;
-        *) RANK=2; RANK_JSON="$INTERNAL_ERROR_JSON" ;;
+        *) RANK=3; RANK_JSON="$INTERNAL_ERROR_JSON" ;;
     esac
 }
 

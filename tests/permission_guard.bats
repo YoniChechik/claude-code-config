@@ -37,7 +37,7 @@ setup() {
     make_pulumi_project "$PU_NONE" core ""
 }
 
-make_pulumi_project() { # <dir> <name> <workspace-json> [backend-url]
+make_pulumi_project() {
     mkdir -p "$1"
     printf 'name: %s\nruntime: nodejs\n' "$2" >"$1/Pulumi.yaml"
     if [ -n "${4:-}" ]; then
@@ -50,7 +50,7 @@ make_pulumi_project() { # <dir> <name> <workspace-json> [backend-url]
     fi
 }
 
-decide_in() { # <cwd> <command> -> NONE | ASK | DENY
+decide_in() {
     local out
     out=$(jq -nc --arg cwd "$1" --arg cmd "$2" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' | bash "$HOOK")
     if [ -z "$out" ]; then
@@ -64,7 +64,7 @@ decide() {
     decide_in "$NOWHERE" "$1"
 }
 
-assert_decision() { # <expected> <actual>
+assert_decision() {
     if [ "$1" != "$2" ]; then
         echo "expected=$1 got=$2" >&2
         return 1
@@ -147,8 +147,8 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide "echo \"result: \$($GH $REPO $DEL foo/bar)\"")"
 }
 
-@test "ask: pulumi -C flag-prefixed destructive subcommand still recognized" {
-    assert_decision ASK "$(decide "pulumi -C infra up")"
+@test "deny: pulumi -C flag-prefixed destructive subcommand with no resolvable stack" {
+    assert_decision DENY "$(decide "pulumi -C infra up")"
 }
 
 @test "deny: bash -c with trailing argv after the code string" {
@@ -252,7 +252,7 @@ assert_decision() { # <expected> <actual>
     assert_decision ASK "$(decide "$GH repo archive foo/bar && $GH repo rename baz")"
 }
 
-@test "ask: a broken shared library fails closed instead of silently allowing" {
+@test "deny: a broken shared library fails closed instead of silently allowing" {
     local dir="$BATS_TEST_TMPDIR/brokenlib"
     mkdir -p "$dir"
     cp "$HOOK" "$dir/"
@@ -260,7 +260,7 @@ assert_decision() { # <expected> <actual>
     out=$(jq -nc --arg cmd "$GH $REPO $DEL foo/bar" '{tool_name:"Bash",tool_input:{command:$cmd}}' \
         | bash "$dir/$(basename "$HOOK")")
     [ -n "$out" ]
-    assert_decision ASK "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+    assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
 }
 
 @test "supabase: --db-url beats --local, so db reset --local --db-url <prod> is denied" {
@@ -306,8 +306,9 @@ assert_decision() { # <expected> <actual>
 
 @test "supabase: default-local commands targeting remote via --linked follow the ref" {
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase migration up --linked")"
-    assert_decision ASK "$(decide_in "$SB_STG" "supabase db diff --linked")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "supabase db reset --linked")"
+    assert_decision NONE "$(decide_in "$SB_STG" "supabase db diff --linked")"
+    assert_decision ASK "$(decide_in "$SB_STG" "supabase db reset --linked")"
+    assert_decision DENY "$(decide_in "$NOWHERE" "supabase db reset --linked")"
 }
 
 @test "supabase: target precedence --db-url > --local > --linked" {
@@ -323,9 +324,9 @@ assert_decision() { # <expected> <actual>
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase storage ls --local")"
 }
 
-@test "supabase: unresolvable ref on a remote command asks" {
-    assert_decision ASK "$(decide_in "$NOWHERE" "supabase db push")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "supabase functions deploy fn")"
+@test "supabase: unresolvable ref on a remote command is denied with a rewrite hint" {
+    assert_decision DENY "$(decide_in "$NOWHERE" "supabase db push")"
+    assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions deploy fn")"
 }
 
 @test "supabase: cd X && is honored for the ref lookup" {
@@ -350,7 +351,7 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions deploy fn --project-ref $PROD_REF")"
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions delete fn --project-ref=$PROD_REF2")"
     assert_decision ASK "$(decide_in "$SB_PROD" "supabase functions deploy fn --project-ref $STG_REF")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "supabase secrets set --project-ref \$REF A=b")"
+    assert_decision DENY "$(decide_in "$NOWHERE" "supabase secrets set --project-ref \$REF A=b")"
     for c in "secrets set A=b" "secrets unset A" "config push" "branches create x" "branches delete x" "postgres-config update --config x=y" "backups restore --timestamp 1" "domains create" "sso add" "network-restrictions update" "network-bans remove" "ssl-enforcement update --enable-db-ssl-enforcement"; do
         assert_decision DENY "$(decide_in "$SB_PROD" "supabase $c")" || { echo "cmd: $c" >&2; return 1; }
         assert_decision ASK "$(decide_in "$SB_STG" "supabase $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
@@ -369,19 +370,20 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase migration repair 1 --status applied --dry-run")"
 }
 
-@test "supabase: gen types is local only with --local, remote with --project-id/--linked, else asks" {
+@test "supabase: gen types is local only with --local, remote with --project-id/--linked, else denied" {
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase gen types typescript --local")"
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase gen types typescript --project-id $PROD_REF")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "supabase gen types typescript --project-id $STG_REF")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase gen types typescript --project-id $STG_REF")"
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase gen types typescript --linked")"
-    assert_decision ASK "$(decide_in "$SB_STG" "supabase gen types typescript")"
+    assert_decision DENY "$(decide_in "$SB_STG" "supabase gen types typescript")"
 }
 
-@test "supabase: --db-url loopback allows, remote asks, unresolved variable asks" {
+@test "supabase: --db-url loopback allows, remote write asks, remote read allows, unresolved variable denied" {
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres")"
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url 'postgresql://postgres:postgres@localhost:54322/postgres'")"
     assert_decision ASK "$(decide_in "$SB_PROD" "supabase db push --db-url postgresql://u:p@db.$STG_REF.supabase.co:5432/postgres")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "supabase db push --db-url \"\$DATABASE_URL\"")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase db dump --db-url postgresql://u:p@db.$STG_REF.supabase.co:5432/postgres")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase db push --db-url \"\$DATABASE_URL\"")"
 }
 
 @test "supabase: a nested bash -c inherits the cwd context" {
@@ -411,9 +413,9 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide_in "$dir" "pulumi up")"
 }
 
-@test "pulumi: non-prod stacks ask, unresolvable stacks ask" {
+@test "pulumi: non-prod stacks ask, unresolvable stacks are denied" {
     assert_decision ASK "$(decide_in "$PU_STG" "pulumi up")"
-    assert_decision ASK "$(decide_in "$PU_NONE" "pulumi up")"
+    assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up")"
     assert_decision ASK "$(decide_in "$PU_NONE" "pulumi up -s organization/x/staging")"
 }
 
@@ -454,7 +456,7 @@ assert_decision() { # <expected> <actual>
     assert_decision DENY "$(decide_in "$devdir" "pulumi refresh -s prod")"
     assert_decision NONE "$(decide_in "$devdir" "pulumi up")"
     assert_decision NONE "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up")"
-    assert_decision ASK "$(decide_in "$nodir" "pulumi up")"
+    assert_decision DENY "$(decide_in "$nodir" "pulumi up")"
     assert_decision DENY "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=gs://production-pulumi-state pulumi up")"
 }
 
@@ -541,16 +543,16 @@ EOF")"
     assert_decision DENY "$(decide "echo ok | $GH pr merge 1 --admin")"
 }
 
-@test "ask: a guarded tool handed to xargs cannot be checked" {
-    assert_decision ASK "$(decide "echo foo/bar | xargs $GH $REPO $DEL")"
+@test "deny: a guarded tool handed to xargs cannot be checked" {
+    assert_decision DENY "$(decide "echo foo/bar | xargs $GH $REPO $DEL")"
 }
 
 @test "none: a dynamic command name with no guarded tool in the command fails open" {
     assert_decision NONE "$(decide "\$TOOL $REPO $DEL foo/bar")"
 }
 
-@test "ask: a dynamic command name in a command that names a guarded tool" {
-    assert_decision ASK "$(decide "T=\$(which $GH); \$T $REPO $DEL foo/bar")"
+@test "deny: a dynamic command name in a command that names a guarded tool" {
+    assert_decision DENY "$(decide "T=\$(which $GH); \$T $REPO $DEL foo/bar")"
 }
 
 @test "a variable assigned a static command resolves to it" {
@@ -574,8 +576,8 @@ EOF")"
     assert_decision NONE "$(decide "echo \"unterminated")"
 }
 
-@test "ask: an unparseable command that names a guarded tool" {
-    assert_decision ASK "$(decide "$GH $REPO $DEL \"unterminated")"
+@test "deny: an unparseable command that names a guarded tool" {
+    assert_decision DENY "$(decide "$GH $REPO $DEL \"unterminated")"
 }
 
 @test "none: shell info and syntax-check invocations do not read stdin" {
@@ -588,8 +590,8 @@ EOF")"
     assert_decision NONE "$(decide "bash --version | head -1; bash .github/scripts/x.sh \"\$PWD\"; bats .github/tests/x.bats 2>&1 | tail -20")"
 }
 
-@test "ask: shells that read stdin or run dynamic code only when a guarded tool is named" {
-    assert_decision ASK "$(decide "gh api repos/x/y/contents/i.sh | bash")"
+@test "deny: shells that read stdin or run dynamic code only when a guarded tool is named" {
+    assert_decision DENY "$(decide "gh api repos/x/y/contents/i.sh | bash")"
     assert_decision NONE "$(decide "bash -s")"
     assert_decision NONE "$(decide "bash")"
     assert_decision NONE "$(decide "bash -c \"\$X\"")"
