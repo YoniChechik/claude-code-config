@@ -26,17 +26,17 @@ decide() {
     fi
 }
 
-bash_decide() { # <cwd> <command>
+bash_decide() {
     decide "$(jq -nc --arg cwd "$1" --arg cmd "$2" \
         '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}')"
 }
 
-file_decide() { # <tool_name> <cwd> <file_path>
+file_decide() {
     decide "$(jq -nc --arg t "$1" --arg cwd "$2" --arg fp "$3" \
         '{tool_name:$t,cwd:$cwd,tool_input:{file_path:$fp}}')"
 }
 
-assert_decision() { # <expected> <actual>
+assert_decision() {
     if [ "$1" != "$2" ]; then
         echo "expected=$1 got=$2" >&2
         return 1
@@ -77,7 +77,7 @@ assert_decision() { # <expected> <actual>
 
 SCRIPTS_DIR() { echo "$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts"; }
 
-dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
+dispatch_in() {
     local out
     out=$(jq -nc --arg cwd "$2" --arg cmd "$3" \
         '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' \
@@ -89,52 +89,52 @@ dispatch_in() { # <scripts dir> <cwd> <command> -> ALLOW | ASK | DENY
     fi
 }
 
-@test "ask: the shared library is missing, so a would-be deny fails closed" {
+@test "deny: the shared library is missing, so a would-be deny fails closed" {
     local dir="$BATS_TEST_TMPDIR/nolib"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/pre_tool_use__dispatch.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__base_dir_protect.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__permission_guard.sh "$dir/"
-    assert_decision ASK "$(dispatch_in "$dir" "$WT" "$GH $REPO $DEL foo/bar")"
+    assert_decision DENY "$(dispatch_in "$dir" "$WT" "$GH $REPO $DEL foo/bar")"
 }
 
-@test "ask: the shared library is missing, so a would-be base-dir deny fails closed" {
+@test "deny: the shared library is missing, so a would-be base-dir deny fails closed" {
     local dir="$BATS_TEST_TMPDIR/nolib2"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/pre_tool_use__dispatch.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__base_dir_protect.sh \
        "$(SCRIPTS_DIR)"/pre_tool_use__permission_guard.sh "$dir/"
-    assert_decision ASK "$(dispatch_in "$dir" "$BASE" "git $C -am y")"
+    assert_decision DENY "$(dispatch_in "$dir" "$BASE" "git $C -am y")"
 }
 
-@test "ask: a sub-check that writes to stderr is not trusted to have passed" {
+@test "deny: a sub-check that writes to stderr is not trusted to have passed" {
     local dir="$BATS_TEST_TMPDIR/noisy"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 echo "unexpected diagnostic" >&2
 ' "$dir/pre_tool_use__base_dir_protect.sh"
-    assert_decision ASK "$(dispatch_in "$dir" "$WT" "echo hello")"
+    assert_decision DENY "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
 
-@test "ask: a sub-check that exits non-zero is not trusted to have passed" {
+@test "deny: a sub-check that exits non-zero is not trusted to have passed" {
     local dir="$BATS_TEST_TMPDIR/rc"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 exit 42
 ' "$dir/pre_tool_use__permission_guard.sh"
-    assert_decision ASK "$(dispatch_in "$dir" "$WT" "echo hello")"
+    assert_decision DENY "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
 
-@test "ask: a sub-check emitting an unrecognizable decision is not forwarded" {
+@test "deny: a sub-check emitting an unrecognizable decision is not forwarded" {
     local dir="$BATS_TEST_TMPDIR/junk"
     mkdir -p "$dir"
     cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
     sed -i '' '1a\
 printf "%s" "not json at all"; exit 0
 ' "$dir/pre_tool_use__permission_guard.sh"
-    assert_decision ASK "$(dispatch_in "$dir" "$WT" "echo hello")"
+    assert_decision DENY "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
 
 @test "allow: a healthy no-rule-matched pass still means allow" {
@@ -183,18 +183,18 @@ echo boom >&2
 
 STUBS() { echo "$BATS_TEST_TMPDIR/stubs"; }
 
-stub_bin() { # <name> <body>
+stub_bin() {
     mkdir -p "$(STUBS)"
     printf '#!/bin/bash\n%s\n' "$2" >"$(STUBS)/$1"
     chmod +x "$(STUBS)/$1"
 }
 
-link_bin() { # <name>
+link_bin() {
     mkdir -p "$(STUBS)"
     ln -sf "$(command -v "$1")" "$(STUBS)/$1"
 }
 
-dispatch_with_path() { # <PATH> <payload-json> [env assignments...] -> ALLOW | ASK | DENY
+dispatch_with_path() {
     local path="$1" payload="$2" out
     shift 2
     out=$(printf '%s' "$payload" | env PATH="$path" "$@" "$BASH" "$HOOK")
@@ -207,16 +207,16 @@ dispatch_with_path() { # <PATH> <payload-json> [env assignments...] -> ALLOW | A
 
 bash_payload() { jq -nc --arg cwd "$1" --arg cmd "$2" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}'; }
 
-assert_logged() { # <substring>
+assert_logged() {
     grep -qF -- "$1" "$HOOK_LOG" && return 0
     echo "hooks.log does not contain: $1" >&2
     cat "$HOOK_LOG" >&2 2>/dev/null
     return 1
 }
 
-@test "ask: shfmt missing and the command names a guarded tool" {
+@test "deny: shfmt missing and the command names a guarded tool" {
     link_bin jq
-    assert_decision ASK "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
+    assert_decision DENY "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
     assert_logged "shfmt not installed) | $GH $REPO $DEL foo/bar"
 }
 
