@@ -30,6 +30,7 @@ Pre-approved (never ask):
 - Pushing.
 - Creating/deleting worktrees via the skill.
 - Fixing lint/CI/tests.
+- Cutting and shipping an app-be (app-backend) production release in the `core` repo via the documented release-please flow (verify the production deploy afterwards). Break-glass flags (`skip_staging`, `acknowledge_breaking_change`, `allow_destructive`) still need explicit user say-so.
 - Running `gcloud auth login <email> --update-adc` when needed. Involve the human only if a browser login is truly required.
 
 Ask only for: destructive prod data changes, spending money, irreversible external sends.
