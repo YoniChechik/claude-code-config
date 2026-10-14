@@ -1,6 +1,6 @@
 ---
 name: "maintain-verification-skill"
-description: "Keep a repo's `verify` skill, feature map and `.claude/verify.json` honest: parallel source readers per feature, one live pass over every feature (local and STAGING), at most one PR of proven corrections. Use for /maintain-verification-skill, \"audit the verify skill\", or after a feature changes a user path."
+description: "Keep a repo's `verify` skill, feature map and staging config (`~/.claude/verify/<owner>__<repo>.json`) honest: parallel source readers per feature, one live pass over every feature (local and STAGING), at most one PR of proven corrections. Use for /maintain-verification-skill, \"audit the verify skill\", or after a feature changes a user path."
 argument-hint: "[repo path]"
 ---
 
@@ -13,12 +13,12 @@ A feature map rots the moment the app changes. This skill is the upkeep loop for
 Pick one, and say which:
 
 - **clean**: every feature got source and live coverage, and nothing needs a change. No branch, no PR.
-- **changed**: one PR ships proven doc, harness, map or `verify.json` corrections.
+- **changed**: one PR ships proven doc, harness or map corrections, and staging config corrections ship as one PR in `~/.claude`.
 - **blocked**: coverage could not finish, or a proven fix could not ship safely. End with `STATUS: FAILURE verify-skill: <what blocked it>`.
 
 ## Edit scope
 
-Edit only `.claude/skills/verify/` (its SKILL.md, `features/`, and harness scripts it owns) and `.claude/verify.json`. Never edit product code during a run. A behavior the map describes that the app no longer has is either doc drift (fix the map) or a product regression (report it, and do not paper over it in docs).
+Edit only `.claude/skills/verify/` (its SKILL.md, `features/`, and harness scripts it owns) and `~/.claude/verify/<owner>__<repo>.json`. Never edit product code during a run. A behavior the map describes that the app no longer has is either doc drift (fix the map) or a product regression (report it, and do not paper over it in docs).
 
 ## Pass
 
@@ -37,7 +37,7 @@ Edit only `.claude/skills/verify/` (its SKILL.md, `features/`, and harness scrip
 
    A doctor failure caused by skill drift is drift: fix it under edit scope and retry once before you call the pass blocked. A feature that cannot be reached is `verified-unreachable` only with the concrete prerequisite (auth, entitlement, OS, external state) and the route attempted. If the map omits that prerequisite, that is drift. Re-drive every harness fix live before it ships. Final teardown happens after the last drive, so nothing outlives the run (evidence stays).
 
-5. **STAGING pass.** Run the verify skill's STAGING mode once against the most recent merged PR (`gh pr list --state merged --limit 1`), which runs `~/.claude/scripts/staging_verify.sh`. Check that `verify.json` still matches reality: the `sha_url` returns the deployed SHA, every probe passes, `timeout_s` covers the observed deploy time, and new user-facing routes have a probe when one is cheap. For `ui: true` targets, capture one UI proof URL. A stale target or probe is drift: fix it in this PR.
+5. **STAGING pass.** Run the verify skill's STAGING mode once against the most recent merged PR (`gh pr list --state merged --limit 1`), which runs `~/.claude/scripts/staging_verify.sh`. Check that `~/.claude/verify/<owner>__<repo>.json` still matches reality: the `sha_url` returns the deployed SHA, every probe (an HTTPS GET with `expect_status` and `expect`) passes, `timeout_s` covers the observed deploy time, and new user-facing routes have a probe when one is cheap. For `ui: true` targets, capture one UI proof URL. A stale target or probe is drift: fix it in this PR.
 
 6. **Triage.** Wrong or missing user-POV description: doc drift, fix it. Working behavior the harness cannot drive: harness gap, fix it (scripts executable, invocation in the skill body). App behavior that is broken: product gap. Report it with evidence, keep it out of this PR, and fix it in its own PR per AGENTS.md.
 

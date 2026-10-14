@@ -10,7 +10,6 @@ fi
 # pass runs unconditionally for BOTH cases, so the library must already be
 # loaded before that branch, not only inside the primary-checkout arm.
 GIT_SYNC_LIB_LOADED=0
-# shellcheck source=./_git_sync.sh
 if source "$(dirname "${BASH_SOURCE[0]}")/_git_sync.sh" 2>/dev/null; then
     GIT_SYNC_LIB_LOADED=1
 fi

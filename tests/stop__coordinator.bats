@@ -46,6 +46,7 @@ stop() {
 }
 
 decision() { if [ -z "$1" ]; then echo allow; else printf "%s" "$1" | jq -r ".decision // \"allow\""; fi; }
+hook_log_text() { cat "$CLAUDE_HOOK_LOG_DIR/hooks.log" 2>/dev/null; }
 reason() { printf '%s' "$1" | jq -r '.reason // ""'; }
 sysmsg() { printf '%s' "$1" | jq -r '.systemMessage // ""'; }
 
@@ -59,38 +60,44 @@ ledger() {
 
 now() { date +%s; }
 
-merge_rec() { printf '{"kind":"merge","repo":"o/r","target":"%s","wait_cmd":"bash /x/gh_monitor.sh wait %s --repo o/r","prompt_id":"%s","ts":%s}' "$1" "$1" "${2:-$PID}" "${3:-$(($(now) - 100))}"; }
+merge_rec() { printf '{"kind":"merge","repo":"o/r","target":"%s","pr":"%s","wait_cmd":"bash /x/gh_monitor.sh wait %s --repo o/r","prompt_id":"%s","ts":%s}' "$1" "${PR_NUM:-$1}" "$1" "${2:-$PID}" "${3:-$(($(now) - 100))}"; }
 
 verify_rec() {
-    printf '{"kind":"verify","repo":"o/r","target":"%s","merge_sha":"%s","result":"%s","reason":"r","targets":[{"name":"staging","observed_sha":"%s","probes":[{"cmd":"x","exit":%s,"matched":true}]}],"ts":%s}' \
-        "$1" "$SHA" "${2:-pass}" "${3:-${SHA:0:12}}" "${4:-0}" "$(($(now) - 50))"
+    printf '{"kind":"verify","repo":"o/r","target":"%s","pr":"%s","merge_sha":"%s","result":"%s","reason":"r","targets":[{"name":"staging","observed_sha":"%s","probes":[{"url":"https://x","exit":%s,"matched":true}]}],"ts":%s}' \
+        "$1" "${PR_NUM:-$1}" "$SHA" "${2:-pass}" "${3:-${SHA:0:12}}" "${4:-0}" "$(($(now) - 50))"
 }
 
 wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s","command":"%s"}]' "$1" "${2:-running}" "$3" "$4"; }
 
-@test "every mined lazy final message is blocked by the rule named in its fixture" {
-    local f rule out n=0
-    for f in "$FIXTURES"/block/*.txt; do
-        rule=$(basename "$f")
-        rule=${rule%%__*}
-        SID="fx$n"
-        n=$((n + 1))
-        out=$(stop "$(cat "$f")")
-        assert_eq block "$(decision "$out")" || { echo "not blocked: $f" >&2; return 1; }
-        assert_contains "$rule:" "$(reason "$out")" || { echo "wrong rule: $f" >&2; return 1; }
-    done
-    ((n >= 20))
+fixture_blocks() {
+    local rule
+    rule=$(basename "$1")
+    rule=${rule%%__*}
+    run stop "$(cat "$1")"
+    assert_eq 0 "$status"
+    assert_eq block "$(decision "$output")"
+    assert_contains "$rule:" "$(reason "$output")"
+    assert_contains "block 1/3 rules=$rule session=s1" "$(hook_log_text)"
 }
 
-@test "every legitimate human-only stop and honest status passes the gate" {
-    local f out n=0
-    for f in "$FIXTURES"/pass/*.txt; do
-        SID="px$n"
-        n=$((n + 1))
-        out=$(stop "$(cat "$f")")
-        assert_eq allow "$(decision "$out")" || { echo "blocked: $f: $(reason "$out")" >&2; return 1; }
-    done
-    ((n >= 10))
+fixture_passes() {
+    run stop "$(cat "$1")"
+    assert_eq 0 "$status"
+    assert_eq allow "$(decision "$output")"
+    assert_not_contains "Stop gate error" "$(sysmsg "$output")"
+    assert_contains "pass session=s1" "$(hook_log_text)"
+}
+
+for fixture in "$FIXTURES"/block/*.txt; do
+    bats_test_function --description "fixture blocks: ${fixture##*/}" -- fixture_blocks "$fixture"
+done
+for fixture in "$FIXTURES"/pass/*.txt; do
+    bats_test_function --description "fixture passes: ${fixture##*/}" -- fixture_passes "$fixture"
+done
+
+@test "the fixture sets are complete" {
+    assert_eq 26 "$(find "$FIXTURES/block" -name '*.txt' | wc -l | tr -d ' ')"
+    assert_eq 13 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
 }
 
 @test "log mode blocks nothing and logs the would-be decision per rule" {
@@ -111,6 +118,35 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     assert_eq block "$(decision "$output")"
 }
 
+@test "an invalid DONE_GATE_MODE is logged and the mode file decides" {
+    export DONE_GATE_MODE=Enforce
+    run stop "Should I merge?"
+    assert_eq "" "$output"
+    assert_contains "error: invalid DONE_GATE_MODE 'Enforce'" "$(hook_log_text)"
+    init_state
+    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
+    run stop "Should I merge?"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "a garbage mode file is logged and the gate stays in log mode" {
+    unset DONE_GATE_MODE
+    init_state
+    printf 'on\nenforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
+    run stop "Should I merge?"
+    assert_eq "" "$output"
+    assert_contains "error: invalid mode 'on'" "$(hook_log_text)"
+}
+
+@test "the env mode takes precedence over the mode file" {
+    export DONE_GATE_MODE=log
+    init_state
+    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
+    run stop "Should I merge?"
+    assert_eq "" "$output"
+    assert_contains "would_block rules=G1" "$(hook_log_text)"
+}
+
 @test "a symlinked mode file is ignored and the gate stays in log mode" {
     unset DONE_GATE_MODE
     init_state
@@ -126,10 +162,62 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     assert_eq "" "$output"
 }
 
-@test "bad input never fails: exit 0 and no output" {
+@test "bad input never fails: exit 0, no output, and a logged skip" {
+    local payload
+    for payload in 'not json' '' '{}' '{"hook_event_name":"Stop"}' '[]'; do
+        rm -f "$CLAUDE_HOOK_LOG_DIR/hooks.log"
+        run bash -c "printf '%s' '$payload' | bash '$HOOK'"
+        assert_eq 0 "$status"
+        assert_eq "" "$output"
+    done
     run bash -c "printf 'not json' | bash '$HOOK'"
+    assert_contains "skip: bad hook input JSON" "$(hook_log_text)"
+}
+
+@test "an unsafe session id is untrusted and nothing is written outside the state root" {
+    SID='../../escape'
+    run stop "STATUS: ANSWER"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
+    assert_contains "state directory is untrusted (invalid session id)" "$(reason "$output")"
+    [ ! -e "$BATS_TEST_TMPDIR/escape" ]
+    [ ! -e "$CLAUDE_STATE_DIR/escape" ]
+}
+
+@test "a null last message and non-array task lists are a missing STATUS, not a crash" {
+    run bash -c "jq -nc '{hook_event_name:\"Stop\",session_id:\"s1\",last_assistant_message:null,background_tasks:\"x\",session_crons:7}' | bash '$HOOK'"
+    assert_eq 0 "$status"
+    assert_contains "G1: the last line is not a STATUS line" "$(reason "$output")"
+    assert_not_contains "error" "$(hook_log_text)"
+}
+
+@test "a missing state root parent is untrusted state, not a crash" {
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/no/such/dir"
+    run stop "STATUS: ANSWER"
+    assert_eq 0 "$status"
+    assert_contains "state directory is untrusted" "$(reason "$output")"
+}
+
+@test "a huge final message and a ledger over 1 MB are evaluated without argv limits" {
+    init_state
+    local pad i
+    pad=$(head -c 4000 /dev/zero | tr '\0' x)
+    for i in $(seq 1 300); do printf '{"kind":"check","item":0,"pred_sha":"z","exit":0,"pad":"%s","ts":1}\n' "$pad"; done >"$SDIR/ledger.jsonl"
+    printf '%s\n' "$(merge_rec 4016 p0)" "$(verify_rec 4016)" >>"$SDIR/ledger.jsonl"
+    (($(wc -c <"$SDIR/ledger.jsonl") > 1048576))
+    { head -c 2000000 /dev/zero | tr '\0' y; printf '\n\nSTATUS: ANSWER'; } >"$BATS_TEST_TMPDIR/msg"
+    jq -nc --rawfile m "$BATS_TEST_TMPDIR/msg" '{hook_event_name: "Stop", session_id: "s1", prompt_id: "p1", last_assistant_message: $m}' >"$BATS_TEST_TMPDIR/payload"
+    run bash -c "bash '$HOOK' <'$BATS_TEST_TMPDIR/payload'"
+    assert_eq 0 "$status"
+    assert_eq allow "$(decision "$output")"
+    assert_contains "pass session=s1" "$(hook_log_text)"
+    assert_not_contains "evaluation failed" "$(hook_log_text)"
+}
+
+@test "an unparseable ledger line is logged as an error" {
+    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)" '{"kind":"merge","repo":"o/r",'
+    run stop "STATUS: ANSWER"
+    assert_eq allow "$(decision "$output")"
+    assert_contains "error: 1 unparseable ledger lines session=s1" "$(hook_log_text)"
 }
 
 @test "G1: a STATUS line wrapped in markdown is still read" {
@@ -158,7 +246,57 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     ledger "$(merge_rec 4016)"
     run stop "STATUS: COMPLETE merged"
     assert_eq block "$(decision "$output")"
-    assert_contains "G2: PR 4016 on o/r is merged and has no staging verify result yet. Run \`bash /x/gh_monitor.sh wait 4016 --repo o/r\` with \`run_in_background: true\`" "$(reason "$output")"
+    assert_contains "G2: o/r#4016 is merged and has no staging verify result yet. Run \`bash /x/gh_monitor.sh wait 4016 --repo o/r\` with \`run_in_background: true\`" "$(reason "$output")"
+}
+
+@test "G2: a merge recorded by branch clears on the verify record of its PR number" {
+    PR_NUM=123 ledger "$(PR_NUM=123 merge_rec feat/x p0)" "$(PR_NUM=123 verify_rec feat/x)" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE staging serves the merge"
+    assert_eq allow "$(decision "$output")"
+}
+
+@test "G4: merged:<repo>#<pr> clears for a branch merge even when the verify record targets the branch" {
+    ledger "$(PR_NUM=123 merge_rec feat/x p0)" '{"kind":"verify","repo":"o/r","target":"feat/x","pr":"123","merge_sha":"'"$SHA"'","result":"pass","targets":[{"name":"s","observed_sha":"'"${SHA:0:12}"'","probes":[]}],"ts":'"$(now)"'}' \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE done"
+    assert_eq allow "$(decision "$output")"
+}
+
+@test "G2: a FAILURE whose what-part does not name the PR never acks it, even if the number appears in the evidence" {
+    ledger "$(merge_rec 12 p0)" "$(verify_rec 12 fail)"
+    run stop "STATUS: FAILURE build: exit 12 from npm"
+    assert_eq block "$(decision "$output")"
+    assert_contains "G2: staging verify for o/r#12 returned fail" "$(reason "$output")"
+    assert_eq 0 "$(jq -s 'map(select(.kind == "ack")) | length' "$SDIR/ledger.jsonl")"
+}
+
+@test "G2: a FAILURE naming the PR by URL, by #n or by repo#n acks it" {
+    local what
+    for what in "https://github.com/o/r/pull/12" "#12" "o/r#12" "PR 12"; do
+        SID="u${#what}"
+        SDIR="$CLAUDE_STATE_DIR/sessions/$SID"
+        ledger "$(merge_rec 12 p0)" "$(verify_rec 12 fail)"
+        run stop "STATUS: FAILURE $what: staging serves 0000000 after 1800s"
+        assert_eq allow "$(decision "$output")" || { echo "not acked: $what" >&2; return 1; }
+        assert_eq 1 "$(jq -s 'map(select(.kind == "ack")) | length' "$SDIR/ledger.jsonl")"
+    done
+}
+
+@test "G2: an ack for one PR does not clear another" {
+    ledger "$(merge_rec 12 p0)" "$(verify_rec 12 fail)" "$(merge_rec 13 p0)" "$(verify_rec 13 fail)"
+    run stop "STATUS: FAILURE #12: staging down"
+    assert_eq block "$(decision "$output")"
+    assert_contains "o/r#13" "$(reason "$output")"
+    assert_not_contains "o/r#12 " "$(reason "$output")"
+}
+
+@test "G2: a merge recorded without a repo still gets a clean message and no dangling --repo" {
+    ledger '{"kind":"merge","repo":"","target":"feat-x","pr":"","wait_cmd":"","ts":'"$(($(now) - 100))"'}'
+    run stop "STATUS: COMPLETE merged"
+    assert_contains "G2: PR feat-x is merged" "$(reason "$output")"
+    assert_contains "gh_monitor.sh wait feat-x\` with" "$(reason "$output")"
+    assert_not_contains "--repo \`" "$(reason "$output")"
 }
 
 @test "G2: WAITING on the live gh_monitor waiter for that PR passes" {
@@ -186,12 +324,13 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     assert_eq block "$(decision "$output")"
 }
 
-@test "G2: a missing verify.json asks for the no-verify-config FAILURE, which then acks the merge" {
+@test "G2: a missing verify config asks for the no-verify-config FAILURE, which then acks the merge" {
     ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016 no-config)"
     run stop "STATUS: ANSWER"
-    assert_contains "has no \`.claude/verify.json\` on its base branch" "$(reason "$output")"
+    assert_contains "o/r#4016 cannot be verified on staging: r. Create the config with \`/create-verification-skill\`" "$(reason "$output")"
+    assert_contains "STATUS: FAILURE no-verify-config: o/r#4016" "$(reason "$output")"
     PID=p2
-    run stop "STATUS: FAILURE no-verify-config: o/r PR 4016"
+    run stop "STATUS: FAILURE no-verify-config: o/r#4016"
     assert_eq allow "$(decision "$output")"
     assert_eq ack "$(jq -rs 'map(select(.kind == "ack"))[0].kind' "$SDIR/ledger.jsonl")"
     PID=p3
@@ -232,12 +371,57 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     assert_contains "is \`completed\`, not running" "$(reason "$output")"
 }
 
+seen_at() { init_state; printf '{"tasks":{"%s":%s},"pred_ack":""}' "$1" "$2" >"$SDIR/gate.json"; }
+
 @test "G3: a watcher older than its TTL fails" {
-    init_state
-    printf '{"tasks":{"b7":%s},"pred_ack":""}' "$(($(now) - 600))" >"$SDIR/gate.json"
+    seen_at b7 "$(($(now) - 600))"
     TASKS=$(wait_task b7 running "[wait:x] ttl=5 poll" "x")
     run stop "STATUS: WAITING b7 x"
     assert_contains "longer than its TTL of 5 min" "$(reason "$output")"
+}
+
+@test "G3: the TTL boundary: just inside passes, just outside fails" {
+    TASKS=$(wait_task b7 running "[wait:x] ttl=5 poll" "x")
+    seen_at b7 "$(($(now) - 290))"
+    run stop "STATUS: WAITING b7 x"
+    assert_eq allow "$(decision "$output")"
+    seen_at b7 "$(($(now) - 310))"
+    PID=p2
+    run stop "STATUS: WAITING b7 x"
+    assert_contains "longer than its TTL of 5 min" "$(reason "$output")"
+}
+
+@test "G3: without ttl= the TTL is 120 minutes" {
+    TASKS=$(wait_task b7 running "[wait:x] poll" "x")
+    seen_at b7 "$(($(now) - 119 * 60))"
+    run stop "STATUS: WAITING b7 x"
+    assert_eq allow "$(decision "$output")"
+    seen_at b7 "$(($(now) - 121 * 60))"
+    PID=p2
+    run stop "STATUS: WAITING b7 x"
+    assert_contains "longer than its TTL of 120 min" "$(reason "$output")"
+}
+
+@test "G3: WAITING on an unknown task id is refused by name" {
+    run stop "STATUS: WAITING zz9 deploy"
+    assert_contains "no running background task or cron has id \`zz9\`" "$(reason "$output")"
+}
+
+@test "G3: a task gone from the task list but still in gate.json is not a wait" {
+    seen_at b7 "$(now)"
+    run stop "STATUS: WAITING b7 x"
+    assert_contains "no running background task or cron has id \`b7\`" "$(reason "$output")"
+}
+
+@test "G3: a finished task drops out of gate.json, so a relaunch with the same id starts a fresh TTL" {
+    seen_at b7 "$(($(now) - 600))"
+    TASKS=$(wait_task b7 completed "[wait:x] ttl=5 poll" "x")
+    stop "STATUS: ANSWER" >/dev/null
+    assert_eq null "$(jq -r '.tasks.b7' "$SDIR/gate.json")"
+    TASKS=$(wait_task b7 running "[wait:x] ttl=5 poll" "x")
+    PID=p2
+    run stop "STATUS: WAITING b7 x"
+    assert_eq allow "$(decision "$output")"
 }
 
 @test "G3: the first sighting of a task is recorded for the TTL" {
@@ -323,6 +507,48 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     assert_contains "CAP_HIT rules=G1" "$(cat "$CLAUDE_HOOK_LOG_DIR/hooks.log")"
 }
 
+@test "cap: stop_hook_active does not bypass the counter" {
+    ACTIVE=true
+    run stop "Should I?"
+    assert_contains "Stop gate (block 1 of 3)" "$(reason "$output")"
+    run stop "Should I?"
+    assert_contains "Stop gate (block 2 of 3)" "$(reason "$output")"
+}
+
+@test "cap: a garbage counter file counts as zero" {
+    init_state
+    printf 'not json' >"$SDIR/counter.json"
+    run stop "Should I?"
+    assert_contains "Stop gate (block 1 of 3)" "$(reason "$output")"
+}
+
+@test "cap: a counter that cannot be saved fails open instead of blocking forever" {
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/mktemp"
+    chmod +x "$BATS_TEST_TMPDIR/bin/mktemp"
+    local i
+    for i in 1 2 3 4 5; do
+        run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -c "$(declare -f stop); SID=$SID PID=$PID TASKS='[]' CRONS='[]' ACTIVE=false HOOK='$HOOK' stop 'Should I?'"
+        assert_eq allow "$(decision "$output")"
+    done
+    assert_contains "block counter cannot be saved, so the stop was allowed" "$(sysmsg "$output")"
+    assert_contains "FAIL_OPEN: cannot save the block counter" "$(hook_log_text)"
+}
+
+@test "cap: counters and carry-over are isolated per session" {
+    local i
+    for i in 1 2 3 4; do stop "Should I?" >/dev/null; done
+    [ -s "$SDIR/unresolved.json" ]
+    SID=s2
+    SDIR="$CLAUDE_STATE_DIR/sessions/s2"
+    ledger "$(merge_rec 77 p0)"
+    run stop "Should I?"
+    assert_contains "Stop gate (block 1 of 3)" "$(reason "$output")"
+    run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt_id:\"p9\",prompt:\"go\"}' | bash '$CONTEXT_HOOK'"
+    assert_not_contains "o/r#77" "$output"
+    assert_contains "G1: the last line is not a STATUS line" "$output"
+}
+
 @test "cap: the counter is per prompt" {
     stop "Should I?" >/dev/null
     stop "Should I?" >/dev/null
@@ -339,7 +565,7 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt_id:\"p2\",prompt:\"go\"}' | bash '$CONTEXT_HOOK'"
     c=$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_contains "Unresolved from the last turn" "$c"
-    assert_contains "PR 4016 on o/r" "$c"
+    assert_contains "o/r#4016 (merged" "$c"
     assert_contains "G1: the last line is not a STATUS line" "$c"
     assert_eq p2 "$(jq -r .id "$SDIR/prompt.json")"
     PID=p2
@@ -352,7 +578,7 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
 @test "carry-over: an Esc-interrupted merge (no Stop ran) is still re-raised on the next prompt" {
     ledger "$(merge_rec 4016 p0)"
     run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt:\"hi\"}' | bash '$CONTEXT_HOOK'"
-    assert_contains "PR 4016 on o/r" "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    assert_contains "o/r#4016 (merged" "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
 }
 
 @test "carry-over is silent in log mode" {
@@ -367,8 +593,36 @@ wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s
     run bash -c "jq -nc '{hook_event_name:\"SessionStart\",session_id:\"s1\",source:\"resume\"}' | bash '$CONTEXT_HOOK'"
     c=$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_eq SessionStart "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')"
-    assert_contains "Run /session-name now, and add --done '<exit predicate>'" "$c"
-    assert_contains "PR 4016 on o/r" "$c"
+    assert_contains "Run /session-name <label> now, and add --done '<exit predicate item>'" "$c"
+    assert_contains "o/r#4016 (merged" "$c"
+}
+
+@test "a prompt without a prompt_id gets a unique synthetic id, so repeated identical prompts do not share a counter" {
+    jq -nc '{hook_event_name:"UserPromptSubmit",session_id:"s1",prompt:"go"}' | bash "$CONTEXT_HOOK" >/dev/null
+    local first
+    first=$(jq -r .id "$SDIR/prompt.json")
+    assert_eq true "$(jq -r .synthetic "$SDIR/prompt.json")"
+    [[ $first =~ ^t[0-9]+-[0-9a-f]{16}$ ]]
+    jq -nc '{hook_event_name:"UserPromptSubmit",session_id:"s1",prompt:"go"}' | bash "$CONTEXT_HOOK" >/dev/null
+    [ "$first" != "$(jq -r .id "$SDIR/prompt.json")" ]
+}
+
+@test "the session-name re-check is nudged on a prompt 30 minutes after the last nudge" {
+    init_state
+    printf '%s' "$(($(now) - 1801))" >"$SDIR/name_nudge"
+    run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt_id:\"p2\",prompt:\"go\"}' | bash '$CONTEXT_HOOK'"
+    assert_contains "The session label may be stale. Run /session-name <label> now" "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt_id:\"p3\",prompt:\"go\"}' | bash '$CONTEXT_HOOK'"
+    assert_eq "" "$output"
+}
+
+@test "the prompt hook tolerates malformed input and unsafe session ids" {
+    local payload
+    for payload in 'garbage' '' '{}' '{"hook_event_name":"UserPromptSubmit","session_id":"../x","prompt":"go"}' '{"hook_event_name":"SessionStart","session_id":"s1"}'; do
+        run bash -c "printf '%s' '$payload' | bash '$CONTEXT_HOOK'"
+        assert_eq 0 "$status"
+    done
+    [ ! -e "$CLAUDE_STATE_DIR/x" ]
 }
 
 @test "session start prunes session state older than the retention window" {
@@ -401,6 +655,52 @@ make_kill_switch() {
     assert_eq block "$(decision "$output")"
 }
 
+stamp() { date -r "$1" +%Y%m%d%H%M.%S; }
+
+@test "kill switch: the 24h boundary, just inside is on and just outside is off" {
+    make_kill_switch "$(stamp $(($(now) - 86400 + 60)))"
+    run stop "Should I merge?"
+    assert_eq "" "$output"
+    make_kill_switch "$(stamp $(($(now) - 86400 - 60)))"
+    PID=p2
+    run stop "Should I merge?"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "kill switch: a future mtime is ignored" {
+    make_kill_switch "$(stamp $(($(now) + 3600)))"
+    run stop "Should I merge?"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "kill switch: a symlinked switch file or override dir is ignored" {
+    init_state
+    mkdir -p "$CLAUDE_STATE_DIR/override" "$BATS_TEST_TMPDIR/real"
+    chmod 700 "$CLAUDE_STATE_DIR/override" "$BATS_TEST_TMPDIR/real"
+    : >"$BATS_TEST_TMPDIR/real/done_gate.off"
+    ln -s "$BATS_TEST_TMPDIR/real/done_gate.off" "$CLAUDE_STATE_DIR/override/done_gate.off"
+    run stop "Should I merge?"
+    assert_eq block "$(decision "$output")"
+    rm -rf "$CLAUDE_STATE_DIR/override"
+    ln -s "$BATS_TEST_TMPDIR/real" "$CLAUDE_STATE_DIR/override"
+    PID=p2
+    run stop "Should I merge?"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "kill switch: a switch file owned by another user is ignored" {
+    make_kill_switch
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    cat >"$BATS_TEST_TMPDIR/bin/stat" <<'STAT'
+#!/bin/bash
+out=$(/usr/bin/stat "$@") || exit
+case "$*" in (*done_gate.off*) printf '0 %s\n' "${out#* }" ;; (*) printf '%s\n' "$out" ;; esac
+STAT
+    chmod +x "$BATS_TEST_TMPDIR/bin/stat"
+    run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -c "jq -nc '{hook_event_name:\"Stop\",session_id:\"s1\",prompt_id:\"p1\",last_assistant_message:\"Should I merge?\"}' | bash '$HOOK'"
+    assert_eq block "$(decision "$output")"
+}
+
 @test "kill switch: a world-readable override dir is ignored" {
     make_kill_switch "" 755
     run stop "Should I merge?"
@@ -427,6 +727,14 @@ make_kill_switch() {
     chmod 770 "$CLAUDE_STATE_DIR/sessions"
     run stop "STATUS: ANSWER"
     assert_contains "untrusted" "$(reason "$output")"
+}
+
+@test "a group-writable state root is tightened to 0700" {
+    init_state
+    chmod 770 "$CLAUDE_STATE_DIR"
+    run stop "STATUS: ANSWER"
+    assert_eq allow "$(decision "$output")"
+    assert_eq 700 "$(stat -f %Lp "$CLAUDE_STATE_DIR")"
 }
 
 broken_copy() {
@@ -463,21 +771,22 @@ broken_copy() {
     assert_contains "Stop gate (block 1 of 3)" "$r"
 }
 
-@test "settings.json has exactly one blocking Stop hook, the coordinator with a 5s timeout, and no other Stop script prints a decision" {
-    run jq -r '[.hooks.Stop[].hooks[] | select((.async // false) | not) | .command | select(test("decision") | not)] | .[]' "$SETTINGS"
-    local cmd script deciders=()
+@test "settings.json has exactly one blocking Stop hook, the coordinator with a 5s timeout, and no other Stop hook emits a decision" {
+    run jq -r '.hooks.Stop[].hooks[] | .command | select(endswith("/scripts/stop__coordinator.sh") | not)' "$SETTINGS"
+    assert_eq 0 "$status"
+    assert_eq 1 "$(jq '[.hooks.Stop[].hooks[] | select(.command | endswith("/scripts/stop__coordinator.sh")) | select((.async // false) | not)] | length' "$SETTINGS")"
+    local cmd script out
     while IFS= read -r cmd; do
         script="${BATS_TEST_DIRNAME}/../scripts/${cmd##*/}"
-        grep -q '"decision"\|decision: "block"\|decision":"block' "$script" && deciders+=("${cmd##*/}")
+        out=$(jq -nc '{hook_event_name:"Stop",session_id:"s1",last_assistant_message:"Should I merge?"}' | bash "$script" 2>/dev/null)
+        assert_not_contains '"decision"' "$out"
     done <<<"$output"
-    assert_eq "stop__coordinator.sh" "${deciders[*]}"
     assert_eq 5 "$(jq -r '.hooks.Stop[].hooks[] | select(.command | endswith("/scripts/stop__coordinator.sh")) | .timeout' "$SETTINGS")"
-    assert_eq 0 "$(jq -r '[.. | .command? // empty | select(test("session_name_reminder"))] | length' "$SETTINGS")"
 }
 
 @test "settings.json wires the carry-over on UserPromptSubmit and SessionStart, the question gate, and the ConfigChange guard" {
     assert_eq 1 "$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | endswith("/scripts/prompt_context__done_gate.sh"))] | length' "$SETTINGS")"
-    assert_eq "startup|resume|compact" "$(jq -r '.hooks.SessionStart[] | select(any(.hooks[]; .command | endswith("/scripts/prompt_context__done_gate.sh"))) | .matcher' "$SETTINGS")"
+    assert_eq "startup|resume|clear|compact" "$(jq -r '.hooks.SessionStart[] | select(any(.hooks[]; .command | endswith("/scripts/prompt_context__done_gate.sh"))) | .matcher' "$SETTINGS")"
     assert_eq AskUserQuestion "$(jq -r '.hooks.PreToolUse[] | select(any(.hooks[]; .command | endswith("/scripts/pre_tool_use__ask_gate.sh"))) | .matcher' "$SETTINGS")"
     assert_eq user_settings "$(jq -r '.hooks.ConfigChange[] | select(any(.hooks[]; .command | endswith("/scripts/config_change__guard.sh"))) | .matcher' "$SETTINGS")"
 }

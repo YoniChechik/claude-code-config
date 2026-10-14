@@ -16,7 +16,7 @@
 
 # Work Continuation
 
-Before the first step, state the exit predicate: a checkable condition such as "PR merged, staging serves the merge SHA, `/api/x` returns 200". Record it with `/session-name --done`. Include "verified on staging" whenever the repo deploys.
+Before the first step, state the exit predicate: a checkable condition such as "PR merged, staging serves the merge SHA, `/api/x` returns 200". Record it with `/session-name <label> --done '<item>'`. Include "verified on staging" whenever the repo deploys.
 
 Work until the predicate is met. A plateau is not a stop: change the approach. A duration is not a finish condition. Do not relax the predicate to declare success. If you must change it, say what changed and why.
 

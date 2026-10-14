@@ -10,7 +10,7 @@ setup() {
     INST="comp""ute"
     INSTANCES="instanc""es"
 
-    unset SUPABASE_PROJECT_ID SUPABASE_WORKDIR PULUMI_STACK PULUMI_BACKEND_URL
+    unset SUPABASE_PROJECT_ID SUPABASE_WORKDIR PULUMI_STACK PULUMI_BACKEND_URL CLAUDE_STATE_DIR
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
     export PULUMI_HOME="$BATS_TEST_TMPDIR/pulumi_home"
     mkdir -p "$PULUMI_HOME/workspaces"
@@ -642,4 +642,28 @@ EOF")"
     assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
     out=$(jq -nc '{tool_name:"Write",cwd:"/tmp",tool_input:{file_path:"/tmp/x.txt",content:""}}' | bash "$HOOK")
     [ -z "$out" ]
+}
+
+write_decision() {
+    local out
+    out=$(jq -nc --arg f "$1" '{tool_name:"Write",cwd:"/tmp",tool_input:{file_path:$f,content:""}}' | bash "$HOOK")
+    if [ -z "$out" ]; then echo NONE; else printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z'; fi
+}
+
+@test "deny: a Write into an overridden CLAUDE_STATE_DIR and a traversal into the state root" {
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/gate-state"
+    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/gate-state/override/done_gate.off")"
+    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/x/../gate-state/./done_gate.mode")"
+    unset CLAUDE_STATE_DIR
+    assert_decision DENY "$(write_decision "$HOME/.claude/skills/../state/override/done_gate.off")"
+}
+
+@test "none: a project's own .claude/state directory is not the gate state" {
+    assert_decision NONE "$(write_decision "$BATS_TEST_TMPDIR/repo/.claude/state/cache.json")"
+    assert_decision NONE "$(decide "touch $BATS_TEST_TMPDIR/repo/.claude/state/x")"
+}
+
+@test "deny: quoted and relative Bash paths into the state root" {
+    assert_decision DENY "$(decide "touch \"$HOME/.claude/state/override/done_gate.off\"")"
+    assert_decision DENY "$(decide_in "$HOME/.claude/skills" "rm -rf ../state/sessions")"
 }

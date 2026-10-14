@@ -31,15 +31,16 @@ BLOCK_TEXT=""
 SYS_TEXT=""
 
 gate_eval() {
-    local ledger="" gate="{}" prompt="{}" st out
-    if [[ -n ${1:-} ]]; then
-        state_read "$STATE_DIR/ledger.jsonl" && ledger=$REPLY
+    local scope=$1 ledger=/dev/null gate="{}" prompt="{}" st out
+    if [[ $scope == full ]]; then
+        state_ledger_file || return 1
+        ledger=$REPLY
         state_read "$STATE_DIR/gate.json" && [[ -n $REPLY ]] && gate=$REPLY
         state_read "$STATE_DIR/prompt.json" && [[ -n $REPLY ]] && prompt=$REPLY
     fi
     st=$(jq -nc --argjson g "$gate" --argjson p "$prompt" '{gate: $g, prompt: $p}' 2>/dev/null) || st='{}'
-    out=$(jq -nc --argjson in "$input" --arg L "$ledger" --argjson st "$st" --argjson now "$(date +%s)" \
-        --arg op stop -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null) || return 1
+    out=$(printf '%s' "$input" | jq -nc --slurpfile hookin /dev/stdin --rawfile L "$ledger" --argjson st "$st" \
+        --argjson now "$EPOCHSECONDS" --arg op stop -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null) || return 1
     [[ -n $out ]] || return 1
     EVAL=$out
 }
@@ -50,7 +51,7 @@ status_is_failure_on() {
 
 require_failure() {
     local what=$1 detail=$2
-    if gate_eval "" && status_is_failure_on "$what"; then
+    if gate_eval status && status_is_failure_on "$what"; then
         hook_log "$detail: FAILURE $what accepted"
         return 0
     fi
@@ -64,13 +65,25 @@ require_failure() {
     SYS_TEXT="Stop gate: $detail."
 }
 
-counter_key() {
-    local key=$prompt_id
+COUNTER_KEY=""
+COUNTER_VALUE=0
+
+counter_load() {
+    local key=$prompt_id stored
     if [[ -z $key ]] && state_read "$STATE_DIR/prompt.json" && [[ -n $REPLY ]]; then
         key=$(jq -r '.id // empty' <<<"$REPLY" 2>/dev/null)
     fi
     [[ -n $key ]] || key=session
-    REPLY=${key//[^A-Za-z0-9_-]/_}
+    COUNTER_KEY=$key
+    COUNTER_VALUE=0
+    state_read "$STATE_DIR/counter.json" || return 1
+    [[ -n $REPLY ]] || return 0
+    stored=$(jq -r --arg k "$key" 'if .key == $k and ((.count | type) == "number") then .count else 0 end' <<<"$REPLY" 2>/dev/null) || stored=0
+    COUNTER_VALUE=$stored
+}
+
+counter_save() {
+    state_write "$STATE_DIR/counter.json" "$(jq -nc --arg k "$COUNTER_KEY" --argjson c "$1" '{key: $k, count: $c}')"
 }
 
 run_gate() {
@@ -86,10 +99,10 @@ run_gate() {
         require_failure state "state directory is untrusted ($STATE_ERR)"
         return 0
     fi
-    if ! gate_eval 1; then
+    if ! gate_eval full; then
         hook_log "error: gate evaluation failed"
         [[ $mode == enforce ]] || return 0
-        if grep -q '"kind":"merge"' "$STATE_DIR/ledger.jsonl" 2>/dev/null; then
+        if ledger_has_kind merge; then
             require_failure gate "internal error while checking a session with a merge"
         else
             SYS_TEXT="Stop gate error: evaluation failed, see ~/.claude/logs/hooks.log."
@@ -97,9 +110,23 @@ run_gate() {
         return 0
     fi
 
-    local rules acks gate_new plain sysmsgs violations
-    rules=$(jq -r '[.violations[].rule] | unique | join(",")' <<<"$EVAL")
-    gate_new=$(jq -c '.gate' <<<"$EVAL")
+    local -a parts
+    mapfile -d '' parts < <(jq -j '([.violations[].rule] | unique | join(",")), "\u0000",
+        (.gate | tojson), "\u0000",
+        (.acks | map(tojson) | join("\n")), "\u0000",
+        (if (.plain | length) > 0 then "Claimed without machine proof: " + (.plain | join(" | ")) else "" end), "\u0000",
+        (.sys | join("\n")), "\u0000",
+        (.violations | map(.msg) | join("\n\n")), "\u0000",
+        ({rules: [.violations[] | {rule, key, msg}]} | tojson), "\u0000",
+        (.bad_lines | tostring), "\u0000"' <<<"$EVAL")
+    if ((${#parts[@]} != 8)); then
+        hook_log "error: gate output has ${#parts[@]} parts"
+        SYS_TEXT="Stop gate error: unreadable evaluation, see ~/.claude/logs/hooks.log."
+        return 0
+    fi
+    local rules=${parts[0]} gate_new=${parts[1]} acks=${parts[2]} plain=${parts[3]} sysmsgs=${parts[4]}
+    local violations=${parts[5]} unresolved=${parts[6]} bad=${parts[7]} ack
+    [[ $bad == 0 ]] || hook_log "error: $bad unparseable ledger lines session=$session"
     state_write "$STATE_DIR/gate.json" "$gate_new" || hook_log "error: cannot write gate.json"
 
     if [[ $mode != enforce ]]; then
@@ -111,35 +138,38 @@ run_gate() {
         return 0
     fi
 
-    while IFS= read -r acks; do
-        [[ -n $acks ]] && ledger_append "$acks"
-    done < <(jq -c '.acks[]' <<<"$EVAL")
-
-    plain=$(jq -r 'if (.plain | length) > 0 then "Claimed without machine proof: " + (.plain | join(" | ")) else empty end' <<<"$EVAL")
-    sysmsgs=$(jq -r '.sys | join("\n")' <<<"$EVAL")
+    while IFS= read -r ack; do
+        [[ -z $ack ]] || ledger_append "$ack" || hook_log "error: cannot record ack"
+    done <<<"$acks"
 
     if [[ -z $rules ]]; then
         rm -f "$STATE_DIR/unresolved.json"
         hook_log "pass session=$session"
-        SYS_TEXT=$(printf '%s\n%s' "$sysmsgs" "$plain" | sed '/^$/d')
+        SYS_TEXT=$sysmsgs
+        [[ -z $plain ]] || SYS_TEXT+="${SYS_TEXT:+$'\n'}$plain"
         return 0
     fi
 
-    violations=$(jq -r '.violations | map(.msg) | join("\n\n")' <<<"$EVAL")
-    counter_key
-    local count_file="$STATE_DIR/count_$REPLY" count=0
-    state_read "$count_file" && [[ $REPLY =~ ^[0-9]+$ ]] && count=$REPLY
+    if ! counter_load; then
+        hook_log "FAIL_OPEN: cannot read the block counter ($STATE_ERR) rules=$rules session=$session"
+        SYS_TEXT="Stop gate: unresolved $rules, but the block counter is unreadable, so the stop was allowed."
+        return 0
+    fi
+    local count=$COUNTER_VALUE
 
     if ((count >= DONE_GATE_CAP)); then
-        state_write "$STATE_DIR/unresolved.json" "$(jq -c '{rules: [.violations[] | {rule, key, msg}]}' <<<"$EVAL")" ||
-            hook_log "error: cannot write unresolved.json"
+        state_write "$STATE_DIR/unresolved.json" "$unresolved" || hook_log "error: cannot write unresolved.json"
         hook_log "CAP_HIT rules=$rules session=$session"
         SYS_TEXT="Stop gate: unresolved $rules, recorded and carried over to the next prompt."
         return 0
     fi
 
     count=$((count + 1))
-    state_write "$count_file" "$count" || hook_log "error: cannot write counter"
+    if ! counter_save "$count"; then
+        hook_log "FAIL_OPEN: cannot save the block counter rules=$rules session=$session"
+        SYS_TEXT="Stop gate: unresolved $rules, but the block counter cannot be saved, so the stop was allowed."
+        return 0
+    fi
     hook_log "block $count/$DONE_GATE_CAP rules=$rules session=$session"
     if ((count >= DONE_GATE_CAP)); then
         BLOCK_TEXT="Stop gate (block $count of $DONE_GATE_CAP): end now with \`STATUS: FAILURE <rule>: <what you tried and observed>\`. Still open:"$'\n\n'"$violations"

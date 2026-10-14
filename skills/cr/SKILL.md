@@ -11,5 +11,5 @@ description: Code-review gate for a PR the user hands over to check or push (e.g
    - Security: authn/authz on new routes, secrets, injection, SSRF, unsafe deserialization, cost/abuse bounds, RLS and grants on new tables, PII and erasure.
    - Standards: repo AGENTS.md rules, no dead code or comments, tests for new behavior, additive-only API contract changes, no suppression increases.
 4. Check CI with `gh api repos/<repo>/commits/<sha>/check-runs?filter=all`. Only expected author-gate failures (such as `pr-author-gates` for non-core authors) may be red.
-5. Valid: `gh pr merge <PR> --squash`. If the only blocker is the author gate, the user must run the `--admin` merge (a hook blocks agents from it); hand them the exact command. Invalid: do not merge; list findings with file:line.
+5. Valid: `gh pr merge <PR> --squash --match-head-commit <sha CI passed on>`. Never use `--admin` and never hand an `--admin` merge to the user. If a required check is red, fix its cause (push a fix to the PR branch or open a follow-up PR) and merge on green. If a required check cannot pass by design (such as the author gate), end with `STATUS: FAILURE admin-merge: <check> fails because <evidence>`. Invalid: do not merge; list findings with file:line.
 6. After merge, wait for the deploy and exercise the change on staging.

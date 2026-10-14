@@ -4,8 +4,12 @@ def status_kinds: ["COMPLETE", "WAITING", "BLOCKED", "FAILURE", "ANSWER"];
 
 def contract: "End the final message with exactly one STATUS line as its last line: `STATUS: COMPLETE <evidence>`, `STATUS: WAITING <task-id> <what it waits for>`, `STATUS: BLOCKED <category>: <one-line ask>` (categories: \(categories | join(", "))), `STATUS: FAILURE <what>: <command and observed output>`, or `STATUS: ANSWER` for a pure answer.";
 
-def records: ($L | split("\n") | map(select(length > 0) | (fromjson? // null) | select(type == "object")
-  | if (.ts | type) == "string" then .ts = ((.ts | fromdateiso8601?) // 0) else . end));
+def parsed_lines: $L | split("\n") | map(select(length > 0) | (fromjson? // null));
+
+def records: parsed_lines | map(select(type == "object")
+  | if (.ts | type) == "string" then .ts = ((.ts | fromdateiso8601?) // 0) else . end);
+
+def bad_lines: parsed_lines | map(select(type != "object")) | length;
 
 def clean_line: gsub("^[\\s>*_`]+"; "") | gsub("[\\s*_`]+$"; "");
 
@@ -35,7 +39,21 @@ def tokens: [scan("[A-Za-z0-9._/+@-]+") | sub("[.]+$"; "")];
 
 def mentions($text; $word): ($word | tostring) as $w | ($w != "") and (($text | tokens) | index($w) != null);
 
-def same($a; $b): (($a.repo // "") == ($b.repo // "")) and ((($a.target // "") | tostring) == (($b.target // "") | tostring));
+def ident: (if ((.pr // "") | tostring) != "" then .pr else (.target // "") end) | tostring;
+
+def same($a; $b): (($a.repo // "") == ($b.repo // "")) and (($a | ident) == ($b | ident));
+
+def repo_flag: if (.repo // "") != "" then " --repo " + .repo else "" end;
+
+def pr_label: if (.repo // "") != "" then "\(.repo)#\(ident)" else "PR \(ident)" end;
+
+def names_pr($what; $m):
+  ($m | ident) as $n
+  | ($what | [scan("[^\\s,;]+") | gsub("^[(\\[]+|[).,\\]]+$"; "")]) as $words
+  | any($words[]; . as $w
+      | $w == $n or $w == "#" + $n
+      or (($m.repo // "") != "" and $w == $m.repo + "#" + $n)
+      or (($m.repo // "") != "" and $w == "https://github.com/" + $m.repo + "/pull/" + $n));
 
 def verify_ok:
   . as $v
@@ -44,10 +62,10 @@ def verify_ok:
       and (($v.targets // []) | length) > 0
       and all(($v.targets // [])[]; . as $t
         | (($t.observed_sha // "") | length) >= 7
-        and (($v.merge_sha // "") | startswith($t.observed_sha))
+        and ($t.contains_merge == true or (($v.merge_sha // "") | startswith($t.observed_sha)))
         and all(($t.probes // [])[]; .exit == 0 and .matched == true)));
 
-def merges($R): [$R[] | select(.kind == "merge")] | group_by([(.repo // ""), ((.target // "") | tostring)]) | map(max_by(.ts // 0));
+def merges($R): [$R[] | select(.kind == "merge")] | group_by([(.repo // ""), ident]) | map(max_by(.ts // 0));
 
 def verifies($R; $m): [$R[] | select(.kind == "verify" and same(.; $m) and ((.ts // 0) >= ($m.ts // 0)))];
 
@@ -59,27 +77,30 @@ def pending($R):
     | $m + {last_verify: (verifies($R; $m) | max_by(.ts // 0))}];
 
 def prompt_start:
-  if (($st.prompt.id // "") != "" and ($in.prompt_id // "") != "" and $st.prompt.id != $in.prompt_id) then null
+  if (($st.prompt.synthetic // false) | not) and ($st.prompt.id // "") != "" and ($hookin[0].prompt_id // "") != "" and $st.prompt.id != $hookin[0].prompt_id then null
   else ($st.prompt.ts // null) end;
 
 def in_prompt:
   . as $r
-  | ((($in.prompt_id // "") != "" and ($r.prompt_id // "") == $in.prompt_id)
+  | ((($hookin[0].prompt_id // "") != "" and ($r.prompt_id // "") == $hookin[0].prompt_id)
     or (prompt_start != null and (($r.ts // 0) >= prompt_start)));
 
 def live: . as $s | (["running", "pending", "in_progress", "starting"] | index($s)) != null;
 
-def tasks: ($in.background_tasks // []);
+def arr: if type == "array" then . else [] end;
+
+def tasks: ($hookin[0].background_tasks | arr);
 
 def find_task($id): [tasks[] | select((.id | tostring) == $id)] | first;
 
-def find_cron($id): [($in.session_crons // [])[] | select((.id | tostring) == $id)] | first;
+def find_cron($id): [($hookin[0].session_crons | arr)[] | select((.id | tostring) == $id)] | first;
 
 def live_waiter($m):
-  any(tasks[]; ((.status // "") | live) and ((.command // "") | test("gh_monitor\\.sh\\s+wait")) and mentions(.command // ""; $m.target));
+  any(tasks[]; ((.status // "") | live) and ((.command // "") | test("gh_monitor\\.sh\\s+wait"))
+    and (mentions(.command // ""; $m.target) or mentions(.command // ""; $m | ident)));
 
 def pending_line:
-  "PR \(.target) on \(.repo // "unknown repo") (merged \(.ts // 0 | todate)) has no passing staging verify result"
+  "\(pr_label) (merged \(.ts // 0 | todate)) has no passing staging verify result"
   + (if .last_verify then " (last result: \(.last_verify.result)\(if .last_verify.reason then ", " + .last_verify.reason else "" end))" else "" end);
 
 def g1($s; $msg; $R):
@@ -109,19 +130,23 @@ def g1($s; $msg; $R):
 
 def g2($s; $R):
   reduce pending($R)[] as $m ({v: [], acks: []};
-    if $s.kind == "FAILURE" and (mentions($s.rest; $m.target) or (($s.rest | test("no-verify-config")) and mentions($s.rest; $m.repo // ""))) then
-      .acks += [{kind: "ack", repo: $m.repo, target: $m.target, reason: $s.rest}]
+    (([$s.rest | capture("^(?<w>.*?):(?<e>\\s.*|$)")] | first) // {w: "", e: ""}) as $f
+    | $f.w as $what
+    | $f.e as $evidence
+    | if $s.kind == "FAILURE" and (names_pr($what; $m)
+        or (($what | gsub("\\s"; "")) == "no-verify-config" and names_pr($evidence; $m))) then
+      .acks += [{kind: "ack", repo: $m.repo, target: $m.target, pr: ($m | ident), reason: $s.rest}]
     elif ($s.kind != "COMPLETE" and $s.kind != "ANSWER") and live_waiter($m) then .
     else
-      .v += [{rule: "G2", key: "\($m.repo // "")#\($m.target)", msg: (
+      .v += [{rule: "G2", key: ($m | pr_label), msg: (
         if $m.last_verify == null then
-          "G2: PR \($m.target) on \($m.repo // "?") is merged and has no staging verify result yet. Run \(if ($m.wait_cmd // "") != "" then "`" + $m.wait_cmd + "`" else "`bash ~/.claude/scripts/gh_monitor.sh wait \($m.target)\(if $m.repo then " --repo " + $m.repo else "" end)`" end) with `run_in_background: true`, then end with `STATUS: WAITING <task-id> deploy \($m.target)`, or report its verdict if it already finished."
+          "G2: \($m | pr_label) is merged and has no staging verify result yet. Run \(if ($m.wait_cmd // "") != "" then "`" + $m.wait_cmd + "`" else "`bash ~/.claude/scripts/gh_monitor.sh wait \($m.target)\($m | repo_flag)`" end) with `run_in_background: true`, then end with `STATUS: WAITING <task-id> deploy \($m | ident)`, or report its verdict if it already finished."
         elif $m.last_verify.result == "no-config" then
-          "G2: \($m.repo) has no `.claude/verify.json` on its base branch, so PR \($m.target) cannot be verified on staging. Create it with `/create-verification-skill` and merge it (it applies from the next merge). End this turn with `STATUS: FAILURE no-verify-config: \($m.repo) PR \($m.target)`."
+          "G2: \($m | pr_label) cannot be verified on staging: \($m.last_verify.reason // "no verify config"). Create the config with `/create-verification-skill` (it applies from the next merge). End this turn with `STATUS: FAILURE no-verify-config: \($m | pr_label)`."
         elif $m.last_verify.result == "pass" then
-          "G2: the staging verify record for PR \($m.target) on \($m.repo) does not prove the merge: the observed SHA must match \($m.last_verify.merge_sha // "the merge commit") and every probe must exit 0 with its expected output. Re-run the verification or end with `STATUS: FAILURE \($m.target): <observed output>`."
+          "G2: the staging verify record for \($m | pr_label) does not prove the merge: the observed SHA must contain \($m.last_verify.merge_sha // "the merge commit") and every probe must pass. Re-run the verification or end with `STATUS: FAILURE \($m | pr_label): <observed output>`."
         else
-          "G2: staging verify for PR \($m.target) on \($m.repo) returned \($m.last_verify.result): \($m.last_verify.reason // "no reason recorded"). Fix the cause and ship the fix, or end with `STATUS: FAILURE \($m.target): <command and observed output>`."
+          "G2: staging verify for \($m | pr_label) returned \($m.last_verify.result): \($m.last_verify.reason // "no reason recorded"). Fix the cause and ship the fix, or end with `STATUS: FAILURE \($m | pr_label): <command and observed output>`."
         end)}]
     end);
 
@@ -183,9 +208,9 @@ def g4($s; $R):
                         else {rule: "G4", msg: "G4: predicate item \($e.key) (`\($e.value)`) has no passing check after the last merge or push. Run `bash ~/.claude/scripts/done_gate.sh check \($e.key)` and fix what fails."} end
                       elif ($e.value | startswith("merged:")) then
                         ($e.value | ltrimstr("merged:") | split("#")) as $parts
-                        | {repo: $parts[0], target: ($parts[1] // "")} as $m
+                        | {repo: $parts[0], pr: ($parts[1] // "" | ltrimstr("#"))} as $m
                         | if any($R[]; .kind == "verify" and same(.; $m) and verify_ok) then empty
-                          else {rule: "G4", msg: "G4: predicate item `\($e.value)` has no passing staging verify record. Wait for the post-merge watcher (`gh_monitor.sh wait \($m.target) --repo \($m.repo)`) and act on its verdict."} end
+                          else {rule: "G4", msg: "G4: predicate item `\($e.value)` has no passing staging verify record. Wait for the post-merge watcher (`gh_monitor.sh wait \($m.pr) --repo \($m.repo)`) and act on its verdict."} end
                       else
                         ($e.value | ltrimstr("staging:")) as $repo
                         | (([$R[] | select(.kind == "merge" and .repo == $repo) | (.ts // 0)] | max) // 0) as $lm
@@ -203,7 +228,7 @@ def g4($s; $R):
 
 def stop_eval:
   records as $R
-  | ($in.last_assistant_message // "") as $msg
+  | ($hookin[0].last_assistant_message // "") as $msg
   | parse_status($msg) as $s
   | g2($s; $R) as $g2
   | g4($s; $R) as $g4
@@ -215,7 +240,7 @@ def stop_eval:
       plain: $g4.plain,
       sys: $g4.sys,
       gate: {tasks: $seen, pred_ack: ($g4.pred_ack // $st.gate.pred_ack // "")},
-      has_merge: any($R[]; .kind == "merge")
+      bad_lines: bad_lines
     };
 
 def pending_eval: records as $R | {pending: (pending($R) | map(pending_line))};

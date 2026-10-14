@@ -17,22 +17,22 @@ file=${fields[1]:-$HOME/.claude/settings.json}
 
 missing=$(jq -r '
     def cmds($ev): [(.hooks[$ev] // [])[] | (.hooks // [])[] | select((.async // false) | not) | (.command // "")];
+    def need($ev; $script; $label): if any(cmds($ev)[]; endswith("/scripts/" + $script)) then empty else $label end;
     [
-        (if any(cmds("Stop")[]; endswith("/scripts/stop__coordinator.sh")) then empty else "Stop coordinator" end),
-        (if any(cmds("PostToolUse")[]; endswith("/scripts/post_tool_use__gh_monitor_trigger.sh")) then empty else "merge ledger trigger" end),
-        (if any(cmds("PreToolUse")[]; endswith("/scripts/pre_tool_use__ask_gate.sh")) then empty else "question gate" end)
+        (if .disableAllHooks == true then "every hook (disableAllHooks)" else empty end),
+        need("Stop"; "stop__coordinator.sh"; "Stop coordinator"),
+        need("PostToolUse"; "post_tool_use__gh_monitor_trigger.sh"; "merge ledger trigger"),
+        need("PreToolUse"; "pre_tool_use__ask_gate.sh"; "question gate"),
+        need("UserPromptSubmit"; "prompt_context__done_gate.sh"; "prompt context"),
+        need("SessionStart"; "prompt_context__done_gate.sh"; "session start context"),
+        need("ConfigChange"; "config_change__guard.sh"; "config change guard")
     ] | join(", ")' "$file" 2>/dev/null) || { hook_log "skip: $file is not readable JSON"; exit 0; }
-[[ -n $missing ]] || exit 0
+if [[ -z $missing ]]; then
+    hook_log "allow config change: gate hooks intact"
+    exit 0
+fi
 
-state_mode
-if [[ $REPLY != enforce ]]; then
-    hook_log "would_block config change: removes $missing"
-    exit 0
-fi
-if state_kill_switch; then
-    hook_log "KILL_SWITCH: config change allowed"
-    exit 0
-fi
+state_enforcing "block config change: removes $missing" "config change" || exit 0
 hook_log "block config change: removes $missing"
 jq -nc --arg r "The change removes the $missing hook; it is not applied to the running session. It takes effect in the next session." '{decision: "block", reason: $r}'
 exit 0

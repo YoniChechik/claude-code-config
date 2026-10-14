@@ -2,9 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source-path=SCRIPTDIR source=../../scripts/_notify.sh
 source "${SCRIPT_DIR}/../../scripts/_notify.sh"
-# shellcheck source-path=SCRIPTDIR source=../../scripts/_state.sh
 source "${SCRIPT_DIR}/../../scripts/_state.sh"
 
 usage() {
@@ -47,12 +45,12 @@ fail() {
 record_predicate() {
     ((${#ITEMS[@]})) || return 0
     state_init "$SESSION_ID" || fail "state directory is untrusted: $STATE_ERR"
-    local items sha last
+    local items sha
     items=$(jq -nc '$ARGS.positional | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))' --args "${ITEMS[@]}")
     [[ $(jq 'length' <<<"$items") -gt 0 ]] || fail "the predicate is empty."
     sha=$(printf '%s' "$items" | shasum -a 256 | cut -d' ' -f1)
-    last=$(jq -Rr 'fromjson? | select(type == "object" and .kind == "predicate") | .sha256' "$STATE_DIR/ledger.jsonl" 2>/dev/null | tail -n 1 || true)
-    [[ "$last" == "$sha" ]] && return 0
+    ledger_latest predicate || fail "the session ledger is untrusted: $STATE_ERR"
+    [[ -n $REPLY && $(jq -r '.sha256' <<<"$REPLY") == "$sha" ]] && return 0
     ledger_append "$(jq -nc --argjson items "$items" --arg sha "$sha" '{kind: "predicate", items: $items, sha256: $sha}')" ||
         fail "could not write the session ledger."
 }
@@ -63,11 +61,7 @@ if [[ "$NAME" == "$(_session_name_read "$SESSION_ID")" ]]; then
 fi
 
 DEST="${CLAUDE_NOTIFY_TMP_DIR:-/tmp}/session_name_${SESSION_ID}"
-tmp=$(mktemp "${CLAUDE_NOTIFY_TMP_DIR:-/tmp}/session_name_XXXXXX") || fail "could not create temp file."
-if ! printf '%s' "$NAME" >"$tmp" || ! mv -f "$tmp" "$DEST"; then
-    rm -f "$tmp"
-    fail "could not store the session name at $DEST."
-fi
+atomic_write "$DEST" "$NAME" || fail "could not store the session name at $DEST."
 echo "$NAME"
 record_predicate
 

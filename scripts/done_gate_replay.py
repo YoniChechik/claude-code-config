@@ -14,13 +14,15 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-COORDINATOR = Path(__file__).resolve().parent / "stop__coordinator.sh"
-LOG_RE = re.compile(
+from _transcript import ReadStats, is_tool_result, main_thread_records, text_of
+
+_COORDINATOR = Path(__file__).resolve().parent / "stop__coordinator.sh"
+_LOG_RE = re.compile(
     r"would_(block rules=(?P<rules>\S+)|pass) session=(?P<sid>replay-\d+)"
 )
 
 
-def parse_args() -> argparse.Namespace:
+def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Replay historical final assistant messages through the Stop gate in log mode."
     )
@@ -42,53 +44,28 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def text_of(content) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return ""
-
-
-def is_tool_result(content) -> bool:
-    return isinstance(content, list) and any(
-        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-    )
-
-
-def final_messages(path: Path):
+def _final_messages(path: Path, stats: ReadStats):
     last_text = ""
     last_ts = ""
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if rec.get("isSidechain"):
-                continue
-            kind = rec.get("type")
-            msg = rec.get("message") or {}
-            content = msg.get("content")
-            if kind == "assistant":
-                t = text_of(content).strip()
-                if t:
-                    last_text = t
-                    last_ts = rec.get("timestamp", "")
-            elif kind == "user" and not is_tool_result(content):
-                if last_text:
-                    yield last_ts, last_text
-                last_text = ""
+    for rec in main_thread_records(path, stats):
+        kind = rec.get("type")
+        msg = rec.get("message") or {}
+        content = msg.get("content")
+        if kind == "assistant":
+            t = text_of(content).strip()
+            if t:
+                last_text = t
+                last_ts = rec["timestamp"]
+        elif kind == "user" and not is_tool_result(content):
+            if last_text:
+                yield last_ts, last_text
+            last_text = ""
     if last_text:
         yield last_ts, last_text
 
 
 def main() -> int:
-    args = parse_args()
+    args = _parse_args()
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
     files = sorted(
         f
@@ -96,10 +73,11 @@ def main() -> int:
         if "subagents" not in f.parts
         and datetime.fromtimestamp(f.stat().st_mtime, timezone.utc) >= cutoff
     )
+    stats = ReadStats()
     stops = []
     for f in files:
-        for ts, text in final_messages(f):
-            if ts and ts < cutoff.isoformat():
+        for ts, text in _final_messages(f, stats):
+            if ts < cutoff.isoformat():
                 continue
             stops.append((f, ts, text))
             if args.limit and len(stops) >= args.limit:
@@ -129,7 +107,7 @@ def main() -> int:
                 "session_crons": [],
             }
             subprocess.run(
-                ["bash", str(COORDINATOR)],
+                ["bash", str(_COORDINATOR)],
                 input=json.dumps(payload),
                 text=True,
                 env=env,
@@ -141,7 +119,7 @@ def main() -> int:
         )
 
     verdicts: dict[int, list[str]] = {}
-    for m in LOG_RE.finditer(log):
+    for m in _LOG_RE.finditer(log):
         idx = int(m.group("sid").split("-")[1])
         verdicts[idx] = m.group("rules").split(",") if m.group("rules") else []
 
@@ -151,7 +129,7 @@ def main() -> int:
     blocked = 0
     for i, (f, ts, text) in enumerate(stops):
         rules = verdicts.get(i)
-        day = (ts or "unknown")[:10]
+        day = ts[:10]
         per_day[day][0] += 1
         if rules is None:
             per_rule["(no verdict logged)"] += 1
@@ -171,6 +149,7 @@ def main() -> int:
     print(
         f"Replayed {total} final messages from {len(files)} transcripts (last {args.days:g} days), gate in log mode."
     )
+    print(f"Unparseable transcript lines skipped: {stats.bad_lines}")
     print(
         "Only G1 and G3 are meaningful here: historical sessions have no ledger, so G2 and G4 never fire."
     )

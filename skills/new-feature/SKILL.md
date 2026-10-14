@@ -51,10 +51,10 @@ Work the PR in this order:
 ## Step 9: Validate on Staging/Production
 Run this step after a successful merge in Step 8, fully automatically.
 - Run the repo's `verify` skill in STAGING mode. If none exists, run `/create-verification-skill` first, then run it.
-- The post-merge watcher already confirms that staging serves the merge SHA and runs the `verify.json` probes. Wait on it with the `gh_monitor.sh wait <PR> --repo <r>` command the merge hook gave you (background Bash).
+- The post-merge watcher already confirms that staging serves the merge SHA and runs the probes in `~/.claude/verify/<owner>__<repo>.json`. Wait on it with the `gh_monitor.sh wait <PR> --repo <r>` command the merge hook gave you (background Bash).
 - Your job is the feature path: click through the UI or call the changed endpoint. A subagent that did not write the code runs it.
 - Proof, broken tools and the report format follow AGENTS.md "Verification is mandatory and self-executed".
-- A repo with no deploy records `{"targets":[],"reason":"<why>"}` in `.claude/verify.json`. Report that as n/a with the reason.
+- A repo with no deploy records `{"targets":[],"reason":"<why>"}` in `~/.claude/verify/<owner>__<repo>.json`. Report that as n/a with the reason.
 
 ## Step 10: Summary
 Report a summary of what the feature is, how it was implemented, and what happened at all post-implementation steps (including whether it merged and whether validation passed). Use the `/adhd-structure` skill.

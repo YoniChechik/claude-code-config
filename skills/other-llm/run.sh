@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/_state.sh"
+
 usage() {
     echo "Usage: $0 <codex|claude> <cwd> <prompt-file> <run-dir>" >&2
     exit 2
@@ -43,7 +45,8 @@ launch() {
 }
 
 mtime() {
-    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
+    state_stat "$1" || return 1
+    printf '%s' "${REPLY##* }"
 }
 
 stalled() {

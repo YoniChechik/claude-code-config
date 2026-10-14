@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-NOISE_PREFIXES = (
+from _transcript import ReadStats, is_tool_result, main_thread_records, text_of
+
+_NOISE_PREFIXES = (
     "<task-notification",
     "<local-command",
     "<bash-input",
@@ -23,15 +25,15 @@ NOISE_PREFIXES = (
     "Caveat:",
     "!",
 )
-MANUAL_COMMANDS = {"/human-meat-proxy", "/human-action-needed"}
-COMMAND_RE = re.compile(r"<command-name>\s*(/[\w:-]+)\s*</command-name>")
-AUTOMATION_DIR_RE = re.compile(r"-scratchpad|worktrees-agent-")
-SHORT_WORDS = 25
-CONTINUE_WORDS = 8
-IDLE_GAP = timedelta(hours=1)
-URL_RE = re.compile(r"https?://\S+")
+_MANUAL_COMMANDS = {"/human-meat-proxy", "/human-action-needed"}
+_COMMAND_RE = re.compile(r"<command-name>\s*(/[\w:-]+)\s*</command-name>")
+_AUTOMATION_DIR_RE = re.compile(r"-scratchpad|worktrees-agent-")
+_SHORT_WORDS = 25
+_CONTINUE_WORDS = 8
+_IDLE_GAP = timedelta(hours=1)
+_URL_RE = re.compile(r"https?://\S+")
 
-CATEGORY_RULES = [
+_CATEGORY_RULES = [
     ("admin", re.compile(r"why (is )?admin|--admin|admin (merge )?needed")),
     (
         "stall",
@@ -66,13 +68,13 @@ CATEGORY_RULES = [
         ),
     ),
 ]
-CONTINUE_RE = re.compile(
+_CONTINUE_RE = re.compile(
     r"^(go|cont|continue|lets? cont\w*|do it|do all|do both|fix all|fix it|fix \d"
     r"|yes|yep|ok|okay|proceed|keep going|go on|go ahead|approved|both approved"
     r"|sure|carry on|next|\d+(\s*[+,&]\s*\d+)*\s*(do|go)?)\b"
 )
 
-BUCKET_RULES = [
+_BUCKET_RULES = [
     ("U6-admin-handoff", re.compile(r"--admin")),
     (
         "U5-idle-waiting",
@@ -109,19 +111,19 @@ BUCKET_RULES = [
         re.compile(r"only a console warning|suppress|downgrad|i meant|silenc"),
     ),
 ]
-U7_RE = re.compile(
+_U7_RE = re.compile(
     r"session'?s? (name|scope)|scope (hasn'?t|has not|is un)changed|name (stays|still fits|is unchanged)"
 )
-CLAIM_RE = re.compile(r"\b(merged|deployed|is live|shipped|verified|done)\b")
-TODO_HEADER_RE = re.compile(
+_CLAIM_RE = re.compile(r"\b(merged|deployed|is live|shipped|verified|done)\b")
+_TODO_HEADER_RE = re.compile(
     r"^#+\s*(todo|needs human|doing)\b", re.IGNORECASE | re.MULTILINE
 )
-EMPTY_SECTION_RE = re.compile(r"^[-*\d.\s]*(none|nothing|n/?a)\b", re.IGNORECASE)
-STATUS_RE = re.compile(r"^STATUS: (COMPLETE|WAITING|BLOCKED|FAILURE|ANSWER)\b")
+_EMPTY_SECTION_RE = re.compile(r"^[-*\d.\s]*(none|nothing|n/?a)\b", re.IGNORECASE)
+_STATUS_RE = re.compile(r"^STATUS: (COMPLETE|WAITING|BLOCKED|FAILURE|ANSWER)\b")
 
 
 @dataclass
-class Turn:
+class _Turn:
     ts: datetime
     role: str
     text: str
@@ -129,14 +131,14 @@ class Turn:
 
 
 @dataclass
-class Session:
+class _Session:
     path: Path
     project: str
-    turns: list[Turn] = field(default_factory=list)
+    turns: list[_Turn] = field(default_factory=list)
     interactive: bool = True
 
 
-def parse_ts(raw: str | None) -> datetime | None:
+def _parse_ts(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
@@ -145,7 +147,7 @@ def parse_ts(raw: str | None) -> datetime | None:
         return None
 
 
-def parse_since(raw: str, now: datetime) -> datetime:
+def _parse_since(raw: str, now: datetime) -> datetime:
     if m := re.fullmatch(r"(\d+)([dh])", raw):
         n = int(m.group(1))
         return now - (timedelta(days=n) if m.group(2) == "d" else timedelta(hours=n))
@@ -153,138 +155,128 @@ def parse_since(raw: str, now: datetime) -> datetime:
     return parsed if parsed.tzinfo else parsed.astimezone()
 
 
-def content_text(content) -> str | None:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
+def _content_text(content) -> str | None:
+    if not isinstance(content, (str, list)) or is_tool_result(content):
         return None
-    if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
-        return None
-    return "\n".join(
-        b.get("text", "")
-        for b in content
-        if isinstance(b, dict) and b.get("type") == "text"
-    )
+    return text_of(content)
 
 
-def load_session(path: Path, since: datetime) -> Session:
-    session = Session(path=path, project=path.parent.name)
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(entry, dict) or entry.get("isSidechain"):
-                continue
-            kind = entry.get("type")
-            if kind not in ("user", "assistant"):
-                continue
-            if kind == "user" and entry.get("entrypoint") not in (None, "cli"):
-                session.interactive = False
-            ts = parse_ts(entry.get("timestamp"))
-            if ts is None or ts < since:
-                continue
-            message = entry.get("message") or {}
-            if kind == "assistant":
-                text = content_text(message.get("content"))
-                if text and text.strip():
-                    session.turns.append(Turn(ts, "assistant", text.strip()))
-                continue
-            if entry.get("isMeta") or entry.get("isCompactSummary"):
-                continue
-            text = content_text(message.get("content"))
-            if not text or not text.strip():
-                continue
-            text = text.strip()
-            if m := COMMAND_RE.search(text):
-                session.turns.append(Turn(ts, "command", text, command=m.group(1)))
-                continue
-            if text.startswith(NOISE_PREFIXES):
-                continue
-            session.turns.append(Turn(ts, "human", text))
+def _load_session(path: Path, since: datetime, stats: ReadStats) -> _Session:
+    session = _Session(path=path, project=path.parent.name)
+    for entry in main_thread_records(path, stats):
+        kind = entry.get("type")
+        if kind not in ("user", "assistant"):
+            continue
+        if kind == "user" and entry.get("entrypoint") not in (None, "cli"):
+            session.interactive = False
+        ts = _parse_ts(entry.get("timestamp"))
+        if ts is None or ts < since:
+            continue
+        message = entry.get("message") or {}
+        if kind == "assistant":
+            text = _content_text(message.get("content"))
+            if text and text.strip():
+                session.turns.append(_Turn(ts, "assistant", text.strip()))
+            continue
+        if entry.get("isMeta") or entry.get("isCompactSummary"):
+            continue
+        text = _content_text(message.get("content"))
+        if not text or not text.strip():
+            continue
+        text = text.strip()
+        if m := _COMMAND_RE.search(text):
+            session.turns.append(_Turn(ts, "command", text, command=m.group(1)))
+            continue
+        if text.startswith(_NOISE_PREFIXES):
+            continue
+        session.turns.append(_Turn(ts, "human", text))
     session.turns.sort(key=lambda t: t.ts)
     return session
 
 
-def normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", URL_RE.sub(" ", text.lower())).strip()
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", _URL_RE.sub(" ", text.lower())).strip()
 
 
-def classify_nudge(text: str) -> str | None:
-    norm = normalize(text)
+def _classify_nudge(text: str) -> str | None:
+    norm = _normalize(text)
     words = norm.split()
-    if len(words) > SHORT_WORDS:
+    if len(words) > _SHORT_WORDS:
         return None
-    for name, rule in CATEGORY_RULES:
+    for name, rule in _CATEGORY_RULES:
         if rule.search(norm):
             return name
-    if len(words) <= CONTINUE_WORDS and CONTINUE_RE.match(norm):
+    if len(words) <= _CONTINUE_WORDS and _CONTINUE_RE.match(norm):
         return "continue"
     return None
 
 
-def classify_buckets(prev: str, category: str) -> list[str]:
-    tail = normalize(prev[-2000:])
-    buckets = [name for name, rule in BUCKET_RULES if rule.search(tail)]
-    if len(prev) < 400 and U7_RE.search(tail):
+def _classify_buckets(prev: str, category: str) -> list[str]:
+    tail = _normalize(prev[-2000:])
+    buckets = [name for name, rule in _BUCKET_RULES if rule.search(tail)]
+    if len(prev) < 400 and _U7_RE.search(tail):
         buckets.insert(0, "U7-filler-final")
-    if category in ("verify", "done-check") and CLAIM_RE.search(tail):
+    if category in ("verify", "done-check") and _CLAIM_RE.search(tail):
         buckets.append("U3-done-without-check")
     if not buckets and prev.rstrip().endswith("?"):
         buckets.append("U1-permission-ask")
     return buckets or ["unclassified"]
 
 
-def has_open_todo(text: str) -> bool:
-    headers = list(TODO_HEADER_RE.finditer(text))
+def _has_open_todo(text: str) -> bool:
+    headers = list(_TODO_HEADER_RE.finditer(text))
     for m in headers:
         end = text.find("\n#", m.end())
         body = text[m.end() : end if end != -1 else len(text)].strip()
-        if body and not EMPTY_SECTION_RE.match(body):
+        if body and not _EMPTY_SECTION_RE.match(body):
             return True
-    tail = normalize(text[-2000:])
+    tail = _normalize(text[-2000:])
     return any(
         rule.search(tail)
-        for name, rule in BUCKET_RULES
+        for name, rule in _BUCKET_RULES
         if name.startswith(("U2", "U4", "U5"))
     )
 
 
-def ends_with_status(text: str) -> bool:
+def _ends_with_status(text: str) -> bool:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    return bool(lines) and bool(STATUS_RE.match(lines[-1]))
+    return bool(lines) and bool(_STATUS_RE.match(lines[-1]))
 
 
-def clip(text: str, n: int = 240) -> str:
+def _clip(text: str, n: int = 240) -> str:
     flat = re.sub(r"\s+", " ", text).strip()
     return flat if len(flat) <= n else flat[: n - 3] + "..."
 
 
-def analyze(sessions: list[Session]) -> dict:
+def _analyze(sessions: list[_Session]) -> dict:
     nudges = []
     idle_gaps = []
     human_turns = 0
     final_total = 0
     final_with_status = 0
     for s in sessions:
-        prev: Turn | None = None
+        prev: _Turn | None = None
         for turn in s.turns:
             if turn.role == "assistant":
                 prev = turn
                 continue
             category = None
             if turn.role == "command":
-                if turn.command not in MANUAL_COMMANDS:
+                if turn.command not in _MANUAL_COMMANDS:
                     continue
                 category = "manual-proxy"
             human_turns += 1
             if prev is not None:
                 final_total += 1
-                final_with_status += ends_with_status(prev.text)
-            category = category or classify_nudge(turn.text)
+                final_with_status += _ends_with_status(prev.text)
+            category = category or _classify_nudge(turn.text)
             gap = turn.ts - prev.ts if prev else None
-            if prev is not None and gap and gap > IDLE_GAP and has_open_todo(prev.text):
+            if (
+                prev is not None
+                and gap
+                and gap > _IDLE_GAP
+                and _has_open_todo(prev.text)
+            ):
                 idle_gaps.append(
                     {
                         "session": s.path.stem,
@@ -292,8 +284,8 @@ def analyze(sessions: list[Session]) -> dict:
                         "assistant_ts": prev.ts.isoformat(),
                         "human_ts": turn.ts.isoformat(),
                         "gap_hours": round(gap.total_seconds() / 3600, 2),
-                        "human": clip(turn.text, 160),
-                        "assistant_tail": clip(prev.text[-600:]),
+                        "human": _clip(turn.text, 160),
+                        "assistant_tail": _clip(prev.text[-600:]),
                     }
                 )
             if category is None:
@@ -305,16 +297,16 @@ def analyze(sessions: list[Session]) -> dict:
                     "ts": turn.ts.isoformat(),
                     "day": turn.ts.astimezone().date().isoformat(),
                     "category": category,
-                    "buckets": classify_buckets(prev.text, category)
+                    "buckets": _classify_buckets(prev.text, category)
                     if prev
                     else ["unclassified"],
-                    "text": clip(turn.text, 160),
-                    "prev_tail": clip(prev.text[-600:]) if prev else "",
+                    "text": _clip(turn.text, 160),
+                    "prev_tail": _clip(prev.text[-600:]) if prev else "",
                 }
             )
         if prev is not None and s.turns and s.turns[-1] is prev:
             final_total += 1
-            final_with_status += ends_with_status(prev.text)
+            final_with_status += _ends_with_status(prev.text)
 
     by_day: dict[str, dict] = defaultdict(
         lambda: {"total": 0, "categories": Counter(), "buckets": Counter()}
@@ -367,9 +359,10 @@ def analyze(sessions: list[Session]) -> dict:
     }
 
 
-def render_text(report: dict) -> str:
+def _render_text(report: dict) -> str:
     out = [
         f"Window: {report['window']['since']} .. {report['window']['until']}",
+        f"Unparseable transcript lines skipped: {report['unparseable_lines']}",
         f"Sessions: {report['sessions']}  human turns: {report['human_turns']}",
         (
             f"Nudges: {report['nudges_total']}  active days: {report['active_days']}"
@@ -421,18 +414,19 @@ def main() -> int:
 
     now = datetime.now(timezone.utc)
     try:
-        since = parse_since(args.since, now)
+        since = _parse_since(args.since, now)
     except ValueError:
         parser.error(f"invalid --since: {args.since}")
     if not args.projects_dir.is_dir():
         parser.error(f"not a directory: {args.projects_dir}")
 
     cutoff = since.timestamp()
+    stats = ReadStats()
     sessions = []
     for path in sorted(args.projects_dir.glob("*/*.jsonl")):
-        if AUTOMATION_DIR_RE.search(path.parent.name) or path.stat().st_mtime < cutoff:
+        if _AUTOMATION_DIR_RE.search(path.parent.name) or path.stat().st_mtime < cutoff:
             continue
-        session = load_session(path, since)
+        session = _load_session(path, since, stats)
         if session.interactive and any(
             t.role in ("human", "command") for t in session.turns
         ):
@@ -440,12 +434,13 @@ def main() -> int:
 
     report = {
         "window": {"since": since.isoformat(), "until": now.isoformat()},
-        **analyze(sessions),
+        "unparseable_lines": stats.bad_lines,
+        **_analyze(sessions),
     }
     print(
         json.dumps(report, indent=2, ensure_ascii=False)
         if args.json
-        else render_text(report)
+        else _render_text(report)
     )
     return 0
 

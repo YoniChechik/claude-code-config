@@ -1,12 +1,12 @@
 ---
 name: "create-verification-skill"
-description: "Generate a repo-local `verify` skill that drives the app the way a user does (any language, framework or platform), plus a STAGING mode: `.claude/verify.json` with a deployed-SHA check and read-only probes that the post-merge watcher runs. Use for /create-verification-skill, when a repo has no `.claude/skills/verify/`, or when a repo has no scripted way to prove UI, CLI or service behavior on staging."
+description: "Generate a repo-local `verify` skill that drives the app the way a user does (any language, framework or platform), plus a STAGING mode: a local `~/.claude/verify/<owner>__<repo>.json` with a deployed-SHA check and read-only HTTPS probes that the post-merge watcher runs. Use for /create-verification-skill, when a repo has no `.claude/skills/verify/`, or when a repo has no scripted way to prove UI, CLI or service behavior on staging."
 argument-hint: "[repo path]"
 ---
 
 # Create a verification skill
 
-Every repo that ships needs a scripted way to drive the real app and prove behavior: launch it, exercise a feature the way a user would, and capture evidence, locally and on staging. This skill generates that as `<repo>/.claude/skills/verify/` plus `<repo>/.claude/verify.json`. Write for the next agent, not for a human: it reads the skill cold, mid-task, with no memory of the app.
+Every repo that ships needs a scripted way to drive the real app and prove behavior: launch it, exercise a feature the way a user would, and capture evidence, locally and on staging. This skill generates that as `<repo>/.claude/skills/verify/` plus the staging config `~/.claude/verify/<owner>__<repo>.json` in the user's Claude config repo. Write for the next agent, not for a human: it reads the skill cold, mid-task, with no memory of the app.
 
 ## 1. Interview the repo, not the user
 
@@ -49,20 +49,20 @@ The STAGING section of the generated skill proves a merge on the deployed target
 - If none exists, add one in the same PR (for example, a `/version` route that returns the build's `GIT_SHA`, injected at build time).
 - If the target cannot expose its SHA, the target is not verifiable. End with `STATUS: FAILURE no-deployed-sha: <target> <what you tried>`. Do not skip it silently.
 
-### 4.2 `.claude/verify.json`
+### 4.2 `~/.claude/verify/<owner>__<repo>.json`
 
-Write the config at the repo root's `.claude/verify.json`:
+The post-merge watcher runs on this machine with the user's credentials after every merge, so it never reads probe definitions from the target repo (anyone with write access there could plant commands). The config lives in the user's Claude config repo instead, one file per repo, named `<owner>__<repo>.json` (for `acme/app`: `~/.claude/verify/acme__app.json`):
 
 ```json
-{"targets":[{"name":"staging","sha_url":"https://staging.example/version","sha_jq":".sha","timeout_s":1800,"probes":[{"cmd":"curl -fsS --max-time 10 https://staging.example/api/ping","expect":"ok"}],"ui":false}]}
+{"targets":[{"name":"staging","sha_url":"https://staging.example/version","sha_jq":".sha","timeout_s":1800,"probes":[{"url":"https://staging.example/api/ping","expect_status":200,"expect":"ok"}],"ui":false}]}
 ```
 
-- `sha_url` and `sha_jq`: where the deployed SHA lives, and the `jq` filter that extracts it. The observed value must be the merge SHA or a prefix of it with at least 7 characters.
+- `sha_url` and `sha_jq`: where the deployed SHA lives (an `https://` URL), and the `jq` filter that extracts it. The observed value passes when it is the merge SHA, a prefix of it with at least 7 characters, or a commit that contains the merge (GitHub compare reports `ahead` or `identical`).
 - `timeout_s`: how long a deploy may take. Default 1800. Use a longer value for mobile and store paths.
-- `probes`: read-only smoke commands, cheap enough to run on every merge. A probe passes when it exits 0 within 120 s and its output contains `expect` (when set). A probe never writes data.
+- `probes`: read-only HTTPS GETs, cheap enough to run on every merge. Each probe is `{"url": "https://...", "expect_status": 200, "expect": "<text>"}`. The watcher fetches it with `curl --proto =https` (no shell, no redirects to other schemes, 60 s timeout). A probe passes when the status matches `expect_status` (default 200) and the body contains `expect` (when set). Shell commands (`cmd`) and non-HTTPS URLs are rejected as an `error` result.
 - `ui`: true when the target has user-visible screens that need UI proof.
 - A repo with no deploy writes `{"targets":[],"reason":"<why>"}`. That records n/a with a reason, not a skip.
-- The post-merge watcher reads this file from the merge commit's first parent (the base branch), so a new or changed config applies from the next merge on. Merge the config PR first.
+- The file must be a regular file owned by the user (not a symlink). Commit and push it in `~/.claude` (via a PR there) so it survives; it applies to the next merge as soon as it is in the main checkout.
 
 ### 4.3 The STAGING run
 
@@ -72,7 +72,7 @@ The generated STAGING section tells the agent to run these steps, in a subagent 
    ```bash
    bash ~/.claude/scripts/staging_verify.sh <owner/repo> <pr> <pr> <merge_sha> none
    ```
-   It reads `.claude/verify.json` from the merge commit's first parent, polls each target's `sha_url` until it serves the merge SHA or `timeout_s` passes, runs the probes, prints one verdict line (`Staging verify PASSED|N/A|NOT CONFIGURED|FAILED ...`), and appends a `verify` record to the session ledger: `repo`, `pr`, `merge_sha`, `result` (`pass`, `n/a`, `no-config`, `fail` or `error`), `reason`, `config_sha`, and `targets[]` with `name`, `observed_sha` and `probes[]` (`cmd`, `exit`, `matched`, `out_head`, `out_sha256`). `bash ~/.claude/scripts/done_gate.sh status` prints the ledger. Save the verdict line to `$EVIDENCE/verdict.txt`.
+   It reads `~/.claude/verify/<owner>__<repo>.json`, polls each target's `sha_url` until it serves a commit that contains the merge or `timeout_s` passes, runs the probes, prints one verdict line (`Staging verify PASSED|N/A|NOT CONFIGURED|FAILED ...`), and appends a `verify` record to the session ledger: `repo`, `pr`, `merge_sha`, `result` (`pass`, `n/a`, `no-config`, `fail` or `error`), `reason`, `config_sha`, and `targets[]` with `name`, `observed_sha`, `contains_merge` and `probes[]` (`url`, `status`, `exit`, `matched`, `out_head`, `out_sha256`). `bash ~/.claude/scripts/done_gate.sh status` prints the ledger. Save the verdict line to `$EVIDENCE/verdict.txt`.
 2. Drive the changed feature on staging with the feature map's recipe.
 3. For `ui: true` targets, drive the UI with Chrome MCP or the repo's device skill. Capture screenshots (before and after where possible) and a GIF when there is motion. Upload them to the Linear ticket (`mcp__linear__prepare_attachment_upload`, `create_attachment_from_upload`, then `save_comment`) and to the PR (`add-images-to-pr` skill). Write the returned URLs, one per line, to `$EVIDENCE/ui_proof.txt`.
 4. Report: the verdict line, each feature check (command or click path, observed result), and the evidence URLs.
@@ -81,10 +81,10 @@ The generated STAGING section tells the agent to run these steps, in a subagent 
 
 ## 5. Prove the generated skill before handing it over
 
-Run its own instructions end to end once: launch, doctor, drive one mapped feature, capture evidence, clean up. After cleanup, confirm the evidence still exists at the named location. A cleanup that eats the proof fails this step. Then run the STAGING mode once against the current staging deploy, and paste the probe result and one UI proof URL. Until the config is merged, `staging_verify.sh` reports NOT CONFIGURED, so run the working-tree config by hand: fetch each `sha_url` with its `sha_jq` and compare it with the default-branch HEAD, then run each probe and check its exit code and `expect` text.
+Run its own instructions end to end once: launch, doctor, drive one mapped feature, capture evidence, clean up. After cleanup, confirm the evidence still exists at the named location. A cleanup that eats the proof fails this step. Then run the STAGING mode once against the current staging deploy, and paste the probe result and one UI proof URL. Once the config file is in `~/.claude/verify/`, run `staging_verify.sh` against the most recent merged PR and check that it reports PASSED.
 
 Fix what fails, and run the generated cleanup after every failed iteration, so broken attempts do not strand processes and ports. A generated skill that was never executed is a draft, not a deliverable. If you proved it in a stand-in for the real target (a container instead of a fresh VM, a local stack instead of staging), list every setup step the stand-in did that the target will not. Those steps stay unverified until a run on the real target covers them.
 
 ## 6. Ship it
 
-Open one PR with `/pr-create` that adds `.claude/skills/verify/`, `.claude/verify.json`, and the deployed-SHA endpoint if you added one. Merge it on green CI per AGENTS.md. Point to `/maintain-verification-skill` for keeping the map honest as the app changes.
+Open one PR with `/pr-create` in the target repo that adds `.claude/skills/verify/` and the deployed-SHA endpoint if you added one, and one PR in `~/.claude` that adds `verify/<owner>__<repo>.json`. Merge both on green CI per AGENTS.md. Point to `/maintain-verification-skill` for keeping the map honest as the app changes.

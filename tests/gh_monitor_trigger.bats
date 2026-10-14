@@ -9,7 +9,7 @@ setup() {
     LEDGER="$CLAUDE_STATE_DIR/sessions/s1/ledger.jsonl"
     HOOK_LOG="$BATS_TEST_TMPDIR/hooks.log"
 
-    export GH_MONITOR_HOOK_TIMEOUT=2
+    export GH_MONITOR_HOOK_TIMEOUT=5
 
     REPO="$BATS_TEST_TMPDIR/repo"
     W="$BATS_TEST_TMPDIR/w"
@@ -29,6 +29,7 @@ setup() {
     set_branch "$BRANCH"
     gh_stub repo_name 0 "o/r"
     gh_stub pr_state 0 "OPEN"
+    gh_stub pr_ident 0 $'12\thttps://github.com/o/r/pull/12'
 
     MON_CALLS="$BATS_TEST_TMPDIR/monitor_calls.log"
     export MON_CALLS
@@ -88,7 +89,7 @@ case "$1 $2" in
     "repo view") key=repo_name ;;
     "pr view")   key=pr_state ;;
 esac
-case "$*" in (*mergeCommit*) key=pr_info ;; esac
+case "$*" in (*mergeCommit*) key=pr_info ;; (*number,url*) key=pr_ident ;; esac
 printf '%s\n' "$*" >>"$GH_STUB_DIR/calls.log"
 [ -n "$key" ] || { echo "gh stub: unroutable call: $*" >&2; exit 99; }
 f="$GH_STUB_DIR/$key"
@@ -828,6 +829,43 @@ git_stub_cmd() {
     assert_eq "bash /x/gh_monitor.sh wait 3951 --repo o/r" "$(jq -r .wait_cmd "$LEDGER")"
     [[ $(jq -r .ts "$LEDGER") =~ ^[0-9]+$ ]]
     assert_eq 700 "$(stat -f %Lp "$CLAUDE_STATE_DIR/sessions/s1")"
+    assert_eq 600 "$(stat -f %Lp "$LEDGER")"
+}
+
+@test "a merge by branch name records the resolved PR number, so the verify record can match it" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge --squash"
+    assert_eq 0 "$status"
+    assert_eq feat-x "$(jq -r .target "$LEDGER")"
+    assert_eq 12 "$(jq -r .pr "$LEDGER")"
+    assert_eq o/r "$(jq -r .repo "$LEDGER")"
+}
+
+@test "a merge whose watcher fails to spawn records the repo resolved from the PR url" {
+    gh_stub pr_state 0 "MERGED"
+    gh_stub pr_ident 0 $'12\thttps://github.com/acme/app/pull/12'
+    FAKE_MONITOR_FAIL=1 run ctx "gh pr merge --squash"
+    assert_eq 0 "$status"
+    assert_contains "watcher could not be started" "$output"
+    assert_eq acme/app "$(jq -r .repo "$LEDGER")"
+    assert_eq 12 "$(jq -r .pr "$LEDGER")"
+    assert_eq "" "$(jq -r .wait_cmd "$LEDGER")"
+}
+
+@test "a merge whose PR number cannot be resolved is still recorded and logged loudly" {
+    gh_stub pr_state 0 "MERGED"
+    gh_stub pr_ident 1
+    run ctx "gh pr merge 3951 --squash"
+    assert_eq 0 "$status"
+    assert_eq merge "$(jq -r .kind "$LEDGER")"
+    assert_eq "" "$(jq -r .pr "$LEDGER")"
+    assert_contains "error: merge: cannot resolve the PR number and repo of 3951" "$(cat "$HOOK_LOG")"
+}
+
+@test "a merge without a prompt id records no prompt_id field" {
+    gh_stub pr_state 0 "MERGED"
+    run ctx "gh pr merge 3951 --squash"
+    assert_eq null "$(jq -r .prompt_id "$LEDGER")"
 }
 
 @test "a subagent merge is recorded in the ledger with its agent id" {
@@ -875,4 +913,5 @@ git_stub_cmd() {
     assert_eq 0 "$status"
     [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
     assert_contains "ledger: state untrusted" "$(cat "$HOOK_LOG")"
+    assert_contains "watcher is ALREADY running" "$output"
 }

@@ -72,7 +72,7 @@ After the plan file is written, run a second-opinion pass before terminating:
 
 - **Critique**: Invoke the `/other-llm` skill on the just-written `plan-$FEATURE_NAME.md`. Ask it to flag weak spots, missing considerations, risky assumptions, bad task sequencing, and unclear acceptance criteria.
 - **Triage**: Separate valid points from noise; note any items that are open questions for the user rather than direct fixes.
-- **Propose**: Present a short bulleted list of proposed plan changes. Use your structured-question tool (if this environment has one) for concrete accept/reject choices; otherwise plain text.
+- **Propose**: Present a short bulleted list of proposed plan changes. Use your structured-question tool (if this environment has one) for concrete accept/reject choices, with each question's `header` set to `plan` (the question gate allows only that header, `one-by-one`, or a `BLOCKED:<category>` question); otherwise plain text.
 - **Apply**: Make surgical edits to the plan `.md` for accepted changes — do not rewrite wholesale.
 - **Sync session name**: Invoke the `/session-name` skill, passing a short proposed name derived from the feature just planned (e.g. `$FEATURE_NAME` from Step 2, or a short label distilled from the plan's TLDR) as its `$ARGUMENTS`. This keeps the session's displayed name in sync with the feature just planned. `/session-name` handles its own orchestrator-confirmation flow if this runs inside a subagent — no separate ping is needed here.
 - **Done**: Tell the user the plan was critiqued by the other LLM and updated, and point them to the final file.

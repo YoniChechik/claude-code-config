@@ -20,5 +20,4 @@ source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || exit 0
 
 relay_collect "$session" "$event"
 [ -n "$RELAY_TEXT" ] || exit 0
-hook_json_str "$RELAY_TEXT"
-printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' "$REPLY"
+jq -nc --arg c "$RELAY_TEXT" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'

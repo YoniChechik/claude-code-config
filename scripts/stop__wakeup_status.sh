@@ -13,8 +13,8 @@ if [[ ! "$session_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
     exit 0
 fi
 
-# shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/_state.sh"
 
 sidecar=$(_wakeup_next_path "$session_id" 2>/dev/null) || exit 0
 if [ -z "$sidecar" ]; then
@@ -28,12 +28,7 @@ fi
 entries=$(jq -c '(.session_crons // []) | select(length>0)' <<< "$input" 2>/dev/null)
 
 _write_sidecar() {
-    local tmp
-    tmp="$(mktemp "${CLAUDE_NOTIFY_TMP_DIR}/wakeup_next_XXXXXX" 2>/dev/null)" || return 1
-    if ! printf '%s\n%s' "$1" "$2" > "$tmp" 2>/dev/null || ! mv -f "$tmp" "$sidecar" 2>/dev/null; then
-        rm -f "$tmp"
-        return 1
-    fi
+    atomic_write "$sidecar" "$1"$'\n'"$2" 2>/dev/null
 }
 
 if [ -z "$entries" ]; then
@@ -48,10 +43,6 @@ import os
 import sys
 
 def parse_field(spec, lo, hi):
-    """Return the set of ints one cron field matches, honoring *, N, A-B,
-    and (A-B|*)/STEP -- the syntax the scheduled-tasks docs say is
-    supported. Raises ValueError on anything else or an out-of-range value.
-    """
     if spec == "*":
         return set(range(lo, hi + 1))
     vals = set()

@@ -32,7 +32,6 @@ setup() {
     export GH_MONITOR_WAIT_POLL=0
     export GH_MONITOR_WAIT_GRACE=0
 
-    # shellcheck source=../scripts/_notify.sh
     source "$NOTIFY_SH"
     KEY=$(_gh_monitor_key "o/r" "$BRANCH")
     SLUG=$(_gh_monitor_slug "$BRANCH")
@@ -999,6 +998,16 @@ VSTUB
     write_verify_stub
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq "o/r $BRANCH 3951 abc123 none" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
+}
+
+@test "merge: a verifier that crashes without a verdict is reported as a failed verify, not silence" {
+    merged_pr
+    export GH_MONITOR_VERIFY_SCRIPT="$BATS_TEST_TMPDIR/bin/verify_crash.sh"
+    printf '#!/bin/bash\nexit 3\n' >"$GH_MONITOR_VERIFY_SCRIPT"
+    chmod +x "$GH_MONITOR_VERIFY_SCRIPT"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Staging verify FAILED for o/r (merge commit abc123): the verifier exited 3 without a verdict" "$output"
 }
 
 @test "merge: a PR closed without merging never runs the verifier" {

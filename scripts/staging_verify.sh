@@ -3,8 +3,9 @@
 set -uo pipefail
 
 : "${STAGING_VERIFY_POLL:=20}"
-: "${STAGING_VERIFY_PROBE_TIMEOUT:=120}"
+: "${STAGING_VERIFY_PROBE_TIMEOUT:=60}"
 : "${STAGING_VERIFY_DEFAULT_TIMEOUT:=1800}"
+: "${CLAUDE_VERIFY_DIR:=$HOME/.claude/verify}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_state.sh"
@@ -15,6 +16,7 @@ TARGET=$2
 PR=$3
 SHA=$4
 CI=$5
+CURL_HTTPS=(--proto "=https" --proto-redir "=https" -sS)
 
 record() {
     local result=$1 reason=$2 targets=${3:-[]} config_sha=${4:-}
@@ -34,86 +36,123 @@ record() {
     exit 0
 }
 
+[[ $REPO =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ ]] || record error "invalid repository name '${REPO}'"
+[[ $SHA =~ ^[0-9a-f]{7,40}$ ]] || record error "invalid merge commit '${SHA}'"
+
 case "$CI" in
     pass | none) ;;
     *) record fail "post-merge CI ${CI}" ;;
 esac
 
-parent=$(gh api "repos/${REPO}/commits/${SHA}" --jq '.parents[0].sha' 2>/dev/null) || record error "could not read the parent of merge commit ${SHA}"
-parent=${parent//[[:space:]]/}
-[[ $parent =~ ^[0-9a-f]{7,40}$ ]] || record error "merge commit ${SHA} has no readable parent"
-
-content=$(gh api "repos/${REPO}/contents/.claude/verify.json?ref=${parent}" --jq '.content' 2>&1)
-rc=$?
-if ((rc != 0)); then
-    case "$content" in
-        *"Not Found"* | *404*) record no-config "no .claude/verify.json on the base branch (${parent:0:12}). Create it with /create-verification-skill." ;;
-        *) record error "could not read .claude/verify.json at ${parent:0:12}: ${content:0:200}" ;;
-    esac
-fi
-config=$(printf '%s' "$content" | tr -d '\n' | base64 -d 2>/dev/null) || record error "verify.json content is not base64"
-jq -e '(.targets | type) == "array"' <<<"$config" >/dev/null 2>&1 || record error "verify.json has no targets array"
+CONFIG_FILE="$CLAUDE_VERIFY_DIR/${REPO%%/*}__${REPO#*/}.json"
+[[ -e $CONFIG_FILE || -L $CONFIG_FILE ]] || record no-config "no verify config at ${CONFIG_FILE}. Create it with /create-verification-skill."
+state_safe_file "$CONFIG_FILE" || record error "untrusted verify config: ${STATE_ERR}"
+config=$(<"$CONFIG_FILE") || record error "cannot read ${CONFIG_FILE}"
 config_sha=$(printf '%s' "$config" | shasum -a 256 | cut -d' ' -f1)
 
+problems=$(jq -r '
+    def https: type == "string" and test("^https://[^\\s]+$");
+    if type != "object" or (.targets | type) != "array" then "no targets array"
+    else
+        [.targets | to_entries[] | .key as $i | .value as $t
+            | if ($t | type) != "object" then "target \($i) is not an object"
+              elif ($t.sha_url | https | not) then "target \($i): sha_url must be an https:// URL"
+              elif (($t.probes // []) | type) != "array" then "target \($i): probes is not an array"
+              else (($t.probes // []) | to_entries[] | .key as $j | .value as $p
+                  | if ($p | type) != "object" then "target \($i) probe \($j) is not an object"
+                    elif $p.cmd != null then "target \($i) probe \($j): shell probes are not supported, use url"
+                    elif ($p.url | https | not) then "target \($i) probe \($j): url must be an https:// URL"
+                    elif ($p.expect_status // 200 | type) != "number" then "target \($i) probe \($j): expect_status is not a number"
+                    else empty end)
+              end] | join("; ")
+    end' <<<"$config" 2>/dev/null) || record error "${CONFIG_FILE} is not valid JSON"
+[[ -z $problems ]] || record error "invalid ${CONFIG_FILE}: ${problems}" "[]" "$config_sha"
+
 if [[ $(jq '.targets | length' <<<"$config") -eq 0 ]]; then
-    record n/a "$(jq -r '.reason // "targets: [] on the base branch"' <<<"$config")" "[]" "$config_sha"
+    record n/a "$(jq -r '.reason // "targets: [] in the verify config"' <<<"$config")" "[]" "$config_sha"
 fi
 
-run_probe() {
-    perl -e 'alarm shift; exec @ARGV' "$STAGING_VERIFY_PROBE_TIMEOUT" bash -c "$1" 2>&1 </dev/null
+WORK=$(mktemp -d) || record error "cannot create a temp dir"
+trap 'rm -rf "$WORK"' EXIT
+
+contains_merge() {
+    [[ $1 =~ ^[0-9a-f]{7,40}$ ]] || return 1
+    local status
+    status=$(gh api "repos/${REPO}/compare/${SHA}...${1}" --jq .status 2>/dev/null) || return 1
+    [[ $status == ahead || $status == identical ]]
 }
 
-all_targets="[]"
+wait_for_sha() {
+    local name=$1 url=$2 filter=$3 timeout_s=$4 start checked=""
+    OBSERVED=""
+    CONTAINS=false
+    start=$EPOCHSECONDS
+    while :; do
+        OBSERVED=$(curl "${CURL_HTTPS[@]}" -f --max-time 20 -- "$url" 2>/dev/null | jq -r "($filter) | strings" 2>/dev/null)
+        OBSERVED=${OBSERVED//[[:space:]]/}
+        if [[ ${#OBSERVED} -ge 7 && $SHA == "$OBSERVED"* ]]; then
+            CONTAINS=true
+            return 0
+        fi
+        if [[ -n $OBSERVED && $OBSERVED != "$checked" ]]; then
+            checked=$OBSERVED
+            if contains_merge "$OBSERVED"; then
+                CONTAINS=true
+                return 0
+            fi
+        fi
+        if ((EPOCHSECONDS - start >= timeout_s)); then
+            failures+=("${name}: ${url} serves '${OBSERVED:-nothing}', which does not contain ${SHA:0:12}, after ${timeout_s}s")
+            return 1
+        fi
+        sleep "$STAGING_VERIFY_POLL"
+    done
+}
+
+run_probe() {
+    local name=$1 url=$2 want=$3 expect=$4 body="$WORK/body" code prc matched=true found=true out out_sha detail
+    code=$(curl "${CURL_HTTPS[@]}" --max-time "$STAGING_VERIFY_PROBE_TIMEOUT" -o "$body" -w '%{http_code}' -- "$url" 2>"$WORK/err")
+    prc=$?
+    [[ -f $body ]] || : >"$body"
+    out=$(head -c 2048 "$body")
+    ((prc == 0)) || out=$(head -c 2048 "$WORK/err")
+    out_sha=$(shasum -a 256 <"$body" | cut -d' ' -f1)
+    [[ -z $expect ]] || grep -qF -- "$expect" "$body" || found=false
+    [[ $code == "$want" && $found == true ]] || matched=false
+    total=$((total + 1))
+    if ((prc == 0)) && [[ $matched == true ]]; then
+        ok=$((ok + 1))
+    else
+        detail="curl exit ${prc}, HTTP ${code:-none}"
+        [[ $code == "$want" ]] || detail+=", expected HTTP ${want}"
+        [[ $found == true ]] || detail+=", expected \"${expect}\""
+        failures+=("${name}: probe ${url} ${detail}: ${out:0:200}")
+    fi
+    probe_lines+=("$(jq -nc --arg u "$url" --arg c "$code" --argjson e "$prc" --argjson m "$matched" --arg o "$out" --arg s "$out_sha" \
+        '{url: $u, status: $c, exit: $e, matched: $m, out_head: $o, out_sha256: $s}')")
+    rm -f "$body"
+}
+
+target_lines=()
 failures=()
 summary=()
-while IFS= read -r target; do
-    name=$(jq -r '.name // "target"' <<<"$target")
-    sha_url=$(jq -r '.sha_url // empty' <<<"$target")
-    sha_jq=$(jq -r '.sha_jq // ".sha"' <<<"$target")
-    timeout_s=$(jq -r '.timeout_s // empty' <<<"$target")
+while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '' sha_jq &&
+    IFS= read -r -d '' timeout_s && IFS= read -r -d '' probes; do
     [[ $timeout_s =~ ^[0-9]+$ ]] || timeout_s=$STAGING_VERIFY_DEFAULT_TIMEOUT
-    observed=""
-    if [[ -z $sha_url ]]; then
-        failures+=("${name}: no sha_url, so the deployed commit cannot be checked")
-    else
-        start=$(date +%s)
-        while :; do
-            observed=$(curl -fsS --max-time 20 "$sha_url" 2>/dev/null | jq -r "$sha_jq" 2>/dev/null)
-            observed=${observed//[[:space:]]/}
-            [[ ${#observed} -ge 7 && $SHA == "$observed"* ]] && break
-            if (($(date +%s) - start >= timeout_s)); then
-                failures+=("${name}: ${sha_url} serves '${observed:-nothing}', not ${SHA:0:12}, after ${timeout_s}s")
-                break
-            fi
-            sleep "$STAGING_VERIFY_POLL"
-        done
-    fi
-    probes="[]"
+    wait_for_sha "$name" "$sha_url" "$sha_jq" "$timeout_s"
+    probe_lines=()
     ok=0
     total=0
-    while IFS= read -r probe; do
-        [[ -n $probe ]] || continue
-        cmd=$(jq -r '.cmd // empty' <<<"$probe")
-        expect=$(jq -r '.expect // empty' <<<"$probe")
-        out=$(run_probe "$cmd")
-        prc=$?
-        matched=true
-        [[ -z $expect || $out == *"$expect"* ]] || matched=false
-        total=$((total + 1))
-        if ((prc == 0)) && [[ $matched == true ]]; then
-            ok=$((ok + 1))
-        else
-            detail="exit ${prc}"
-            [[ $matched == true ]] || detail+=", expected \"${expect}\""
-            failures+=("${name}: probe \`${cmd}\` ${detail}: ${out:0:200}")
-        fi
-        probes=$(jq -c --arg c "$cmd" --argjson e "$prc" --argjson m "$matched" --arg o "${out:0:2048}" \
-            --arg s "$(printf '%s' "$out" | shasum -a 256 | cut -d' ' -f1)" \
-            '. + [{cmd: $c, exit: $e, matched: $m, out_head: $o, out_sha256: $s}]' <<<"$probes")
-    done < <(jq -c '.probes // [] | .[]' <<<"$target")
-    all_targets=$(jq -c --arg n "$name" --arg o "$observed" --argjson p "$probes" '. + [{name: $n, observed_sha: $o, probes: $p}]' <<<"$all_targets")
-    summary+=("${name} serves ${observed:0:12}, ${ok}/${total} probes ok")
-done < <(jq -c '.targets[]' <<<"$config")
+    while IFS= read -r -d '' url && IFS= read -r -d '' want && IFS= read -r -d '' expect; do
+        run_probe "$name" "$url" "$want" "$expect"
+    done < <(jq -j '.[] | .url, "\u0000", (.expect_status // 200 | tostring), "\u0000", (.expect // "" | tostring), "\u0000"' <<<"$probes")
+    target_lines+=("$(printf '%s\n' "${probe_lines[@]}" | jq -sc --arg n "$name" --arg o "$OBSERVED" --argjson c "$CONTAINS" \
+        '{name: $n, observed_sha: $o, contains_merge: $c, probes: .}')")
+    summary+=("${name} serves ${OBSERVED:0:12}, ${ok}/${total} probes ok")
+done < <(jq -j '.targets[] | (.name // "target" | tostring), "\u0000", .sha_url, "\u0000", (.sha_jq // ".sha"), "\u0000",
+    (.timeout_s // "" | tostring), "\u0000", ((.probes // []) | tojson), "\u0000"' <<<"$config")
+
+all_targets=$(printf '%s\n' "${target_lines[@]}" | jq -sc .)
 
 if ((${#failures[@]} > 0)); then
     record fail "$(IFS='; '; printf '%s' "${failures[*]}")" "$all_targets" "$config_sha"

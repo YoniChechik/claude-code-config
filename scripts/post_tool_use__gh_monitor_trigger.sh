@@ -15,6 +15,7 @@ esac
 source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
 source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
 source "$HOOK_DIR/_state.sh" 2>/dev/null || skip "state library missing"
+source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || skip "relay library missing"
 
 mapfile -d '' resp < <(printf '%s' "$input" | jq -j '(.tool_name // "" | tostring), "\u0000",
     (.tool_response.exit_code // "" | tostring), "\u0000",
@@ -275,35 +276,48 @@ handle_merge() {
     [ -z "$repo" ] || view+=(--repo "$repo")
     pr_state "$dir" "${view[@]}" || return
     [ "$PR_STATE" = "MERGED" ] || { note_skip "merge: PR state $PR_STATE"; return; }
-    add_merge "$target" "$repo" "$dir"
+    local ident number="" url="" pr_repo=""
+    ident=$(in_dir "$dir" gh pr view "${view[@]}" --json number,url -q '"\(.number)\t\(.url)"') || ident=""
+    IFS=$'\t' read -r number url <<<"$ident"
+    [[ $number =~ ^[0-9]+$ ]] || number=""
+    [[ $url =~ ^https://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/[0-9]+$ ]] && pr_repo=${BASH_REMATCH[1]}
+    [[ -n $number && -n $pr_repo ]] || hook_log "error: merge: cannot resolve the PR number and repo of $target"
+    add_merge "$target" "$repo" "$dir" "$number" "${repo:-$pr_repo}"
 }
 
 MERGE_TARGETS=()
 MERGE_REPOS=()
 MERGE_DIRS=()
+MERGE_PRS=()
+MERGE_PR_REPOS=()
 add_merge() {
-    local selector="$1" repo="$2" dir="$3" k
+    local selector="$1" repo="$2" dir="$3" number="$4" pr_repo="$5" k
     safe_word "$selector" || { note_skip "merge: unsafe selector $selector"; return; }
     [ -z "$repo" ] || safe_word "$repo" || { note_skip "merge: unsafe repo $repo"; return; }
+    [ -z "$pr_repo" ] || safe_word "$pr_repo" || { note_skip "merge: unsafe repo $pr_repo"; return; }
     for k in "${!MERGE_TARGETS[@]}"; do
         if [ "${MERGE_TARGETS[k]}" = "$selector" ]; then
             [ -n "${MERGE_REPOS[k]}" ] || MERGE_REPOS[k]="$repo"
+            [ -n "${MERGE_PRS[k]}" ] || MERGE_PRS[k]="$number"
+            [ -n "${MERGE_PR_REPOS[k]}" ] || MERGE_PR_REPOS[k]="$pr_repo"
             return 0
         fi
     done
     MERGE_TARGETS+=("$selector")
     MERGE_REPOS+=("$repo")
     MERGE_DIRS+=("$dir")
+    MERGE_PRS+=("$number")
+    MERGE_PR_REPOS+=("$pr_repo")
 }
 
-meta_field() {
-    local line
-    line=$(grep -m 1 "^$2=" "$1" 2>/dev/null) || return 1
-    printf '%s' "${line#*=}"
+record_merge() {
+    local repo="$1" selector="$2" number="$3" wait_cmd="$4"
+    [ -n "$repo" ] || hook_log "error: merge of $selector recorded without a repo"
+    record_event --arg kind merge --arg repo "$repo" --arg target "$selector" --arg pr "$number" --arg wait_cmd "$wait_cmd"
 }
 
 merge_text() {
-    local selector="$1" repo="$2" dir="$3" meta wait_cmd watched_repo
+    local selector="$1" repo="$2" dir="$3" number="$4" pr_repo="$5" meta wait_cmd watched_repo
     local -a args=(merge "$selector")
     [ -z "$repo" ] || args+=(--repo "$repo")
     args+=(--detach)
@@ -314,16 +328,17 @@ merge_text() {
     )
     if [ -z "$meta" ] || [ ! -f "$meta" ]; then
         hook_log "spawn failed: merge $selector${repo:+ --repo $repo}"
-        record_event --arg kind merge --arg repo "$repo" --arg target "$selector" --arg wait_cmd ""
+        record_merge "$pr_repo" "$selector" "$number" ""
         local repo_flag=""
         [ -z "$repo" ] || repo_flag=" --repo '$repo'"
         REPLY="A \`gh pr merge\` of '${selector}' just succeeded, but the detached post-merge watcher could not be started. Start it yourself: call the Bash tool with \`command: bash ~/.claude/scripts/gh_monitor.sh merge '${selector}'${repo_flag}\` and \`run_in_background: true\` (no explicit \`timeout\` override). When it completes, report its full verdict (PR number and title, merge commit, every workflow's conclusion) to the main session / the user."
         return 0
     fi
-    wait_cmd=$(meta_field "$meta" wait_cmd)
-    watched_repo=$(meta_field "$meta" repo)
+    relay_read_meta "$meta"
+    wait_cmd=$META_wait_cmd
+    watched_repo=$META_repo
     hook_log "spawned: merge $selector --repo $watched_repo${AGENT_ID:+ (subagent $AGENT_ID)}"
-    record_event --arg kind merge --arg repo "$watched_repo" --arg target "$selector" --arg wait_cmd "$wait_cmd"
+    record_merge "${watched_repo:-$pr_repo}" "$selector" "$number" "$wait_cmd"
     local lead="A \`gh pr merge\` of '${selector}' on ${watched_repo} just succeeded. A detached post-merge watcher is ALREADY running for it: it waits for every workflow run on the merge commit, including the release/deploy cascade that starts after the merge, and its verdict comes from the GitHub API run conclusions. Do NOT start \`gh_monitor.sh merge\` yourself (that would restart the watch)."
     if [ -n "$AGENT_ID" ]; then
         local info number="" sha="" title="" pr_label merged_as
@@ -340,7 +355,7 @@ merge_text() {
         REPLY="${lead} You are a subagent: do not wait for the deploys, and never say they passed. ${send} Then continue. Your final report MUST contain this line verbatim, so the main session can wait for the verdict: \"PR '${selector}' on ${watched_repo} is merged; its deploy is NOT verified yet. Main session: run \`${wait_cmd}\` with \`run_in_background: true\` and wait for its verdict before reporting it deployed.\" Only if you are still busy with other work when it finishes, you may call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` and include its output in your report."
     else
         REPLY="${lead} Its deploy is NOT verified yet: do not tell the user that it is deployed, shipped or live until the verdict arrives. Call the Bash tool with \`command: ${wait_cmd}\` and \`run_in_background: true\` (no explicit \`timeout\` override; it returns when the watcher's verdict is written). When it completes, report the verdict to the user exactly as printed: the PR number and what it is about, the merge commit sha, and each workflow's conclusion."
-        : >"$meta.announced"
+        (set -C && : >"$meta.announced") 2>/dev/null || hook_log "cannot mark $meta announced"
     fi
 }
 
@@ -352,7 +367,7 @@ for i in "${MERGES[@]}"; do handle_merge "$i"; done
 
 text=""
 for k in "${!MERGE_TARGETS[@]}"; do
-    merge_text "${MERGE_TARGETS[k]}" "${MERGE_REPOS[k]}" "${MERGE_DIRS[k]}"
+    merge_text "${MERGE_TARGETS[k]}" "${MERGE_REPOS[k]}" "${MERGE_DIRS[k]}" "${MERGE_PRS[k]}" "${MERGE_PR_REPOS[k]}"
     text+="${text:+$'\n\n'}$REPLY"
 done
 for k in "${!INSTR_KEYS[@]}"; do

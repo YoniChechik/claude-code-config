@@ -64,8 +64,8 @@ The `/new-feature` skill is the most basic skill we have, and we use it 95% of t
   - `STATUS: COMPLETE <evidence pointer>`: the recorded exit predicate is met.
   - `STATUS: WAITING <task-id> <what it waits for>`: a running background task or cron watches it.
   - `STATUS: BLOCKED <category>: <one-line ask>`. Categories: `credential | captcha | payment | physical | destructive-prod-data | spending-money | irreversible-external-send | paradigm-shift`.
-  - `STATUS: FAILURE <what>: <command and observed output, or a path>`.
-  - `STATUS: ANSWER`: a pure answer with no merge or push in this prompt.
+  - `STATUS: FAILURE <what>: <command and observed output, or a path>`. When it is about a merged PR, `<what>` names it: `<n>`, `#<n>`, `<owner/repo>#<n>` or the PR URL.
+  - `STATUS: ANSWER`: a pure answer with no merge or push in this prompt. An unverified merge from an earlier prompt still blocks `ANSWER` until its staging verify passes or a FAILURE names it.
 - Mapping: a non-empty `# Needs human` means `BLOCKED`. Anything in `# Doing` means `WAITING` on that task. A non-empty `# TODO` cannot end with `COMPLETE`. A pure answer uses only the answer text plus `STATUS: ANSWER`.
 - **# Needs human is conditional.** Include it only for a credential, captcha, payment, or physical action no tool can do. Before listing an item, try it via CLI and the `/human-meat-proxy` skill (Chrome MCP). Anything the agent can do goes under TODO, and the agent does it.
 - **Structure over prose.** Use a numbered list. each bullet should be self contained
