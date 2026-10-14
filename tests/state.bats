@@ -5,7 +5,6 @@ LIB="${BATS_TEST_DIRNAME}/../scripts/_state.sh"
 setup() {
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
-    unset DONE_GATE_MODE
 }
 
 assert_eq() {
@@ -58,21 +57,6 @@ lib() { bash -c "source '$LIB'; $1"; }
     run lib 'STATE_DIR="$CLAUDE_STATE_DIR/sessions/s1"; ledger_append "{\"kind\":\"x\"}"'
     assert_eq 1 "$status"
     [ ! -s "$BATS_TEST_TMPDIR/other" ]
-}
-
-@test "state_mode: env wins, an invalid env falls back to the mode file, garbage defaults to log" {
-    lib 'state_init s1'
-    assert_eq log "$(lib 'state_mode; echo $REPLY')"
-    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    assert_eq enforce "$(lib 'state_mode; echo $REPLY')"
-    assert_eq log "$(DONE_GATE_MODE=log lib 'state_mode; echo $REPLY')"
-    run env DONE_GATE_MODE=yes bash -c "source '$LIB'; state_mode; echo \$REPLY"
-    assert_eq enforce "${lines[-1]}"
-    assert_contains "invalid DONE_GATE_MODE 'yes'" "$output"
-    printf 'maybe\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run lib 'state_mode; echo $REPLY'
-    assert_eq log "${lines[-1]}"
-    assert_contains "invalid mode 'maybe'" "$output"
 }
 
 @test "state_kill_switch honours DONE_GATE_KILL_TTL at the boundary" {

@@ -87,21 +87,17 @@ counter_save() {
 }
 
 run_gate() {
-    state_mode
-    local mode=$REPLY
     if state_kill_switch; then
         hook_log "KILL_SWITCH: gate off"
         return 0
     fi
     if ! state_init "$session"; then
         hook_log "STATE_UNTRUSTED: $STATE_ERR"
-        [[ $mode == enforce ]] || return 0
         require_failure state "state directory is untrusted ($STATE_ERR)"
         return 0
     fi
     if ! gate_eval full; then
         hook_log "error: gate evaluation failed"
-        [[ $mode == enforce ]] || return 0
         if ledger_has_kind merge; then
             require_failure gate "internal error while checking a session with a merge"
         else
@@ -128,15 +124,6 @@ run_gate() {
     local violations=${parts[5]} unresolved=${parts[6]} bad=${parts[7]} ack
     [[ $bad == 0 ]] || hook_log "error: $bad unparseable ledger lines session=$session"
     state_write "$STATE_DIR/gate.json" "$gate_new" || hook_log "error: cannot write gate.json"
-
-    if [[ $mode != enforce ]]; then
-        if [[ -n $rules ]]; then
-            hook_log "would_block rules=$rules session=$session"
-        else
-            hook_log "would_pass session=$session"
-        fi
-        return 0
-    fi
 
     while IFS= read -r ack; do
         [[ -z $ack ]] || ledger_append "$ack" || hook_log "error: cannot record ack"

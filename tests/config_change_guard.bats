@@ -6,7 +6,6 @@ SETTINGS="${BATS_TEST_DIRNAME}/../settings.json"
 setup() {
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
-    export DONE_GATE_MODE=enforce
     NEW="$BATS_TEST_TMPDIR/settings.json"
     LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
 }
@@ -111,14 +110,6 @@ blocked_for() {
     run bash -c "printf 'garbage' | bash '$HOOK'"
     assert_eq 0 "$status"
     assert_eq "" "$output"
-}
-
-@test "log mode only logs" {
-    export DONE_GATE_MODE=log
-    jq 'del(.hooks.Stop)' "$SETTINGS" >"$NEW"
-    run change
-    assert_eq "" "$output"
-    assert_contains "would_block config change: removes Stop coordinator" "$(cat "$LOG")"
 }
 
 @test "the kill switch allows the change and logs it" {

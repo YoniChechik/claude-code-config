@@ -5,7 +5,6 @@ HOOK="${BATS_TEST_DIRNAME}/../scripts/pre_tool_use__ask_gate.sh"
 setup() {
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
-    export DONE_GATE_MODE=enforce
     LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
 }
 
@@ -111,24 +110,6 @@ reset_log() { rm -f "$LOG"; }
     run ask "Pay" "BLOCKED:payment card?" sub1
     assert_eq deny "$(verdict)"
     assert_contains "Subagents have no user to ask" "$(reason)"
-}
-
-@test "log mode allows and logs the would-be deny" {
-    export DONE_GATE_MODE=log
-    run ask "Merge" "Should I merge?"
-    assert_eq 0 "$status"
-    assert_eq "" "$output"
-    assert_contains "would_deny ask: deny" "$(cat "$LOG")"
-}
-
-@test "an invalid mode value is logged as an error and falls back to the mode file" {
-    export DONE_GATE_MODE=enforcee
-    mkdir -p "$CLAUDE_STATE_DIR"
-    chmod 700 "$CLAUDE_STATE_DIR"
-    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run ask "Merge" "Should I merge?"
-    assert_eq deny "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.permissionDecision')"
-    assert_contains "error: invalid DONE_GATE_MODE 'enforcee'" "$(cat "$LOG")"
 }
 
 @test "the kill switch allows a denied question and logs it" {

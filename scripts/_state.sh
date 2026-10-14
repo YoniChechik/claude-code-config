@@ -6,14 +6,6 @@ STATE_ERR=""
 DONE_GATE_KILL_TTL="${DONE_GATE_KILL_TTL:-86400}"
 STATE_LOCK_TIMEOUT="${STATE_LOCK_TIMEOUT:-10}"
 
-state_report() {
-    if declare -F hook_log >/dev/null; then
-        hook_log "$1"
-    else
-        printf '%s\n' "$1" >&2
-    fi
-}
-
 state_stat() {
     REPLY=$(stat -f '%u %Lp %m' "$1" 2>/dev/null) || REPLY=$(stat -c '%u %a %Y' "$1" 2>/dev/null) || return 1
 }
@@ -127,28 +119,6 @@ ledger_has_kind() {
     jq -Rne --arg k "$1" 'any(inputs | fromjson? | select(type == "object"); .kind == $k)' "$REPLY" >/dev/null
 }
 
-state_mode() {
-    local m=${DONE_GATE_MODE:-} f="$STATE_ROOT/done_gate.mode"
-    case "$m" in
-        enforce | log) REPLY=$m; return 0 ;;
-        "") ;;
-        *) state_report "error: invalid DONE_GATE_MODE '${m:0:40}' (want enforce or log), using $f" ;;
-    esac
-    m=""
-    if [[ -e $f || -L $f ]]; then
-        if state_safe_file "$f"; then
-            read -r m <"$f"
-        else
-            state_report "error: untrusted mode file: $STATE_ERR"
-        fi
-    fi
-    case "$m" in
-        enforce | log) REPLY=$m ;;
-        "") REPLY=log ;;
-        *) state_report "error: invalid mode '${m:0:40}' in $f (want enforce or log), using log"; REPLY=log ;;
-    esac
-}
-
 state_kill_switch() {
     local dir="$STATE_ROOT/override" file="$STATE_ROOT/override/done_gate.off" mtime
     [[ -e $file || -L $file ]] || return 1
@@ -159,15 +129,3 @@ state_kill_switch() {
     ((mtime <= EPOCHSECONDS && EPOCHSECONDS - mtime <= DONE_GATE_KILL_TTL))
 }
 
-state_enforcing() {
-    state_mode
-    if [[ $REPLY != enforce ]]; then
-        state_report "would_$1"
-        return 1
-    fi
-    if state_kill_switch; then
-        state_report "KILL_SWITCH: $2 allowed"
-        return 1
-    fi
-    return 0
-}
