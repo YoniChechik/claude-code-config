@@ -1,0 +1,3 @@
+Chrome is on Shopify's "Update data access" page for sunsay-staging-2, with the Update button visible.
+
+STATUS: BLOCKED credential: click Update on the open "Update data access" page (only the store owner's login can approve it)

@@ -1,0 +1,3 @@
+Moving the backoffice API off Next.js changes how every route deploys.
+
+STATUS: BLOCKED paradigm-shift: move the backoffice API routes from Next.js to the app-backend service

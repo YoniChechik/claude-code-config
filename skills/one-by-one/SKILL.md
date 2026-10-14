@@ -11,10 +11,10 @@ Pace a multi-item answer. One item per turn. Every item is numbered, start to fi
 ## Pattern
 
 1. One short line: what this is about.
-2. Numbered list of item names only — no content yet.
+2. Numbered list of item names only, no content yet. An item with nothing to decide ("Decision needed: none") is logged as done and not presented; list it once under a "Logged, no decision" line.
 3. Stop. Wait for "go".
 4. On "go", write that item using the adhd-structure format (1-line summary → 5-line version → deeper detail on request). Keep its number in view (e.g. "Item 2 of 5").
-5. If the item is a real decision/question, end it with a short recommendation and the lowest-effort way to answer (see "Claude's questions"). If the item is purely informational (nothing to decide), skip the recommendation entirely — just present the information.
+5. End each presented item with a short recommendation and the lowest-effort way to answer (see "Claude's questions"). If the user asked to walk informational items too, present them without a recommendation.
 6. End the item with: "Say 'go' for the next one" — or, if it asked a question, with that question instead.
 7. Anything else — pushback, a question, "explain more" — means stay on this item. Answer it directly. "Go" is the advance word for a purely informational item; saying it closes the current item AS-IS and moves to the next one. For an item that asked a question, the ANSWER ITSELF is the advance signal — the moment the user gives a numbered choice or yes/no, log it as closed and immediately present the next item in the SAME reply, without waiting for a separate "go". There is no separate accept-then-advance step: giving the answer IS the approval, nothing more to confirm.
 
@@ -24,6 +24,8 @@ Phrase every mid-walkthrough question so the reply can be as short as possible:
 - Numbered alternatives when there's more than one real option — tell the user to reply with a number.
 - Yes/no ("y"/"n") when there are exactly two.
 - "Say 'go' to accept the default" whenever there's an obvious recommended choice — name it.
+
+If you use the question tool for an item, set each question's `header` to `one-by-one`.
 
 Bad: "Update tests too, or just docs, or both?"
 Good: "1) tests too  2) docs only  3) both (recommended — say 'go')"

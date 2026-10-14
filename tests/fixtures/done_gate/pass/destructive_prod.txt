@@ -1,0 +1,3 @@
+The 3 leftover production rows for the removed user are listed above.
+
+STATUS: BLOCKED destructive-prod-data: confirm deleting the 3 production rows for user 8812

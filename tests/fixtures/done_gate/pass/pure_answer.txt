@@ -1,0 +1,3 @@
+Meta's phone verification rejects some Israeli numbers (source: https://developers.facebook.com/community/threads/123).
+
+STATUS: ANSWER

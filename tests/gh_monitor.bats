@@ -7,6 +7,8 @@ WATCHER_ABS="$(cd "$(dirname "$WATCHER")" && pwd)/$(basename "$WATCHER")"
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
     export CLAUDE_CODE_SESSION_ID="testsess"
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
+    export GH_MONITOR_VERIFY_SCRIPT=""
     BRANCH="feat-x"
 
     export GH_MONITOR_CHECK_GRACE_MAX=2
@@ -199,8 +201,8 @@ wait
 HOLD
     bash "$BATS_TEST_TMPDIR/holder.sh" "$lockfile" "$secs" "$pidout" &
     printf '%s\n' "$!" >>"$SPAWNED_PIDS_FILE"
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    local _
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         if [ -s "$pidout" ] && ! lockf -t 0 -k "$lockfile" true 2>/dev/null; then
             printf '%s\n' "$(cat "$pidout")" >>"$SPAWNED_PIDS_FILE"
             return 0
@@ -212,8 +214,8 @@ HOLD
 }
 
 wait_for_file() {
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    local _
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         [ -s "$1" ] && return 0
         sleep 1
     done
@@ -960,4 +962,48 @@ DRV
     assert_contains "CI passed for 42" "$output"
     run lockf -t 0 -k "$runlock" true
     assert_eq 75 "$status"
+}
+
+write_verify_stub() {
+    export GH_MONITOR_VERIFY_SCRIPT="$BATS_TEST_TMPDIR/bin/verify_stub.sh"
+    cat >"$GH_MONITOR_VERIFY_SCRIPT" <<'VSTUB'
+#!/bin/bash
+printf '%s\n' "$*" >>"$BATS_TEST_TMPDIR/verify_calls.log"
+echo "Staging verify PASSED for $1 (merge commit $4): staging serves ${4:0:12}, 1/1 probes ok"
+VSTUB
+    chmod +x "$GH_MONITOR_VERIFY_SCRIPT"
+}
+
+@test "merge: after a green post-merge CI the staging verifier runs with repo, target, PR, merge sha and the CI verdict, and its line lands in the result" {
+    merged_pr
+    write_verify_stub
+    api_runs_fixture "11:CI:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_eq "o/r $BRANCH 3951 abc123 pass" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
+    assert_contains "Staging verify PASSED for o/r (merge commit abc123)" "$output"
+    assert_contains "Staging verify PASSED for o/r" "$(cat "$(result_for)")"
+}
+
+@test "merge: a failed post-merge CI hands the verifier ci=fail" {
+    merged_pr
+    write_verify_stub
+    api_runs_fixture "11:CI:completed:failure:1:push"
+    stub run_view_jobs 0 ""
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq "o/r $BRANCH 3951 abc123 fail" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
+}
+
+@test "merge: no post-merge run hands the verifier ci=none" {
+    merged_pr
+    write_verify_stub
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq "o/r $BRANCH 3951 abc123 none" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
+}
+
+@test "merge: a PR closed without merging never runs the verifier" {
+    stub pr_state 0 "CLOSED	-	3951	t"
+    write_verify_stub
+    run bash "$WATCHER" merge "$BRANCH"
+    [ ! -e "$BATS_TEST_TMPDIR/verify_calls.log" ]
 }

@@ -14,18 +14,21 @@ esac
 
 source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
 source "$HOOK_DIR/_bashparse.sh" 2>/dev/null || skip "bashparse library missing"
+source "$HOOK_DIR/_state.sh" 2>/dev/null || skip "state library missing"
 
 mapfile -d '' resp < <(printf '%s' "$input" | jq -j '(.tool_name // "" | tostring), "\u0000",
     (.tool_response.exit_code // "" | tostring), "\u0000",
     ((.tool_response.stdout // "" | tostring) + "\n" + (.tool_response.stderr // "" | tostring)), "\u0000",
     (.session_id // "" | tostring), "\u0000",
-    (.agent_id // "" | tostring), "\u0000"' 2>/dev/null)
-((${#resp[@]} == 5)) || skip "bad hook input JSON"
+    (.agent_id // "" | tostring), "\u0000",
+    (.prompt_id // "" | tostring), "\u0000"' 2>/dev/null)
+((${#resp[@]} == 6)) || skip "bad hook input JSON"
 [[ ${resp[0]} == Bash ]] || exit 0
 EXIT_CODE=${resp[1]}
 OUTPUT=${resp[2]}
 SESSION_ID=${resp[3]}
 AGENT_ID=${resp[4]}
+PROMPT_ID=${resp[5]}
 
 bp_parse_hook "$input" || skip "parse failed: $BP_ERR"
 
@@ -71,6 +74,35 @@ in_dir() {
     local dir="$1"
     shift
     (cd "$dir" 2>/dev/null && run_timeout "$GH_MONITOR_HOOK_TIMEOUT" "$@" 2>/dev/null)
+}
+
+record_event() {
+    [ -n "$SESSION_ID" ] || return 0
+    if ! state_init "$SESSION_ID"; then
+        hook_log "ledger: state untrusted: $STATE_ERR"
+        return 0
+    fi
+    ledger_append "$(jq -nc --arg p "$PROMPT_ID" --arg a "$AGENT_ID" '$ARGS.named | del(.p, .a)
+        + (if $p == "" then {} else {prompt_id: $p} end) + (if $a == "" then {} else {agent_id: $a} end)' "$@")" ||
+        hook_log "ledger: append failed"
+}
+
+default_branch() {
+    local ref
+    ref=$(in_dir "$1" git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || return 1
+    REPLY=${ref#origin/}
+    [ -n "$REPLY" ] && [ "$REPLY" != "$ref" ]
+}
+
+remote_slug() {
+    local url
+    url=$(in_dir "$1" git remote get-url origin) || url=""
+    url=${url%.git}
+    if [[ $url =~ github\.com[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$ ]]; then
+        REPLY=${BASH_REMATCH[1]}
+    else
+        REPLY=$1
+    fi
 }
 
 note_skip() {
@@ -166,6 +198,14 @@ handle_push() {
         local heads
         heads=$(in_dir "$dir" git rev-parse HEAD '@{push}')
         [[ $heads == *$'\n'* && ${heads%%$'\n'*} == "${heads#*$'\n'}" ]] || { note_skip "push: exit code not attributable and HEAD != @{push}"; return; }
+    fi
+    if default_branch "$dir" && [ "$BRANCH" = "$REPLY" ]; then
+        local sha
+        sha=$(in_dir "$dir" git rev-parse HEAD)
+        remote_slug "$dir"
+        record_event --arg kind push --arg repo "$REPLY" --arg branch "$BRANCH" --arg sha "$sha"
+        hook_log "ledger: push to default branch $BRANCH"
+        return
     fi
     pr_state "$dir" "$BRANCH" || return
     [ "$PR_STATE" = "OPEN" ] || { note_skip "push: PR state $PR_STATE"; return; }
@@ -274,6 +314,7 @@ merge_text() {
     )
     if [ -z "$meta" ] || [ ! -f "$meta" ]; then
         hook_log "spawn failed: merge $selector${repo:+ --repo $repo}"
+        record_event --arg kind merge --arg repo "$repo" --arg target "$selector" --arg wait_cmd ""
         local repo_flag=""
         [ -z "$repo" ] || repo_flag=" --repo '$repo'"
         REPLY="A \`gh pr merge\` of '${selector}' just succeeded, but the detached post-merge watcher could not be started. Start it yourself: call the Bash tool with \`command: bash ~/.claude/scripts/gh_monitor.sh merge '${selector}'${repo_flag}\` and \`run_in_background: true\` (no explicit \`timeout\` override). When it completes, report its full verdict (PR number and title, merge commit, every workflow's conclusion) to the main session / the user."
@@ -282,6 +323,7 @@ merge_text() {
     wait_cmd=$(meta_field "$meta" wait_cmd)
     watched_repo=$(meta_field "$meta" repo)
     hook_log "spawned: merge $selector --repo $watched_repo${AGENT_ID:+ (subagent $AGENT_ID)}"
+    record_event --arg kind merge --arg repo "$watched_repo" --arg target "$selector" --arg wait_cmd "$wait_cmd"
     local lead="A \`gh pr merge\` of '${selector}' on ${watched_repo} just succeeded. A detached post-merge watcher is ALREADY running for it: it waits for every workflow run on the merge commit, including the release/deploy cascade that starts after the merge, and its verdict comes from the GitHub API run conclusions. Do NOT start \`gh_monitor.sh merge\` yourself (that would restart the watch)."
     if [ -n "$AGENT_ID" ]; then
         local info number="" sha="" title="" pr_label merged_as

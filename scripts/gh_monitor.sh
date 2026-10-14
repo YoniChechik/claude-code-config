@@ -35,6 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=./_notify.sh
 source "${SCRIPT_DIR}/_notify.sh"
+: "${GH_MONITOR_VERIFY_SCRIPT=${SCRIPT_DIR}/staging_verify.sh}"
 
 run_watchable() {
     local sig=""
@@ -391,14 +392,17 @@ watch_merge_sha() {
                 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_MERGE_SETTLE" \
                 && "$EVAL_SIG" == "$prev_sig" ]]; then
                 if [[ "$EVAL_FAILED" -gt 0 ]]; then
+                    MERGE_CI=fail
                     report "Post-merge CI FAILED for ${label} on ${OWNER_REPO} (merge commit ${sha}): ${EVAL_FAILED} of ${EVAL_TOTAL} failed"
                 else
+                    MERGE_CI=pass
                     report "Post-merge CI PASSED for ${label} on ${OWNER_REPO} (merge commit ${sha}): all ${EVAL_TOTAL} green"
                 fi
                 report "$EVAL_DETAILS"
                 return 0
             fi
             if [[ "$EVAL_TOTAL" -eq 0 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_RUN_APPEAR_MAX" ]]; then
+                MERGE_CI=none
                 report "${label} merged on ${OWNER_REPO} (merge commit ${sha}); no post-merge CI run started within ${GH_MONITOR_RUN_APPEAR_MAX}s"
                 return 0
             fi
@@ -407,6 +411,7 @@ watch_merge_sha() {
             poll_failed
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
+            MERGE_CI=timeout
             report "Post-merge CI watch TIMED OUT for ${label} on ${OWNER_REPO} (merge commit ${sha}) after ${GH_MONITOR_WATCH_MAX}s: ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"
             return 0
@@ -450,7 +455,19 @@ merge_body() {
     if [[ -z "$sha" || "$sha" == "-" ]]; then
         die_persistent "PR is MERGED but GitHub reports no merge commit"
     fi
+    MERGE_CI=timeout
     watch_merge_sha "$sha" "PR #${number} \"${title}\""
+    staging_verify "$sha" "$number"
+}
+
+staging_verify() {
+    [[ -n "$GH_MONITOR_VERIFY_SCRIPT" ]] || return 0
+    local out
+    log "staging verify: ci=${MERGE_CI}"
+    out=$(run_watchable bash "$GH_MONITOR_VERIFY_SCRIPT" "$OWNER_REPO" "$TARGET" "$2" "$1" "$MERGE_CI" 2>>"$LOGFILE")
+    bail_if_signaled $?
+    [[ -n "$out" ]] && report "$out"
+    return 0
 }
 
 run_body() {

@@ -1,0 +1,7 @@
+# Done
+1. Review of PR #3940 (Support ticket soft delete) found no blocking problems.
+
+# Needs human
+1. Delete flow on staging: I didn't click through it. It needs a super-admin Google sign-in.
+
+STATUS: COMPLETE PR #3940 merged

@@ -19,6 +19,18 @@
   },
   "feedbackDrafts" : "off",
   "hooks" : {
+    "ConfigChange" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/config_change__guard.sh",
+            "timeout" : 5,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "user_settings"
+      }
+    ],
     "Elicitation" : [
       {
         "hooks" : [
@@ -162,6 +174,15 @@
       {
         "hooks" : [
           {
+            "command" : "bash $HOME\/.claude\/scripts\/pre_tool_use__ask_gate.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "AskUserQuestion"
+      },
+      {
+        "hooks" : [
+          {
             "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
             "type" : "command"
           }
@@ -217,21 +238,24 @@
           }
         ],
         "matcher" : "startup|resume|clear"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/prompt_context__done_gate.sh",
+            "timeout" : 5,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "startup|resume|compact"
       }
     ],
     "Stop" : [
       {
         "hooks" : [
           {
-            "command" : "bash $HOME\/.claude\/scripts\/stop__session_name_reminder.sh",
-            "type" : "command"
-          }
-        ]
-      },
-      {
-        "hooks" : [
-          {
-            "command" : "bash $HOME\/.claude\/scripts\/gh_monitor_relay.sh",
+            "command" : "bash $HOME\/.claude\/scripts\/stop__coordinator.sh",
+            "timeout" : 5,
             "type" : "command"
           }
         ]
@@ -288,6 +312,15 @@
         "hooks" : [
           {
             "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/prompt_context__done_gate.sh",
+            "timeout" : 5,
             "type" : "command"
           }
         ]

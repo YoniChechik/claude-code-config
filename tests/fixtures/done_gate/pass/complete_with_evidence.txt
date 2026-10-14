@@ -1,0 +1,7 @@
+# Done
+- Fixed the probe.
+
+# TODO
+- None
+
+STATUS: COMPLETE `curl -fsS https://staging.example/api/ping` returned ok

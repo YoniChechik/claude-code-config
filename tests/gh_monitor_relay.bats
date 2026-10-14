@@ -1,11 +1,14 @@
 #!/usr/bin/env bats
 
 HOOK="${BATS_TEST_DIRNAME}/../scripts/gh_monitor_relay.sh"
+STOP_HOOK="${BATS_TEST_DIRNAME}/../scripts/stop__coordinator.sh"
 SETTINGS="${BATS_TEST_DIRNAME}/../settings.json"
 
 setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR"
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
+    export DONE_GATE_MODE=log
 }
 
 assert_contains() {
@@ -29,7 +32,7 @@ make_meta() {
 }
 
 fire() {
-    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,stop_hook_active:false}' | bash "$HOOK"
+    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,stop_hook_active:false}' | bash "$STOP_HOOK"
 }
 
 fire_agent_return() {
@@ -127,7 +130,7 @@ reason() { printf '%s' "$1" | jq -r '.reason'; }
     run fire_agent_return s1 sub1
     assert_eq "" "$output"
     [ ! -e "$meta.announced" ] || { echo "a subagent hook must not consume the watch" >&2; return 1; }
-    jq -nc '{hook_event_name:"Stop",session_id:"s1",agent_id:"sub1"}' | bash "$HOOK" >"$BATS_TEST_TMPDIR/out"
+    jq -nc '{hook_event_name:"Stop",session_id:"s1",agent_id:"sub1"}' | bash "$STOP_HOOK" >"$BATS_TEST_TMPDIR/out"
     assert_eq "" "$(cat "$BATS_TEST_TMPDIR/out")"
     [ ! -e "$meta.announced" ] || { echo "a subagent hook must not consume the watch" >&2; return 1; }
 }
@@ -135,6 +138,8 @@ reason() { printf '%s' "$1" | jq -r '.reason'; }
 @test "other hook events never relay" {
     meta=$(make_meta 3951 s1 3951)
     run bash -c "jq -nc '{hook_event_name:\"SubagentStop\",session_id:\"s1\"}' | bash '$HOOK'"
+    assert_eq "" "$output"
+    run bash -c "jq -nc '{hook_event_name:\"Stop\",session_id:\"s1\"}' | bash '$HOOK'"
     assert_eq "" "$output"
     [ ! -e "$meta.announced" ] || { echo "must not consume the watch" >&2; return 1; }
 }
@@ -145,9 +150,9 @@ reason() { printf '%s' "$1" | jq -r '.reason'; }
     assert_contains "relay(PostToolUse): waiter 3951 --repo o/r" "$(cat "$BATS_TEST_TMPDIR/hooks.log")"
 }
 
-@test "settings.json wires the relay synchronously on Stop and on PostToolUse for the Agent tool" {
+@test "settings.json wires the relay synchronously on PostToolUse for the Agent tool only; Stop relays through the coordinator" {
     run jq -r '[.hooks.Stop[] | select(any(.hooks[]; .command | endswith("/scripts/gh_monitor_relay.sh")))] | length' "$SETTINGS"
-    assert_eq 1 "$output"
+    assert_eq 0 "$output"
     run jq -r '.hooks.PostToolUse[] | select(any(.hooks[]; .command | endswith("/scripts/gh_monitor_relay.sh"))) | .matcher' "$SETTINGS"
     assert_eq "Agent|Task" "$output"
     run jq -r '[.hooks[][] | .hooks[] | select(.command | endswith("/scripts/gh_monitor_relay.sh")) | .async // false] | unique | .[]' "$SETTINGS"

@@ -128,8 +128,8 @@ regression, just the same real-world limit the daemon always had.
                         a conclusion and the set is stable past the settle
                         window, then writes ONE report (PR number + title,
                         merge sha, one line per workflow) to RESULT
-8. main session relay (`gh_monitor_relay.sh`, PostToolUse on the Agent
-   tool and Stop) → any unannounced META for this session: handed once
+8. main session relay (`gh_monitor_relay.sh` on PostToolUse for the Agent
+   tool; `stop__coordinator.sh` on Stop) → any unannounced META for this session: handed once
                         to the main agent (as context when a subagent
                         returns, as a Stop block otherwise) with either the
                         finished verdict or the waiter command to run in the
@@ -395,7 +395,7 @@ tagged with the main session, and the relay ignores any payload that has an
   pending watch arrives as context before the main agent writes its reply.
   The docs name this as the way to inject context into the parent; a
   SubagentStop block would only keep the subagent running.
-- Stop: the backstop for every other path (a background subagent, whose
+- Stop (through `stop__coordinator.sh`, which sources `_relay_lib.sh`): the backstop for every other path (a background subagent, whose
   completion arrives as a notification rather than a tool result). It blocks
   once per unannounced META at the end of the main agent's next turn.
 

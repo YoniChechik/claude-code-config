@@ -1,0 +1,3 @@
+I'm waiting for you to free up the host and tell me to retry the simulator test.
+
+STATUS: WAITING user free up the host

@@ -1,0 +1,3 @@
+The legal gap analysis email is drafted in Gmail.
+
+STATUS: BLOCKED irreversible-external-send: approve sending the legal gap analysis email to counsel

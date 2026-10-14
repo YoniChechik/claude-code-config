@@ -1,0 +1,2 @@
+# Needs human
+A hook blocks me from running `--admin` merges, so I stopped. Please run this: `! gh pr merge 3937 ... --admin`

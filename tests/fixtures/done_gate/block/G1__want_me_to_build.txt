@@ -1,0 +1,1 @@
+A hook would fix this. I'd build it as a PostToolUse hook... Want me to build it?
