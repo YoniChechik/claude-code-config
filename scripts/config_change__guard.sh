@@ -32,7 +32,10 @@ if [[ -z $missing ]]; then
     exit 0
 fi
 
-state_enforcing "block config change: removes $missing" "config change" || exit 0
+if state_kill_switch; then
+    hook_log "KILL_SWITCH: config change allowed"
+    exit 0
+fi
 hook_log "block config change: removes $missing"
 jq -nc --arg r "The change removes the $missing hook; it is not applied to the running session. It takes effect in the next session." '{decision: "block", reason: $r}'
 exit 0

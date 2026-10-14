@@ -623,9 +623,9 @@ EOF")"
     assert_decision DENY "$(decide "cat ~/.claude/state/override/done_gate.off")"
 }
 
-@test "deny: writing the gate ledger or mode file from Bash" {
+@test "deny: writing gate state from Bash" {
     assert_decision DENY "$(decide "echo '{}' >> $HOME/.claude/state/sessions/s1/ledger.jsonl")"
-    assert_decision DENY "$(decide "printf enforce > ~/.claude/state/done_gate.mode")"
+    assert_decision DENY "$(decide "printf x > ~/.claude/state/gate.json")"
     assert_decision DENY "$(decide "rm -rf ~/.claude/state/sessions")"
     assert_decision DENY "$(decide_in "$HOME/.claude" "touch state/override/done_gate.off")"
 }
@@ -653,7 +653,7 @@ write_decision() {
 @test "deny: a Write into an overridden CLAUDE_STATE_DIR and a traversal into the state root" {
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/gate-state"
     assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/gate-state/override/done_gate.off")"
-    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/x/../gate-state/./done_gate.mode")"
+    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/x/../gate-state/./gate.json")"
     unset CLAUDE_STATE_DIR
     assert_decision DENY "$(write_decision "$HOME/.claude/skills/../state/override/done_gate.off")"
 }

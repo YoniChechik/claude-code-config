@@ -35,8 +35,6 @@ prune_old_sessions() {
 
 carry_over() {
     REPLY=""
-    state_mode
-    [[ $REPLY == enforce ]] || { REPLY=""; return 0; }
     state_kill_switch && { REPLY=""; return 0; }
     [[ -n $STATE_DIR ]] || { REPLY=""; return 0; }
     local unresolved="" lines

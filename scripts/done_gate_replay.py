@@ -18,13 +18,13 @@ from _transcript import ReadStats, is_tool_result, main_thread_records, text_of
 
 _COORDINATOR = Path(__file__).resolve().parent / "stop__coordinator.sh"
 _LOG_RE = re.compile(
-    r"would_(block rules=(?P<rules>\S+)|pass) session=(?P<sid>replay-\d+)"
+    r"\b(?:block \d+/\d+ rules=(?P<rules>\S+)|pass) session=(?P<sid>replay-\d+)\b"
 )
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Replay historical final assistant messages through the Stop gate in log mode."
+        description="Replay historical final assistant messages through the Stop gate and count would-block verdicts."
     )
     p.add_argument(
         "--days", type=float, default=2.0, help="look back this many days (default 2)"
@@ -90,7 +90,6 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="done_gate_replay.") as tmp:
         env = os.environ | {
-            "DONE_GATE_MODE": "log",
             "CLAUDE_STATE_DIR": f"{tmp}/state",
             "CLAUDE_HOOK_LOG_DIR": f"{tmp}/logs",
             "CLAUDE_NOTIFY_TMP_DIR": f"{tmp}/notify",
@@ -147,7 +146,7 @@ def main() -> int:
 
     total = len(stops)
     print(
-        f"Replayed {total} final messages from {len(files)} transcripts (last {args.days:g} days), gate in log mode."
+        f"Replayed {total} final messages from {len(files)} transcripts (last {args.days:g} days)."
     )
     print(f"Unparseable transcript lines skipped: {stats.bad_lines}")
     print(

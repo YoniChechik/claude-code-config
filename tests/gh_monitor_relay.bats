@@ -8,7 +8,6 @@ setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR"
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
-    export DONE_GATE_MODE=log
 }
 
 assert_contains() {
@@ -32,7 +31,7 @@ make_meta() {
 }
 
 fire() {
-    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,stop_hook_active:false}' | bash "$STOP_HOOK"
+    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,stop_hook_active:false,last_assistant_message:"STATUS: ANSWER"}' | bash "$STOP_HOOK"
 }
 
 fire_agent_return() {

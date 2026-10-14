@@ -46,7 +46,7 @@ assert_contains() {
     assert_contains "invalid --since" "$output"
 }
 
-@test "done_gate_replay replays each final message through the gate in log mode" {
+@test "done_gate_replay replays each final message through the gate and counts would-block verdicts" {
     run uv run --quiet "$SCRIPTS/done_gate_replay.py" --days 400 --projects-dir "$PROJECTS"
     assert_eq 0 "$status"
     assert_contains "Replayed 2 final messages from 1 transcripts" "$output"

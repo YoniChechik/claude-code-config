@@ -11,7 +11,6 @@ setup() {
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR/notify"
-    export DONE_GATE_MODE=enforce
     mkdir -p "$CLAUDE_NOTIFY_TMP_DIR"
     SID=s1
     PID=p1
@@ -100,60 +99,11 @@ done
     assert_eq 13 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
 }
 
-@test "log mode blocks nothing and logs the would-be decision per rule" {
-    export DONE_GATE_MODE=log
+@test "the gate enforces with no configuration and logs the decision per rule" {
     run stop "$(cat "$FIXTURES/block/G1__merge_handoff.txt")"
     assert_eq 0 "$status"
-    assert_eq "" "$output"
-    assert_contains "would_block rules=G1 session=s1" "$(cat "$CLAUDE_HOOK_LOG_DIR/hooks.log")"
-}
-
-@test "the mode defaults to log, and a regular mode file switches it to enforce" {
-    unset DONE_GATE_MODE
-    run stop "Should I merge?"
-    assert_eq "" "$output"
-    init_state
-    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run stop "Should I merge?"
     assert_eq block "$(decision "$output")"
-}
-
-@test "an invalid DONE_GATE_MODE is logged and the mode file decides" {
-    export DONE_GATE_MODE=Enforce
-    run stop "Should I merge?"
-    assert_eq "" "$output"
-    assert_contains "error: invalid DONE_GATE_MODE 'Enforce'" "$(hook_log_text)"
-    init_state
-    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run stop "Should I merge?"
-    assert_eq block "$(decision "$output")"
-}
-
-@test "a garbage mode file is logged and the gate stays in log mode" {
-    unset DONE_GATE_MODE
-    init_state
-    printf 'on\nenforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run stop "Should I merge?"
-    assert_eq "" "$output"
-    assert_contains "error: invalid mode 'on'" "$(hook_log_text)"
-}
-
-@test "the env mode takes precedence over the mode file" {
-    export DONE_GATE_MODE=log
-    init_state
-    printf 'enforce\n' >"$CLAUDE_STATE_DIR/done_gate.mode"
-    run stop "Should I merge?"
-    assert_eq "" "$output"
-    assert_contains "would_block rules=G1" "$(hook_log_text)"
-}
-
-@test "a symlinked mode file is ignored and the gate stays in log mode" {
-    unset DONE_GATE_MODE
-    init_state
-    printf 'enforce\n' >"$BATS_TEST_TMPDIR/mode"
-    ln -s "$BATS_TEST_TMPDIR/mode" "$CLAUDE_STATE_DIR/done_gate.mode"
-    run stop "Should I merge?"
-    assert_eq "" "$output"
+    assert_contains "block 1/3 rules=G1 session=s1" "$(cat "$CLAUDE_HOOK_LOG_DIR/hooks.log")"
 }
 
 @test "a subagent stop is never gated" {
@@ -579,13 +529,6 @@ seen_at() { init_state; printf '{"tasks":{"%s":%s},"pred_ack":""}' "$1" "$2" >"$
     ledger "$(merge_rec 4016 p0)"
     run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt:\"hi\"}' | bash '$CONTEXT_HOOK'"
     assert_contains "o/r#4016 (merged" "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
-}
-
-@test "carry-over is silent in log mode" {
-    export DONE_GATE_MODE=log
-    ledger "$(merge_rec 4016 p0)"
-    run bash -c "jq -nc '{hook_event_name:\"UserPromptSubmit\",session_id:\"s1\",prompt:\"hi\"}' | bash '$CONTEXT_HOOK'"
-    assert_eq "" "$output"
 }
 
 @test "session start injects the session-name line and the carry-over" {

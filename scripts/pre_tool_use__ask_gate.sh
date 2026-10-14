@@ -31,7 +31,10 @@ case "$verdict" in
     *) hook_log "error: unexpected verdict '$verdict'"; exit 0 ;;
 esac
 
-state_enforcing "deny ask: $verdict" "ask" || exit 0
+if state_kill_switch; then
+    hook_log "KILL_SWITCH: ask allowed"
+    exit 0
+fi
 hook_log "deny ask: $verdict"
 if [[ $verdict == subagent ]]; then
     hook_decision deny "$SUBAGENT_MSG"
