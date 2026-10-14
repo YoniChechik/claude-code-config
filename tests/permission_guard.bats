@@ -10,7 +10,7 @@ setup() {
     INST="comp""ute"
     INSTANCES="instanc""es"
 
-    unset SUPABASE_PROJECT_ID SUPABASE_WORKDIR PULUMI_STACK PULUMI_BACKEND_URL
+    unset SUPABASE_PROJECT_ID SUPABASE_WORKDIR PULUMI_STACK PULUMI_BACKEND_URL CLAUDE_STATE_DIR
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
     export PULUMI_HOME="$BATS_TEST_TMPDIR/pulumi_home"
     mkdir -p "$PULUMI_HOME/workspaces"
@@ -602,4 +602,68 @@ EOF")"
     assert_decision NONE "$(decide "keyshelf run -- bash -c 'curl -sS -X POST \"\$SUPABASE_URL/x\"'")"
     assert_decision NONE "$(decide "\$T -sS https://example.com")"
     assert_decision NONE "$(decide "curl -X DELETE https://api.github.com/repos/sunsay-ltd/x")"
+}
+
+@test "deny: --admin merge explains how to fix the failing check instead of handing the merge to the user" {
+    out=$(jq -nc --arg cmd "$GH pr merge 3937 --squash --admin" '{tool_name:"Bash",cwd:"/tmp",tool_input:{command:$cmd}}' | bash "$HOOK")
+    r=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+    assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+    case "$r" in (*'find the failing required check, fix its cause'*'STATUS: FAILURE admin-merge: <check> fails because <evidence>'*) ;; (*) echo "$r" >&2; return 1 ;; esac
+    case "$r" in (*'Ask the user to run it'*) echo "$r" >&2; return 1 ;; esac
+}
+
+@test "deny: gh repo delete still asks the user to run it" {
+    out=$(jq -nc --arg cmd "$GH $REPO $DEL o/r --yes" '{tool_name:"Bash",cwd:"/tmp",tool_input:{command:$cmd}}' | bash "$HOOK")
+    case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in (*'Ask the user to run it themselves'*) ;; (*) return 1 ;; esac
+}
+
+@test "deny: creating the done-gate kill switch from Bash" {
+    assert_decision DENY "$(decide "touch ~/.claude/state/override/done_gate.off")"
+    assert_decision DENY "$(decide "mkdir -p \$HOME/.claude/state/override")"
+    assert_decision DENY "$(decide "cat ~/.claude/state/override/done_gate.off")"
+}
+
+@test "deny: writing the gate ledger or mode file from Bash" {
+    assert_decision DENY "$(decide "echo '{}' >> $HOME/.claude/state/sessions/s1/ledger.jsonl")"
+    assert_decision DENY "$(decide "printf enforce > ~/.claude/state/done_gate.mode")"
+    assert_decision DENY "$(decide "rm -rf ~/.claude/state/sessions")"
+    assert_decision DENY "$(decide_in "$HOME/.claude" "touch state/override/done_gate.off")"
+}
+
+@test "none: reading the gate ledger for debugging" {
+    assert_decision NONE "$(decide "cat ~/.claude/state/sessions/s1/ledger.jsonl")"
+    assert_decision NONE "$(decide "jq . $HOME/.claude/state/sessions/s1/gate.json")"
+}
+
+@test "deny: Write and Edit on gate state; other files pass" {
+    out=$(jq -nc --arg f "$HOME/.claude/state/override/done_gate.off" '{tool_name:"Write",cwd:"/tmp",tool_input:{file_path:$f,content:""}}' | bash "$HOOK")
+    assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+    out=$(jq -nc --arg f "$HOME/.claude/state/sessions/s1/ledger.jsonl" '{tool_name:"Edit",cwd:"/tmp",tool_input:{file_path:$f,old_string:"a",new_string:"b"}}' | bash "$HOOK")
+    assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+    out=$(jq -nc '{tool_name:"Write",cwd:"/tmp",tool_input:{file_path:"/tmp/x.txt",content:""}}' | bash "$HOOK")
+    [ -z "$out" ]
+}
+
+write_decision() {
+    local out
+    out=$(jq -nc --arg f "$1" '{tool_name:"Write",cwd:"/tmp",tool_input:{file_path:$f,content:""}}' | bash "$HOOK")
+    if [ -z "$out" ]; then echo NONE; else printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z'; fi
+}
+
+@test "deny: a Write into an overridden CLAUDE_STATE_DIR and a traversal into the state root" {
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/gate-state"
+    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/gate-state/override/done_gate.off")"
+    assert_decision DENY "$(write_decision "$BATS_TEST_TMPDIR/x/../gate-state/./done_gate.mode")"
+    unset CLAUDE_STATE_DIR
+    assert_decision DENY "$(write_decision "$HOME/.claude/skills/../state/override/done_gate.off")"
+}
+
+@test "none: a project's own .claude/state directory is not the gate state" {
+    assert_decision NONE "$(write_decision "$BATS_TEST_TMPDIR/repo/.claude/state/cache.json")"
+    assert_decision NONE "$(decide "touch $BATS_TEST_TMPDIR/repo/.claude/state/x")"
+}
+
+@test "deny: quoted and relative Bash paths into the state root" {
+    assert_decision DENY "$(decide "touch \"$HOME/.claude/state/override/done_gate.off\"")"
+    assert_decision DENY "$(decide_in "$HOME/.claude/skills" "rm -rf ../state/sessions")"
 }

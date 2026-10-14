@@ -1,0 +1,1 @@
+{"targets":[],"reason":"Claude Code config repo: nothing deploys; hooks and skills take effect from the main checkout and are checked by the local bats suite."}

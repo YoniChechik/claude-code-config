@@ -1,0 +1,3 @@
+The device verification is still blocked by the machine load, and nothing else is pending.
+
+STATUS: FAILURE simulator smoke test

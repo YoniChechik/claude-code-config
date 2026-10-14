@@ -24,6 +24,8 @@
 !/setup.sh
 !/skills
 !/tests
+!/verify
+!/.shellcheckrc
 
 # Noise that can appear INSIDE re-included dirs, ignored everywhere.
 **/__pycache__/

@@ -1,0 +1,7 @@
+1. In **Card number**, type `1`... I can't enter card details myself.
+2. Click **Pay now**.
+
+# Needs human
+- Pay in the open checkout tab.
+
+STATUS: BLOCKED payment: enter the card in the open Shopify checkout tab and click Pay now

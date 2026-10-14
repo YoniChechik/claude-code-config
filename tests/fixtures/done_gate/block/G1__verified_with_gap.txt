@@ -1,0 +1,1 @@
+Nothing new from this notification ... Everything on DEVPUB-592 is merged and verified on staging. The one gap that remains is that DEVPUB-592's status is unconfirmed, because I don't know whether it moved to 'Done - in Staging'.

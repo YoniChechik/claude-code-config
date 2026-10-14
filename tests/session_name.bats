@@ -21,7 +21,6 @@
 # `[[ ... ]]`: bash does not fire the ERR trap for the `[[` keyword, so bats
 # SWALLOWS a failing non-final `[[ ... ]]` and reports the test as ok.
 
-NOTIFY_SH="${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 STATUS_LINE_SH="${BATS_TEST_DIRNAME}/../scripts/status_line.sh"
 
 setup() {
@@ -31,7 +30,7 @@ setup() {
     # fallback is deterministic ("myrepo") across machines.
     WORKDIR="$BATS_TEST_TMPDIR/myrepo"
     mkdir -p "$WORKDIR"
-    source "$NOTIFY_SH"
+    source "${BATS_TEST_DIRNAME}/../scripts/_notify.sh"
 }
 
 assert_equals() {

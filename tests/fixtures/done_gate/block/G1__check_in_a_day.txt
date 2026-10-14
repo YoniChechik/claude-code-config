@@ -1,0 +1,6 @@
+# Done
+- Cookiebot "Customer Privacy API did not load in time": now only a console warning, so Sentry no longer captures it. PR #4011 made the change.
+
+# Needs human
+- The four Sentry issues are still marked unresolved. Check them in a day and resolve them if no new events appear.
+- PR #4020 did not run the repo-wide typecheck and lint.

@@ -24,6 +24,51 @@ if ((BP_RC != 0)); then
     fi
     exit 0
 fi
+STATE_ROOT_GUARD="${CLAUDE_STATE_DIR:-$HOME/.claude/state}"
+DYN=$'\xef\xbf\xbd'
+STATE_DENY_MSG="DENIED: ~/.claude/state holds the Stop gate's session ledger and its kill switch. Only the gate's own scripts write there (done_gate.sh predicate|check, the merge trigger, the post-merge watcher). Do not create, edit or delete these files: satisfy the gate instead (finish the work, start a real watcher, or end with \`STATUS: FAILURE <what>: <evidence>\`). The kill switch is for the user only."
+
+normalize_path() {
+    local part out=() parts
+    IFS=/ read -ra parts <<<"$1"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            "" | .) ;;
+            ..) ((${#out[@]})) && unset 'out[${#out[@]}-1]' ;;
+            *) out+=("$part") ;;
+        esac
+    done
+    local IFS=/
+    REPLY="/${out[*]}"
+}
+
+state_path() {
+    local p=$1 tilde='~'
+    case "$p" in
+        "$tilde"/*) p="$HOME/${p#"$tilde"/}" ;;
+        "\$HOME/"*) p="$HOME/${p#\$HOME/}" ;;
+        "\${HOME}/"*) p="$HOME/${p#\$\{HOME\}/}" ;;
+        "\$/"*) p="$HOME/${p#\$/}" ;;
+        "$DYN"/*) p="$HOME/${p#"$DYN"/}" ;;
+    esac
+    [[ $p == /* ]] || return 1
+    normalize_path "$p"
+    case "$REPLY" in
+        "$STATE_ROOT_NORM" | "$STATE_ROOT_NORM"/*) return 0 ;;
+    esac
+    return 1
+}
+
+normalize_path "$STATE_ROOT_GUARD"
+STATE_ROOT_NORM=$REPLY
+
+if [[ $BP_TOOL == Write || $BP_TOOL == Edit || $BP_TOOL == NotebookEdit || $BP_TOOL == MultiEdit ]]; then
+    if [ -n "$BP_FILE" ] && state_path "$BP_FILE"; then
+        hook_log "deny: $BP_TOOL on gate state $BP_FILE"
+        hook_decision deny "$STATE_DENY_MSG"
+    fi
+    exit 0
+fi
 [[ $BP_TOOL == Bash ]] || exit 0
 
 SUPABASE_PROD_REFS=(pnseoblfzeqiczmmimnr ampdktckxcbdajezxkul)
@@ -54,8 +99,8 @@ ask() { record_verdict ask "$1"; }
 deny() { record_verdict deny "$1"; }
 
 GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
+GH_ADMIN_DENY_MSG="Blocked: \`--admin\` bypasses required checks. Run \`gh pr checks <n>\`, find the failing required check, fix its cause (a CVE: bump the dependency; a migration lint: fix the migration), push, and merge normally on green with \`gh pr merge <n> --squash --match-head-commit <sha>\`. Do not hand the merge to the user. If a required check cannot pass by design, end with \`STATUS: FAILURE admin-merge: <check> fails because <evidence>\`."
 GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
-DYN=$'\xef\xbf\xbd'
 
 has_prefix() {
     case "$1" in
@@ -703,6 +748,29 @@ check_unknown() {
     done
 }
 
+seg_state_path() {
+    state_path "$1" && { REPLY=$1; return 0; }
+    [[ $1 != /* && $SEG_CWD_KNOWN == 1 ]] && state_path "$SEG_CWD/$1" && { REPLY="$SEG_CWD/$1"; return 0; }
+    return 1
+}
+
+check_state_paths() {
+    local w
+    for w in ${SEG_WRITES[@]+"${SEG_WRITES[@]}"}; do
+        seg_state_path "$w" && { deny "$STATE_DENY_MSG"; return; }
+    done
+    for w in "${W[@]:1}"; do
+        seg_state_path "$w" || continue
+        case "$REPLY" in
+            */override | */override/*) deny "$STATE_DENY_MSG"; return ;;
+        esac
+        case "${W[0]##*/}" in
+            cat | ls | head | tail | jq | grep | stat | wc | less) ;;
+            *) deny "$STATE_DENY_MSG"; return ;;
+        esac
+    done
+}
+
 check_segment() {
     local j pattern text w
     W=(${SEG_ARGV[@]+"${SEG_ARGV[@]}"})
@@ -714,11 +782,13 @@ check_segment() {
 
     case "$SEG_FLAGS" in *U*) check_unknown ;; esac
 
+    check_state_paths
+
     case "$SEG_CMD" in
         gh)
             for w in "${W[@]:1}"; do
                 case "$w" in
-                    --admin|--admin=*|*=--admin) deny "$GH_DENY_MSG" ;;
+                    --admin|--admin=*|*=--admin) deny "$GH_ADMIN_DENY_MSG" ;;
                 esac
             done
             has_prefix "$text" "gh repo delete" && deny "$GH_DENY_MSG"

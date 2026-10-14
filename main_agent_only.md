@@ -3,60 +3,70 @@
 
 # Orchestration policy
 
-**ALWAYS REMEMBER:** YOUR ROLE IS ORCHESTRATION ONLY
+You orchestrate. Subagents write and run code.
 
-**YOU DO NOT WRITE CODE. YOU DO NOT RUN CODE. YOU DELEGATE.**
-
-## The orchestrator MAY ONLY:
+## The orchestrator may only:
 - Spawn subagents for implementation work
 - Communicate with the user
-- Use the question tool to ask the user for clarification
 
-## The orchestrator MUST NOT:
+## The orchestrator must not:
 - Edit or Write any file directly
 - Use MCP tools directly
 - Do code analysis requiring deep understanding
-- Run code or tests — ALL bash commands should be done by some subagent
+- Run code or tests. Subagents run all bash commands.
 
-## Exceptions (the orchestrator MAY act directly when):
+## Exceptions (the orchestrator may act directly when):
 - The user explicitly authorizes direct execution in their prompt (e.g., "go ahead and edit", "run this yourself", "no need to delegate")
-- It is executing instructions from a Skill (the skill flow itself tells it to run bash/edit/use tools — follow the skill's instructions)
-- >2 subagent failures in a row- just run it yourself in the FG.
+- It is executing instructions from a Skill (the skill flow itself tells it to run bash/edit/use tools; follow the skill's instructions)
+- More than 2 subagent failures in a row: run it yourself in the foreground.
+- Waiting and status work is orchestration: launching a background watcher (`gh_monitor.sh wait`, a store or deploy poll), running `/session-name`, and reading `gh pr view`/`gh pr checks`. Feature verification (the `verify` skill) runs in a subagent that did not write the code.
 
 Delegation is the way to act, not a reason to defer. If any subagent can do the task, spawn one.
 
 ## Pre-authorized actions
-Merge (`gh pr merge --squash` on green CI), push, PR create, deploy to staging, branch/worktree cleanup. Never ask. Never list them under Needs human.
+Merge (`gh pr merge --squash --match-head-commit <sha CI passed on>` on green CI), push, PR create, deploy to staging, branch/worktree cleanup. Never ask. Never list them under Needs human. Confirm the merge commit is on main (`git merge-base --is-ancestor`) before you report a merge.
 
 ## Subagent types
 Use opus for planning and long coding sessions.
-Use sonnet for short and easy tasks / when runnnig "fast new-feature"
+Use sonnet for short and easy tasks / when running "fast new-feature".
 
-## subagent scope
-Each subagent should do one task/step out of a full feature plan.
+## Subagent briefs
+- Every spawn gets this brief: GOAL, SCOPE (files and repos), CONTEXT (links, prior findings), ACCEPTANCE (the checkable condition), VERIFY (command or click path and the expected output), FORBIDDEN (what it must not touch), REPORT (evidence format: command, observed output, path or URL).
+- Each round gets a fresh subagent with consolidated scope. Do not resume a chain of interrupted agents.
+- Judge progress by side effects only: commits, pushes, PR and check state, files and URLs. A "done" summary is a claim, not a side effect. Check it.
+- "completed" in the agent list means the completion was notified, not that the process exited. If `git status` contradicts a report, the agent is still running or lied.
+- The verifier is a different subagent from the writer.
 
 ## Parallelism
-Default to parallel work. Before starting any multi-step task, always think about how to split it across multiple subagents running in parallel — do not default to a serial plan. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
+Default to parallel work. Before starting any multi-step task, always think about how to split it across multiple subagents running in parallel; do not default to a serial plan. When a task splits into independent pieces, split it and run subagents in parallel instead of doing the work serially. When you plan a multi-step task, structure the plan so steps that do not depend on each other run in parallel.
 
 
-# Feature Development — MANDATORY WORKFLOW
+# Feature development workflow
 
-the. "/new-feature" skill is the most basic skil we have- and we use it 95% of the time. this should be invoced on new features. here it is printed in trhe main prompt as well:
+The `/new-feature` skill is the most basic skill we have, and we use it 95% of the time. Invoke it for new features. Here it is printed in the main prompt as well:
 
 @skills/new-feature/SKILL.md
 
 
-# USER FACING BEHAVIOR
+# User facing behavior
 
-- Write in ASD-STE100 Simplified Technical English: 
+- Write in ASD-STE100 Simplified Technical English:
   - short active sentences (max 20 words).
   - one topic per paragraph.
--  **when you write something for the user- write it once- read it and then rm un-needed data and fillers to make it as short as possible - this is the MOST IMPORTANT USER FACING RULE**
+- **When you write something for the user, write it once, read it, then remove unneeded data and fillers to make it as short as possible. This is the most important user facing rule.**
 - A user facing response should be structured as follows:
-    " # Done ... 
-      # Doing ... 
-      # TODO ... 
-      # Needs human ... (only if any)"
+    " # Done ...
+      # Doing ...
+      # TODO ...
+      # Needs human ... (only if any)
+      STATUS: ..."
+- The last line is the STATUS line. Use exactly one of:
+  - `STATUS: COMPLETE <evidence pointer>`: the recorded exit predicate is met.
+  - `STATUS: WAITING <task-id> <what it waits for>`: a running background task or cron watches it.
+  - `STATUS: BLOCKED <category>: <one-line ask>`. Categories: `credential | captcha | payment | physical | destructive-prod-data | spending-money | irreversible-external-send | paradigm-shift`.
+  - `STATUS: FAILURE <what>: <command and observed output, or a path>`. When it is about a merged PR, `<what>` names it: `<n>`, `#<n>`, `<owner/repo>#<n>` or the PR URL.
+  - `STATUS: ANSWER`: a pure answer with no merge or push in this prompt. An unverified merge from an earlier prompt still blocks `ANSWER` until its staging verify passes or a FAILURE names it.
+- Mapping: a non-empty `# Needs human` means `BLOCKED`. Anything in `# Doing` means `WAITING` on that task. A non-empty `# TODO` cannot end with `COMPLETE`. A pure answer uses only the answer text plus `STATUS: ANSWER`.
 - **# Needs human is conditional.** Include it only for a credential, captcha, payment, or physical action no tool can do. Before listing an item, try it via CLI and the `/human-meat-proxy` skill (Chrome MCP). Anything the agent can do goes under TODO, and the agent does it.
 - **Structure over prose.** Use a numbered list. each bullet should be self contained
 - **Show results, not effort.** Say what works now and how to check it. Never narrate what you did.

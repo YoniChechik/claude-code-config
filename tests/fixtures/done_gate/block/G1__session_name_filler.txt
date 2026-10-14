@@ -1,0 +1,1 @@
+The session's scope hasn't changed since the last check, so the name stays.

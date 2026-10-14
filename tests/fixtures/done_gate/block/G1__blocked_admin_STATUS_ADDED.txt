@@ -1,0 +1,3 @@
+A hook blocks me from running `--admin` merges.
+
+STATUS: BLOCKED admin-merge: run `! gh pr merge 3937 --squash --admin`

@@ -32,9 +32,8 @@ FAILING_CONCLUSIONS='["failure","cancelled","timed_out","action_required","start
 PASSING_CONCLUSIONS='["success","neutral","skipped"]'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source-path=SCRIPTDIR
-# shellcheck source=./_notify.sh
 source "${SCRIPT_DIR}/_notify.sh"
+: "${GH_MONITOR_VERIFY_SCRIPT=${SCRIPT_DIR}/staging_verify.sh}"
 
 run_watchable() {
     local sig=""
@@ -193,7 +192,7 @@ short_reason() {
 }
 
 die_persistent() {
-    report "$(printf 'CI watch for %s hit a persistent error: %s — stopping; run `bash %s %s %s%s` to retry' \
+    report "$(printf "CI watch for %s hit a persistent error: %s — stopping; run \`bash %s %s %s%s\` to retry" \
         "$TARGET" "$1" "$SELF" "$MODE" "$TARGET" "${RETRY_EXTRA:-}")"
     finalize_result
     exit 1
@@ -391,14 +390,17 @@ watch_merge_sha() {
                 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_MERGE_SETTLE" \
                 && "$EVAL_SIG" == "$prev_sig" ]]; then
                 if [[ "$EVAL_FAILED" -gt 0 ]]; then
+                    MERGE_CI=fail
                     report "Post-merge CI FAILED for ${label} on ${OWNER_REPO} (merge commit ${sha}): ${EVAL_FAILED} of ${EVAL_TOTAL} failed"
                 else
+                    MERGE_CI=pass
                     report "Post-merge CI PASSED for ${label} on ${OWNER_REPO} (merge commit ${sha}): all ${EVAL_TOTAL} green"
                 fi
                 report "$EVAL_DETAILS"
                 return 0
             fi
             if [[ "$EVAL_TOTAL" -eq 0 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_RUN_APPEAR_MAX" ]]; then
+                MERGE_CI=none
                 report "${label} merged on ${OWNER_REPO} (merge commit ${sha}); no post-merge CI run started within ${GH_MONITOR_RUN_APPEAR_MAX}s"
                 return 0
             fi
@@ -407,6 +409,7 @@ watch_merge_sha() {
             poll_failed
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
+            MERGE_CI=timeout
             report "Post-merge CI watch TIMED OUT for ${label} on ${OWNER_REPO} (merge commit ${sha}) after ${GH_MONITOR_WATCH_MAX}s: ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"
             return 0
@@ -441,7 +444,7 @@ merge_body() {
                 ;;
         esac
         if [[ "$(elapsed_since "$wait_start")" -ge "$GH_MONITOR_MERGE_WAIT_MAX" ]]; then
-            report "$(printf 'CI settled wait timed out; %s still not merged after 6h — stopping. Run `bash %s merge %s --repo %s` after you merge it.' \
+            report "$(printf "CI settled wait timed out; %s still not merged after 6h — stopping. Run \`bash %s merge %s --repo %s\` after you merge it." \
                 "$TARGET" "$SELF" "$TARGET" "$OWNER_REPO")"
             return 0
         fi
@@ -450,7 +453,22 @@ merge_body() {
     if [[ -z "$sha" || "$sha" == "-" ]]; then
         die_persistent "PR is MERGED but GitHub reports no merge commit"
     fi
+    MERGE_CI=timeout
     watch_merge_sha "$sha" "PR #${number} \"${title}\""
+    staging_verify "$sha" "$number"
+}
+
+staging_verify() {
+    [[ -n "$GH_MONITOR_VERIFY_SCRIPT" ]] || return 0
+    local out
+    log "staging verify: ci=${MERGE_CI}"
+    local rc
+    out=$(run_watchable bash "$GH_MONITOR_VERIFY_SCRIPT" "$OWNER_REPO" "$TARGET" "$2" "$1" "$MERGE_CI" 2>>"$LOGFILE")
+    rc=$?
+    bail_if_signaled "$rc"
+    [[ -n "$out" ]] || out="Staging verify FAILED for ${OWNER_REPO} (merge commit $1): the verifier exited ${rc} without a verdict; see ${LOGFILE}"
+    report "$out"
+    return 0
 }
 
 run_body() {
@@ -553,7 +571,7 @@ wait_body() {
         fi
         if [[ "$waited" -ge "$GH_MONITOR_WAIT_GRACE" ]] && lockf -t 0 -k "$LOCKFILE" true 2>/dev/null; then
             [[ -s "$RESULT_FILE" ]] && continue
-            printf 'No merge watcher is running for %s on %s and none recorded a result; start one with `bash %s merge %s --repo %s --detach`\n' \
+            printf "No merge watcher is running for %s on %s and none recorded a result; start one with \`bash %s merge %s --repo %s --detach\`\n" \
                 "$TARGET" "$OWNER_REPO" "$SELF" "$TARGET" "$OWNER_REPO"
             return 0
         fi

@@ -1,46 +1,76 @@
 #!/usr/bin/env bash
-# Usage: rename_session.sh <name>
-# Exit 0 = applied, 1 = error/empty name, 2 = usage, 10 = name unchanged (no-op).
-# Env: CLAUDE_CODE_SESSION_ID (or AGENT_SESSION_ID); NATIVE_RENAME_CMD (default /rename).
 set -euo pipefail
 
-# Shared helpers: _sanitize_and_cap, _session_name_read
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../../scripts/_notify.sh
 source "${SCRIPT_DIR}/../../scripts/_notify.sh"
+source "${SCRIPT_DIR}/../../scripts/_state.sh"
 
-[[ -n "${1:-}" ]] || { echo "Usage: $0 <name>" >&2; exit 2; }
+usage() {
+    echo "Usage: $0 <name> [--done '<predicate item>']..." >&2
+    exit 2
+}
+
+[[ -n "${1:-}" ]] || usage
+RAW_NAME="$1"
+shift
+ITEMS=()
+while (($#)); do
+    case "$1" in
+    --done)
+        [[ -n "${2:-}" ]] || usage
+        ITEMS+=("$2")
+        shift 2
+        ;;
+    *) usage ;;
+    esac
+done
+
 SESSION_ID="${CLAUDE_CODE_SESSION_ID:-${AGENT_SESSION_ID:-}}"
-[[ -n "$SESSION_ID" ]] || { echo "Error: no session id (CLAUDE_CODE_SESSION_ID or AGENT_SESSION_ID) set." >&2; exit 1; }
-
-# Step 1: sanitize + cap at 35 codepoints; empty result is an error
-NAME=$(_sanitize_and_cap "$1")
-[[ -n "$NAME" ]] || { echo "Error: name is empty after sanitizing; nothing written." >&2; exit 1; }
-
-# Step 2: no-op if it already matches the stored name
-if [[ "$NAME" == "$(_session_name_read "$SESSION_ID")" ]]; then
-    echo "$NAME"
-    exit 10
-fi
-
-# Step 3: atomic sidecar write (temp file + mv) so the status-line poller never sees a partial file
-DEST="${CLAUDE_NOTIFY_TMP_DIR:-/tmp}/session_name_${SESSION_ID}"
-tmp=$(mktemp "${CLAUDE_NOTIFY_TMP_DIR:-/tmp}/session_name_XXXXXX") || { echo "Error: could not create temp file." >&2; exit 1; }
-if ! printf '%s' "$NAME" >"$tmp" || ! mv -f "$tmp" "$DEST"; then
-    rm -f "$tmp"
-    echo "Error: could not store the session name at $DEST." >&2
+[[ -n "$SESSION_ID" ]] || {
+    echo "Error: no session id (CLAUDE_CODE_SESSION_ID or AGENT_SESSION_ID) set." >&2
     exit 1
-fi
-echo "$NAME"
+}
 
-# Steps 4-5 only apply inside iTerm2
+NAME=$(_sanitize_and_cap "$RAW_NAME")
+[[ -n "$NAME" ]] || {
+    echo "Error: name is empty after sanitizing; nothing written." >&2
+    exit 1
+}
+
+fail() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+record_predicate() {
+    ((${#ITEMS[@]})) || return 0
+    state_init "$SESSION_ID" || fail "state directory is untrusted: $STATE_ERR"
+    local items sha
+    items=$(jq -nc '$ARGS.positional | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))' --args "${ITEMS[@]}")
+    [[ $(jq 'length' <<<"$items") -gt 0 ]] || fail "the predicate is empty."
+    sha=$(printf '%s' "$items" | shasum -a 256 | cut -d' ' -f1)
+    ledger_latest predicate || fail "the session ledger is untrusted: $STATE_ERR"
+    [[ -n $REPLY && $(jq -r '.sha256' <<<"$REPLY") == "$sha" ]] && return 0
+    ledger_append "$(jq -nc --argjson items "$items" --arg sha "$sha" '{kind: "predicate", items: $items, sha256: $sha}')" ||
+        fail "could not write the session ledger."
+}
+
+if [[ "$NAME" == "$(_session_name_read "$SESSION_ID")" ]]; then
+    record_predicate
+    exit 0
+fi
+
+DEST="${CLAUDE_NOTIFY_TMP_DIR:-/tmp}/session_name_${SESSION_ID}"
+atomic_write "$DEST" "$NAME" || fail "could not store the session name at $DEST."
+echo "$NAME"
+record_predicate
+
 [[ "${TERM_PROGRAM:-}" == "iTerm.app" && -n "${ITERM_SESSION_ID:-}" ]] || exit 0
 
-# AppleScript's "unique ID" is the bare GUID; $ITERM_SESSION_ID has a "w2t1p0:" prefix to strip
 GUID="${ITERM_SESSION_ID#*:}"
 
-# Step 4: set the raw tab title (OSC 1). Bash tool stdout is a pipe, so write to the session's real tty device
-TTY_DEVICE=$(osascript <<APPLESCRIPT
+TTY_DEVICE=$(
+    osascript <<APPLESCRIPT
 tell application "iTerm2"
     repeat with w in windows
         repeat with t in tabs of w
@@ -52,12 +82,8 @@ tell application "iTerm2"
 end tell
 APPLESCRIPT
 )
-[[ -z "$TTY_DEVICE" ]] || printf '\e]1;%s\a' "$NAME" > "$TTY_DEVICE"
+[[ -z "$TTY_DEVICE" ]] || printf '\e]1;%s\a' "$NAME" >"$TTY_DEVICE"
 
-# Step 5: type "/rename <name>" into THIS session (by GUID, never the frontmost one), then send a
-# lone CR as a separate write so Claude Code reads it as an Enter keypress, not pasted text.
-# write text goes straight to the session's pty: no select/activate, so focus never changes.
-# The GUID is re-resolved per write: loop refs are z-order indexes that shift if the user switches windows.
 CMD="${NATIVE_RENAME_CMD:-/rename}"
 ESC="${NAME//\\/\\\\}"
 ESC="${ESC//\"/\\\"}"

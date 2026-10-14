@@ -1,0 +1,9 @@
+# TODO
+1. Check Sentry production ...
+2. If Sentry is quiet, debug the `readyForApp` gate ...
+3. Fix it, then open a PR and merge it on green CI ...
+
+I'll start with step 1 and carry on through the fix unless you say otherwise.
+
+# Doing
+- Nothing is running.

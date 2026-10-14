@@ -1,0 +1,3 @@
+Meta sent the verification SMS to the phone number on the account.
+
+STATUS: BLOCKED physical: read me the Meta SMS code sent to your phone

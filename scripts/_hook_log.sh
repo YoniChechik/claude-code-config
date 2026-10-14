@@ -62,7 +62,7 @@ hook_log() {
     reason=${reason//$'\n'/\\n}
     line="$ts ${HOOK_NAME}[$$] ${reason:0:200} | ${cmd:0:160}"
     if [[ ! -d $HOOK_LOG_DIR ]]; then
-        mkdir -p -m 700 "$HOOK_LOG_DIR" 2>/dev/null || return 0
+        (umask 077 && mkdir -p "$HOOK_LOG_DIR") 2>/dev/null || return 0
     fi
     if [[ ! -e $HOOK_LOG_FILE ]]; then
         (umask 077; : >>"$HOOK_LOG_FILE") 2>/dev/null || return 0

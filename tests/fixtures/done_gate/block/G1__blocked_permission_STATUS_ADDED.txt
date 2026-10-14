@@ -1,0 +1,3 @@
+I can run this check myself if your Chrome profile is already signed in. Do you approve a read-only check on production?
+
+STATUS: BLOCKED permission: read-only check on production

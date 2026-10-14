@@ -1,0 +1,2 @@
+1. Merge PR #4008: `gh pr merge 4008 --squash`. It is code-only. Tell me "merged" when it's in.
+2. Staging catalog drift... I haven't looked into it yet.

@@ -17,7 +17,7 @@ Creates a professional pull request when a feature is complete and ready for rev
 git log origin/main..HEAD --oneline
 git diff origin/main...HEAD --stat
 ```
-- Erase `plan-*.md` and any other dev/workflow related files and commit. If not sure, ask user for directions.
+- Erase `plan-*.md` and any other dev/workflow related files and commit. If not sure, keep the file.
 - **IMPORTANT:** Only erase files that were created by this branch. Never delete files that existed before the branch was created. When in doubt, check `git log origin/main..HEAD -- <file>` to verify the file was added in this branch.
 
 ### Step 2: Generate PR Title and Body
@@ -25,22 +25,27 @@ Create professional PR content:
 
 **Title Format**: `Feature: [Descriptive title based on plan-*.md and commits]`
 
-**Body Structure**:
+**Body Structure** (under about 40 lines):
 ```markdown
-## Summary
-- Key functionality delivered
-- Major components implemented
-- Value provided to users
+## Why
+- The problem or ticket, and why it matters now
 
-## Implementation Details
-- Technical approach and architecture decisions
-- Integration points with existing codebase
-- Notable patterns or utilities used
+## What changed
+- The behavior change, in user or operator terms
 
-## Testing
-- Unit tests added for core functionality
-- Integration tests for end-to-end workflows
-- Manual testing performed
+## Scope
+- What this PR covers, and what it leaves out on purpose
+
+## Tradeoffs
+- Options considered, and why this one won
+
+## Blast radius
+- What can break, who sees it, and how to roll back
+
+## Verification
+- What was run: command or click path
+- Observed output or evidence link
+- Staging plan: target, deployed-SHA check, probes, UI proof
 ```
 
 ### Step 3: Create Pull Request

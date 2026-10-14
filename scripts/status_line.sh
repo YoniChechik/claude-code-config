@@ -6,7 +6,6 @@ trap 'echo "(status error)"' ERR
 # Shared helpers: _session_name_read / _sanitize_and_cap (the single
 # implementation of the session-name sanitize-and-cap contract). Sourcing only
 # defines functions, so it costs no subprocess on this ~1/second hot path.
-# shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/_notify.sh"
 
 # Colors are expanded ONCE, here, via $'...' ANSI-C quoting — never left as

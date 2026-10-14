@@ -1,7 +1,4 @@
 #!/usr/bin/env bats
-#
-# Tests for skills/session-name/rename_session.sh -- the single
-# session-name script (sanitize, no-op, atomic write; iTerm2 steps skipped outside iTerm2). The sanitize/read primitives are covered by tests/session_name.bats.
 
 SCRIPT="${BATS_TEST_DIRNAME}/../skills/session-name/rename_session.sh"
 
@@ -9,6 +6,8 @@ setup() {
     export CLAUDE_NOTIFY_TMP_DIR="$BATS_TEST_TMPDIR"
     unset AGENT_SESSION_ID
     export CLAUDE_CODE_SESSION_ID="testsess"
+    export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
+    export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
     unset TERM_PROGRAM ITERM_SESSION_ID
 }
 
@@ -20,10 +19,13 @@ setup() {
     [ "$(wc -c <"$BATS_TEST_TMPDIR/session_name_testsess")" -eq 10 ]
 }
 
-@test "a name matching the stored one is a no-op (exit 10)" {
+@test "a name matching the stored one is a silent no-op (exit 0, no output, sidecar untouched)" {
     printf '%s' "already-set" >"$BATS_TEST_TMPDIR/session_name_testsess"
+    touch -t 202601010000 "$BATS_TEST_TMPDIR/session_name_testsess"
     run bash "$SCRIPT" "already-set"
-    [ "$status" -eq 10 ]
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ "$(stat -f %m "$BATS_TEST_TMPDIR/session_name_testsess")" = "$(date -j -f %Y%m%d%H%M%S 20260101000000 +%s)" ]
 }
 
 @test "a name that sanitizes to empty exits 1 and writes nothing" {
@@ -58,6 +60,59 @@ setup() {
     run bash "$SCRIPT" "my-feature"
     [ "$status" -eq 0 ]
     [ -f "$BATS_TEST_TMPDIR/session_name_otherid" ]
+}
+
+@test "--done appends one predicate record to a 0700 session ledger" {
+    run bash "$SCRIPT" "my-feature" --done 'cmd:curl -fsS https://x/ping' --done 'merged:sunsay/core#1'
+    [ "$status" -eq 0 ]
+    [ "$output" = "my-feature" ]
+    local dir="$CLAUDE_STATE_DIR/sessions/$CLAUDE_CODE_SESSION_ID"
+    [ "$(stat -f %Lp "$dir")" = "700" ]
+    [ "$(wc -l <"$dir/ledger.jsonl")" -eq 1 ]
+    run jq -r '[.kind, (.items | length), .items[1], (.sha256 | length), (.ts | type)] | @tsv' "$dir/ledger.jsonl"
+    [ "$output" = "$(printf 'predicate\t2\tmerged:sunsay/core#1\t64\tnumber')" ]
+}
+
+@test "--done with an unchanged name and predicate is silent and appends nothing" {
+    local ledger="$CLAUDE_STATE_DIR/sessions/$CLAUDE_CODE_SESSION_ID/ledger.jsonl"
+    bash "$SCRIPT" "my-feature" --done 'x' >/dev/null
+    run bash "$SCRIPT" "my-feature" --done ' x '
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ "$(wc -l <"$ledger")" -eq 1 ]
+    run bash "$SCRIPT" "my-feature" --done 'y'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ "$(wc -l <"$ledger")" -eq 2 ]
+}
+
+@test "--done with only blank items exits 1" {
+    run bash "$SCRIPT" "my-feature" --done '   '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"predicate is empty"* ]]
+}
+
+@test "--done refuses a symlinked state dir" {
+    mkdir -p "$BATS_TEST_TMPDIR/real"
+    ln -s "$BATS_TEST_TMPDIR/real" "$BATS_TEST_TMPDIR/state"
+    run bash "$SCRIPT" "my-feature" --done 'x'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"untrusted"* ]]
+    [ -z "$(ls -A "$BATS_TEST_TMPDIR/real")" ]
+}
+
+@test "--done refuses an unsafe session id" {
+    export CLAUDE_CODE_SESSION_ID="bad.id"
+    run bash "$SCRIPT" "my-feature" --done 'x'
+    [ "$status" -eq 1 ]
+    [ ! -e "$CLAUDE_STATE_DIR/sessions/bad.id" ]
+}
+
+@test "--done without a value or an unknown flag exits 2" {
+    run bash "$SCRIPT" "my-feature" --done
+    [ "$status" -eq 2 ]
+    run bash "$SCRIPT" "my-feature" --bogus
+    [ "$status" -eq 2 ]
 }
 
 @test "no argument exits 2 with usage" {

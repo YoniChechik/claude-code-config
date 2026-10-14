@@ -7,10 +7,9 @@
 # the function's whole job is real filesystem git state (branch, HEAD,
 # working tree), which a stub would only re-describe, not verify.
 
-LIB="${BATS_TEST_DIRNAME}/../scripts/_git_sync.sh"
 
 setup() {
-    source "$LIB"
+    source "${BATS_TEST_DIRNAME}/../scripts/_git_sync.sh"
 
     ORIGIN="$BATS_TEST_TMPDIR/origin.git"
     git init --quiet --bare -b main "$ORIGIN"

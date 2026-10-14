@@ -40,18 +40,24 @@ first, so that when you do ask, there is almost nothing left to do.
    - **Open with an explicit mark** that this happens in the browser tab/page
      you already opened via Chrome MCP — e.g. "Do this in the tab I just
      opened" — never let it read as ambiguous about which window.
+   - Name the attempted path: the URL you reached and the element that
+     blocked you (the button, field or prompt).
    - List only the remaining action(s), in order, as short imperative steps.
-   - **End with:** "Say 'go' (or similar) once done and I'll continue from
+   - Then add: "Say 'go' (or similar) once done and I'll continue from
      here." Never end with an open-ended question when the actual next step
      is this mechanical.
+   - The last line is `STATUS: BLOCKED <credential|captcha|payment|physical>: <the ask in one line>`.
 
 6. **On their "go," resume immediately** and finish the rest of the task
    without re-explaining or re-confirming what already happened.
 
 ## Example shape
 
-> Do this in the tab I just opened (`dev.shopify.com/dashboard/.../apps/...`):
+> Do this in the tab I just opened (`dev.shopify.com/dashboard/.../apps/...`).
+> Blocked at: the "Install app" button needs the store owner's consent click.
 > 1. Click "Install app"
 > 2. Confirm on the consent screen
 >
 > Say "go" once done and I'll continue from here.
+>
+> STATUS: BLOCKED credential: click "Install app" and confirm consent in the open tab
