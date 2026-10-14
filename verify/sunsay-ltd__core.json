@@ -1,0 +1,84 @@
+{
+  "targets": [
+    {
+      "name": "app-backend-staging",
+      "sha_url": "https://api.staging.app.sunsay.com/version",
+      "sha_jq": ".git_sha",
+      "headers_file": "~/.config/sunsay/staging-edge.headers",
+      "timeout_s": 2700,
+      "paths": [
+        "app-backend/**",
+        "chat-skeleton/**",
+        "mobile/src/signal/facet-text.json",
+        "infra-app-backend/**",
+        "app-supabase/supabase/migrations/**",
+        "app-supabase/supabase/config.toml",
+        ".keyshelf/app-backend/**",
+        ".keyshelf/app-supabase/**",
+        ".keyshelf/ci-app-smoke/**",
+        ".keyshelf/config.yaml",
+        ".github/workflows/deploy-app-backend.yml",
+        ".github/workflows/_app-backend-smoke-tests.yml",
+        ".github/actions/gcp-auth/**",
+        ".github/actions/setup-deploy-context/**",
+        ".github/actions/keyshelf-resolve/**",
+        ".github/actions/pulumi-context/**",
+        ".github/actions/setup-node-pnpm/**",
+        ".github/actions/traffic-gated-deploy/**",
+        ".github/actions/traffic-gated-promote/**",
+        ".github/scripts/app-deep-health-probe.js",
+        ".github/scripts/traffic-gated-promote.sh",
+        ".github/scripts/check-recorded-backend-url.sh",
+        ".github/scripts/app-staging-smoke-test.js",
+        ".github/scripts/lib/smoke.js",
+        "pnpm-lock.yaml"
+      ],
+      "probes": [
+        {
+          "url": "https://api.staging.app.sunsay.com/health",
+          "expect_status": 200,
+          "expect": "\"status\":\"ok\""
+        },
+        {
+          "url": "https://api.staging.app.sunsay.com/version-check",
+          "expect_status": 200,
+          "expect": "min_native_version"
+        }
+      ],
+      "ui": false
+    },
+    {
+      "name": "backoffice-backend-staging",
+      "sha_url": "https://backoffice-api-staging.sunsay.com/version",
+      "sha_jq": ".git_sha",
+      "headers_file": "~/.config/sunsay/staging-edge.headers",
+      "timeout_s": 2700,
+      "paths": [
+        "backoffice-backend/**",
+        "chat-skeleton/**",
+        "shared/roles.json",
+        "vibe-code-onboarding/**",
+        "sunsay-cli/**",
+        "infra-backoffice-backend/**",
+        ".keyshelf/backoffice-backend/**",
+        ".keyshelf/config.yaml",
+        ".github/workflows/deploy-backoffice-backend.yml",
+        ".github/workflows/_backoffice-backend-deploy-stack.yml",
+        ".github/actions/setup-deploy-context/**",
+        ".github/actions/gcp-auth/**",
+        ".github/actions/pulumi-context/**",
+        ".github/actions/setup-node-pnpm/**",
+        ".github/actions/keyshelf-resolve/**",
+        "pnpm-lock.yaml"
+      ],
+      "probes": [
+        {
+          "url": "https://backoffice-api-staging.sunsay.com/health",
+          "expect_status": 200,
+          "expect": "\"status\":\"ok\""
+        }
+      ],
+      "ui": false
+    }
+  ]
+}
