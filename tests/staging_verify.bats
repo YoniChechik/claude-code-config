@@ -18,6 +18,7 @@ setup() {
 printf '%s\n' "$*" >>"$STUB/gh_calls.log"
 case "$*" in
     "api repos/o/r/compare/"*"--jq .status") cat "$STUB/compare" 2>/dev/null || echo diverged; exit 0 ;;
+    "api --paginate repos/o/r/commits/"*) [ -f "$STUB/files" ] || exit 1; cat "$STUB/files"; exit 0 ;;
 esac
 exit 99
 GH
@@ -262,4 +263,84 @@ STG='"name":"staging","sha_url":"https://stg/version","sha_jq":".sha"'
     verify
     assert_contains "Staging verify N/A" "$output"
     [ ! -e "$LEDGER" ]
+}
+
+@test "a headers_file is sent to every curl call by reference, never on argv" {
+    printf 'x-key: s3cret\n' >"$BATS_TEST_TMPDIR/h"
+    chmod 600 "$BATS_TEST_TMPDIR/h"
+    config "{\"targets\":[{$STG,\"headers_file\":\"$BATS_TEST_TMPDIR/h\",\"probes\":[{\"url\":\"https://stg/ping\"}]}]}"
+    serve_sha "$SHA"
+    verify
+    assert_eq pass "$(field .result)"
+    run cat "$STUB/curl_calls.log"
+    assert_contains "-H @$BATS_TEST_TMPDIR/h" "${lines[0]}"
+    assert_contains "-H @$BATS_TEST_TMPDIR/h" "${lines[1]}"
+    ! grep -q s3cret "$STUB/curl_calls.log" "$LEDGER"
+}
+
+@test "a headers_file under ~/ resolves against HOME" {
+    export HOME="$BATS_TEST_TMPDIR/home"
+    mkdir -p "$HOME"
+    printf 'x-key: v\n' >"$HOME/h"
+    chmod 600 "$HOME/h"
+    config "{\"targets\":[{$STG,\"headers_file\":\"~/h\"}]}"
+    serve_sha "$SHA"
+    verify
+    assert_eq pass "$(field .result)"
+    assert_contains "-H @$HOME/h" "$(cat "$STUB/curl_calls.log")"
+}
+
+@test "a missing or group-readable headers_file fails the target without any curl" {
+    config "{\"targets\":[{$STG,\"headers_file\":\"$BATS_TEST_TMPDIR/none\"}]}"
+    verify
+    assert_eq fail "$(field .result)"
+    assert_contains "is missing" "$output"
+    printf 'x-key: v\n' >"$BATS_TEST_TMPDIR/h"
+    chmod 640 "$BATS_TEST_TMPDIR/h"
+    config "{\"targets\":[{$STG,\"headers_file\":\"$BATS_TEST_TMPDIR/h\"}]}"
+    verify
+    assert_contains "readable by others (mode 640)" "$output"
+    [ ! -e "$STUB/curl_calls.log" ]
+}
+
+@test "a target whose paths the merge does not touch is skipped and the verify is n/a" {
+    printf 'docs/a.md\nmobile/x.ts\n' >"$STUB/files"
+    config "{\"targets\":[{$STG,\"paths\":[\"app-backend/**\",\"infra/*.ts\"]}]}"
+    verify
+    assert_eq n/a "$(field .result)"
+    assert_contains "staging skipped, merge touches none of its paths" "$output"
+    assert_eq true "$(field '.targets[0].skipped')"
+    [ ! -e "$STUB/curl_calls.log" ]
+}
+
+@test "a target whose paths the merge touches is checked, and skipped siblings do not fail it" {
+    printf 'app-backend/app/main.py\n' >"$STUB/files"
+    config "{\"targets\":[{$STG,\"paths\":[\"app-backend/**\"]},{\"name\":\"b\",\"sha_url\":\"https://b/version\",\"paths\":[\"bo/**\"]}]}"
+    serve_sha "$SHA"
+    verify
+    assert_eq pass "$(field .result)"
+    assert_contains "staging serves ${SHA:0:12}, 0/0 probes ok; b skipped" "$output"
+}
+
+@test "a single-star glob does not cross directories" {
+    printf 'infra/sub/x.ts\n' >"$STUB/files"
+    config "{\"targets\":[{$STG,\"paths\":[\"infra/*.ts\"]}]}"
+    verify
+    assert_eq n/a "$(field .result)"
+}
+
+@test "when the merge's files cannot be listed the target is checked, not skipped" {
+    config "{\"targets\":[{$STG,\"paths\":[\"app-backend/**\"]}]}"
+    serve_sha "$SHA"
+    verify
+    assert_eq pass "$(field .result)"
+}
+
+@test "malformed headers_file and paths are rejected" {
+    config "{\"targets\":[{$STG,\"headers_file\":1}]}"
+    verify
+    assert_contains "headers_file must be a path string" "$output"
+    config "{\"targets\":[{$STG,\"paths\":[1]}]}"
+    verify
+    assert_contains "paths must be an array of glob strings" "$output"
 }

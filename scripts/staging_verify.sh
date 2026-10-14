@@ -58,6 +58,8 @@ problems=$(jq -r '
             | if ($t | type) != "object" then "target \($i) is not an object"
               elif ($t.sha_url | https | not) then "target \($i): sha_url must be an https:// URL"
               elif (($t.probes // []) | type) != "array" then "target \($i): probes is not an array"
+              elif $t.headers_file != null and ($t.headers_file | type) != "string" then "target \($i): headers_file must be a path string"
+              elif $t.paths != null and ((($t.paths | type) != "array") or ([$t.paths[] | select(type != "string")] | length > 0)) then "target \($i): paths must be an array of glob strings"
               else (($t.probes // []) | to_entries[] | .key as $j | .value as $p
                   | if ($p | type) != "object" then "target \($i) probe \($j) is not an object"
                     elif $p.cmd != null then "target \($i) probe \($j): shell probes are not supported, use url"
@@ -88,7 +90,7 @@ wait_for_sha() {
     CONTAINS=false
     start=$EPOCHSECONDS
     while :; do
-        OBSERVED=$(curl "${CURL_HTTPS[@]}" -f --max-time 20 -- "$url" 2>/dev/null | jq -r "($filter) | strings" 2>/dev/null)
+        OBSERVED=$(curl "${CURL_HTTPS[@]}" "${HDR[@]}" -f --max-time 20 -- "$url" 2>/dev/null | jq -r "($filter) | strings" 2>/dev/null)
         OBSERVED=${OBSERVED//[[:space:]]/}
         if [[ ${#OBSERVED} -ge 7 && $SHA == "$OBSERVED"* ]]; then
             CONTAINS=true
@@ -111,7 +113,7 @@ wait_for_sha() {
 
 run_probe() {
     local name=$1 url=$2 want=$3 expect=$4 body="$WORK/body" code prc matched=true found=true out out_sha detail
-    code=$(curl "${CURL_HTTPS[@]}" --max-time "$STAGING_VERIFY_PROBE_TIMEOUT" -o "$body" -w '%{http_code}' -- "$url" 2>"$WORK/err")
+    code=$(curl "${CURL_HTTPS[@]}" "${HDR[@]}" --max-time "$STAGING_VERIFY_PROBE_TIMEOUT" -o "$body" -w '%{http_code}' -- "$url" 2>"$WORK/err")
     prc=$?
     [[ -f $body ]] || : >"$body"
     out=$(head -c 2048 "$body")
@@ -133,12 +135,64 @@ run_probe() {
     rm -f "$body"
 }
 
+joined() {
+    local out
+    out=$(printf '%s; ' "$@")
+    printf '%s' "${out%; }"
+}
+
+MERGE_FILES=""
+MERGE_FILES_STATE=""
+
+touches_paths() {
+    local globs=$1
+    if [[ -z $MERGE_FILES_STATE ]]; then
+        if MERGE_FILES=$(gh api --paginate "repos/${REPO}/commits/${SHA}" --jq '.files[].filename' 2>/dev/null); then
+            MERGE_FILES_STATE=ok
+        else
+            MERGE_FILES_STATE=unknown
+        fi
+    fi
+    [[ $MERGE_FILES_STATE == ok ]] || return 0
+    jq -e -R -s --argjson globs "$globs" '
+        def regex: gsub("(?<c>[.+?^$(){}|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*\\*"; "\u0001") | gsub("\\*"; "[^/]*") | gsub("\u0001"; ".*") | "^\(.)$";
+        ($globs | map(regex)) as $res
+        | any(split("\n")[] | select(length > 0); . as $file | any($res[]; . as $re | $file | test($re)))' <<<"$MERGE_FILES" >/dev/null
+}
+
+trusted_headers_file() {
+    local path=$1 mode
+    [[ -e $path ]] || { HDR_ERR="headers_file ${path} is missing"; return 1; }
+    state_safe_file "$path" || { HDR_ERR="untrusted headers_file: ${STATE_ERR}"; return 1; }
+    read -r _ mode _ <<<"$REPLY"
+    ((8#$mode & 8#077)) && { HDR_ERR="headers_file ${path} is readable by others (mode ${mode})"; return 1; }
+    return 0
+}
+
 target_lines=()
 failures=()
 summary=()
+ran=0
 while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '' sha_jq &&
-    IFS= read -r -d '' timeout_s && IFS= read -r -d '' probes; do
+    IFS= read -r -d '' timeout_s && IFS= read -r -d '' probes && IFS= read -r -d '' headers_file &&
+    IFS= read -r -d '' paths; do
     [[ $timeout_s =~ ^[0-9]+$ ]] || timeout_s=$STAGING_VERIFY_DEFAULT_TIMEOUT
+    if [[ $paths != null ]] && ! touches_paths "$paths"; then
+        target_lines+=("$(jq -nc --arg n "$name" '{name: $n, skipped: true, reason: "merge touches none of its paths"}')")
+        summary+=("${name} skipped, merge touches none of its paths")
+        continue
+    fi
+    ran=$((ran + 1))
+    HDR=()
+    if [[ -n $headers_file ]]; then
+        [[ $headers_file == \~/* ]] && headers_file="$HOME/${headers_file#\~/}"
+        if ! trusted_headers_file "$headers_file"; then
+            failures+=("${name}: ${HDR_ERR}")
+            target_lines+=("$(jq -nc --arg n "$name" '{name: $n, observed_sha: "", contains_merge: false, probes: []}')")
+            continue
+        fi
+        HDR=(-H "@${headers_file}")
+    fi
     wait_for_sha "$name" "$sha_url" "$sha_jq" "$timeout_s"
     probe_lines=()
     ok=0
@@ -150,11 +204,13 @@ while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '
         '{name: $n, observed_sha: $o, contains_merge: $c, probes: .}')")
     summary+=("${name} serves ${OBSERVED:0:12}, ${ok}/${total} probes ok")
 done < <(jq -j '.targets[] | (.name // "target" | tostring), "\u0000", .sha_url, "\u0000", (.sha_jq // ".sha"), "\u0000",
-    (.timeout_s // "" | tostring), "\u0000", ((.probes // []) | tojson), "\u0000"' <<<"$config")
+    (.timeout_s // "" | tostring), "\u0000", ((.probes // []) | tojson), "\u0000", (.headers_file // ""), "\u0000",
+    (.paths | tojson), "\u0000"' <<<"$config")
 
 all_targets=$(printf '%s\n' "${target_lines[@]}" | jq -sc .)
 
 if ((${#failures[@]} > 0)); then
-    record fail "$(IFS='; '; printf '%s' "${failures[*]}")" "$all_targets" "$config_sha"
+    record fail "$(joined "${failures[@]}")" "$all_targets" "$config_sha"
 fi
-record pass "$(IFS='; '; printf '%s' "${summary[*]}")" "$all_targets" "$config_sha"
+((ran > 0)) || record n/a "$(joined "${summary[@]}")" "$all_targets" "$config_sha"
+record pass "$(joined "${summary[@]}")" "$all_targets" "$config_sha"
