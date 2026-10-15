@@ -96,9 +96,12 @@ bash "<skill-base-dir>/destroy_worktree.sh" my-feature-name --force
 bash "<skill-base-dir>/destroy_worktree.sh" my-feature-name --delete-branch
 ```
 
-`destroy_worktree.sh` accepts either a bare feature name (resolved against
-`<main-repo-root>/.claude/worktrees/<name>`) or a full path to a registered
-worktree. Both scripts work from any cwd inside the repo (main checkout or
+`setup_worktree.sh` caps the directory name at 58 characters (leading
+characters plus an 8-hex hash of the full name) because devtrees builds a unix
+socket path from it that macOS limits to 103 bytes; the branch keeps the full
+name. `destroy_worktree.sh` accepts a directory name (resolved against
+`<main-repo-root>/.claude/worktrees/<name>`), a branch name, or a full path to
+a registered worktree. Both scripts work from any cwd inside the repo (main checkout or
 any worktree) — they always resolve the true main repo root themselves.
 
 `setup_worktree.sh` preserves the existing `create-worktree` skill's

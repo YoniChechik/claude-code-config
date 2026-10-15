@@ -21,6 +21,22 @@ case "$FEATURE_NAME" in
         ;;
 esac
 
+# Worktree directory names are capped: devtrees builds a unix socket path from
+# the directory name and macOS rejects socket paths over 103 bytes, so a name
+# longer than 58 characters can never boot. Longer names keep their leading
+# characters plus a hash of the full name, so they stay readable and unique.
+worktree_dir_name() {
+    local name="$1" max=58 hash head
+    if [ "${#name}" -le "$max" ]; then
+        printf '%s' "$name"
+        return
+    fi
+    hash=$(printf '%s' "$name" | shasum -a 1 | cut -c1-8)
+    head="${name:0:$((max - 9))}"
+    while [ "${head%-}" != "$head" ]; do head="${head%-}"; done
+    printf '%s-%s' "$head" "$hash"
+}
+
 # --- Resolve the TRUE main repo root, regardless of cwd -----------------
 # `git rev-parse --show-toplevel` is what the older create-worktree script
 # used, and it is the root cause of the nesting bug: run from inside a
@@ -36,7 +52,8 @@ GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null)" || {
 GIT_COMMON_DIR="$(cd "$GIT_COMMON_DIR" && pwd)"
 MAIN_REPO_ROOT="$(dirname "$GIT_COMMON_DIR")"
 
-WORKTREE_REL=".claude/worktrees/$FEATURE_NAME"
+DIR_NAME=$(worktree_dir_name "$FEATURE_NAME")
+WORKTREE_REL=".claude/worktrees/$DIR_NAME"
 WORKTREE_ABS="$MAIN_REPO_ROOT/$WORKTREE_REL"
 
 # --- Belt-and-suspenders anti-nesting guard ------------------------------
