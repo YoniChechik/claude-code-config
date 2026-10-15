@@ -213,6 +213,51 @@ done
     assert_eq allow "$(decision "$output")"
 }
 
+pass_targets_rec() {
+    printf '{"kind":"verify","repo":"o/r","target":"123","pr":"123","merge_sha":"%s","result":"%s","reason":"r","targets":%s,"ts":%s}' \
+        "$SHA" "$1" "$2" "$(($(now) - 50))"
+}
+
+skipped_target='{"name":"other","skipped":true,"reason":"merge touches none of its paths"}'
+
+@test "G2: a pass with one verified target and one skipped target clears" {
+    local ok='{"name":"s","observed_sha":"'"${SHA:0:12}"'","contains_merge":true,"probes":[{"url":"https://x","exit":0,"matched":true}]}'
+    ledger "$(PR_NUM=123 merge_rec 123)" "$(pass_targets_rec pass "[$ok,$skipped_target]")" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE merged"
+    assert_eq allow "$(decision "$output")"
+}
+
+@test "G2: a pass whose targets are all skipped does not clear" {
+    ledger "$(PR_NUM=123 merge_rec 123)" "$(pass_targets_rec pass "[$skipped_target]")" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE merged"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "G2: an n/a record with all targets skipped clears" {
+    ledger "$(PR_NUM=123 merge_rec 123)" "$(pass_targets_rec n/a "[$skipped_target]")" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE merged"
+    assert_eq allow "$(decision "$output")"
+}
+
+@test "G2: a pass with a verified target lacking observed_sha does not clear even beside a skipped one" {
+    local bad='{"name":"s","observed_sha":"","contains_merge":true,"probes":[]}'
+    ledger "$(PR_NUM=123 merge_rec 123)" "$(pass_targets_rec pass "[$bad,$skipped_target]")" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE merged"
+    assert_eq block "$(decision "$output")"
+}
+
+@test "G2: a pass with a failing probe beside a skipped target does not clear" {
+    local bad='{"name":"s","observed_sha":"'"${SHA:0:12}"'","contains_merge":true,"probes":[{"url":"https://x","exit":22,"matched":false}]}'
+    ledger "$(PR_NUM=123 merge_rec 123)" "$(pass_targets_rec pass "[$bad,$skipped_target]")" \
+        '{"kind":"predicate","items":["merged:o/r#123"],"sha256":"a","ts":1}'
+    run stop "STATUS: COMPLETE merged"
+    assert_eq block "$(decision "$output")"
+}
+
 @test "G2: a FAILURE whose what-part does not name the PR never acks it, even if the number appears in the evidence" {
     ledger "$(merge_rec 12 p0)" "$(verify_rec 12 fail)"
     run stop "STATUS: FAILURE build: exit 12 from npm"

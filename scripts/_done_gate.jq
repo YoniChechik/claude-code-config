@@ -59,11 +59,12 @@ def verify_ok:
   . as $v
   | ($v.result == "n/a")
     or ($v.result == "pass"
-      and (($v.targets // []) | length) > 0
+      and any(($v.targets // [])[]; (.skipped // false) | not)
       and all(($v.targets // [])[]; . as $t
-        | (($t.observed_sha // "") | length) >= 7
+        | ($t.skipped // false)
+        or ((($t.observed_sha // "") | length) >= 7
         and ($t.contains_merge == true or (($v.merge_sha // "") | startswith($t.observed_sha)))
-        and all(($t.probes // [])[]; .exit == 0 and .matched == true)));
+        and all(($t.probes // [])[]; .exit == 0 and .matched == true))));
 
 def merges($R): [$R[] | select(.kind == "merge")] | group_by([(.repo // ""), ident]) | map(max_by(.ts // 0));
 
