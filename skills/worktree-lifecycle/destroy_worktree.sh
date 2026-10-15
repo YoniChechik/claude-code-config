@@ -3,8 +3,8 @@
 # every byte on disk (node_modules, .venv, build output, everything) — not
 # just the git-tracked files `git worktree remove` alone would touch.
 # Usage: destroy_worktree.sh <name-or-path> [--force] [--delete-branch]
-#   <name-or-path>   a bare feature name (matches .claude/worktrees/<name>)
-#                     or a full path to a registered worktree.
+#   <name-or-path>   a bare directory name (matches .claude/worktrees/<name>),
+#                     a branch name, or a full path to a registered worktree.
 #   --force          skip the uncommitted/unpushed safety check.
 #   --delete-branch  also delete the local branch once the worktree is gone
 #                     (default: keep it, so the history stays recoverable).
@@ -40,7 +40,7 @@ GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null)" || {
     echo "Error: not inside a git repository" >&2
     exit 1
 }
-GIT_COMMON_DIR="$(cd "$GIT_COMMON_DIR" && pwd)"
+GIT_COMMON_DIR="$(cd "$GIT_COMMON_DIR" && pwd -P)"
 MAIN_REPO_ROOT="$(dirname "$GIT_COMMON_DIR")"
 
 # --- Locate the worktree via git's own bookkeeping -----------------------
@@ -54,7 +54,7 @@ list_worktrees() {
 }
 
 if [ -e "$TARGET_ARG" ]; then
-    CANDIDATE_PATH="$(cd "$TARGET_ARG" && pwd)"
+    CANDIDATE_PATH="$(cd "$TARGET_ARG" && pwd -P)"
 else
     CANDIDATE_PATH="$MAIN_REPO_ROOT/.claude/worktrees/$TARGET_ARG"
 fi
@@ -68,6 +68,16 @@ while IFS=$'\t' read -r wt_path wt_branch; do
         break
     fi
 done < <(list_worktrees)
+
+if [ -z "$WT_PATH" ]; then
+    while IFS=$'\t' read -r wt_path wt_branch; do
+        if [ -n "$wt_branch" ] && [ "$wt_branch" = "$TARGET_ARG" ]; then
+            WT_PATH="$wt_path"
+            BRANCH="$wt_branch"
+            break
+        fi
+    done < <(list_worktrees)
+fi
 
 if [ -z "$WT_PATH" ]; then
     echo "Error: no registered worktree matches '$TARGET_ARG' (resolved to $CANDIDATE_PATH)." >&2

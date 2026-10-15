@@ -18,6 +18,22 @@ if [ -z "$FEATURE_NAME" ]; then
     exit 1
 fi
 
+# Worktree directory names are capped: devtrees builds a unix socket path from
+# the directory name and macOS rejects socket paths over 103 bytes, so a name
+# longer than 58 characters can never boot. Longer names keep their leading
+# characters plus a hash of the full name, so they stay readable and unique.
+worktree_dir_name() {
+    local name="$1" max=58 hash head
+    if [ "${#name}" -le "$max" ]; then
+        printf '%s' "$name"
+        return
+    fi
+    hash=$(printf '%s' "$name" | shasum -a 1 | cut -c1-8)
+    head="${name:0:$((max - 9))}"
+    while [ "${head%-}" != "$head" ]; do head="${head%-}"; done
+    printf '%s-%s' "$head" "$hash"
+}
+
 # Always anchor on the repo root, not the current directory: `git worktree add`
 # with a relative path resolves against cwd, and worktrees must live at the
 # canonical <repo-root>/.claude/worktrees/<name> location (Claude Code's native
@@ -25,7 +41,8 @@ fi
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
-WORKTREE_REL=".claude/worktrees/$FEATURE_NAME"
+DIR_NAME=$(worktree_dir_name "$FEATURE_NAME")
+WORKTREE_REL=".claude/worktrees/$DIR_NAME"
 WORKTREE_ABS="$REPO_ROOT/$WORKTREE_REL"
 
 # Refresh remote refs so branch detection and origin/main are both current.
