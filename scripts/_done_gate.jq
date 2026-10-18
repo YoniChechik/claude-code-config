@@ -18,7 +18,7 @@ def partial_re: "\\b(partly|partially|only partly|still open|stays? open|blocked
 
 def surfaces: ["staging", "production", "simulator", "local"];
 
-def contract: "End the final message with exactly one STATUS line as its last line: `STATUS: COMPLETE <evidence>`, `STATUS: WAITING <task-id> <what it waits for>`, `STATUS: BLOCKED <category>: <one-line ask>` (categories: \(categories | join(", "))), `STATUS: FAILURE <what>: <command and observed output>`, or `STATUS: ANSWER VERIFIED <command or path>: <observed output>` for a pure answer (cite the command in backticks and quote its output in backticks). FAILURE is accepted only after \(N_ATTEMPTS) distinct failed attempts across \(N_APPROACHES) different tools in this prompt, quoting one failure's output in backticks. If you cannot verify, end with BLOCKED (human-only) or FAILURE.";
+def contract: "End the final message with exactly one STATUS line as its last line: `STATUS: COMPLETE <evidence>`, `STATUS: WAITING <task-id> <what it waits for>`, `STATUS: BLOCKED <category>: <one-line ask>` (categories: \(categories | join(", "))), `STATUS: FAILURE <what>: <command and observed output>`, or `STATUS: ANSWER VERIFIED <command or path>: <observed output>` for a pure answer (cite the command in backticks exactly as run, no placeholders like <path> or ~, and quote its output in backticks). A plan or proposal that leaves choices open applies the defaults per AGENTS.md, lists them under `# Decisions (defaults applied)` as \"Default: X, because Y\", and ends with `STATUS: ANSWER VERIFIED` citing a read-only probe of the repo facts the plan rests on; `BLOCKED paradigm-shift:` is only for a real architecture fork. Phrases like \"should I\", \"do you want\" or \"assuming\" still block as an offer or a hedge. FAILURE is accepted only after \(N_ATTEMPTS) distinct failed attempts across \(N_APPROACHES) different tools in this prompt, quoting one failure's output in backticks. If you cannot verify, end with BLOCKED (human-only) or FAILURE.";
 
 def parsed_lines: $L | split("\n") | map(select(length > 0) | (fromjson? // null));
 
@@ -47,7 +47,11 @@ def last_paragraph: [splits("\\n\\s*\\n") | select(test("\\S"))] | last // "";
 
 def quotes: (if ([scan("`")] | length) % 2 == 1 then . + "`" else . end) | [scan("`([^`]+)`") | .[0] | collapse];
 
-def parse_answer($rest): [$rest | capture("^VERIFIED\\s+(?<src>`[^`]+`|[^:]+?)\\s*:\\s*(?<obs>\\S.*)$"; "i")] | first;
+def parse_answer($rest):
+  ([$rest | capture("^VERIFIED\\s+(?<src>`[^`]+`)\\s*:\\s*(?<obs>\\S.*)$"; "i")]
+    + [$rest | capture("^VERIFIED\\s+(?<src>[^`\\s].*?)\\s*:\\s+(?<obs>`.*)$"; "i")]
+    + [$rest | capture("^VERIFIED\\s+(?<src>[^`:]+?)\\s*:\\s*(?<obs>\\S.*)$"; "i")])
+  | first;
 
 def split_failure($rest): ([$rest | capture("^(?<w>.*?):(?<e>\\s.*|$)")] | first) // {w: "", e: ""};
 
@@ -278,19 +282,29 @@ def g3($s):
 
 def cite_matches($src; $p):
   ($src | gsub("`"; "") | collapse) as $c
-  | ($c | bash_cmd(.)) as $n
+  | bash_cmd($c) as $n
   | ($p.cmd // "") as $pc
   | ($pc | ltrimstr(($p.tool // "") + " ")) as $rest
-  | ($c != "") and (($pc | contains($c)) or ($pc | contains($n)) or (($rest | length) >= 3 and ($c | contains($rest))));
+  | ($c != "") and ($pc == $n or ($pc | contains($c)) or ($pc | contains($n)) or (($rest | length) >= 3 and ($c | contains($rest))));
+
+def overlap($src; $p):
+  (bash_cmd($src | gsub("`"; "") | collapse) | words | unique) as $a
+  | (($p.cmd // "") | words | unique) as $b
+  | [$a[] | select(. as $x | $b | index($x) != null)] | length;
+
+def probe_line: "`\(.cmd)` (\(if .ro == true then "read-only" else "not read-only: \(.ro_reason // "no reason recorded")" end))";
 
 def g5_answer($s; $R):
   parse_answer($s.rest) as $a
-  | [probes($R)[] | select(.ro == true)] as $ro
+  | probes($R) as $P
+  | [$P[] | select(.ro == true)] as $ro
   | ($a.obs | quotes | map(select(length >= 4))) as $q
   | [$ro[] | select(cite_matches($a.src; .))] as $hits
-  | ($ro | map(.cmd) | .[-5:] | map("`" + . + "`") | join(", ")) as $recent
+  | ($P | .[-5:] | map(probe_line) | join(", ")) as $recent
+  | ([$P[] | select(.ro != true) | {p: ., m: cite_matches($a.src; .), o: overlap($a.src; .)} | select(.m or .o > 0)]
+      | sort_by([(if .m then 1 else 0 end), .o]) | last | .p) as $near
   | if ($hits | length) == 0 then
-      [{rule: "G5", msg: "G5: `ANSWER VERIFIED` cites \($a.src), and no read-only command or read in this prompt matches it. Run it read-only (no writes, no `;`/`&&` chains) and cite it as run. Recent read-only probes: \(if $recent == "" then "none" else $recent end)."}]
+      [{rule: "G5", msg: "G5: `ANSWER VERIFIED` cites \($a.src), and no read-only command or read in this prompt matches it.\(if $near != null then " The closest match \($near | probe_line) does not count." else "" end) Run it read-only (no writes, no `;`/`&&` chains) and cite the command exactly as run; no placeholders like <path> or ~. Last probes in this prompt: \(if $recent == "" then "none" else $recent end)."}]
     elif ($q | length) == 0 then
       [{rule: "G5", msg: "G5: `ANSWER VERIFIED` needs the observed output quoted in backticks (at least 4 characters copied from the output of \($a.src))."}]
     elif any($hits[]; (.out_excerpt // "") as $e | any($q[]; . as $x | $e | contains($x))) then []

@@ -1,0 +1,1 @@
+{"kind":"probe","tool":"Bash","bin":"rg","cmd":"rg first_bins scripts -c","exit":0,"ro":true,"out_excerpt":"scripts/_probe_ledger.jq:2","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}

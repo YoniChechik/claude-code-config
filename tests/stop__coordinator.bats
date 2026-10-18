@@ -116,7 +116,7 @@ done
 
 @test "the fixture sets are complete" {
     assert_eq 38 "$(find "$FIXTURES/block" -name '*.txt' | wc -l | tr -d ' ')"
-    assert_eq 15 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
+    assert_eq 16 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
 }
 
 @test "the gate enforces with no configuration and logs the decision per rule" {
@@ -838,6 +838,48 @@ failures() { jq -cs 'map(select(.kind == "failure"))' "$SDIR/ledger.jsonl"; }
     ledger "$(probe_rec "rg defineRoute -c" "130 routes" 0 true)"
     run stop 'STATUS: ANSWER VERIFIED `rg -c defineRoute`: `130 routes`'
     assert_eq allow "$(decision "$output")"
+}
+
+tar_probe() {
+    ledger "$(probe_rec "tar tzf /tmp/s/p.tar.gz | grep 'swecl.c|swehouse.c' -E" "p/libswe/swecl.c p/libswe/swehouse.c" 0 true "$PID" t1 tar)"
+}
+
+@test "G5: a backticked pipeline citation as typed with a backticked output passes" {
+    tar_probe
+    run stop "STATUS: ANSWER VERIFIED \`tar tzf /tmp/s/p.tar.gz | rtk grep -E 'swecl.c|swehouse.c'\`: \`p/libswe/swecl.c\`"
+    assert_eq allow "$(decision "$output")"
+    assert_contains "pass session=s1" "$(hook_log_text)"
+}
+
+@test "G5: a misquoted output of a matching pipeline fails on the quote check" {
+    tar_probe
+    run stop "STATUS: ANSWER VERIFIED \`tar tzf /tmp/s/p.tar.gz | grep -E 'swecl.c|swehouse.c'\`: \`p/libswe/swedate.c\`"
+    assert_contains "G5: the quoted observation is not in the output of" "$(reason "$output")"
+}
+
+@test "G5: a placeholder citation fails and the block says to cite exactly as run" {
+    tar_probe
+    run stop "STATUS: ANSWER VERIFIED \`tar tzf <path> | grep -E 'swecl.c|swehouse.c'\`: \`p/libswe/swecl.c\`"
+    assert_contains "no read-only command or read in this prompt matches it" "$(reason "$output")"
+    assert_contains "cite the command exactly as run; no placeholders like <path> or ~" "$(reason "$output")"
+}
+
+@test "G5: an unbackticked command with a colon parses up to the colon before the backticked output" {
+    ledger "$(probe_rec "curl https://x.io/a" "out-value" 0 true)"
+    run stop 'STATUS: ANSWER VERIFIED curl https://x.io/a: `out-value`'
+    assert_eq allow "$(decision "$output")"
+    ledger "$(probe_rec "ls /d | grep 'a:b' -E" "a:b-file" 0 true)"
+    run stop "STATUS: ANSWER VERIFIED ls /d | grep -E 'a:b': \`a:b-file\`"
+    assert_eq allow "$(decision "$output")"
+}
+
+@test "G5: the block lists the last probes with their read-only flag and reason and names the closest non-read-only match" {
+    ledger "$(probe_rec "ls /d" "x" 0 true "$PID" u1 ls "$(($(now) - 2))")" \
+        "$(jq -c '. + {ro_reason: "`zcat`: not in read-only allowlist"}' <<<"$(probe_rec "zcat a.gz | grep x" "hit-line" 0 false "$PID" u2 zcat "$(($(now) - 1))")")"
+    run stop 'STATUS: ANSWER VERIFIED `zcat a.gz | grep x`: `hit-line`'
+    assert_eq block "$(decision "$output")"
+    assert_contains "The closest match \`zcat a.gz | grep x\` (not read-only: \`zcat\`: not in read-only allowlist) does not count." "$(reason "$output")"
+    assert_contains "Last probes in this prompt: \`ls /d\` (read-only), \`zcat a.gz | grep x\` (not read-only:" "$(reason "$output")"
 }
 
 @test "G5: an observation quote that is not in the cited probe's output blocks" {
