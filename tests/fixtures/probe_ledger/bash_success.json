@@ -1,0 +1,24 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo capture-ok",
+    "description": "Echo a test string"
+  },
+  "tool_response": {
+    "stdout": "capture-ok",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_017xjr9pe2kExVKkjz6nmLKq",
+  "duration_ms": 416
+}

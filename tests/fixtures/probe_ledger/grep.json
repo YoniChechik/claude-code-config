@@ -1,0 +1,26 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Grep",
+  "tool_input": {
+    "pattern": "hello",
+    "path": "/tmp/capture"
+  },
+  "tool_response": {
+    "mode": "files_with_matches",
+    "filenames": [
+      "payloads.jsonl",
+      "sample.txt"
+    ],
+    "numFiles": 2,
+    "totalFiles": 2
+  },
+  "tool_use_id": "toolu_012HkGpVnJ7WWBx1GoYRSuht",
+  "duration_ms": 17
+}

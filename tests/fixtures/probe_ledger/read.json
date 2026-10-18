@@ -1,0 +1,26 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/tmp/capture/sample.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "/tmp/capture/sample.txt",
+      "content": "hello\n",
+      "numLines": 2,
+      "startLine": 1,
+      "totalLines": 2
+    }
+  },
+  "tool_use_id": "toolu_01ELHoUe3NEGVAiKyieVHbkc",
+  "duration_ms": 3
+}

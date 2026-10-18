@@ -1,0 +1,19 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rtk ls /nonexistent",
+    "description": "List a nonexistent directory"
+  },
+  "tool_use_id": "toolu_0123XKmSHotgDQa6AKcb5ZwS",
+  "error": "Exit code 1\nls: /nonexistent: No such file or directory",
+  "is_interrupt": false,
+  "duration_ms": 21
+}
