@@ -1,0 +1,3 @@
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl https://staging.example/healthz -sS","exit":6,"ro":true,"out_excerpt":"curl: (6) Could not resolve host: staging.example","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}
+{"kind":"probe","tool":"Bash","bin":"dig","cmd":"dig staging.example","exit":1,"ro":true,"out_excerpt":";; connection timed out; no servers could be reached","prompt_id":"__PID__","tool_use_id":"t2","ts":__TS__}
+{"kind":"probe","tool":"Bash","bin":"gh","cmd":"gh run view 77","exit":1,"ro":true,"out_excerpt":"run 77 not found","prompt_id":"__PID__","tool_use_id":"t3","ts":__TS__}

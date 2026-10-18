@@ -1,0 +1,6 @@
+# Done
+- Dashboard updated with the retention and funnel charts.
+
+The chart filter is still open, blocked on an Amplitude admin granting the edit permission.
+
+STATUS: COMPLETE dashboard https://app.amplitude.com/analytics/sunsay/dashboard/abc123 shows the new charts

@@ -1,3 +1,3 @@
-The CLI covers 130 of 133 backoffice-backend routes (`rg -c defineRoute` output above).
+The CLI covers 130 of 133 backoffice-backend routes.
 
-**STATUS: ANSWER**
+**STATUS: ANSWER VERIFIED `rg -c defineRoute`: `130 of 133` routes use it**

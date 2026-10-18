@@ -1,0 +1,1 @@
+{"kind":"probe","tool":"Bash","bin":"rg","cmd":"rg defineRoute -c","exit":0,"ro":true,"out_excerpt":"routes: 130 of 133 use defineRoute","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}

@@ -31,7 +31,10 @@ make_meta() {
 }
 
 fire() {
-    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,stop_hook_active:false,last_assistant_message:"STATUS: ANSWER"}' | bash "$STOP_HOOK"
+    local dir="$CLAUDE_STATE_DIR/sessions/$1"
+    mkdir -p "$dir" && chmod 700 "$CLAUDE_STATE_DIR" "$CLAUDE_STATE_DIR/sessions" "$dir"
+    jq -nc --argjson ts "$EPOCHSECONDS" '{kind: "probe", tool: "Bash", bin: "ls", cmd: "ls /x", exit: 0, ro: true, out_excerpt: "alpha beta", prompt_id: "p1", tool_use_id: "t1", ts: $ts}' >>"$dir/ledger.jsonl"
+    jq -nc --arg s "$1" '{hook_event_name:"Stop",session_id:$s,prompt_id:"p1",stop_hook_active:false,last_assistant_message:"STATUS: ANSWER VERIFIED `ls /x`: `alpha beta`"}' | bash "$STOP_HOOK"
 }
 
 fire_agent_return() {

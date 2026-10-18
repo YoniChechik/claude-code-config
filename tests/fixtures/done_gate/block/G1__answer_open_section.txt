@@ -1,0 +1,7 @@
+# Done
+- The route returns 404 on staging.
+
+# Open ends
+- The cache header was not checked.
+
+STATUS: ANSWER VERIFIED `curl -sS https://staging.example/api/x`: `404 Not Found`

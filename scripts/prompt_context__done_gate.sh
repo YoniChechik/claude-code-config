@@ -51,7 +51,7 @@ carry_over() {
         return 0
     }
     lines=$(jq -nr --rawfile L "$REPLY" --argjson hookin '[{}]' --argjson st '{}' --argjson now "$EPOCHSECONDS" --arg op pending \
-        -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null | jq -r '.pending[]' 2>/dev/null)
+        -L "$HOOK_DIR" -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null | jq -r '.pending[]' 2>/dev/null)
     if [[ -n $unresolved ]]; then
         lines+="${lines:+$'\n'}$(jq -r '.rules[]?.msg' <<<"$unresolved" 2>/dev/null)"
     fi

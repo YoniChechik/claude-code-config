@@ -66,12 +66,31 @@ verify_rec() {
         "$1" "${PR_NUM:-$1}" "$SHA" "${2:-pass}" "${3:-${SHA:0:12}}" "${4:-0}" "$(($(now) - 50))"
 }
 
+probe_rec() {
+    jq -nc --arg c "$1" --arg o "${2:-alpha beta gamma}" --argjson e "${3:-0}" --argjson r "${4:-true}" --arg p "${5-$PID}" \
+        --arg id "${6:-u$RANDOM$RANDOM}" --arg b "${7:-${1%% *}}" --argjson ts "${8:-$(now)}" \
+        '{kind: "probe", tool: "Bash", bin: $b, cmd: $c, exit: $e, ro: $r, out_excerpt: $o, tool_use_id: $id, ts: $ts}
+        + (if $p == "" then {} else {prompt_id: $p} end)'
+}
+
+VERIFIED='STATUS: ANSWER VERIFIED `ls /x`: `alpha beta`'
+
+verified() { ledger "$(probe_rec "ls /x" "alpha beta gamma" 0 true "${1:-$PID}")"; }
+
 wait_task() { printf '[{"id":"%s","type":"shell","status":"%s","description":"%s","command":"%s"}]' "$1" "${2:-running}" "$3" "$4"; }
+
+fixture_ledger() {
+    local companion="${1%.txt}.ledger.jsonl"
+    [ -f "$companion" ] || return 0
+    init_state
+    sed -e "s/__PID__/$PID/g" -e "s/__TS__/$(now)/g" "$companion" >>"$SDIR/ledger.jsonl"
+}
 
 fixture_blocks() {
     local rule
     rule=$(basename "$1")
     rule=${rule%%__*}
+    fixture_ledger "$1"
     run stop "$(cat "$1")"
     assert_eq 0 "$status"
     assert_eq block "$(decision "$output")"
@@ -80,6 +99,7 @@ fixture_blocks() {
 }
 
 fixture_passes() {
+    fixture_ledger "$1"
     run stop "$(cat "$1")"
     assert_eq 0 "$status"
     assert_eq allow "$(decision "$output")"
@@ -95,8 +115,8 @@ for fixture in "$FIXTURES"/pass/*.txt; do
 done
 
 @test "the fixture sets are complete" {
-    assert_eq 26 "$(find "$FIXTURES/block" -name '*.txt' | wc -l | tr -d ' ')"
-    assert_eq 13 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
+    assert_eq 38 "$(find "$FIXTURES/block" -name '*.txt' | wc -l | tr -d ' ')"
+    assert_eq 15 "$(find "$FIXTURES/pass" -name '*.txt' | wc -l | tr -d ' ')"
 }
 
 @test "the gate enforces with no configuration and logs the decision per rule" {
@@ -152,9 +172,9 @@ done
     local pad i
     pad=$(head -c 4000 /dev/zero | tr '\0' x)
     for i in $(seq 1 300); do printf '{"kind":"check","item":0,"pred_sha":"z","exit":0,"pad":"%s","ts":1}\n' "$pad"; done >"$SDIR/ledger.jsonl"
-    printf '%s\n' "$(merge_rec 4016 p0)" "$(verify_rec 4016)" >>"$SDIR/ledger.jsonl"
+    printf '%s\n' "$(merge_rec 4016 p0)" "$(verify_rec 4016)" "$(probe_rec "ls /x")" >>"$SDIR/ledger.jsonl"
     (($(wc -c <"$SDIR/ledger.jsonl") > 1048576))
-    { head -c 2000000 /dev/zero | tr '\0' y; printf '\n\nSTATUS: ANSWER'; } >"$BATS_TEST_TMPDIR/msg"
+    { head -c 2000000 /dev/zero | tr '\0' y; printf '\n\n%s' "$VERIFIED"; } >"$BATS_TEST_TMPDIR/msg"
     jq -nc --rawfile m "$BATS_TEST_TMPDIR/msg" '{hook_event_name: "Stop", session_id: "s1", prompt_id: "p1", last_assistant_message: $m}' >"$BATS_TEST_TMPDIR/payload"
     run bash -c "bash '$HOOK' <'$BATS_TEST_TMPDIR/payload'"
     assert_eq 0 "$status"
@@ -164,14 +184,15 @@ done
 }
 
 @test "an unparseable ledger line is logged as an error" {
-    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)" '{"kind":"merge","repo":"o/r",'
-    run stop "STATUS: ANSWER"
+    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)" "$(probe_rec "ls /x")" '{"kind":"merge","repo":"o/r",'
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
     assert_contains "error: 1 unparseable ledger lines session=s1" "$(hook_log_text)"
 }
 
 @test "G1: a STATUS line wrapped in markdown is still read" {
-    run stop $'Answer.\n\n`STATUS: ANSWER`'
+    verified
+    run stop "$(printf 'Answer.\n\n> **%s**' "$VERIFIED")"
     assert_eq allow "$(decision "$output")"
 }
 
@@ -186,9 +207,9 @@ done
     assert_contains "G1: \`STATUS: ANSWER\` is only for a pure answer" "$(reason "$output")"
 }
 
-@test "G1: ANSWER is fine in a later prompt after the merge was verified" {
-    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)"
-    run stop "STATUS: ANSWER"
+@test "G1: ANSWER VERIFIED is fine in a later prompt after the merge was verified" {
+    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)" "$(probe_rec "ls /x")"
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
 }
 
@@ -302,8 +323,8 @@ skipped_target='{"name":"other","skipped":true,"reason":"merge touches none of i
 }
 
 @test "G2: a passing verify record whose observed SHA matches the merge clears the merge" {
-    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)"
-    run stop "STATUS: FAILURE other: unrelated evidence"
+    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016)" "$(probe_rec "ls /x")"
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
 }
 
@@ -320,8 +341,8 @@ skipped_target='{"name":"other","skipped":true,"reason":"merge touches none of i
 }
 
 @test "G2: a missing verify config asks for the no-verify-config FAILURE, which then acks the merge" {
-    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016 no-config)"
-    run stop "STATUS: ANSWER"
+    ledger "$(merge_rec 4016 p0)" "$(verify_rec 4016 no-config)" "$(probe_rec "ls /x")"
+    run stop "$VERIFIED"
     assert_contains "o/r#4016 cannot be verified on staging: r. Create the config with \`/create-verification-skill\`" "$(reason "$output")"
     assert_contains "STATUS: FAILURE no-verify-config: o/r#4016" "$(reason "$output")"
     PID=p2
@@ -329,7 +350,8 @@ skipped_target='{"name":"other","skipped":true,"reason":"merge touches none of i
     assert_eq allow "$(decision "$output")"
     assert_eq ack "$(jq -rs 'map(select(.kind == "ack"))[0].kind' "$SDIR/ledger.jsonl")"
     PID=p3
-    run stop "STATUS: ANSWER"
+    verified
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
 }
 
@@ -338,7 +360,8 @@ skipped_target='{"name":"other","skipped":true,"reason":"merge touches none of i
     run stop "STATUS: FAILURE 4016: staging serves 0000000 after 1800s"
     assert_eq allow "$(decision "$output")"
     PID=p9
-    run stop "STATUS: ANSWER"
+    verified
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
 }
 
@@ -488,13 +511,14 @@ seen_at() { init_state; printf '{"tasks":{"%s":%s},"pred_ack":""}' "$1" "$2" >"$
     assert_eq allow "$(decision "$output")"
 }
 
-@test "cap: blocks 1 and 2 name the fix, block 3 demands FAILURE, then the stop passes and is carried over" {
+@test "cap: blocks 1 and 2 name the fix, block 3 states the ladder without offering FAILURE, then the stop passes and is carried over" {
     run stop "Should I merge PR #135?"
     assert_contains "Stop gate (block 1 of 3)" "$(reason "$output")"
     run stop "Should I merge PR #135?"
     assert_contains "Stop gate (block 2 of 3)" "$(reason "$output")"
     run stop "Should I merge PR #135?"
-    assert_contains "end now with \`STATUS: FAILURE <rule>: <what you tried and observed>\`" "$(reason "$output")"
+    assert_not_contains "end now with \`STATUS: FAILURE" "$(reason "$output")"
+    assert_contains "Stop gate (block 3 of 3). Fix this and continue. A FAILURE is accepted only after 3 distinct failed attempts across 2 tools in this prompt" "$(reason "$output")"
     run stop "Should I merge PR #135?"
     assert_eq allow "$(decision "$output")"
     assert_contains "Stop gate: unresolved G1, recorded and carried over" "$(sysmsg "$output")"
@@ -564,8 +588,8 @@ seen_at() { init_state; printf '{"tasks":{"%s":%s},"pred_ack":""}' "$1" "$2" >"$
     assert_contains "G1: the last line is not a STATUS line" "$c"
     assert_eq p2 "$(jq -r .id "$SDIR/prompt.json")"
     PID=p2
-    printf '%s\n' "$(verify_rec 4016)" >>"$SDIR/ledger.jsonl"
-    run stop "STATUS: ANSWER"
+    printf '%s\n' "$(verify_rec 4016)" "$(probe_rec "ls /x")" >>"$SDIR/ledger.jsonl"
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
     [ ! -e "$SDIR/unresolved.json" ]
 }
@@ -718,9 +742,9 @@ STAT
 }
 
 @test "a group-writable state root is tightened to 0700" {
-    init_state
+    verified
     chmod 770 "$CLAUDE_STATE_DIR"
-    run stop "STATUS: ANSWER"
+    run stop "$VERIFIED"
     assert_eq allow "$(decision "$output")"
     assert_eq 700 "$(stat -f %Lp "$CLAUDE_STATE_DIR")"
 }
