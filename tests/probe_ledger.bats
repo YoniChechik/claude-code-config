@@ -213,3 +213,55 @@ ro_of() { bash_event "$1" >/dev/null; last .ro; }
         assert_eq 1 "$(jq --arg e "$ev" '[.hooks[$e][] | .hooks[] | select(.command | endswith("/scripts/post_tool_use__probe_ledger.sh"))] | length' "$SETTINGS")"
     done
 }
+
+@test "a tar list piped into grep is read-only and records the pipeline as typed" {
+    local typed="tar tzf /tmp/x/pysweph-2.10.3.6.tar.gz | grep -E 'swecl.c|swehouse.c|pyswisseph.c'"
+    bash_event "$typed"
+    assert_eq true "$(last .ro)"
+    assert_eq null "$(last .ro_reason)"
+    assert_eq tar "$(last .bin)"
+    local want
+    want=$(jq -nr --arg c "$typed" -L "$SCRIPTS" 'include "_probe_common"; bash_cmd($c)')
+    assert_eq "$want" "$(last .cmd)"
+    assert_eq "tar tzf /tmp/x/pysweph-2.10.3.6.tar.gz | grep 'swecl.c|swehouse.c|pyswisseph.c' -E" "$(last .cmd)"
+}
+
+@test "rtk prefixes and flag order normalize per pipe stage" {
+    bash_event "tar tzf a.tgz | rtk grep -E 'x|y' | rtk proxy head -n 3"
+    local a
+    a=$(last .cmd)
+    assert_eq "tar tzf a.tgz | grep 'x|y' -E | head 3 -n" "$a"
+    bash_event "rtk tar tzf a.tgz | grep -E 'x|y' | head -n 3"
+    assert_eq "$a" "$(last .cmd)"
+    assert_eq true "$(last .ro)"
+}
+
+@test "read-only allowlist additions" {
+    local c
+    for c in "tar -tvf a.tar" "tar --list -f a.tar" "unzip -l a.zip" "unzip -Z -1 a.zip" "zipinfo a.zip" "strings bin | grep x" \
+        "du -sh ." "df -h" "realpath x" "readlink -f x" "type ls" "nl f" "column -t f" "basename /a/b" "dirname /a/b" "pwd" \
+        "xxd -l 64 f" "xxd f | head" "sed -n '1,20p' f" "sed -n 5p f" "cat f | sed -n '2,4p'" "cut -d, -f1 f" "tr a b" "sort f | uniq -c"; do
+        assert_eq true "$(ro_of "$c")" || { echo "should be ro: $c" >&2; return 1; }
+    done
+}
+
+@test "write modes of the new bins stay non-read-only with a reason" {
+    local c
+    for c in "tar xzf a.tgz" "tar czf a.tgz d" "tar -xf a.tar" "tar tf a.tgz --to-command=sh" "tar -tf host:a.tar" "sed -i s/a/b/ f" \
+        "sed -n '1p' -i f" "sed -n 's/a/b/w out' f" "xxd -r f" "xxd f out" "unzip a.zip" "unzip -o a.zip" "awk 1 f" "printf x" \
+        "ls | tee f" "ls; rm x" "ls && mv a b" 'cat "$(rm f)"' "tar tf a.tar > l"; do
+        assert_eq false "$(ro_of "$c")" || { echo "should not be ro: $c" >&2; return 1; }
+        [ "$(last .ro_reason)" != null ] || { echo "no reason: $c" >&2; return 1; }
+    done
+}
+
+@test "ro_reason names the cause" {
+    bash_event "zcat a.gz | grep x"
+    assert_eq "\`zcat\`: not in read-only allowlist" "$(last .ro_reason)"
+    bash_event "cat x; ls"
+    assert_eq "contains \`;\`" "$(last .ro_reason)"
+    bash_event "ls | sh"
+    assert_eq "\`sh\`: not a read-only pipe filter" "$(last .ro_reason)"
+    bash_event "tar xzf a.tgz"
+    assert_eq "\`tar\`: not list mode (\`t\` or \`--list\`)" "$(last .ro_reason)"
+}

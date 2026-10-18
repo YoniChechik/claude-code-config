@@ -1,0 +1,8 @@
+# Plan
+1. Add `tar` list mode to the read-only allowlist.
+2. Normalise each pipe stage.
+
+# Decisions (defaults applied)
+- Default: one PR, because the changes share one test suite.
+
+STATUS: ANSWER VERIFIED `rg -c first_bins scripts`: `scripts/_probe_ledger.jq:2`

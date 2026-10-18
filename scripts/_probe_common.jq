@@ -15,8 +15,12 @@ def is_flag: test("^-");
 
 def basename: sub("^.*/"; "");
 
-def bash_cmd($raw):
-  ($raw | words | strip_prefix) as $w
-  | ([$w[] | select(is_flag | not)] + ([$w[] | select(is_flag)] | sort)) | join(" ");
+def stages:
+  reduce ([scan("'[^']*'|\"(?:\\\\.|[^\"\\\\])*\"|\\\\.|\\|\\||[^|'\"\\\\]+|['\"|\\\\]")])[] as $t ([""];
+    if $t == "|" then . + [""] else (length - 1) as $i | .[$i] += $t end);
 
-def bash_bin($raw): (($raw | words | strip_prefix)[0] // "") | basename;
+def stage_norm: words | strip_prefix | ([.[] | select(is_flag | not)] + ([.[] | select(is_flag)] | sort)) | join(" ");
+
+def bash_cmd($raw): $raw | stages | map(stage_norm) | join(" | ");
+
+def bash_bin($raw): (($raw | stages | .[0] | words | strip_prefix)[0] // "") | basename;
