@@ -1,0 +1,3 @@
+The deploy job runs as the assumed role `deployer`. The phrase `I guess` appears only in a code span.
+
+STATUS: ANSWER VERIFIED `cat infra/role.json`: `"assumed_role": "deployer"`

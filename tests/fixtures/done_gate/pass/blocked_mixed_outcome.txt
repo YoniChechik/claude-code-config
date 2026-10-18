@@ -1,0 +1,7 @@
+# Done
+- The webhook handler is merged and serves 200 on staging.
+
+# Needs human
+- Paste the Stripe live key into keyshelf; only the account owner can reveal it.
+
+STATUS: BLOCKED credential: reveal the Stripe live secret key in the Stripe dashboard and paste it into keyshelf

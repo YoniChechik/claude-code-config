@@ -1,0 +1,26 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__linear__get_issue",
+  "tool_input": {
+    "id": "DEVPUB-560"
+  },
+  "tool_response": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"DEVPUB-560\",\"uuid\":\"914337be-08f0-4ec2-87d5-e69f4335f0e2\",\"title\":\"Amplitude: allow permanent deletion of archived charts\",\"status\":\"Approved by Product\",\"statusType\":\"backlog\",\"url\":\"https://linear.app/sunsay/issue/DEVPUB-560/amplitude-allow-permanent-deletion-of-archived-charts\",\"labels\":[\"Operations\"]}"
+    }
+  ],
+  "tool_use_id": "toolu_01LciLF7NPYAqeR4JfwvEdy7",
+  "duration_ms": 481,
+  "mcp_server": {
+    "name": "linear",
+    "source": "user"
+  }
+}

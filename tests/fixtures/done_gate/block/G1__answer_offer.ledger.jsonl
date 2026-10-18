@@ -1,0 +1,1 @@
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl https://staging.example/api/x -sS","exit":0,"ro":true,"out_excerpt":"404 Not Found","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}

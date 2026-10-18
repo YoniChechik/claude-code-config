@@ -1,0 +1,3 @@
+The backfill is partly applied: 3 of 5 tables are migrated.
+
+STATUS: COMPLETE `psql -c '\dt'` lists the 3 new tables

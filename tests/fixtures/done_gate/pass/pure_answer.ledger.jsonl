@@ -1,0 +1,1 @@
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl https://developers.facebook.com/community/threads/123 -s","exit":0,"ro":true,"out_excerpt":"<h1>Phone verification</h1> Israeli +972 numbers are rejected by the SMS provider","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}

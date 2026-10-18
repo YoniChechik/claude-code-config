@@ -48,6 +48,8 @@ blocked_for() {
     local spec ev script label
     for spec in "Stop|stop__coordinator.sh|Stop coordinator" \
         "PostToolUse|post_tool_use__gh_monitor_trigger.sh|merge ledger trigger" \
+        "PostToolUse|post_tool_use__probe_ledger.sh|probe ledger" \
+        "PostToolUseFailure|post_tool_use__probe_ledger.sh|failed-probe ledger" \
         "PreToolUse|pre_tool_use__ask_gate.sh|question gate" \
         "UserPromptSubmit|prompt_context__done_gate.sh|prompt context" \
         "SessionStart|prompt_context__done_gate.sh|session start context" \
@@ -61,7 +63,7 @@ blocked_for() {
 
 @test "making a gate hook async counts as removing it" {
     local ev
-    for ev in Stop:stop__coordinator.sh PostToolUse:post_tool_use__gh_monitor_trigger.sh PreToolUse:pre_tool_use__ask_gate.sh; do
+    for ev in Stop:stop__coordinator.sh PostToolUse:post_tool_use__gh_monitor_trigger.sh PreToolUse:pre_tool_use__ask_gate.sh PostToolUse:post_tool_use__probe_ledger.sh PostToolUseFailure:post_tool_use__probe_ledger.sh; do
         jq --arg ev "${ev%%:*}" --arg s "${ev#*:}" '.hooks[$ev] |= map(.hooks |= map(if (.command | endswith("/scripts/" + $s)) then .async = true else . end))' "$SETTINGS" >"$NEW"
         run change
         assert_eq block "$(printf '%s' "$output" | jq -r .decision)" || { echo "event $ev" >&2; return 1; }

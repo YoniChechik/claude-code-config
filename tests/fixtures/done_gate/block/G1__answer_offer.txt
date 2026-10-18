@@ -1,0 +1,5 @@
+The route returns 404 on staging.
+
+I can open a PR if you want.
+
+STATUS: ANSWER VERIFIED `curl -sS https://staging.example/api/x`: `404 Not Found`

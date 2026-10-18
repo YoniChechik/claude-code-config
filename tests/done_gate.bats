@@ -105,3 +105,11 @@ predicate() {
     assert_contains "state directory is untrusted" "$output"
     [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
 }
+
+@test "check on a linear: item exits 1 with the Linear get_issue instruction and records nothing" {
+    predicate '["linear:DEVPUB-1:Done"]'
+    run bash "$SCRIPT" check 0
+    assert_eq 1 "$status"
+    assert_contains "Linear MCP \`get_issue\`" "$output"
+    assert_eq 0 "$(jq -rs 'map(select(.kind == "check")) | length' "$LEDGER")"
+}

@@ -1,0 +1,1 @@
+{"kind":"probe","tool":"Bash","bin":"cat","cmd":"cat infra/role.json","exit":0,"ro":true,"out_excerpt":"{ \"assumed_role\": \"deployer\" }","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}

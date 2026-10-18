@@ -1,0 +1,3 @@
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl https://staging.example/healthz -sS","exit":6,"ro":true,"out_excerpt":"curl: (6) Could not resolve host: staging.example","prompt_id":"__PID__","tool_use_id":"t1","ts":__TS__}
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl https://staging.example/ -sS","exit":6,"ro":true,"out_excerpt":"curl: (6) Could not resolve host: staging.example","prompt_id":"__PID__","tool_use_id":"t2","ts":__TS__}
+{"kind":"probe","tool":"Bash","bin":"curl","cmd":"curl http://staging.example/healthz -sS","exit":6,"ro":true,"out_excerpt":"curl: (6) Could not resolve host: staging.example","prompt_id":"__PID__","tool_use_id":"t3","ts":__TS__}

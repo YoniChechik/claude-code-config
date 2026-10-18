@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from _transcript import ReadStats, is_tool_result, main_thread_records, text_of
@@ -66,12 +66,12 @@ def _final_messages(path: Path, stats: ReadStats):
 
 def main() -> int:
     args = _parse_args()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+    cutoff = datetime.now(UTC) - timedelta(days=args.days)
     files = sorted(
         f
         for f in args.projects_dir.rglob("*.jsonl")
         if "subagents" not in f.parts
-        and datetime.fromtimestamp(f.stat().st_mtime, timezone.utc) >= cutoff
+        and datetime.fromtimestamp(f.stat().st_mtime, UTC) >= cutoff
     )
     stats = ReadStats()
     stops = []
@@ -94,6 +94,8 @@ def main() -> int:
             "CLAUDE_HOOK_LOG_DIR": f"{tmp}/logs",
             "CLAUDE_NOTIFY_TMP_DIR": f"{tmp}/notify",
             "CLAUDE_HOOK_LOG_MAX_BYTES": str(1 << 40),
+            "DONE_GATE_REPLAY": "1",
+            "DONE_GATE_SKIP_RULES": "G5",
         }
         os.makedirs(env["CLAUDE_NOTIFY_TMP_DIR"])
         for i, (_, _, text) in enumerate(stops):
@@ -150,7 +152,7 @@ def main() -> int:
     )
     print(f"Unparseable transcript lines skipped: {stats.bad_lines}")
     print(
-        "Only G1 and G3 are meaningful here: historical sessions have no ledger, so G2 and G4 never fire."
+        "Only G1 and G3 are meaningful here: historical sessions have no ledger, so G2, G4 and G5 never fire."
     )
     print(
         f"Would block: {blocked} ({blocked * 100 / total:.1f}%)   would pass: {total - blocked}"

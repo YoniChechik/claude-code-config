@@ -5,18 +5,29 @@ set -uo pipefail
 HOOK_DIR=.
 [[ ${BASH_SOURCE[0]} == */* ]] && HOOK_DIR=${BASH_SOURCE[0]%/*}
 DONE_GATE_CAP="${DONE_GATE_CAP:-3}"
+SKIP_RULES=""
+[[ ${DONE_GATE_REPLAY:-} == 1 ]] && SKIP_RULES=${DONE_GATE_SKIP_RULES:-}
 
 IFS= read -r -d '' input
 source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
-source "$HOOK_DIR/_state.sh" 2>/dev/null || { hook_log "error: _state.sh missing"; exit 0; }
-source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || { hook_log "error: _relay_lib.sh missing"; exit 0; }
+source "$HOOK_DIR/_state.sh" 2>/dev/null || {
+    hook_log "error: _state.sh missing"
+    exit 0
+}
+source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || {
+    hook_log "error: _relay_lib.sh missing"
+    exit 0
+}
 
 mapfile -d '' fields < <(printf '%s' "$input" | jq -j '(.session_id // "" | tostring), "\u0000",
     (.hook_event_name // "" | tostring), "\u0000",
     (.agent_id // "" | tostring), "\u0000",
     (.stop_hook_active // false | tostring), "\u0000",
     (.prompt_id // "" | tostring), "\u0000"' 2>/dev/null)
-((${#fields[@]} == 5)) || { hook_log "skip: bad hook input JSON"; exit 0; }
+((${#fields[@]} == 5)) || {
+    hook_log "skip: bad hook input JSON"
+    exit 0
+}
 session=${fields[0]}
 event=${fields[1]}
 agent=${fields[2]}
@@ -40,7 +51,7 @@ gate_eval() {
     fi
     st=$(jq -nc --argjson g "$gate" --argjson p "$prompt" '{gate: $g, prompt: $p}' 2>/dev/null) || st='{}'
     out=$(printf '%s' "$input" | jq -nc --slurpfile hookin /dev/stdin --rawfile L "$ledger" --argjson st "$st" \
-        --argjson now "$EPOCHSECONDS" --arg op stop -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null) || return 1
+        --argjson now "$EPOCHSECONDS" --arg op stop --arg skip "$SKIP_RULES" -L "$HOOK_DIR" -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null) || return 1
     [[ -n $out ]] || return 1
     EVAL=$out
 }
@@ -63,6 +74,10 @@ require_failure() {
     hook_log "block: $detail"
     BLOCK_TEXT="Stop gate: $detail. End the turn with \`STATUS: FAILURE $what: <what you observed>\`."
     SYS_TEXT="Stop gate: $detail."
+}
+
+log_failure() {
+    [[ -z $1 ]] || ledger_append "$1" || hook_log "error: cannot record failure"
 }
 
 COUNTER_KEY=""
@@ -114,14 +129,17 @@ run_gate() {
         (.sys | join("\n")), "\u0000",
         (.violations | map(.msg) | join("\n\n")), "\u0000",
         ({rules: [.violations[] | {rule, key, msg}]} | tojson), "\u0000",
-        (.bad_lines | tostring), "\u0000"' <<<"$EVAL")
-    if ((${#parts[@]} != 8)); then
+        (.bad_lines | tostring), "\u0000",
+        (if .failure_log == null then "" else (.failure_log | tojson) end), "\u0000",
+        "\(.ladder.attempts) \(.ladder.approaches)", "\u0000"' <<<"$EVAL")
+    if ((${#parts[@]} != 10)); then
         hook_log "error: gate output has ${#parts[@]} parts"
         SYS_TEXT="Stop gate error: unreadable evaluation, see ~/.claude/logs/hooks.log."
         return 0
     fi
     local rules=${parts[0]} gate_new=${parts[1]} acks=${parts[2]} plain=${parts[3]} sysmsgs=${parts[4]}
-    local violations=${parts[5]} unresolved=${parts[6]} bad=${parts[7]} ack
+    local violations=${parts[5]} unresolved=${parts[6]} bad=${parts[7]} failure_log=${parts[8]} ack n_attempts n_approaches
+    read -r n_attempts n_approaches <<<"${parts[9]}"
     [[ $bad == 0 ]] || hook_log "error: $bad unparseable ledger lines session=$session"
     state_write "$STATE_DIR/gate.json" "$gate_new" || hook_log "error: cannot write gate.json"
 
@@ -130,6 +148,7 @@ run_gate() {
     done <<<"$acks"
 
     if [[ -z $rules ]]; then
+        log_failure "$failure_log"
         rm -f "$STATE_DIR/unresolved.json"
         hook_log "pass session=$session"
         SYS_TEXT=$sysmsgs
@@ -138,6 +157,7 @@ run_gate() {
     fi
 
     if ! counter_load; then
+        log_failure "$failure_log"
         hook_log "FAIL_OPEN: cannot read the block counter ($STATE_ERR) rules=$rules session=$session"
         SYS_TEXT="Stop gate: unresolved $rules, but the block counter is unreadable, so the stop was allowed."
         return 0
@@ -145,12 +165,14 @@ run_gate() {
     local count=$COUNTER_VALUE
 
     if ((count >= DONE_GATE_CAP)); then
+        [[ -z $failure_log ]] || log_failure "$(jq -c '. + {capped: true}' <<<"$failure_log")"
         state_write "$STATE_DIR/unresolved.json" "$unresolved" || hook_log "error: cannot write unresolved.json"
         hook_log "CAP_HIT rules=$rules session=$session"
         SYS_TEXT="Stop gate: unresolved $rules, recorded and carried over to the next prompt."
         return 0
     fi
 
+    log_failure "$failure_log"
     count=$((count + 1))
     if ! counter_save "$count"; then
         hook_log "FAIL_OPEN: cannot save the block counter rules=$rules session=$session"
@@ -159,7 +181,7 @@ run_gate() {
     fi
     hook_log "block $count/$DONE_GATE_CAP rules=$rules session=$session"
     if ((count >= DONE_GATE_CAP)); then
-        BLOCK_TEXT="Stop gate (block $count of $DONE_GATE_CAP): end now with \`STATUS: FAILURE <rule>: <what you tried and observed>\`. Still open:"$'\n\n'"$violations"
+        BLOCK_TEXT="Stop gate (block $count of $DONE_GATE_CAP). Fix this and continue. A FAILURE is accepted only after $n_attempts distinct failed attempts across $n_approaches tools in this prompt; a human-only step ends with BLOCKED. Still open:"$'\n\n'"$violations"
     else
         BLOCK_TEXT="Stop gate (block $count of $DONE_GATE_CAP). Fix this and continue:"$'\n\n'"$violations"
     fi

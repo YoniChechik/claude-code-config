@@ -1,0 +1,26 @@
+{
+  "session_id": "3af0ac80-6a6f-4273-821d-548ca092f86b",
+  "cwd": "/tmp/capture",
+  "prompt_id": "c9b45126-ce6f-45df-b550-371fed5f9033",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "ada5b0553839ff46c",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo from-subagent",
+    "description": "Run echo command"
+  },
+  "tool_response": {
+    "stdout": "from-subagent",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01WbTHZbwkuAsWXNa4kFWu5e",
+  "duration_ms": 11
+}

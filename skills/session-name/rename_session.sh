@@ -16,12 +16,12 @@ shift
 ITEMS=()
 while (($#)); do
     case "$1" in
-    --done)
-        [[ -n "${2:-}" ]] || usage
-        ITEMS+=("$2")
-        shift 2
-        ;;
-    *) usage ;;
+        --done)
+            [[ -n "${2:-}" ]] || usage
+            ITEMS+=("$2")
+            shift 2
+            ;;
+        *) usage ;;
     esac
 done
 
@@ -48,10 +48,15 @@ record_predicate() {
     local items sha
     items=$(jq -nc '$ARGS.positional | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))' --args "${ITEMS[@]}")
     [[ $(jq 'length' <<<"$items") -gt 0 ]] || fail "the predicate is empty."
+    local bad
+    bad=$(jq -r 'map(select((startswith("linear:") and (test("^linear:[A-Z][A-Z0-9]+-[0-9]+:.+$") | not))
+        or (startswith("surface:") and (test("^surface:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:(simulator|local)$") | not)))) | first // empty' <<<"$items")
+    [[ -z $bad ]] || fail "bad predicate item '$bad': use linear:<TEAM-123>:<state> or surface:<owner/repo>:<simulator|local>."
     sha=$(printf '%s' "$items" | shasum -a 256 | cut -d' ' -f1)
     ledger_latest predicate || fail "the session ledger is untrusted: $STATE_ERR"
     [[ -n $REPLY && $(jq -r '.sha256' <<<"$REPLY") == "$sha" ]] && return 0
-    ledger_append "$(jq -nc --argjson items "$items" --arg sha "$sha" '{kind: "predicate", items: $items, sha256: $sha}')" ||
+    local ts_ms=${EPOCHREALTIME/[.,]/}
+    ledger_append "$(jq -nc --argjson items "$items" --arg sha "$sha" --argjson ts_ms "${ts_ms:0:13}" '{kind: "predicate", items: $items, sha256: $sha, ts_ms: $ts_ms}')" ||
         fail "could not write the session ledger."
 }
 

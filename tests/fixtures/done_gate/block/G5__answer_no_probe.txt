@@ -1,0 +1,3 @@
+The flag is on in production.
+
+STATUS: ANSWER VERIFIED `curl -sS https://prod.example/flags`: `"flag": true`

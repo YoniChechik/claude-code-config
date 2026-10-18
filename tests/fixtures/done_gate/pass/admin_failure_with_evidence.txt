@@ -1,3 +1,3 @@
 `gh pr checks 4016` shows `squawk` failing on purpose: ban-drop-table flags migration 0042, which drops the legacy table by design.
 
-STATUS: FAILURE admin-merge: required check squawk fails because ban-drop-table flags migration 0042 (gh pr checks 4016: squawk fail)
+STATUS: FAILURE admin-merge: required check squawk fails by design (`gh pr checks 4016`: `squawk fail ban-drop-table: migration 0042`)

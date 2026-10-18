@@ -1,0 +1,4 @@
+# TODO
+- Retry the deploy after the DNS fix.
+
+STATUS: FAILURE staging-deploy: `curl -sS https://staging.example/healthz` printed `Could not resolve host: staging.example`

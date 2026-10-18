@@ -1,0 +1,7 @@
+# Done
+- The migration PR is open.
+
+# TODO
+- Run the backfill on staging.
+
+STATUS: BLOCKED credential: paste the staging DB password into keyshelf
