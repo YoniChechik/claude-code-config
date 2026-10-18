@@ -10,7 +10,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_state.sh"
 
-(($# == 5)) || { echo "Usage: staging_verify.sh <owner/repo> <target> <pr-number> <merge-sha> <ci: pass|fail|timeout|none>" >&2; exit 2; }
+(($# == 5)) || {
+    echo "Usage: staging_verify.sh <owner/repo> <target> <pr-number> <merge-sha> <ci: pass|fail|timeout|none>" >&2
+    exit 2
+}
 REPO=$1
 TARGET=$2
 PR=$3
@@ -24,7 +27,7 @@ record() {
     if [[ -n $session ]] && state_init "$session"; then
         ledger_append "$(jq -nc --arg repo "$REPO" --arg target "$TARGET" --arg pr "$PR" --arg sha "$SHA" \
             --arg result "$result" --arg reason "$reason" --arg cfg "$config_sha" --argjson targets "$targets" \
-            '{kind: "verify", repo: $repo, target: $target, pr: $pr, merge_sha: $sha, result: $result, reason: $reason, config_sha: $cfg, targets: $targets}')" ||
+            '{kind: "verify", repo: $repo, target: $target, pr: $pr, merge_sha: $sha, result: $result, reason: $reason, config_sha: $cfg, targets: $targets, surfaces: ($targets | map(.surface // empty) | unique)}')" ||
             echo "Staging verify: could not write the session ledger" >&2
     fi
     case "$result" in
@@ -69,6 +72,10 @@ problems=$(jq -r '
               end] | join("; ")
     end' <<<"$config" 2>/dev/null) || record error "${CONFIG_FILE} is not valid JSON"
 [[ -z $problems ]] || record error "invalid ${CONFIG_FILE}: ${problems}" "[]" "$config_sha"
+
+bad_surface=$(jq -r '[.targets[] | . as $t | select($t.surface != null and ((["staging", "production", "simulator", "local"] | index($t.surface | tostring)) == null))
+    | "target \($t.name // "target"): invalid surface \($t.surface)"] | first // empty' <<<"$config")
+[[ -z $bad_surface ]] || record fail "$bad_surface" "[]" "$config_sha"
 
 if [[ $(jq '.targets | length' <<<"$config") -eq 0 ]]; then
     record n/a "$(jq -r '.reason // "targets: [] in the verify config"' <<<"$config")" "[]" "$config_sha"
@@ -162,10 +169,19 @@ touches_paths() {
 
 trusted_headers_file() {
     local path=$1 mode
-    [[ -e $path ]] || { HDR_ERR="headers_file ${path} is missing"; return 1; }
-    state_safe_file "$path" || { HDR_ERR="untrusted headers_file: ${STATE_ERR}"; return 1; }
+    [[ -e $path ]] || {
+        HDR_ERR="headers_file ${path} is missing"
+        return 1
+    }
+    state_safe_file "$path" || {
+        HDR_ERR="untrusted headers_file: ${STATE_ERR}"
+        return 1
+    }
     read -r _ mode _ <<<"$REPLY"
-    ((8#$mode & 8#077)) && { HDR_ERR="headers_file ${path} is readable by others (mode ${mode})"; return 1; }
+    ((8#$mode & 8#077)) && {
+        HDR_ERR="headers_file ${path} is readable by others (mode ${mode})"
+        return 1
+    }
     return 0
 }
 
@@ -175,10 +191,10 @@ summary=()
 ran=0
 while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '' sha_jq &&
     IFS= read -r -d '' timeout_s && IFS= read -r -d '' probes && IFS= read -r -d '' headers_file &&
-    IFS= read -r -d '' paths; do
+    IFS= read -r -d '' paths && IFS= read -r -d '' surface; do
     [[ $timeout_s =~ ^[0-9]+$ ]] || timeout_s=$STAGING_VERIFY_DEFAULT_TIMEOUT
     if [[ $paths != null ]] && ! touches_paths "$paths"; then
-        target_lines+=("$(jq -nc --arg n "$name" '{name: $n, skipped: true, reason: "merge touches none of its paths"}')")
+        target_lines+=("$(jq -nc --arg n "$name" --arg s "$surface" '{name: $n, surface: $s, skipped: true, reason: "merge touches none of its paths"}')")
         summary+=("${name} skipped, merge touches none of its paths")
         continue
     fi
@@ -188,7 +204,7 @@ while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '
         [[ $headers_file == \~/* ]] && headers_file="$HOME/${headers_file#\~/}"
         if ! trusted_headers_file "$headers_file"; then
             failures+=("${name}: ${HDR_ERR}")
-            target_lines+=("$(jq -nc --arg n "$name" '{name: $n, observed_sha: "", contains_merge: false, probes: []}')")
+            target_lines+=("$(jq -nc --arg n "$name" --arg s "$surface" '{name: $n, surface: $s, observed_sha: "", contains_merge: false, probes: []}')")
             continue
         fi
         HDR=(-H "@${headers_file}")
@@ -200,12 +216,12 @@ while IFS= read -r -d '' name && IFS= read -r -d '' sha_url && IFS= read -r -d '
     while IFS= read -r -d '' url && IFS= read -r -d '' want && IFS= read -r -d '' expect; do
         run_probe "$name" "$url" "$want" "$expect"
     done < <(jq -j '.[] | .url, "\u0000", (.expect_status // 200 | tostring), "\u0000", (.expect // "" | tostring), "\u0000"' <<<"$probes")
-    target_lines+=("$(printf '%s\n' "${probe_lines[@]}" | jq -sc --arg n "$name" --arg o "$OBSERVED" --argjson c "$CONTAINS" \
-        '{name: $n, observed_sha: $o, contains_merge: $c, probes: .}')")
+    target_lines+=("$(printf '%s\n' "${probe_lines[@]}" | jq -sc --arg n "$name" --arg s "$surface" --arg o "$OBSERVED" --argjson c "$CONTAINS" \
+        '{name: $n, surface: $s, observed_sha: $o, contains_merge: $c, probes: .}')")
     summary+=("${name} serves ${OBSERVED:0:12}, ${ok}/${total} probes ok")
 done < <(jq -j '.targets[] | (.name // "target" | tostring), "\u0000", .sha_url, "\u0000", (.sha_jq // ".sha"), "\u0000",
     (.timeout_s // "" | tostring), "\u0000", ((.probes // []) | tojson), "\u0000", (.headers_file // ""), "\u0000",
-    (.paths | tojson), "\u0000"' <<<"$config")
+    (.paths | tojson), "\u0000", (.surface // "staging" | tostring), "\u0000"' <<<"$config")
 
 all_targets=$(printf '%s\n' "${target_lines[@]}" | jq -sc .)
 

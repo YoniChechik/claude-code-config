@@ -86,6 +86,20 @@ setup() {
     [ "$(wc -l <"$ledger")" -eq 2 ]
 }
 
+@test "--done records ts_ms and validates linear: and surface: items" {
+    run bash "$SCRIPT" "t1" --done "linear:DEVPUB-12:Done in Staging" --done "surface:o/r:simulator"
+    [ "$status" -eq 0 ]
+    L="$CLAUDE_STATE_DIR/sessions/testsess/ledger.jsonl"
+    [[ $(jq -r '.ts_ms' "$L") =~ ^[0-9]{13}$ ]]
+    [ "$(jq -r '.items[0]' "$L")" = "linear:DEVPUB-12:Done in Staging" ]
+    run bash "$SCRIPT" "t2" --done "linear:devpub-12:Done"
+    [ "$status" -eq 1 ]
+    [[ $output == *"bad predicate item 'linear:devpub-12:Done'"* ]]
+    run bash "$SCRIPT" "t3" --done "surface:o/r:laptop"
+    [ "$status" -eq 1 ]
+    [ "$(wc -l <"$L" | tr -d ' ')" = 1 ]
+}
+
 @test "--done with only blank items exits 1" {
     run bash "$SCRIPT" "my-feature" --done '   '
     [ "$status" -eq 1 ]

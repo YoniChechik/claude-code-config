@@ -6,7 +6,7 @@ argument-hint: "[optional forced name] [--done '<predicate item>']..."
 
 1. Pick a short name (well under 35 characters) from `$ARGUMENTS` if given, otherwise from the current task and branch.
 2. If you are a subagent (any depth), first `SendMessage(to: "main", ...)` with the name and reason, and use main's reply (confirmed or adjusted name). The top-level agent skips this.
-3. Once the task is known, add the exit predicate: one `--done` per item. An item is `cmd:<command>` (a check that exits 0 when met), `merged:<owner/repo>#<pr>`, `staging:<owner/repo>`, or plain text. Work that merges needs at least one item that is not plain text.
+3. Once the task is known, add the exit predicate: one `--done` per item. An item is `cmd:<command>` (a check that exits 0 when met), `merged:<owner/repo>#<pr>`, `staging:<owner/repo>`, `linear:<TEAM-123>:<state>` (met by a Linear `get_issue` read showing that state; one item per ticket), `surface:<owner/repo>:<simulator|local>` (accepts a verify run on that surface), or plain text. Work that merges needs at least one item that is not plain text. Items may be added during a prompt, never dropped.
 4. Run the one script from this skill's base directory:
 
 ```bash

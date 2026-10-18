@@ -10,15 +10,24 @@ SKIP_RULES=""
 
 IFS= read -r -d '' input
 source "$HOOK_DIR/_hook_log.sh" 2>/dev/null || exit 0
-source "$HOOK_DIR/_state.sh" 2>/dev/null || { hook_log "error: _state.sh missing"; exit 0; }
-source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || { hook_log "error: _relay_lib.sh missing"; exit 0; }
+source "$HOOK_DIR/_state.sh" 2>/dev/null || {
+    hook_log "error: _state.sh missing"
+    exit 0
+}
+source "$HOOK_DIR/_relay_lib.sh" 2>/dev/null || {
+    hook_log "error: _relay_lib.sh missing"
+    exit 0
+}
 
 mapfile -d '' fields < <(printf '%s' "$input" | jq -j '(.session_id // "" | tostring), "\u0000",
     (.hook_event_name // "" | tostring), "\u0000",
     (.agent_id // "" | tostring), "\u0000",
     (.stop_hook_active // false | tostring), "\u0000",
     (.prompt_id // "" | tostring), "\u0000"' 2>/dev/null)
-((${#fields[@]} == 5)) || { hook_log "skip: bad hook input JSON"; exit 0; }
+((${#fields[@]} == 5)) || {
+    hook_log "skip: bad hook input JSON"
+    exit 0
+}
 session=${fields[0]}
 event=${fields[1]}
 agent=${fields[2]}

@@ -344,3 +344,32 @@ STG='"name":"staging","sha_url":"https://stg/version","sha_jq":".sha"'
     verify
     assert_contains "paths must be an array of glob strings" "$output"
 }
+
+@test "every target record carries its surface, defaulting to staging" {
+    config "{\"targets\":[{$STG,\"probes\":[]}]}"
+    serve_sha "${SHA:0:12}"
+    verify
+    assert_eq pass "$(field .result)"
+    assert_eq staging "$(field '.targets[0].surface')"
+    assert_eq '["staging"]' "$(field '.surfaces | tojson')"
+}
+
+@test "an invalid surface records fail before any probe" {
+    config "{\"targets\":[{$STG,\"surface\":\"laptop\",\"probes\":[]}]}"
+    verify
+    assert_eq fail "$(field .result)"
+    assert_contains "target staging: invalid surface laptop" "$(field .reason)"
+    [ ! -e "$STUB/curl_calls.log" ]
+}
+
+@test "mixed target surfaces are all listed in surfaces, including skipped targets" {
+    printf 'docs/x.md\n' >"$STUB/files"
+    config "{\"targets\":[{$STG,\"probes\":[]},{\"name\":\"sim\",\"surface\":\"simulator\",\"sha_url\":\"https://sim/version\",\"probes\":[]},{\"name\":\"app\",\"surface\":\"production\",\"sha_url\":\"https://app/version\",\"paths\":[\"app/**\"],\"probes\":[]}]}"
+    serve_sha "${SHA:0:12}"
+    verify
+    assert_eq pass "$(field .result)"
+    assert_eq '["production","simulator","staging"]' "$(field '.surfaces | tojson')"
+    assert_eq simulator "$(field '.targets[1].surface')"
+    assert_eq production "$(field '.targets[2].surface')"
+    assert_eq true "$(field '.targets[2].skipped')"
+}

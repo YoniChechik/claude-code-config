@@ -87,3 +87,15 @@ assert_contains() {
     assert_contains "G1: 1 (50.0%)" "$output"
     assert_contains "Should I merge PR #12?" "$output"
 }
+
+@test "done_gate_replay skips G5: a historical ANSWER VERIFIED replays as pass" {
+    rm -f "$T"
+    {
+        jq -nc '{type: "user", entrypoint: "cli", timestamp: "2026-10-01T10:00:00Z", message: {content: "how many routes?"}}'
+        jq -nc '{type: "assistant", timestamp: "2026-10-01T10:05:00Z", message: {content: [{type: "text", text: "130 routes.\n\nSTATUS: ANSWER VERIFIED `rg -c defineRoute`: `130`"}]}}'
+    } >"$PROJECTS/-Users-me-app/fedcba9876543210.jsonl"
+    run uv run --quiet "$SCRIPTS/done_gate_replay.py" --days 400 --projects-dir "$PROJECTS"
+    assert_eq 0 "$status"
+    assert_contains "G2, G4 and G5 never fire" "$output"
+    assert_contains "Would block: 0 (0.0%)   would pass: 1" "$output"
+}
