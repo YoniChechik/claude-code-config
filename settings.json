@@ -141,6 +141,15 @@
           }
         ],
         "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__probe_ledger.sh",
+            "timeout" : 5,
+            "type" : "command"
+          }
+        ]
       }
     ],
     "PreToolUse" : [
@@ -195,6 +204,15 @@
         "hooks" : [
           {
             "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__probe_ledger.sh",
+            "timeout" : 5,
             "type" : "command"
           }
         ]

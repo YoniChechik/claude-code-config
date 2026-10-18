@@ -35,11 +35,21 @@ prune_old_sessions() {
 
 carry_over() {
     REPLY=""
-    state_kill_switch && { REPLY=""; return 0; }
-    [[ -n $STATE_DIR ]] || { REPLY=""; return 0; }
+    state_kill_switch && {
+        REPLY=""
+        return 0
+    }
+    [[ -n $STATE_DIR ]] || {
+        REPLY=""
+        return 0
+    }
     local unresolved="" lines
     state_read "$STATE_DIR/unresolved.json" && unresolved=$REPLY
-    state_ledger_file || { hook_log "STATE_UNTRUSTED: $STATE_ERR"; REPLY=""; return 0; }
+    state_ledger_file || {
+        hook_log "STATE_UNTRUSTED: $STATE_ERR"
+        REPLY=""
+        return 0
+    }
     lines=$(jq -nr --rawfile L "$REPLY" --argjson hookin '[{}]' --argjson st '{}' --argjson now "$EPOCHSECONDS" --arg op pending \
         -f "$HOOK_DIR/_done_gate.jq" 2>/dev/null | jq -r '.pending[]' 2>/dev/null)
     if [[ -n $unresolved ]]; then
@@ -72,8 +82,9 @@ case "$event" in
                 synthetic=true
                 prompt_id="t${EPOCHREALTIME/[.,]/}-$(printf '%s' "$prompt" | shasum -a 256 | cut -c1-16)"
             fi
-            state_write "$STATE_DIR/prompt.json" "$(jq -nc --arg id "$prompt_id" --argjson ts "$EPOCHSECONDS" --argjson syn "$synthetic" \
-                '{id: $id, ts: $ts, synthetic: $syn}')" || hook_log "error: cannot write prompt.json"
+            ts_ms=${EPOCHREALTIME/[.,]/}
+            state_write "$STATE_DIR/prompt.json" "$(jq -nc --arg id "$prompt_id" --argjson ts "${ts_ms:0:10}" --argjson ts_ms "${ts_ms:0:13}" \
+                --argjson syn "$synthetic" '{id: $id, ts: $ts, ts_ms: $ts_ms, synthetic: $syn}')" || hook_log "error: cannot write prompt.json"
         else
             hook_log "STATE_UNTRUSTED: $STATE_ERR"
         fi

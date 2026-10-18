@@ -5,11 +5,12 @@
 # ///
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from _transcript import ReadStats, is_tool_result, main_thread_records, text_of
@@ -120,6 +121,8 @@ _TODO_HEADER_RE = re.compile(
 )
 _EMPTY_SECTION_RE = re.compile(r"^[-*\d.\s]*(none|nothing|n/?a)\b", re.IGNORECASE)
 _STATUS_RE = re.compile(r"^STATUS: (COMPLETE|WAITING|BLOCKED|FAILURE|ANSWER)\b")
+_MISSING_PATH_BINS = {"ls", "test", "stat", "cat"}
+_REPEAT_LIMIT = 3
 
 
 @dataclass
@@ -142,7 +145,7 @@ def _parse_ts(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return datetime.fromisoformat(raw)
     except ValueError:
         return None
 
@@ -359,6 +362,110 @@ def _analyze(sessions: list[_Session]) -> dict:
     }
 
 
+def _record_ts(raw) -> datetime | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        try:
+            return datetime.fromtimestamp(raw, UTC)
+        except OverflowError, OSError, ValueError:
+            return None
+    if isinstance(raw, str):
+        ts = _parse_ts(raw)
+        return ts if ts is None or ts.tzinfo else ts.astimezone()
+    return None
+
+
+def _load_failures(
+    state_dir: Path, since: datetime, stats: ReadStats
+) -> list[tuple[str, datetime, dict]]:
+    failures = []
+    for path in sorted(state_dir.glob("sessions/*/ledger.jsonl")):
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    stats.bad_lines += 1
+                    continue
+                if not isinstance(rec, dict):
+                    stats.bad_lines += 1
+                    continue
+                if rec.get("kind") != "failure":
+                    continue
+                ts = _record_ts(rec.get("ts"))
+                if ts is None or ts < since:
+                    continue
+                failures.append((path.parent.name, ts, rec))
+    return failures
+
+
+def _verdict(rec: dict) -> str:
+    if rec.get("capped") is True:
+        return "capped"
+    if rec.get("exempt") is not None:
+        return "exempt"
+    return "accepted" if rec.get("accepted") is True else "rejected"
+
+
+def _ladder_flags(rec: dict, verdict: str) -> list[str]:
+    attempts = [a for a in rec.get("attempts") or [] if isinstance(a, dict)]
+    cmds = [str(a.get("cmd", "")) for a in attempts]
+    flags = []
+    if cmds:
+        cmd, count = Counter(cmds).most_common(1)[0]
+        if count >= _REPEAT_LIMIT:
+            flags.append(f"a: one cmd repeated {count}x ({_clip(cmd, 80)})")
+    if attempts and all(
+        "No such file or directory" in str(a.get("out_excerpt") or "")
+        and a.get("bin") in _MISSING_PATH_BINS
+        for a in attempts
+    ):
+        flags.append("b: every attempt is a missing-path probe")
+    if verdict == "capped":
+        distinct_cmds = len(set(cmds))
+        distinct_bins = len({a.get("bin") for a in attempts})
+        n_attempts = rec.get("n_attempts") or 0
+        n_approaches = rec.get("n_approaches") or 0
+        if distinct_cmds < n_attempts or distinct_bins < n_approaches:
+            flags.append(
+                f"c: {distinct_cmds} distinct cmds / {distinct_bins} distinct bins"
+                f" below claimed {n_attempts} attempts / {n_approaches} approaches"
+            )
+    return flags
+
+
+def _analyze_failures(failures: list[tuple[str, datetime, dict]]) -> dict:
+    by_verdict = Counter({"accepted": 0, "rejected": 0, "exempt": 0, "capped": 0})
+    trivial = []
+    for session, ts, rec in failures:
+        verdict = _verdict(rec)
+        by_verdict[verdict] += 1
+        if verdict not in ("accepted", "capped"):
+            continue
+        if flags := _ladder_flags(rec, verdict):
+            trivial.append(
+                {
+                    "session": session,
+                    "ts": ts.isoformat(),
+                    "verdict": verdict,
+                    "what": _clip(str(rec.get("what") or ""), 160),
+                    "reason": "; ".join(flags),
+                    "cmds": [
+                        str(a.get("cmd", ""))
+                        for a in rec.get("attempts") or []
+                        if isinstance(a, dict)
+                    ],
+                }
+            )
+    return {
+        "failures": {"total": len(failures), "by_verdict": dict(by_verdict)},
+        "trivial_ladders": trivial,
+    }
+
+
 def _render_text(report: dict) -> str:
     out = [
         f"Window: {report['window']['since']} .. {report['window']['until']}",
@@ -393,6 +500,20 @@ def _render_text(report: dict) -> str:
             f"  {g['gap_hours']}h {g['project']}/{g['session'][:8]} {g['assistant_ts']} -> {g['human']}"
             for g in report["idle_gaps"][:15]
         ),
+        "",
+        "FAILURE ladders:",
+        f"  Unparseable ledger lines skipped: {report['unparseable_ledger_lines']}",
+        (
+            f"  Total: {report['failures']['total']}  "
+            + ", ".join(f"{k}={v}" for k, v in report["failures"]["by_verdict"].items())
+        ),
+        f"  Trivial ladders: {len(report['trivial_ladders'])}",
+        *(
+            f"    {t['session']} {t['ts']} [{t['verdict']}] {t['what']}\n"
+            f"      reason: {t['reason']}\n"
+            f"      cmds: {' | '.join(t['cmds'])}"
+            for t in report["trivial_ladders"]
+        ),
     ]
     return "\n".join(out)
 
@@ -408,11 +529,19 @@ def main() -> int:
         "--projects-dir", type=Path, default=Path.home() / ".claude" / "projects"
     )
     parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=Path(
+            os.environ.get("CLAUDE_STATE_DIR") or Path.home() / ".claude" / "state"
+        ),
+        help="hook state dir holding sessions/*/ledger.jsonl",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="print the full report as JSON"
     )
     args = parser.parse_args()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         since = _parse_since(args.since, now)
     except ValueError:
@@ -432,10 +561,15 @@ def main() -> int:
         ):
             sessions.append(session)
 
+    ledger_stats = ReadStats()
+    failures = _load_failures(args.state_dir, since, ledger_stats)
+
     report = {
         "window": {"since": since.isoformat(), "until": now.isoformat()},
         "unparseable_lines": stats.bad_lines,
+        "unparseable_ledger_lines": ledger_stats.bad_lines,
         **_analyze(sessions),
+        **_analyze_failures(failures),
     }
     print(
         json.dumps(report, indent=2, ensure_ascii=False)

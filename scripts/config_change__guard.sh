@@ -22,11 +22,16 @@ missing=$(jq -r '
         (if .disableAllHooks == true then "every hook (disableAllHooks)" else empty end),
         need("Stop"; "stop__coordinator.sh"; "Stop coordinator"),
         need("PostToolUse"; "post_tool_use__gh_monitor_trigger.sh"; "merge ledger trigger"),
+        need("PostToolUse"; "post_tool_use__probe_ledger.sh"; "probe ledger"),
+        need("PostToolUseFailure"; "post_tool_use__probe_ledger.sh"; "failed-probe ledger"),
         need("PreToolUse"; "pre_tool_use__ask_gate.sh"; "question gate"),
         need("UserPromptSubmit"; "prompt_context__done_gate.sh"; "prompt context"),
         need("SessionStart"; "prompt_context__done_gate.sh"; "session start context"),
         need("ConfigChange"; "config_change__guard.sh"; "config change guard")
-    ] | join(", ")' "$file" 2>/dev/null) || { hook_log "skip: $file is not readable JSON"; exit 0; }
+    ] | join(", ")' "$file" 2>/dev/null) || {
+    hook_log "skip: $file is not readable JSON"
+    exit 0
+}
 if [[ -z $missing ]]; then
     hook_log "allow config change: gate hooks intact"
     exit 0
