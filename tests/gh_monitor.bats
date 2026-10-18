@@ -45,6 +45,7 @@ setup() {
     stub repo_name 0 "o/r"
     stub api_checks 0 '{"check_runs":[]}'
     stub api_status 0 '{"statuses":[]}'
+    stub api_wfruns 0 '{"workflow_runs":[]}'
 
     SPAWNED_PIDS_FILE="$BATS_TEST_TMPDIR/spawned_pids"
     : >"$SPAWNED_PIDS_FILE"
@@ -119,6 +120,8 @@ esac
 case "$1" in
     api)
         case "$*" in
+            *actions/workflows/*) key=api_wfruns ;;
+            *compare/*) key=api_compare ;;
             *actions/runs*) key=api_runs ;;
             *check-runs*) key=api_checks ;;
             */status*) key=api_status ;;
@@ -159,12 +162,14 @@ merged_pr() {
 }
 
 runs_json() {
-    local spec id name status conclusion attempt event
+    local spec id name status conclusion attempt event wid branch sha created
     for spec in "$@"; do
-        IFS=: read -r id name status conclusion attempt event <<<"$spec"
+        wid=""; branch=""; sha=""; created=""
+        IFS=: read -r id name status conclusion attempt event wid branch sha created <<<"$spec"
         jq -nc --argjson id "$id" --arg n "$name" --arg s "$status" --arg c "$conclusion" \
-            --argjson a "$attempt" --arg e "$event" \
-            '{id:$id,name:$n,status:$s,conclusion:(if $c == "" then null else $c end),run_attempt:$a,event:$e}'
+            --argjson a "$attempt" --arg e "$event" --arg wid "$wid" --arg b "$branch" --arg sha "$sha" --arg cr "$created" \
+            '{id:$id,name:$n,status:$s,conclusion:(if $c == "" then null else $c end),run_attempt:$a,event:$e,
+              workflow_id:(if $wid == "" then null else ($wid | tonumber) end),head_branch:$b,head_sha:$sha,created_at:$cr}'
     done | jq -sc '{workflow_runs: .}'
 }
 
@@ -588,6 +593,81 @@ DRV
     api_runs_fixture "11:A:completed:cancelled:1:push" "12:B:completed:timed_out:1:push" "13:C:completed:action_required:1:push" "14:D:completed:skipped:1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_contains "3 of 4 failed" "$output"
+}
+
+wfruns_fixture() {
+    local spec id status conclusion sha created
+    stub api_wfruns 0 "$(for spec in "$@"; do
+        IFS=: read -r id status conclusion sha created <<<"$spec"
+        jq -nc --argjson id "$id" --arg s "$status" --arg c "$conclusion" --arg sha "$sha" --arg cr "$created" \
+            '{id:$id,status:$s,conclusion:(if $c == "" then null else $c end),head_sha:$sha,created_at:$cr}'
+    done | jq -sc '{workflow_runs: .}')"
+}
+
+@test "merge: a cancelled run superseded by a later descendant run that succeeded passes" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "21:completed:success:def456:c2" "11:completed:cancelled:abc123:c1"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED for PR #3951 \"fix(website): probe health\" on o/r (merge commit abc123): all 1 green" "$output"
+    assert_contains "superseded         Release (run 11, attempt 1, push, superseded by run 21)" "$output"
+    assert_not_contains "FAILED" "$output"
+}
+
+@test "merge: a cancelled run whose superseder is still in progress keeps the watcher waiting" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    stub api_wfruns.1 0 "$(jq -nc '{workflow_runs:[{id:21,status:"in_progress",conclusion:null,head_sha:"def456",created_at:"c2"}]}')"
+    stub api_wfruns 0 "$(jq -nc '{workflow_runs:[{id:21,status:"completed",conclusion:"success",head_sha:"def456",created_at:"c2"}]}')"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    [ "$(call_count 'actions/runs')" -ge 2 ] || { echo "expected a second poll" >&2; return 1; }
+}
+
+@test "merge: a cancelled run whose superseder failed fails the verdict" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "21:completed:failure:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED for PR #3951 \"fix(website): probe health\" on o/r (merge commit abc123): 1 of 1 failed" "$output"
+    assert_contains "failure            Release (run 11, attempt 1, push, superseded by run 21)" "$output"
+}
+
+@test "merge: a cancelled run with no later run of its workflow still fails" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "11:completed:cancelled:abc123:c1"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "cancelled          Release (run 11, attempt 1, push)" "$output"
+    assert_eq 0 "$(call_count 'compare/')"
+}
+
+@test "merge: a later run on a diverged (non-descendant) sha does not supersede" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "21:completed:success:def456:c2"
+    stub api_compare 0 '{"status":"diverged"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "cancelled          Release (run 11, attempt 1, push)" "$output"
+}
+
+@test "merge: two cancelled runs of one workflow share one superseder lookup" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1" "12:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "21:completed:success:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "all 2 green" "$output"
+    local polls; polls=$(call_count 'actions/runs')
+    assert_eq "$polls" "$(call_count 'actions/workflows/')"
+    assert_eq "$polls" "$(call_count 'compare/')"
 }
 
 @test "merge: a non-Actions check run that failed on its latest attempt fails the verdict" {
