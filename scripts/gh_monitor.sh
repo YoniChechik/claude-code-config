@@ -307,13 +307,85 @@ push_body() {
     return 0
 }
 
+SNAP_N=0
+SUPER_LINES=""
+cache_get() {
+    local var="CACHE_${SNAP_N}_$1"
+    [[ -n "${!var+x}" ]] || return 1
+    CACHE_VAL=${!var}
+}
+cache_put() { printf -v "CACHE_${SNAP_N}_$1" '%s' "$2"; }
+
+workflow_runs_for() {
+    local wid="$1" branch="$2" key
+    key="wf_${wid}_$(printf '%s' "$branch" | cksum | cut -d' ' -f1)"
+    cache_get "$key" && return 0
+    gh_call_best_effort gh api --method GET "repos/${OWNER_REPO}/actions/workflows/${wid}/runs" \
+        -f "branch=${branch}" -f event=push -f per_page=100 \
+        --jq '.workflow_runs[] | {id, status, conclusion, created_at, head_sha} | @json' \
+        || return 1
+    CACHE_VAL=$GH_OUT
+    cache_put "$key" "$CACHE_VAL"
+}
+
+compare_status() {
+    local base="$1" head="$2" key="cmp_${1}_${2}"
+    cache_get "$key" && return 0
+    gh_call_best_effort gh api "repos/${OWNER_REPO}/compare/${base}...${head}?per_page=1" \
+        --jq '.status' || return 1
+    CACHE_VAL=$(last_line "$GH_OUT")
+    cache_put "$key" "$CACHE_VAL"
+}
+
+resolve_superseders() {
+    local runs_out="$1" cancelled run id wid branch created sha cands cand cand_sha cand_id st
+    SNAP_N=$((SNAP_N + 1))
+    SUPER_LINES=""
+    cancelled=$(printf '%s\n' "$runs_out" | jq -c 'select(type == "object" and .conclusion == "cancelled" and .event == "push") | {id, workflow_id, head_branch, created_at, head_sha}' 2>/dev/null) || cancelled=""
+    [[ -n "$cancelled" ]] || return 0
+    while IFS= read -r run; do
+        [[ -n "$run" ]] || continue
+        id=$(jq -r '.id' <<<"$run")
+        wid=$(jq -r '.workflow_id' <<<"$run")
+        branch=$(jq -r '.head_branch' <<<"$run")
+        created=$(jq -r '.created_at' <<<"$run")
+        sha=$(jq -r '.head_sha' <<<"$run")
+        workflow_runs_for "$wid" "$branch" || return 1
+        cands=$(printf '%s\n' "$CACHE_VAL" | jq -s -c --arg id "$id" --arg c "$created" \
+            '[.[] | select((.id | tostring) != $id and .created_at > $c)] | sort_by(.created_at) | reverse | .[:5][]') || return 1
+        [[ -n "$cands" ]] || continue
+        while IFS= read -r cand; do
+            [[ -n "$cand" ]] || continue
+            cand_sha=$(jq -r '.head_sha' <<<"$cand")
+            if [[ "$cand_sha" == "$sha" ]]; then
+                st=identical
+            else
+                compare_status "$sha" "$cand_sha" || return 1
+                st=$CACHE_VAL
+            fi
+            case "$st" in
+                ahead | identical)
+                    cand_id=$(jq -r '.id' <<<"$cand")
+                    SUPER_LINES+=$(jq -nc --argjson run_id "$id" --argjson c "$cand" \
+                        '{kind: "super", run_id: $run_id, id: $c.id, status: $c.status, conclusion: $c.conclusion}')$'\n'
+                    log "run ${id} cancelled; superseded by run ${cand_id} (${st})"
+                    break
+                    ;;
+            esac
+        done <<<"$cands"
+    done <<<"$cancelled"
+    return 0
+}
+
 SNAP_LINES=""
 snapshot_sha() {
     local sha="$1" lines=""
     gh_call_best_effort gh api --paginate "repos/${OWNER_REPO}/actions/runs?head_sha=${sha}&per_page=100" \
-        --jq '.workflow_runs[] | {kind: "run", id, name, status, conclusion, attempt: .run_attempt, event} | @json' \
+        --jq '.workflow_runs[] | {kind: "run", id, name, status, conclusion, attempt: .run_attempt, event, workflow_id, head_branch, created_at, head_sha} | @json' \
         || return 1
     lines+=$GH_OUT$'\n'
+    resolve_superseders "$GH_OUT" || return 1
+    lines+=$SUPER_LINES
     gh_call_best_effort gh api --paginate "repos/${OWNER_REPO}/commits/${sha}/check-runs?filter=all&per_page=100" \
         --jq '.check_runs[] | {kind: "check", id, name, status, conclusion, app: (.app.slug // "")} | @json' \
         || return 1
@@ -341,17 +413,27 @@ evaluate_snapshot() {
         ($ignore | split(",")) as $ignored |
         [split("\n")[] | (fromjson? // empty) | select(type == "object" and has("kind"))] as $all
         | ($all | map(select(.kind == "run" and ((.event // "") as $e | $ignored | index($e) | not))) | group_by(.id) | map(max_by(.attempt // 1))) as $runs
+        | ($all | map(select(.kind == "super") | {key: (.run_id | tostring), value: .}) | from_entries) as $sup
         | ($all | map(select(.kind == "check" and .app != "github-actions"))
             | group_by([.app, .name]) | map(max_by(.id))) as $checks
         | ($all | map(select(.kind == "status")) | group_by(.name) | map(max_by(.id))) as $statuses
         | [
-            ($runs[] | {
-                sig: "run:\(.id)",
-                done: (concl != ""),
-                bad: (concl as $c | $failing | index($c) != null),
-                state: (if concl != "" then concl else (.status // "unknown") end),
-                label: "\(.name) (run \(.id), attempt \(.attempt // 1), \(.event // "?"))"
-            }),
+            ($runs[] | concl as $c | $sup[(.id | tostring)] as $s
+              | if $c == "cancelled" and $s != null then
+                  (($s.conclusion // "") as $sc | {
+                    sig: "run:\(.id)>\($s.id)",
+                    done: ($sc != ""),
+                    bad: ($sc != "" and ($failing | index($sc) != null)),
+                    state: (if $sc != "" and ($failing | index($sc) != null) then $sc else "superseded" end),
+                    label: "\(.name) (run \(.id), attempt \(.attempt // 1), \(.event // "?"), superseded by run \($s.id))"
+                  })
+                else {
+                  sig: "run:\(.id)",
+                  done: ($c != ""),
+                  bad: ($failing | index($c) != null),
+                  state: (if $c != "" then $c else (.status // "unknown") end),
+                  label: "\(.name) (run \(.id), attempt \(.attempt // 1), \(.event // "?"))"
+                } end),
             ($checks[] | {
                 sig: "check:\(.app)/\(.name)",
                 done: (concl != ""),
