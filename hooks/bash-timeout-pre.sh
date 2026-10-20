@@ -42,10 +42,13 @@ if [ "${BASH_TIMEOUT_SKIP_RTK:-0}" != "1" ] && command -v rtk >/dev/null 2>&1; t
     [ -n "$REWRITTEN" ] && COMMAND="$REWRITTEN"
 fi
 
+TOOL_ID=$(jq -r '.tool_use_id // empty' <<<"$INPUT" | tr -cd 'A-Za-z0-9_-')
+[ -n "$TOOL_ID" ] || TOOL_ID="-"
+
 MODE="fg"
 [ "$(jq -r '.tool_input.run_in_background // false' <<<"$INPUT")" = "true" ] && MODE="bg"
 
-WRAPPED=$(jq -rn --arg r "$RUNNER" --arg s "$SECONDS_CAP" --arg m "$MODE" --arg c "$COMMAND" '"bash \($r | @sh) \($s) \($m) \($c | @sh)"')
+WRAPPED=$(jq -rn --arg r "$RUNNER" --arg s "$SECONDS_CAP" --arg m "$MODE" --arg i "$TOOL_ID" --arg c "$COMMAND" '"bash \($r | @sh) \($s) \($m) \($i) \($c | @sh)"')
 
 [ "${BASH_TIMEOUT_SKIP_RTK:-0}" = "1" ] || wait_for_sibling_rtk
 
