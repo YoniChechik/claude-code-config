@@ -226,6 +226,15 @@
             "type" : "command"
           }
         ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/worktree_sweep.sh",
+            "timeout" : 5,
+            "type" : "command"
+          }
+        ]
       }
     ],
     "SessionStart" : [
@@ -320,6 +329,15 @@
         "hooks" : [
           {
             "command" : "bash $HOME\/.claude\/scripts\/tab_color.sh",
+            "type" : "command"
+          }
+        ]
+      },
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/scripts\/worktree_sweep.sh",
+            "timeout" : 5,
             "type" : "command"
           }
         ]
