@@ -100,13 +100,18 @@ EOF
     chmod +x "$BATS_TEST_TMPDIR/bin/gh"
 }
 
+age_tree() {
+    find "$1" -exec touch -h -t 202001010000 {} +
+}
+
 # add_worktree <branch> [days-old] — creates a worktree off PRIMARY on a new
 # branch with one commit, optionally backdated for the stale-age tests. Shares
 # PRIMARY's object database, so a later `git -C "$PRIMARY" merge --ff-only
 # <branch>` can simulate that commit having already landed on main.
 add_worktree() {
     local branch="$1" days_old="${2:-0}" wt date_env
-    wt="$BATS_TEST_TMPDIR/wt-$branch"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    wt="$PRIMARY/.claude/worktrees/wt-$branch"
     git -C "$PRIMARY" worktree add --quiet -b "$branch" "$wt" main
     git -C "$wt" config user.email "t@example.com"
     git -C "$wt" config user.name "t"
@@ -114,6 +119,7 @@ add_worktree() {
         date_env=$(date -v-"${days_old}"d +%Y-%m-%dT%H:%M:%S)
         GIT_AUTHOR_DATE="$date_env" GIT_COMMITTER_DATE="$date_env" \
             git -C "$wt" commit --quiet --allow-empty -m "commit on $branch"
+        age_tree "$wt"
     else
         git -C "$wt" commit --quiet --allow-empty -m "commit on $branch"
     fi
@@ -349,8 +355,10 @@ STUB
 
 @test "cleanup: a detached worktree with nothing unique versus origin/main is removed" {
     setup_cleanup
-    WT="$BATS_TEST_TMPDIR/wt-detached-clean"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-detached-clean"
     git -C "$PRIMARY" worktree add --quiet --detach "$WT" main
+    age_tree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -359,11 +367,13 @@ STUB
 
 @test "cleanup: a detached worktree with a unique recent commit is kept" {
     setup_cleanup
-    WT="$BATS_TEST_TMPDIR/wt-detached-unique"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-detached-unique"
     git -C "$PRIMARY" worktree add --quiet --detach "$WT" main
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     git -C "$WT" commit --quiet --allow-empty -m "unique"
+    age_tree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -372,12 +382,14 @@ STUB
 
 @test "cleanup: a detached worktree with a unique commit older than 4 days is removed" {
     setup_cleanup
-    WT="$BATS_TEST_TMPDIR/wt-detached-old"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-detached-old"
     git -C "$PRIMARY" worktree add --quiet --detach "$WT" main
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     old=$(date -v-10d +%Y-%m-%dT%H:%M:%S)
     GIT_AUTHOR_DATE="$old" GIT_COMMITTER_DATE="$old" git -C "$WT" commit --quiet --allow-empty -m "old unique"
+    age_tree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -389,7 +401,7 @@ STUB
     ORPHAN="$PRIMARY/.claude/worktrees/orphan"
     mkdir -p "$ORPHAN"
     echo x >"$ORPHAN/file"
-    touch -t 202001010000 "$ORPHAN"
+    age_tree "$ORPHAN"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -400,7 +412,7 @@ STUB
     setup_cleanup
     ORPHAN="$PRIMARY/.claude/worktrees/orphan-busy"
     mkdir -p "$ORPHAN"
-    touch -t 202001010000 "$ORPHAN"
+    age_tree "$ORPHAN"
     (cd "$ORPHAN" && exec sleep 300) >/dev/null 2>&1 3>&- &
     busy=$!
 
@@ -427,7 +439,7 @@ STUB
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     git -C "$WT" commit --quiet --allow-empty -m "work"
-    touch -t 202001010000 "$WT"
+    age_tree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -443,4 +455,106 @@ STUB
     _cleanup_worktrees_and_branches "$PRIMARY"
 
     ! git -C "$PRIMARY" worktree list | grep -qF "$WT"
+}
+
+@test "cleanup: a symlinked orphan is skipped and its target is untouched" {
+    setup_cleanup
+    OUTSIDE="$BATS_TEST_TMPDIR/outside"
+    mkdir -p "$OUTSIDE" "$PRIMARY/.claude/worktrees"
+    echo precious >"$OUTSIDE/file"
+    age_tree "$OUTSIDE"
+    ln -s "$OUTSIDE" "$PRIMARY/.claude/worktrees/link"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -f "$OUTSIDE/file" ]
+    [ -L "$PRIMARY/.claude/worktrees/link" ]
+}
+
+@test "cleanup: an orphan with an unregistered git pointer is kept" {
+    setup_cleanup
+    ORPHAN="$PRIMARY/.claude/worktrees/orphan-git"
+    mkdir -p "$ORPHAN"
+    echo "gitdir: /nonexistent" >"$ORPHAN/.git"
+    echo work >"$ORPHAN/edit.txt"
+    age_tree "$ORPHAN"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -f "$ORPHAN/edit.txt" ]
+}
+
+@test "cleanup: an orphan whose top dir is old but holds a recent file is kept" {
+    setup_cleanup
+    ORPHAN="$PRIMARY/.claude/worktrees/orphan-recent"
+    mkdir -p "$ORPHAN/sub"
+    age_tree "$ORPHAN"
+    echo fresh >"$ORPHAN/sub/new.txt"
+    touch -t 202001010000 "$ORPHAN" "$ORPHAN/sub"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -f "$ORPHAN/sub/new.txt" ]
+}
+
+@test "cleanup: a fresh detached worktree with nothing unique is kept" {
+    setup_cleanup
+    WT="$PRIMARY/.claude/worktrees/wt-detached-fresh"
+    git -C "$PRIMARY" worktree add --quiet --detach "$WT" main
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a dirty locked worktree with a dead pid is kept" {
+    setup_cleanup
+    WT=$(add_worktree feat-dirty-locked)
+    echo "MERGED" >"$GH_STUB_DIR/feat-dirty-locked"
+    lock_worktree "$WT" "$(dead_pid)"
+    echo "uncommitted" >"$WT/dirty.txt"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -f "$WT/dirty.txt" ]
+}
+
+@test "cleanup: a fresh branch cut from an old main is kept by the age rule" {
+    setup_cleanup
+    old=$(date -v-10d +%Y-%m-%dT%H:%M:%S)
+    GIT_AUTHOR_DATE="$old" GIT_COMMITTER_DATE="$old" git -C "$PRIMARY" commit --quiet --allow-empty -m "old main"
+    git -C "$PRIMARY" push --quiet origin main
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-fresh-from-old"
+    git -C "$PRIMARY" worktree add --quiet -b feat-fresh-old "$WT" main
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: when lsof fails every worktree is treated as in use and kept" {
+    setup_cleanup
+    WT=$(add_worktree feat-lsof-fail)
+    echo "MERGED" >"$GH_STUB_DIR/feat-lsof-fail"
+    printf '#!/usr/bin/env bash\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/lsof"
+    chmod +x "$BATS_TEST_TMPDIR/bin/lsof"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+    grep -q "process snapshot failed" "$CLAUDE_HOOK_LOG_DIR/hooks.log"
+}
+
+@test "cleanup: a worktree outside the .claude/worktrees directory is never removed" {
+    setup_cleanup
+    OUT="$BATS_TEST_TMPDIR/elsewhere-wt"
+    git -C "$PRIMARY" worktree add --quiet -b feat-elsewhere "$OUT" main
+    echo "MERGED" >"$GH_STUB_DIR/feat-elsewhere"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$OUT" ]
+    git -C "$PRIMARY" worktree list | grep -qF "elsewhere-wt"
 }

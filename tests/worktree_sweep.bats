@@ -21,7 +21,8 @@ setup() {
 }
 
 @test "the sweep returns immediately and later removes a merged worktree whose lock pid is dead" {
-    WT="$BATS_TEST_TMPDIR/wt-sweep"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-sweep"
     git -C "$PRIMARY" worktree add --quiet -b feat-sweep "$WT" main
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
