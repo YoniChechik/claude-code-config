@@ -50,7 +50,8 @@ setup() {
 }
 
 @test "running from the primary checkout still runs cleanup: a merged, gone-from-origin worktree branch is removed" {
-    WT="$BATS_TEST_TMPDIR/wt-feat"
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-feat"
     git -C "$PRIMARY" worktree add --quiet -b feat-merged "$WT" main
     git -C "$PRIMARY" config user.email "t@example.com"
     git -C "$PRIMARY" config user.name "t"

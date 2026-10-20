@@ -1,22 +1,8 @@
 #!/usr/bin/env bash
-#
-# Shared primary-checkout sync, used by session_start.sh (every session start)
-# and post_tool_use__sync_main_after_merge.sh (right after a `gh pr merge`
-# succeeds, so the base repo does not sit stale for the rest of a long
-# session). Sourced, never executed directly.
 
-# _sync_primary_checkout_to_origin_main <primary-repo-root>
-#
-# Force-syncs the PRIMARY checkout (never a worktree) to origin/main,
-# discarding anything local not on origin — intentional, no backup, so the
-# base checkout of every repo always matches origin/main exactly. Every git
-# call uses `-C`, never `cd`, so this never touches the caller's own cwd.
-#
-# checkout -f main can fail (e.g. another worktree already has main checked
-# out) — in that case do NOT continue, or reset --hard would land on whatever
-# branch is actually checked out instead of main. Confirmed via
-# `branch --show-current` too, in case checkout "succeeds" but a detached
-# HEAD or some other state leaves us not actually on main.
+: "${HOOK_NAME:=git_sync}"
+source "$(dirname "${BASH_SOURCE[0]}")/_hook_log.sh"
+
 _sync_primary_checkout_to_origin_main() {
     local dir="$1"
     if git -C "$dir" checkout -f main >/dev/null 2>&1 \
@@ -27,203 +13,315 @@ _sync_primary_checkout_to_origin_main() {
     fi
 }
 
-# _cleanup_worktrees_and_branches <repo-root>
-#
-# Applies to every worktree `git worktree list` reports for the repo at
-# <repo-root>, regardless of where it lives on disk. Drops:
-#   - a worktree whose branch is gone from origin AND (merged into the
-#     default branch OR its PR was closed without merging)
-#   - a worktree untouched (no commits, no dirty files) for over 4 days
-#   - a local branch whose upstream tracking is reported "gone"
-#
-# All state is `local` to this function (bash's dynamic scoping makes it
-# visible to the nested helper functions this calls, same as when this logic
-# lived at a script's top level) — nothing here leaks into the caller's shell.
-#
-# Runs from wherever it's called; every git call is `-C <repo-root>` or a
-# `cd`-in-a-subshell, so this never touches the caller's own cwd.
+_wt_regex_escape() {
+    printf '%s' "$1" | sed 's/[][\.*^$+?(){}|/]/\\&/g'
+}
+
+_wt_path_in_text() {
+    local path="$1" text="$2" esc
+    esc=$(_wt_regex_escape "$path")
+    grep -qE -- "${esc}(/|[[:space:]]|\$)" <<<"$text"
+}
+
+_wt_timeout() {
+    local secs="$1" out rc pid watchdog
+    shift
+    out=$(mktemp "${TMPDIR:-/tmp}/wt-sweep.XXXXXX") || return 1
+    (cd "$WT_GIT_ROOT" && exec "$@") >"$out" 2>/dev/null </dev/null &
+    pid=$!
+    (
+        trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+        sleep "$secs" &
+        nap=$!
+        wait "$nap"
+        kill "$pid" 2>/dev/null
+    ) >/dev/null 2>&1 </dev/null &
+    watchdog=$!
+    wait "$pid"
+    rc=$?
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    cat "$out"
+    rm -f "$out"
+    return "$rc"
+}
+
+_wt_snapshot_processes() {
+    local lsof_out
+    WT_SNAPSHOT_OK=1
+    WT_PS_TEXT=$(ps -axo command= 2>/dev/null) || WT_SNAPSHOT_OK=0
+    lsof_out=$(lsof -d cwd -Fn 2>/dev/null) || true
+    WT_CWD_TEXT=$(sed -n 's/^n//p' <<<"$lsof_out")
+    if [[ -z "$WT_PS_TEXT" || -z "$WT_CWD_TEXT" ]]; then
+        WT_SNAPSHOT_OK=0
+    fi
+    if [[ "$WT_SNAPSHOT_OK" != "1" ]]; then
+        hook_log "process snapshot failed (ps or lsof); treating every worktree as in use" ""
+    fi
+}
+
+_wt_in_use() {
+    local path="$1"
+    [[ "$WT_SNAPSHOT_OK" == "1" ]] || return 0
+    _wt_path_in_text "$path" "$WT_PS_TEXT" && return 0
+    _wt_path_in_text "$path" "$WT_CWD_TEXT" && return 0
+    return 1
+}
+
+_wt_resolve() {
+    local path="$1" parent
+    if [[ -d "$path" ]]; then
+        (cd -P "$path" 2>/dev/null && pwd -P)
+        return
+    fi
+    parent=$(cd -P "$(dirname "$path")" 2>/dev/null && pwd -P) || return 1
+    printf '%s/%s\n' "$parent" "$(basename "$path")"
+}
+
+_wt_contained() {
+    local path="$1" resolved
+    resolved=$(_wt_resolve "$path") || return 1
+    [[ "$resolved" == "$WT_DIR"/?* ]]
+}
+
+_wt_birth() {
+    stat -f %B "$1" 2>/dev/null || echo 0
+}
+
+_wt_settled() {
+    local path="$1" recent
+    (( $(_wt_birth "$path") <= $(date +%s) - 3600 )) || return 1
+    recent=$(find "$path" -maxdepth 4 -mmin -60 -print -quit 2>/dev/null) || return 1
+    [[ -z "$recent" ]]
+}
+
+_wt_lock_pid_alive() {
+    local reason="$1" pid
+    [[ "$reason" =~ \(pid\ ([0-9]+)\) ]] || return 1
+    pid="${BASH_REMATCH[1]}"
+    kill -0 "$pid" 2>/dev/null
+}
+
+_wt_unlock() {
+    local git_root="$1" path="$2" out
+    out=$(git -C "$git_root" worktree unlock "$path" 2>&1) || {
+        hook_log "unlock failed: $out" "$path"
+        return 1
+    }
+}
+
+_wt_remove() {
+    local git_root="$1" path="$2" locked="$3" reason="$4" out
+    if ! _wt_contained "$path"; then
+        hook_log "refused: path is not strictly under $WT_DIR" "$path"
+        return 1
+    fi
+    if [[ "$locked" == "1" ]]; then
+        if _wt_lock_pid_alive "$reason" || _wt_in_use "$path"; then
+            hook_log "keep: locked worktree held by a live process ($reason)" "$path"
+            return 1
+        fi
+        _wt_unlock "$git_root" "$path" || true
+    elif _wt_in_use "$path"; then
+        hook_log "keep: live process inside worktree" "$path"
+        return 1
+    fi
+    if out=$(git -C "$git_root" worktree remove --force --force "$path" 2>&1); then
+        hook_log "removed worktree" "$path"
+        return 0
+    fi
+    hook_log "remove failed: $out" "$path"
+    return 1
+}
+
+_wt_last_touched() {
+    local path="$1" last_commit last_touched status f _orig m entry birth
+    last_commit=$(git -C "$path" log -1 --format=%ct 2>/dev/null)
+    last_touched="${last_commit:-0}"
+    birth=$(_wt_birth "$path")
+    (( birth > last_touched )) && last_touched="$birth"
+    while IFS= read -r -d '' entry; do
+        status="${entry:0:2}"
+        f="${entry:3}"
+        if [[ "$status" == *R* || "$status" == *C* ]]; then
+            IFS= read -r -d '' _orig
+        fi
+        [[ -z "$f" ]] && continue
+        m=$(stat -f "%m" "${path}/${f}" 2>/dev/null) || continue
+        (( m > last_touched )) && last_touched="$m"
+    done < <(git -C "$path" status --porcelain -z 2>/dev/null)
+    echo "$last_touched"
+}
+
+_wt_merged_or_abandoned() {
+    local git_root="$1" branch="$2" default_branch="$3"
+    local local_sha remote_sha remote_out ahead_count pr_state
+    local_sha=$(git -C "$git_root" rev-parse --verify --quiet "refs/heads/$branch" 2>/dev/null) || return 1
+    remote_out=$(_wt_timeout "${WT_NET_TIMEOUT:-20}" git -C "$git_root" ls-remote --heads origin "$branch") || return 1
+    remote_sha=$(awk -v r="refs/heads/$branch" '$2 == r {print $1; exit}' <<<"$remote_out")
+    if [[ -n "$remote_sha" && "$remote_sha" != "$local_sha" ]]; then
+        git -C "$git_root" merge-base --is-ancestor "$local_sha" "$remote_sha" 2>/dev/null || return 1
+    fi
+    ahead_count=$(git -C "$git_root" rev-list --count "$default_branch".."$branch" 2>/dev/null || echo 0)
+    if [[ "$ahead_count" != "0" ]] && git -C "$git_root" merge-base --is-ancestor "$branch" "$default_branch" 2>/dev/null; then
+        return 0
+    fi
+    pr_state=$(_wt_timeout "${WT_NET_TIMEOUT:-20}" gh pr view "$branch" --json state -q .state) || true
+    [[ "$pr_state" == "MERGED" || "$pr_state" == "CLOSED" ]]
+}
+
+_wt_detached_has_nothing_unique() {
+    local git_root="$1" path="$2" default_branch="$3" base unique
+    base="origin/$default_branch"
+    git -C "$git_root" rev-parse --verify --quiet "$base" >/dev/null 2>&1 || base="$default_branch"
+    unique=$(git -C "$path" cherry "$base" HEAD 2>/dev/null) || return 1
+    [[ "$unique" != *"+"* ]]
+}
+
+_wt_sweep_one() {
+    local git_root="$1" path="$2" branch="$3" detached="$4" locked="$5" reason="$6"
+    local default_branch="$7" age_cutoff="$8" cwd_real="$9" last_touched real
+
+    [[ -z "$path" || "$path" == "$git_root" || "$path" == "$WT_MAIN_ROOT" ]] && return 0
+    [[ "$branch" == "main" || "$branch" == "master" ]] && return 0
+    if [[ -L "$path" ]]; then
+        hook_log "skip: worktree path is a symlink" "$path"
+        return 0
+    fi
+    if ! _wt_contained "$path"; then
+        hook_log "skip: path is not strictly under $WT_DIR" "$path"
+        return 0
+    fi
+    real=$(_wt_resolve "$path")
+    [[ "$cwd_real" == "$real" || "$cwd_real" == "$real"/* ]] && return 0
+
+    if [[ ! -d "$path" ]]; then
+        if [[ "$locked" == "1" ]] && ! _wt_lock_pid_alive "$reason"; then
+            _wt_unlock "$git_root" "$path" || true
+        fi
+        return 0
+    fi
+
+    if ! git -C "$path" rev-parse --git-dir >/dev/null 2>&1; then
+        local broken_cutoff_str
+        broken_cutoff_str=$(date -v-4d "+%Y-%m-%d %H:%M:%S")
+        if find "$path" \( -name node_modules -o -name .next -o -name dist -o -name build -o -name .venv \) -prune -o -type f -newermt "$broken_cutoff_str" -print -quit 2>/dev/null | grep -q .; then
+            return 0
+        fi
+        if [[ "$locked" == "1" ]]; then
+            _wt_lock_pid_alive "$reason" && return 0
+            _wt_unlock "$git_root" "$path" || true
+        fi
+        _wt_in_use "$path" && return 0
+        rm -rf "$real" && hook_log "removed broken worktree" "$real"
+        return 0
+    fi
+
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && return 0
+
+    if [[ -n "$branch" ]]; then
+        if _wt_merged_or_abandoned "$git_root" "$branch" "$default_branch"; then
+            _wt_remove "$git_root" "$path" "$locked" "$reason" || true
+            return 0
+        fi
+    elif [[ "$detached" == "1" ]]; then
+        _wt_settled "$path" || return 0
+        if _wt_detached_has_nothing_unique "$git_root" "$path" "$default_branch"; then
+            _wt_remove "$git_root" "$path" "$locked" "$reason" || true
+            return 0
+        fi
+    else
+        return 0
+    fi
+
+    _wt_settled "$path" || return 0
+    last_touched=$(_wt_last_touched "$path")
+    [[ "$last_touched" == "0" ]] && return 0
+    (( last_touched > age_cutoff )) && return 0
+    _wt_remove "$git_root" "$path" "$locked" "$reason" || true
+    return 0
+}
+
+_wt_sweep_orphans() {
+    local git_root="$1" cwd_real="$2" registered d real recent
+    registered=$(git -C "$git_root" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+    for d in "$WT_DIR"/*; do
+        if [[ -L "$d" ]]; then
+            hook_log "skip orphan: symlink" "$d"
+            continue
+        fi
+        [[ -d "$d" ]] || continue
+        real=$(cd -P "$d" 2>/dev/null && pwd -P) || continue
+        _wt_contained "$real" || { hook_log "skip orphan: resolves outside $WT_DIR" "$d"; continue; }
+        grep -qxF -- "$real" <<<"$registered" && continue
+        grep -qxF -- "$d" <<<"$registered" && continue
+        [[ "$cwd_real" == "$real" || "$cwd_real" == "$real"/* ]] && continue
+        if [[ -e "$real/.git" ]]; then
+            hook_log "keep orphan: has a git pointer that is not a registered worktree" "$real"
+            continue
+        fi
+        if ! recent=$(find "$real" -maxdepth 4 -mmin -60 -print -quit 2>/dev/null) || [[ -n "$recent" ]]; then
+            continue
+        fi
+        _wt_in_use "$real" && continue
+        rm -rf "$real" && hook_log "removed orphan worktree directory" "$real"
+    done
+}
+
 _cleanup_worktrees_and_branches() {
     local git_root="$1"
     [[ -n "$git_root" ]] || return 0
 
-    # Primary branch name, used below to check whether a feature branch's commits
-    # are actually merged in (as opposed to just "absent from origin", which is
-    # also true of a branch that was simply never pushed yet).
     local default_branch="main"
     git -C "$git_root" rev-parse --verify --quiet main >/dev/null 2>&1 || default_branch="master"
 
-    # Drop stale administrative records first, so `git worktree list` reflects reality
-    # even if a directory was deleted by hand.
-    git -C "$git_root" worktree prune 2>/dev/null || true
-
-    # Shared 4-day age cutoff, used both below (merged-branch cleanup) and by the
-    # stale-worktree pass further down, so both paths agree on "how old is old".
     local age_cutoff=$(( $(date +%s) - 4*24*60*60 ))
+    local cwd_real="${2:-}"
+    [[ -n "$cwd_real" ]] || cwd_real=$(pwd -P)
 
-    # Returns (echoes) the last-touched epoch time for a worktree: the newer of
-    # its last commit time and the mtime of any uncommitted/untracked file in it.
-    # Echoes 0 when it cannot be determined at all (no commits, no dirty files,
-    # `git log` failed) so callers can fail closed instead of guessing.
-    worktree_last_touched() {
-        local path="$1"
-        local last_commit last_touched status f _orig m entry
-        last_commit=$(git -C "$path" log -1 --format=%ct 2>/dev/null)
-        last_touched="${last_commit:-0}"
+    WT_GIT_ROOT="$git_root"
+    local common_dir
+    common_dir=$(git -C "$git_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common_dir=""
+    WT_MAIN_ROOT=""
+    WT_DIR=""
+    if [[ "$common_dir" == */.git && -d "${common_dir%/.git}/.claude/worktrees" ]]; then
+        WT_MAIN_ROOT=$(cd -P "${common_dir%/.git}" && pwd -P)
+        WT_DIR="$WT_MAIN_ROOT/.claude/worktrees"
+    fi
 
-        # -z gives NUL-delimited records (safe for spaces); a rename/copy record is
-        # "XY new-path\0orig-path\0" — skip the extra orig-path token, stat new-path.
-        while IFS= read -r -d '' entry; do
-            status="${entry:0:2}"
-            f="${entry:3}"
-            if [[ "$status" == *R* || "$status" == *C* ]]; then
-                IFS= read -r -d '' _orig
-            fi
-            [[ -z "$f" ]] && continue
-            m=$(stat -f "%m" "${path}/${f}" 2>/dev/null) || continue
-            (( m > last_touched )) && last_touched="$m"
-        done < <(git -C "$path" status --porcelain -z 2>/dev/null)
+    local line wt_path="" wt_branch="" wt_detached=0 wt_locked=0 wt_reason="" rec
+    if [[ -n "$WT_DIR" ]]; then
+        _wt_snapshot_processes
 
-        echo "$last_touched"
-    }
+        local records=()
+        while IFS= read -r line; do
+            case "$line" in
+                "worktree "*) wt_path="${line#worktree }" ;;
+                "branch refs/heads/"*) wt_branch="${line#branch refs/heads/}" ;;
+                "detached") wt_detached=1 ;;
+                "locked") wt_locked=1 ;;
+                "locked "*) wt_locked=1; wt_reason="${line#locked }" ;;
+                "")
+                    [[ -n "$wt_path" ]] && records+=("$wt_path"$'\x1f'"$wt_branch"$'\x1f'"$wt_detached"$'\x1f'"$wt_locked"$'\x1f'"$wt_reason")
+                    wt_path=""; wt_branch=""; wt_detached=0; wt_locked=0; wt_reason=""
+                    ;;
+            esac
+        done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null; echo)
 
-    # Parse `git worktree list --porcelain`: records are blank-line separated, with a
-    # `worktree <abs-path>` line and (unless detached) a `branch refs/heads/<name>` line.
-    local wt_path=""
-    local wt_branch=""
-    process_worktree() {
-        [[ -z "$wt_path" ]] && return
-        # Never touch the main checkout.
-        [[ "$wt_path" == "$git_root" ]] && return
-        # Detached HEAD or no branch: leave it alone, we can't reason about its remote.
-        [[ -z "$wt_branch" ]] && return
+        for rec in "${records[@]}"; do
+            IFS=$'\x1f' read -r wt_path wt_branch wt_detached wt_locked wt_reason <<<"$rec"
+            _wt_sweep_one "$git_root" "$wt_path" "$wt_branch" "$wt_detached" "$wt_locked" "$wt_reason" \
+                "$default_branch" "$age_cutoff" "$cwd_real"
+        done
 
-        if [[ $wt_branch == "main" || $wt_branch == "master" ]]; then
-            return
-        fi
+        _wt_sweep_orphans "$git_root" "$cwd_real"
+    fi
 
-        # Dirty gate: a worktree with uncommitted or untracked changes is never
-        # removed here, no matter its merge/PR state — losing local edits nobody
-        # pushed is the actual risk, not the worktree's age. (The age-based gate
-        # this replaced was a proxy for the same risk and is redundant now that
-        # the ahead_count/PR-state checks below already rule out the false-positive
-        # "brand-new branch looks merged" case that motivated it — confirmed live,
-        # 2026-08-30.)
-        if [[ -n "$(git -C "$wt_path" status --porcelain 2>/dev/null)" ]]; then
-            return
-        fi
+    git -C "$git_root" worktree prune 2>&1 | while IFS= read -r line; do hook_log "prune: $line" "$git_root"; done
 
-        if git -C "$git_root" ls-remote --heads origin "$wt_branch" 2>/dev/null | grep -qF "refs/heads/$wt_branch"; then
-            return
-        fi
-
-        # Branch missing from origin can mean "PR merged, branch deleted upstream"
-        # (safe to drop) OR "local branch never pushed yet" (must NOT drop — this
-        # false positive is what destroyed a live, unpushed worktree previously).
-        # Safe to drop if EITHER its commits are already ancestors of the local
-        # default branch (merged), OR its PR was closed without merging on GitHub
-        # (abandoned). If neither can be confirmed, leave it alone.
-        #
-        # `merge-base --is-ancestor` is trivially true for a BRAND-NEW branch that
-        # hasn't diverged from main yet (0 commits ahead) — it's the same commit,
-        # so it looks "merged" even though nothing was ever merged. That false
-        # positive is what destroyed several genuinely fresh, in-progress worktrees
-        # (confirmed live, 2026-08-30). Only trust the ancestor check once the
-        # branch has actually diverged; a branch with 0 commits ahead must fall
-        # through to the PR-state check like any other unconfirmed case.
-        local ahead_count pr_state
-        ahead_count=$(git -C "$git_root" rev-list --count "$default_branch".."$wt_branch" 2>/dev/null || echo 0)
-        if [[ "$ahead_count" == "0" ]] || ! git -C "$git_root" merge-base --is-ancestor "$wt_branch" "$default_branch" 2>/dev/null; then
-            pr_state=$(cd "$git_root" && gh pr view "$wt_branch" --json state -q .state 2>/dev/null) || true
-            if [[ "$pr_state" != "MERGED" && "$pr_state" != "CLOSED" ]]; then
-                return
-            fi
-        fi
-
-        # Branch is gone upstream, and either merged or its PR was closed.
-        # --force is needed because the worktree may hold untracked leftovers
-        # (node_modules, .venv, symlinked .env files).
-        git -C "$git_root" worktree remove --force "$wt_path" 2>/dev/null || true
-    }
-
-    while IFS= read -r line; do
-        case "$line" in
-            "worktree "*) wt_path="${line#worktree }" ;;
-            "branch refs/heads/"*) wt_branch="${line#branch refs/heads/}" ;;
-            "") process_worktree; wt_path=""; wt_branch="" ;;
-        esac
-    done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null)
-    # The last record may not be followed by a blank line.
-    process_worktree
-
-    # Removing a worktree can leave its branch behind; prune the admin files again.
-    git -C "$git_root" worktree prune 2>/dev/null || true
-
-    # --- Stale worktree cleanup (untouched >4 days) ---
-    # Beyond the "branch deleted upstream" check above, also drop any worktree
-    # `git worktree list` reports (wherever it lives on disk) that has had no
-    # commits and no uncommitted file changes in over 4 days — abandoned
-    # agent/feature worktrees that would otherwise sit around eating disk space.
-    # Uses the same `age_cutoff` (4 days) computed above. Unlike process_worktree,
-    # this pass has no merge/PR confirmation to lean on, so age is the only signal
-    # available and stays load-bearing here.
-    local cwd_real
-    cwd_real=$(pwd -P)
-
-    wt_path=""
-    wt_branch=""
-    process_stale_worktree() {
-        [[ -z "$wt_path" ]] && return
-        # Never touch the main checkout.
-        [[ "$wt_path" == "$git_root" ]] && return
-        [[ -n "$wt_branch" && ( "$wt_branch" == "main" || "$wt_branch" == "master" ) ]] && return
-        # Never remove the worktree we're currently sitting in.
-        [[ "$cwd_real" == "$wt_path" || "$cwd_real" == "$wt_path"/* ]] && return
-
-        # Broken worktree admin metadata ("not a git repository"): git can't be
-        # trusted to tell us about commits or uncommitted changes here, so fall
-        # back to raw filesystem mtimes with the same 4-day cutoff before treating
-        # it as abandoned enough to delete outright.
-        if ! git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
-            local broken_cutoff_str
-            broken_cutoff_str=$(date -v-4d "+%Y-%m-%d %H:%M:%S")
-            # Skip node_modules/.next/build caches — their mtimes reflect tooling
-            # churn, not real edits, and would mask genuinely abandoned worktrees.
-            if find "$wt_path" \( -name node_modules -o -name .next -o -name dist -o -name build -o -name .venv \) -prune -o -type f -newermt "$broken_cutoff_str" -print -quit 2>/dev/null | grep -q .; then
-                return
-            fi
-            rm -rf "$wt_path" 2>/dev/null || true
-            return
-        fi
-
-        local last_touched
-        last_touched=$(worktree_last_touched "$wt_path")
-
-        # Could not determine any timestamp (no commits, no dirty files, and git log
-        # failed) — fail closed and keep it rather than guessing a cutoff-equal value.
-        if [[ "$last_touched" == "0" ]]; then
-            return
-        fi
-
-        (( last_touched > age_cutoff )) && return
-
-        git -C "$git_root" worktree remove --force "$wt_path" 2>/dev/null || rm -rf "$wt_path" 2>/dev/null || true
-    }
-
-    while IFS= read -r line; do
-        case "$line" in
-            "worktree "*) wt_path="${line#worktree }" ;;
-            "branch refs/heads/"*) wt_branch="${line#branch refs/heads/}" ;;
-            "") process_stale_worktree; wt_path=""; wt_branch="" ;;
-        esac
-    done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null)
-    process_stale_worktree
-
-    git -C "$git_root" worktree prune 2>/dev/null || true
-
-    # Clean local branches with gone tracking
+    local branch
     while read -r line; do
         [[ $line =~ ^[*+] ]] && continue
-        local branch
         branch=$(echo "$line" | awk '{print $1}')
         [[ $branch == "main" || $branch == "master" ]] && continue
         echo "$line" | grep -q ': gone]' || continue
