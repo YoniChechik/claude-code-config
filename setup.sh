@@ -109,6 +109,15 @@ PYTHON
     echo "    PostToolUse Bash hooks skip."
   fi
 
+  if command -v gtimeout >/dev/null 2>&1; then
+    echo "==> gtimeout already installed"
+  elif command -v brew >/dev/null 2>&1; then
+    echo "==> Installing coreutils (gtimeout enforces the 30-minute Bash cap) via Homebrew"
+    brew install coreutils || echo "    WARNING: brew install coreutils failed; the Bash timeout hook stays inactive until gtimeout exists."
+  else
+    echo "==> Skipping coreutils install: Homebrew not found. Install GNU coreutils so gtimeout is on PATH."
+  fi
+
   echo ""
   echo "==> Done! Restart your shell or run: source ~/.zshrc"
   echo "    Then start Claude with: claude"
