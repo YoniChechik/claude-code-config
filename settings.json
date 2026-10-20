@@ -12,6 +12,8 @@
   "effortLevel" : "high",
   "env" : {
     "API_TIMEOUT_MS" : "600000",
+    "BASH_DEFAULT_TIMEOUT_MS" : "1800000",
+    "BASH_MAX_TIMEOUT_MS" : "1800000",
     "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" : "300000",
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" : "1",
     "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS" : "600000",
@@ -145,6 +147,16 @@
       {
         "hooks" : [
           {
+            "command" : "bash $HOME\/.claude\/hooks\/bash-timeout-post.sh",
+            "timeout" : 10,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
             "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__probe_ledger.sh",
             "timeout" : 5,
             "type" : "command"
@@ -183,6 +195,16 @@
       {
         "hooks" : [
           {
+            "command" : "bash $HOME\/.claude\/hooks\/bash-timeout-pre.sh",
+            "timeout" : 10,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
             "command" : "bash $HOME\/.claude\/scripts\/pre_tool_use__ask_gate.sh",
             "type" : "command"
           }
@@ -200,6 +222,16 @@
       }
     ],
     "PostToolUseFailure" : [
+      {
+        "hooks" : [
+          {
+            "command" : "bash $HOME\/.claude\/hooks\/bash-timeout-post.sh",
+            "timeout" : 10,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
       {
         "hooks" : [
           {
