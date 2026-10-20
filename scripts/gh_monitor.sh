@@ -13,11 +13,12 @@ exec </dev/null
 : "${GH_MONITOR_MERGE_SETTLE:=300}"
 : "${GH_MONITOR_DEPLOY_POLL:=30}"
 : "${GH_MONITOR_RUN_POLL:=15}"
-: "${GH_MONITOR_WATCH_MAX:=14400}"
+: "${GH_MONITOR_WATCH_MAX:=1320}"
 : "${GH_MONITOR_POLL_FAIL_MAX:=10}"
 : "${GH_MONITOR_IGNORE_EVENTS:=schedule,issue_comment,issues,pull_request_review,pull_request_review_comment,discussion,discussion_comment,label,milestone,project_card,watch,fork,gollum}"
 : "${GH_MONITOR_WAIT_POLL:=10}"
 : "${GH_MONITOR_WAIT_GRACE:=60}"
+: "${GH_MONITOR_WAIT_MAX:=1620}"
 : "${GH_MONITOR_RETRY_MAX:=3}"
 : "${GH_MONITOR_RETRY_BACKOFF:=5}"
 : "${GH_MONITOR_ACQUIRE_ATTEMPTS:=5}"
@@ -435,7 +436,7 @@ evaluate_snapshot() {
                     sig: "run:\(.id)>\($s.id)",
                     done: ($sc != ""),
                     bad: ($sc != "" and ($failing | index($sc) != null)),
-                    state: (if $sc != "" and ($failing | index($sc) != null) then $sc else "superseded" end),
+                    state: (if $sc == "" then "superseded-pending" elif ($failing | index($sc) != null) then $sc else "superseded" end),
                     label: "\(.name) (run \(.id), attempt \(.attempt // 1), \(.event // "?"), superseded by run \($s.id))"
                   })
                 else {
@@ -503,7 +504,7 @@ watch_merge_sha() {
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
             MERGE_CI=timeout
-            report "Post-merge CI watch TIMED OUT for ${label} on ${OWNER_REPO} (merge commit ${sha}) after ${GH_MONITOR_WATCH_MAX}s: ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
+            report "Post-merge verdict UNKNOWN (timeout): CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound with ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"
             return 0
         fi
@@ -666,6 +667,11 @@ wait_body() {
             [[ -s "$RESULT_FILE" ]] && continue
             printf "No merge watcher is running for %s on %s and none recorded a result; start one with \`bash %s merge %s --repo %s --detach\`\n" \
                 "$TARGET" "$OWNER_REPO" "$SELF" "$TARGET" "$OWNER_REPO"
+            return 0
+        fi
+        if [[ "$waited" -ge "$GH_MONITOR_WAIT_MAX" ]]; then
+            printf "Post-merge verdict UNKNOWN (timeout): no result recorded for %s on %s after %ss and the merge watcher is still running; see %s\n" \
+                "$TARGET" "$OWNER_REPO" "$GH_MONITOR_WAIT_MAX" "$LOGFILE"
             return 0
         fi
         pause "$GH_MONITOR_WAIT_POLL"
