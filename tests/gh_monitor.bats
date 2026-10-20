@@ -791,14 +791,51 @@ wfruns_fixture() {
     assert_contains "PR #3951 \"fix(website): probe health\" merged on o/r (merge commit abc123); no post-merge CI run started within 0s" "$output"
 }
 
-@test "merge: runs still pending at the watch bound report TIMED OUT with their states" {
+@test "merge: runs still pending at the watch bound report an UNKNOWN verdict with their states" {
     export GH_MONITOR_WATCH_MAX=0
     merged_pr
     api_runs_fixture "11:Deploy:waiting::1:push"
     run bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge CI watch TIMED OUT for PR #3951" "$output"
+    assert_contains "Post-merge verdict UNKNOWN (timeout): CI watch for PR #3951" "$output"
     assert_contains "waiting            Deploy (run 11, attempt 1, push)" "$output"
+}
+
+@test "merge: every run cancelled and superseded by completed successes passes" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1" "12:Deploy:completed:cancelled:1:push:6:main:abc123:c1"
+    wfruns_fixture "21:completed:success:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "all 2 green" "$output"
+    assert_not_contains "UNKNOWN" "$output"
+}
+
+@test "merge: a success next to a cancelled run superseded by a success passes" {
+    merged_pr
+    api_runs_fixture "10:Gates:completed:success:1:push:4:main:abc123:c1" "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "21:completed:success:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "all 2 green" "$output"
+    assert_contains "superseded         Release (run 11, attempt 1, push, superseded by run 21)" "$output"
+}
+
+@test "merge: cancelled runs whose superseder never finishes end in an UNKNOWN timeout verdict, not a hang" {
+    export GH_MONITOR_WATCH_MAX=1
+    merged_pr
+    api_runs_fixture "10:Gates:completed:success:1:push:4:main:abc123:c1" "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    stub api_wfruns 0 "$(jq -nc '{workflow_runs:[{id:21,status:"in_progress",conclusion:null,head_sha:"def456",created_at:"c2"}]}')"
+    stub api_compare 0 '{"status":"ahead"}'
+    run timeout 30 bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge verdict UNKNOWN (timeout): CI watch for PR #3951" "$output"
+    assert_contains "1 still pending, 0 failed so far" "$output"
+    assert_contains "superseded-pending Release (run 11, attempt 1, push, superseded by run 21)" "$output"
+    assert_not_contains "PASSED" "$output"
 }
 
 @test "merge: a PR closed without merging is reported and never treated as an error" {
@@ -860,6 +897,15 @@ wfruns_fixture() {
     assert_eq 0 "$status"
     assert_contains "No merge watcher is running for feat-x on o/r" "$output"
     assert_contains "merge feat-x --repo o/r --detach" "$output"
+}
+
+@test "wait: a watcher that never records a result ends in an UNKNOWN timeout verdict" {
+    export GH_MONITOR_WAIT_GRACE=100
+    export GH_MONITOR_WAIT_POLL=1
+    export GH_MONITOR_WAIT_MAX=2
+    run timeout 30 bash "$WATCHER" wait "$BRANCH" --repo o/r
+    assert_eq 0 "$status"
+    assert_contains "Post-merge verdict UNKNOWN (timeout): no result recorded for feat-x on o/r after 2s" "$output"
 }
 
 @test "wait: an existing result is printed immediately" {
