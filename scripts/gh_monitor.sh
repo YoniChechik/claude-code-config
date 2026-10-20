@@ -338,7 +338,7 @@ compare_status() {
 }
 
 resolve_superseders() {
-    local runs_out="$1" cancelled run id wid branch created sha cands cand cand_sha cand_id st
+    local runs_out="$1" cancelled run id wid branch created sha cands cand cand_sha cand_id st best best_st
     SNAP_N=$((SNAP_N + 1))
     SUPER_LINES=""
     cancelled=$(printf '%s\n' "$runs_out" | jq -c 'select(type == "object" and .conclusion == "cancelled" and .event == "push") | {id, workflow_id, head_branch, created_at, head_sha}' 2>/dev/null) || cancelled=""
@@ -354,6 +354,8 @@ resolve_superseders() {
         cands=$(printf '%s\n' "$CACHE_VAL" | jq -s -c --arg id "$id" --arg c "$created" \
             '[.[] | select((.id | tostring) != $id and .created_at > $c)] | sort_by(.created_at) | reverse | .[:5][]') || return 1
         [[ -n "$cands" ]] || continue
+        best=""
+        best_st=""
         while IFS= read -r cand; do
             [[ -n "$cand" ]] || continue
             cand_sha=$(jq -r '.head_sha' <<<"$cand")
@@ -365,14 +367,23 @@ resolve_superseders() {
             fi
             case "$st" in
                 ahead | identical)
-                    cand_id=$(jq -r '.id' <<<"$cand")
-                    SUPER_LINES+=$(jq -nc --argjson run_id "$id" --argjson c "$cand" \
-                        '{kind: "super", run_id: $run_id, id: $c.id, status: $c.status, conclusion: $c.conclusion}')$'\n'
-                    log "run ${id} cancelled; superseded by run ${cand_id} (${st})"
-                    break
+                    if [[ -z "$best" ]]; then
+                        best=$cand
+                        best_st=$st
+                    fi
+                    if [[ "$(jq -r '.conclusion' <<<"$cand")" != "cancelled" ]]; then
+                        best=$cand
+                        best_st=$st
+                        break
+                    fi
                     ;;
             esac
         done <<<"$cands"
+        [[ -n "$best" ]] || continue
+        cand_id=$(jq -r '.id' <<<"$best")
+        SUPER_LINES+=$(jq -nc --argjson run_id "$id" --argjson c "$best" \
+            '{kind: "super", run_id: $run_id, id: $c.id, status: $c.status, conclusion: $c.conclusion}')$'\n'
+        log "run ${id} cancelled; superseded by run ${cand_id} (${best_st})"
     done <<<"$cancelled"
     return 0
 }
