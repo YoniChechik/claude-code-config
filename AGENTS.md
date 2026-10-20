@@ -7,6 +7,7 @@
 - **Never run `git worktree add` / `git worktree remove` directly**, and **never use Claude Code's built-in `EnterWorktree`/`ExitWorktree` tools**. Use the worktree skill instead.
 - Do not create Artifacts or invoke the `artifact-design` skill unless the user explicitly asks for an artifact.
 - To wait for anything (CI, deploy, store review, a subagent), run one background Bash command (`run_in_background: true`) whose loop polls inside the shell, and act on its completion notification. Do not use `sleep` in the foreground, `ScheduleWakeup` or `/loop`.
+- The user runs several sessions in parallel. **Never write to a PR or branch this session did not create**: no commits, no pushes, no edits, no merge, even for a one-line fix. Read it (`gh pr diff`, `gh pr checks`), report the problem, and fix it in a new PR of your own off `origin/main`. Briefing a subagent: put this in its FORBIDDEN list.
 - No comments in code. If you see old comments, delete them.
 - Python 3.14+ allows paren-free exception tuples in `except` clauses without an `as` binding (PEP 758), e.g. `except jwt.PyJWTError, KeyError:` is valid; parens are only required when binding via `as`. So never "fix" a paren-less `except A, B:`, and verify Python syntax with the project interpreter (`uv run ...`), not a bare pre-3.14 system `python3`/`ast.parse` which falsely flags it as a SyntaxError.
 - Never use legacy or deprecated libraries/ dependencies.
