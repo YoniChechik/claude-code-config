@@ -647,6 +647,38 @@ wfruns_fixture() {
     assert_eq 0 "$(call_count 'compare/')"
 }
 
+@test "merge: a cancelled superseder is skipped for an older live run that succeeded" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "31:completed:cancelled:fff111:c3" "21:completed:success:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "superseded         Release (run 11, attempt 1, push, superseded by run 21)" "$output"
+    assert_not_contains "FAILED" "$output"
+}
+
+@test "merge: a cancelled superseder skipped for an older pending run keeps the watcher waiting" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    stub api_wfruns.1 0 "$(jq -nc '{workflow_runs:[{id:31,status:"completed",conclusion:"cancelled",head_sha:"fff111",created_at:"c3"},{id:21,status:"in_progress",conclusion:null,head_sha:"def456",created_at:"c2"}]}')"
+    stub api_wfruns 0 "$(jq -nc '{workflow_runs:[{id:31,status:"completed",conclusion:"cancelled",head_sha:"fff111",created_at:"c3"},{id:21,status:"completed",conclusion:"success",head_sha:"def456",created_at:"c2"}]}')"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    [ "$(call_count 'actions/runs')" -ge 2 ] || { echo "expected a second poll" >&2; return 1; }
+}
+
+@test "merge: a chain of cancelled runs with no live successor is not green" {
+    merged_pr
+    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "31:completed:cancelled:fff111:c3" "21:completed:cancelled:def456:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "cancelled          Release (run 11, attempt 1, push, superseded by run 31)" "$output"
+}
+
 @test "merge: a later run on a diverged (non-descendant) sha does not supersede" {
     merged_pr
     api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
