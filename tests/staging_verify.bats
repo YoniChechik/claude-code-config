@@ -246,7 +246,7 @@ STG='"name":"staging","sha_url":"https://stg/version","sha_jq":".sha"'
     assert_eq unverified "$(field .result)"
     assert_eq "post-merge CI timeout" "$(field .reason)"
     assert_contains "Staging verify NOT VERIFIED for o/r (merge commit $SHA): post-merge CI timeout" "$output"
-    assert_not_contains "FAILED" "$output"
+    [[ $output != *FAILED* ]]
 }
 
 @test "an invalid verify config records error" {
