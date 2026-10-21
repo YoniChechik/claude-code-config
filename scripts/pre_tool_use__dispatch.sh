@@ -53,31 +53,19 @@ if [ "$failed_base_dir" = "1" ] || [ "$failed_permission" = "1" ]; then
     exit 0
 fi
 
-RANK=0
-RANK_JSON=""
-_rank_decision() {
-    RANK=0
-    RANK_JSON=""
+deny_json() {
+    REPLY=""
     case "$1" in
         "") ;;
-        "$DECISION_PREFIX"'"deny"'*'}}') RANK=3; RANK_JSON="$1" ;;
-        "$DECISION_PREFIX"'"ask"'*'}}') RANK=2; RANK_JSON="$1" ;;
-        "$DECISION_PREFIX"'"allow"'*'}}') ;;
-        *) RANK=3; RANK_JSON="$INTERNAL_ERROR_JSON" ;;
+        "$DECISION_PREFIX"'"deny"'*'}}') REPLY="$1" ;;
+        *) REPLY="$INTERNAL_ERROR_JSON" ;;
     esac
 }
 
-_rank_decision "$out_base_dir"
-rank_base_dir=$RANK
-json_base_dir=$RANK_JSON
-_rank_decision "$out_permission"
-rank_permission=$RANK
-json_permission=$RANK_JSON
-
-if [ "$rank_base_dir" -ge "$rank_permission" ] && [ "$rank_base_dir" -gt 0 ]; then
-    printf '%s' "$json_base_dir"
-elif [ "$rank_permission" -gt 0 ]; then
-    printf '%s' "$json_permission"
+deny_json "$out_base_dir"
+if [ -z "$REPLY" ]; then
+    deny_json "$out_permission"
 fi
+printf '%s' "$REPLY"
 
 exit 0

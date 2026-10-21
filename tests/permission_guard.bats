@@ -87,16 +87,32 @@ assert_decision() {
     assert_decision NONE "$(decide "bq query 'select 1'")"
 }
 
+@test "deny: gcloud projects delete" {
+    assert_decision DENY "$(decide "$GC projects $DEL my-project")"
+    assert_decision DENY "$(decide "cd /tmp && $GC projects $DEL my-project --quiet")"
+}
+
+@test "none: gh run cancel, gcloud storage rm and bq rm are allowed" {
+    assert_decision NONE "$(decide "$GH run cancel 1")"
+    assert_decision NONE "$(decide "$GC storage rm gs://b/x")"
+    assert_decision NONE "$(decide "bq rm mydataset.mytable")"
+}
+
+@test "none: gcloud run deploy against an unprotected project is allowed" {
+    assert_decision NONE "$(decide "$GC run deploy svc --project dev-123")"
+    assert_decision DENY "$(decide "$GC run deploy svc --project staging-480220")"
+}
+
 @test "deny: gh repo delete, direct" {
     assert_decision DENY "$(decide "$GH $REPO $DEL foo/bar")"
 }
 
-@test "ask: gh repo archive requires confirmation" {
-    assert_decision ASK "$(decide "$GH repo archive foo/bar")"
+@test "none: gh repo archive is allowed" {
+    assert_decision NONE "$(decide "$GH repo archive foo/bar")"
 }
 
-@test "ask: gcloud compute instances delete, direct" {
-    assert_decision ASK "$(decide "$GC $INST instances $DEL x")"
+@test "none: gcloud compute instances delete is allowed" {
+    assert_decision NONE "$(decide "$GC $INST instances $DEL x")"
 }
 
 @test "deny: cd foo then gh repo delete (segment split)" {
@@ -119,24 +135,24 @@ assert_decision() {
     assert_decision DENY "$(decide "bash -c \"$GH $REPO $DEL foo/bar\"")"
 }
 
-@test "ask: backtick command substitution assigned to a variable" {
-    assert_decision ASK "$(decide "X=\`$GC $INST instances $DEL x\`")"
+@test "none: a backtick substitution of a gcloud delete is allowed" {
+    assert_decision NONE "$(decide "X=\`$GC $INST instances $DEL x\`")"
 }
 
 @test "deny: \`command\` builtin prefix" {
     assert_decision DENY "$(decide "command $GH $REPO $DEL foo/bar")"
 }
 
-@test "ask: \`command\` builtin prefix on gcloud" {
-    assert_decision ASK "$(decide "command $GC $INST instances $DEL x")"
+@test "none: \`command\` builtin prefix on a gcloud delete is allowed" {
+    assert_decision NONE "$(decide "command $GC $INST instances $DEL x")"
 }
 
 @test "deny: backslash-escaped leading command word" {
     assert_decision DENY "$(decide "\\$GH $REPO $DEL foo/bar")"
 }
 
-@test "ask: bare VAR=value env-prefix before gcloud" {
-    assert_decision ASK "$(decide "FOO=bar $GC $INST instances $DEL x")"
+@test "none: bare VAR=value env-prefix before a gcloud delete is allowed" {
+    assert_decision NONE "$(decide "FOO=bar $GC $INST instances $DEL x")"
 }
 
 @test "deny: \`env\` builtin prefix" {
@@ -147,8 +163,8 @@ assert_decision() {
     assert_decision DENY "$(decide "echo \"result: \$($GH $REPO $DEL foo/bar)\"")"
 }
 
-@test "deny: pulumi -C flag-prefixed destructive subcommand with no resolvable stack" {
-    assert_decision DENY "$(decide "pulumi -C infra up")"
+@test "none: pulumi -C flag-prefixed destructive subcommand with no resolvable stack" {
+    assert_decision NONE "$(decide "pulumi -C infra up")"
 }
 
 @test "deny: bash -c with trailing argv after the code string" {
@@ -227,29 +243,29 @@ assert_decision() {
     assert_decision DENY "$(decide "( $GH $REPO $DEL foo/bar )")"
 }
 
-@test "ask: a grammar-wrapped ask-level command is still recognized" {
-    assert_decision ASK "$(decide "{ $GC $INST $INSTANCES $DEL x; }")"
+@test "none: a grammar-wrapped gcloud delete is allowed" {
+    assert_decision NONE "$(decide "{ $GC $INST $INSTANCES $DEL x; }")"
 }
 
-@test "deny: gcloud ask-rule first, gcloud-run prod deny-rule second" {
+@test "deny: allowed gcloud command first, gcloud-run prod deny-rule second" {
     local cmd="$GC $INST $INSTANCES $DEL x && $GC run deploy --project=production-490411"
     assert_decision DENY "$(decide "$cmd")"
 }
 
-@test "deny: bq ask-rule first, pulumi prod deny-rule second" {
+@test "deny: allowed bq command first, pulumi prod deny-rule second" {
     assert_decision DENY "$(decide "bq rm mydataset.mytable && pulumi up --stack production")"
 }
 
-@test "deny: gh ask-rule first, gh repo delete deny-rule later in the same command" {
+@test "deny: allowed gh command first, gh repo delete deny-rule later in the same command" {
     assert_decision DENY "$(decide "$GH repo archive foo/bar && $GH $REPO $DEL foo/bar")"
 }
 
-@test "deny: gh ask-rule first, supabase prod deny-rule second" {
+@test "deny: allowed gh command first, supabase prod deny-rule second" {
     assert_decision DENY "$(decide "$GH repo archive foo/bar && supabase functions deploy x --project-ref $PROD_REF")"
 }
 
-@test "ask: an ask-only compound command still asks (deny is never invented)" {
-    assert_decision ASK "$(decide "$GH repo archive foo/bar && $GH repo rename baz")"
+@test "none: a compound of allowed gh commands is allowed (deny is never invented)" {
+    assert_decision NONE "$(decide "$GH repo archive foo/bar && $GH repo rename baz")"
 }
 
 @test "deny: a broken shared library fails closed instead of silently allowing" {
@@ -268,10 +284,10 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase db reset --db-url=postgresql://postgres.$PROD_REF2:pw@aws-0-eu-central-1.pooler.supabase.com:6543/postgres --local")"
 }
 
-@test "supabase: npx db push in a prod-linked dir is denied, staging asks" {
+@test "supabase: npx db push in a prod-linked dir is denied, staging is allowed" {
     assert_decision DENY "$(decide_in "$SB_PROD" "npx supabase db push")"
     assert_decision DENY "$(decide_in "$SB_PROD2" "npx supabase db push")"
-    assert_decision ASK "$(decide_in "$SB_STG" "npx supabase db push")"
+    assert_decision NONE "$(decide_in "$SB_STG" "npx supabase db push")"
 }
 
 @test "supabase: wrapper runners resolve to the real subcommand" {
@@ -292,7 +308,7 @@ assert_decision() {
     done
 }
 
-@test "supabase: always-local commands are allowed (stop no longer asks, link is allowed)" {
+@test "supabase: always-local commands are allowed (stop and link included)" {
     for c in "start" "stop" "status" "init" "functions serve" "migration new add_table" "link --project-ref $PROD_REF"; do
         assert_decision NONE "$(decide_in "$SB_PROD" "supabase $c")" || { echo "cmd: $c" >&2; return 1; }
     done
@@ -300,15 +316,15 @@ assert_decision() {
 
 @test "supabase: global flags before the subcommand (--experimental db reset --linked)" {
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase --experimental db reset --linked")"
-    assert_decision ASK "$(decide_in "$SB_STG" "supabase --experimental db reset --linked")"
+    assert_decision NONE "$(decide_in "$SB_STG" "supabase --experimental db reset --linked")"
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase --experimental db reset --local")"
 }
 
 @test "supabase: default-local commands targeting remote via --linked follow the ref" {
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase migration up --linked")"
     assert_decision NONE "$(decide_in "$SB_STG" "supabase db diff --linked")"
-    assert_decision ASK "$(decide_in "$SB_STG" "supabase db reset --linked")"
-    assert_decision DENY "$(decide_in "$NOWHERE" "supabase db reset --linked")"
+    assert_decision NONE "$(decide_in "$SB_STG" "supabase db reset --linked")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase db reset --linked")"
 }
 
 @test "supabase: target precedence --db-url > --local > --linked" {
@@ -320,47 +336,48 @@ assert_decision() {
     for c in "migration repair 2024 --status applied" "migration list" "migration fetch" "db dump" "db pull" "storage rm ss:///b/x" "storage cp a ss:///b/a" "storage mv ss:///b/a ss:///b/c" "inspect db bloat"; do
         assert_decision DENY "$(decide_in "$SB_PROD" "supabase $c")" || { echo "cmd: $c" >&2; return 1; }
     done
-    assert_decision ASK "$(decide_in "$SB_STG" "supabase migration repair 2024 --status applied")"
+    assert_decision NONE "$(decide_in "$SB_STG" "supabase migration repair 2024 --status applied")"
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase storage ls --local")"
 }
 
-@test "supabase: unresolvable ref on a remote command is denied with a rewrite hint" {
-    assert_decision DENY "$(decide_in "$NOWHERE" "supabase db push")"
-    assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions deploy fn")"
+@test "supabase: unresolvable ref on a remote command is allowed" {
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase db push")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase functions deploy fn")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase db push --project-ref \$REF")"
 }
 
 @test "supabase: cd X && is honored for the ref lookup" {
     assert_decision DENY "$(decide_in "$NOWHERE" "cd $SB_PROD && supabase db push")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "cd $SB_STG && supabase db push")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "cd $SB_STG && supabase db push")"
 }
 
 @test "supabase: --workdir, --workdir= and SUPABASE_WORKDIR are honored" {
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase db push --workdir $SB_PROD")"
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase --workdir=$SB_PROD db push")"
     assert_decision DENY "$(decide_in "$NOWHERE" "SUPABASE_WORKDIR=$SB_PROD supabase db push")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "supabase db push --workdir $SB_STG")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --workdir $SB_STG")"
 }
 
 @test "supabase: SUPABASE_PROJECT_ID beats the linked project-ref file" {
     assert_decision DENY "$(decide_in "$SB_STG" "SUPABASE_PROJECT_ID=$PROD_REF supabase db push")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "SUPABASE_PROJECT_ID=$STG_REF2 supabase db push")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "SUPABASE_PROJECT_ID=$STG_REF2 supabase db push")"
     assert_decision DENY "$(SUPABASE_PROJECT_ID=$PROD_REF decide_in "$NOWHERE" "supabase db push")"
 }
 
 @test "supabase: API-only commands follow --project-ref, then the linked ref" {
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions deploy fn --project-ref $PROD_REF")"
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase functions delete fn --project-ref=$PROD_REF2")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "supabase functions deploy fn --project-ref $STG_REF")"
-    assert_decision DENY "$(decide_in "$NOWHERE" "supabase secrets set --project-ref \$REF A=b")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase functions deploy fn --project-ref $STG_REF")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "supabase secrets set --project-ref \$REF A=b")"
     for c in "secrets set A=b" "secrets unset A" "config push" "branches create x" "branches delete x" "postgres-config update --config x=y" "backups restore --timestamp 1" "domains create" "sso add" "network-restrictions update" "network-bans remove" "ssl-enforcement update --enable-db-ssl-enforcement"; do
         assert_decision DENY "$(decide_in "$SB_PROD" "supabase $c")" || { echo "cmd: $c" >&2; return 1; }
-        assert_decision ASK "$(decide_in "$SB_STG" "supabase $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
+        assert_decision NONE "$(decide_in "$SB_STG" "supabase $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
     done
 }
 
 @test "supabase: projects delete uses its positional ref" {
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase projects delete $PROD_REF")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "supabase projects delete $STG_REF")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase projects delete $STG_REF")"
 }
 
 @test "supabase: --dry-run only allows subcommands that implement it" {
@@ -370,20 +387,20 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase migration repair 1 --status applied --dry-run")"
 }
 
-@test "supabase: gen types is local only with --local, remote with --project-id/--linked, else denied" {
+@test "supabase: gen types follows --project-id/--linked, otherwise it is allowed" {
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase gen types typescript --local")"
     assert_decision DENY "$(decide_in "$NOWHERE" "supabase gen types typescript --project-id $PROD_REF")"
     assert_decision NONE "$(decide_in "$NOWHERE" "supabase gen types typescript --project-id $STG_REF")"
     assert_decision DENY "$(decide_in "$SB_PROD" "supabase gen types typescript --linked")"
-    assert_decision DENY "$(decide_in "$SB_STG" "supabase gen types typescript")"
+    assert_decision NONE "$(decide_in "$SB_STG" "supabase gen types typescript")"
 }
 
-@test "supabase: --db-url loopback allows, remote write asks, remote read allows, unresolved variable denied" {
+@test "supabase: --db-url only denies production URLs" {
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres")"
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url 'postgresql://postgres:postgres@localhost:54322/postgres'")"
-    assert_decision ASK "$(decide_in "$SB_PROD" "supabase db push --db-url postgresql://u:p@db.$STG_REF.supabase.co:5432/postgres")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url postgresql://u:p@db.$STG_REF.supabase.co:5432/postgres")"
     assert_decision NONE "$(decide_in "$SB_PROD" "supabase db dump --db-url postgresql://u:p@db.$STG_REF.supabase.co:5432/postgres")"
-    assert_decision DENY "$(decide_in "$SB_PROD" "supabase db push --db-url \"\$DATABASE_URL\"")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase db push --db-url \"\$DATABASE_URL\"")"
 }
 
 @test "supabase: a nested bash -c inherits the cwd context" {
@@ -413,21 +430,22 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$dir" "pulumi up")"
 }
 
-@test "pulumi: non-prod stacks ask, unresolvable stacks are denied" {
-    assert_decision ASK "$(decide_in "$PU_STG" "pulumi up")"
-    assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up")"
-    assert_decision ASK "$(decide_in "$PU_NONE" "pulumi up -s organization/x/staging")"
+@test "pulumi: non-prod and unresolvable stacks are allowed" {
+    assert_decision NONE "$(decide_in "$PU_STG" "pulumi up")"
+    assert_decision NONE "$(decide_in "$PU_NONE" "pulumi up -s \$STACK")"
+    assert_decision NONE "$(decide_in "$PU_NONE" "pulumi up")"
+    assert_decision NONE "$(decide_in "$PU_NONE" "pulumi up -s organization/x/staging")"
 }
 
 @test "pulumi: stack names are matched on the exact last segment, never by substring" {
     for s in domain-staging remain organization/x/production-copy prod-eu organization/main/dev; do
-        assert_decision ASK "$(decide_in "$PU_NONE" "pulumi up -s $s")" || { echo "stack: $s" >&2; return 1; }
+        assert_decision NONE "$(decide_in "$PU_NONE" "pulumi up -s $s")" || { echo "stack: $s" >&2; return 1; }
     done
 }
 
 @test "pulumi: PULUMI_STACK prefix and environment select the stack" {
     assert_decision DENY "$(decide_in "$PU_STG" "PULUMI_STACK=organization/core/production pulumi up")"
-    assert_decision ASK "$(decide_in "$PU_PROD" "PULUMI_STACK=organization/core/dev pulumi up")"
+    assert_decision NONE "$(decide_in "$PU_PROD" "PULUMI_STACK=organization/core/dev pulumi up")"
     assert_decision DENY "$(PULUMI_STACK=prod decide_in "$PU_NONE" "pulumi up")"
 }
 
@@ -435,7 +453,7 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$NOWHERE" "pulumi -C $PU_PROD up")"
     assert_decision DENY "$(decide_in "$NOWHERE" "pulumi up --cwd=$PU_PROD")"
     assert_decision DENY "$(decide_in "$NOWHERE" "cd $PU_PROD && pulumi up")"
-    assert_decision ASK "$(decide_in "$PU_PROD" "cd $PU_STG && pulumi up")"
+    assert_decision NONE "$(decide_in "$PU_PROD" "cd $PU_STG && pulumi up")"
 }
 
 @test "pulumi: preview, --preview-only and read-only commands are allowed" {
@@ -456,22 +474,22 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$devdir" "pulumi refresh -s prod")"
     assert_decision NONE "$(decide_in "$devdir" "pulumi up")"
     assert_decision NONE "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=file:///tmp/state pulumi up")"
-    assert_decision DENY "$(decide_in "$nodir" "pulumi up")"
+    assert_decision NONE "$(decide_in "$nodir" "pulumi up")"
     assert_decision DENY "$(decide_in "$PU_STG" "PULUMI_BACKEND_URL=gs://production-pulumi-state pulumi up")"
 }
 
 @test "pulumi: deployment runs and settings changes follow the resolved stack" {
     for c in "deployment run up" "deployment run destroy" "deployment settings configure" "deployment settings destroy" "deployment settings push"; do
         assert_decision DENY "$(decide_in "$PU_PROD" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
-        assert_decision ASK "$(decide_in "$PU_STG" "pulumi $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
+        assert_decision NONE "$(decide_in "$PU_STG" "pulumi $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
     done
     assert_decision DENY "$(decide_in "$PU_STG" "pulumi deployment run up -s organization/core/production")"
     assert_decision NONE "$(decide_in "$PU_PROD" "pulumi deployment settings pull")"
 }
 
-@test "pulumi: org-wide policy changes ask, local project commands have no opinion" {
+@test "pulumi: org-wide policy changes and local project commands are allowed" {
     for c in "policy publish org" "policy enable org/pack latest" "policy disable org/pack" "policy rm org/pack 1"; do
-        assert_decision ASK "$(decide_in "$PU_NONE" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
+        assert_decision NONE "$(decide_in "$PU_NONE" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
     done
     for c in "new gcp-typescript --yes" "plugin install resource gcp" "policy ls" "policy new aws-typescript" "stack init organization/core/dev" "login gs://bucket"; do
         assert_decision NONE "$(decide_in "$PU_PROD" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
@@ -481,7 +499,7 @@ assert_decision() {
 @test "pulumi: the mutating set follows the resolved stack" {
     for c in "destroy" "refresh" "import aws:s3/bucket:Bucket b id" "cancel" "watch" "state delete urn:x" "state rename urn:x y" "state move --dest organization/core/dev urn:x" "state unprotect urn:x" "state protect urn:x" "state repair" "state taint urn:x" "state untaint urn:x" "state upgrade" "stack rm" "stack rename organization/core/next" "stack import --file x.json" "stack tag set k v" "stack tag rm k" "stack change-secrets-provider passphrase" "config set k v" "config set-all --plaintext k=v" "config rm k" "config rm-all k" "config cp --dest organization/core/dev" "config refresh"; do
         assert_decision DENY "$(decide_in "$PU_PROD" "pulumi $c")" || { echo "cmd: $c" >&2; return 1; }
-        assert_decision ASK "$(decide_in "$PU_STG" "pulumi $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
+        assert_decision NONE "$(decide_in "$PU_STG" "pulumi $c")" || { echo "cmd: $c (staging)" >&2; return 1; }
     done
 }
 
@@ -491,7 +509,7 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$PU_STG" "pulumi stack rename organization/core/production")"
     assert_decision DENY "$(decide_in "$PU_STG" "pulumi state move --source organization/core/dev --dest organization/core/production urn:x")"
     assert_decision DENY "$(decide_in "$PU_STG" "pulumi config cp -d organization/core/production")"
-    assert_decision ASK "$(decide_in "$PU_STG" "pulumi stack select -c organization/core/dev2")"
+    assert_decision NONE "$(decide_in "$PU_STG" "pulumi stack select -c organization/core/dev2")"
 }
 
 @test "pulumi: ESC environment mutations follow the environment name" {
@@ -499,15 +517,15 @@ assert_decision() {
     assert_decision DENY "$(decide_in "$NOWHERE" "pulumi env rm organization/core/prod")"
     assert_decision DENY "$(decide_in "$NOWHERE" "pulumi env clone organization/core/dev organization/core/production")"
     assert_decision DENY "$(decide_in "$NOWHERE" "pulumi env version tag organization/core/production@3 stable")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "pulumi env set organization/core/dev key production")"
-    assert_decision ASK "$(decide_in "$NOWHERE" "pulumi env edit organization/core/staging")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "pulumi env set organization/core/dev key production")"
+    assert_decision NONE "$(decide_in "$NOWHERE" "pulumi env edit organization/core/staging")"
     assert_decision NONE "$(decide_in "$NOWHERE" "pulumi env get organization/core/production key")"
 }
 
-@test "pulumi: a tight --target set on a prod stack asks instead of denying" {
+@test "pulumi: any --target set on a prod stack is denied" {
     local urn="urn:pulumi:production::core::gcp:cloudrunv2/service:Service::api"
-    assert_decision ASK "$(decide_in "$PU_NONE" "pulumi up -s production --target $urn")"
-    assert_decision ASK "$(decide_in "$PU_PROD" "pulumi up --target=$urn")"
+    assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production --target $urn")"
+    assert_decision DENY "$(decide_in "$PU_PROD" "pulumi up --target=$urn")"
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production --target $urn --target-dependents")"
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production --target urn:pulumi:production::core::pulumi:pulumi:Stack::core-production")"
     assert_decision DENY "$(decide_in "$PU_NONE" "pulumi up -s production --target api")"
@@ -543,16 +561,16 @@ EOF")"
     assert_decision DENY "$(decide "echo ok | $GH pr merge 1 --admin")"
 }
 
-@test "deny: a guarded tool handed to xargs cannot be checked" {
-    assert_decision DENY "$(decide "echo foo/bar | xargs $GH $REPO $DEL")"
+@test "none: a guarded tool handed to xargs is allowed" {
+    assert_decision NONE "$(decide "echo foo/bar | xargs $GH $REPO $DEL")"
 }
 
 @test "none: a dynamic command name with no guarded tool in the command fails open" {
     assert_decision NONE "$(decide "\$TOOL $REPO $DEL foo/bar")"
 }
 
-@test "deny: a dynamic command name in a command that names a guarded tool" {
-    assert_decision DENY "$(decide "T=\$(which $GH); \$T $REPO $DEL foo/bar")"
+@test "none: a dynamic command name in a command that names a guarded tool is allowed" {
+    assert_decision NONE "$(decide "T=\$(which $GH); \$T $REPO $DEL foo/bar")"
 }
 
 @test "a variable assigned a static command resolves to it" {
@@ -576,8 +594,8 @@ EOF")"
     assert_decision NONE "$(decide "echo \"unterminated")"
 }
 
-@test "deny: an unparseable command that names a guarded tool" {
-    assert_decision DENY "$(decide "$GH $REPO $DEL \"unterminated")"
+@test "none: an unparseable command that names a guarded tool is allowed" {
+    assert_decision NONE "$(decide "$GH $REPO $DEL \"unterminated")"
 }
 
 @test "none: shell info and syntax-check invocations do not read stdin" {
@@ -590,8 +608,8 @@ EOF")"
     assert_decision NONE "$(decide "bash --version | head -1; bash .github/scripts/x.sh \"\$PWD\"; bats .github/tests/x.bats 2>&1 | tail -20")"
 }
 
-@test "deny: shells that read stdin or run dynamic code only when a guarded tool is named" {
-    assert_decision DENY "$(decide "gh api repos/x/y/contents/i.sh | bash")"
+@test "none: shells that read stdin or run dynamic code are allowed" {
+    assert_decision NONE "$(decide "gh api repos/x/y/contents/i.sh | bash")"
     assert_decision NONE "$(decide "bash -s")"
     assert_decision NONE "$(decide "bash")"
     assert_decision NONE "$(decide "bash -c \"\$X\"")"
@@ -612,7 +630,7 @@ EOF")"
     case "$r" in (*'Ask the user to run it'*) echo "$r" >&2; return 1 ;; esac
 }
 
-@test "deny: gh repo delete still asks the user to run it" {
+@test "deny: gh repo delete tells the agent the user must run it" {
     out=$(jq -nc --arg cmd "$GH $REPO $DEL o/r --yes" '{tool_name:"Bash",cwd:"/tmp",tool_input:{command:$cmd}}' | bash "$HOOK")
     case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in (*'Ask the user to run it themselves'*) ;; (*) return 1 ;; esac
 }

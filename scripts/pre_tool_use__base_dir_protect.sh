@@ -33,14 +33,15 @@ repo_root() {
     [ -e "$REPO_ROOT/.git" ]
 }
 
-all_outside_base() {
-    local d
-    (($# > 0)) || return 1
+all_in_base() {
+    local d found=1
     for d in "$@"; do
-        in_worktree "$d" && continue
-        repo_root "$d" && return 1
+        [ -d "$d" ] || continue
+        in_worktree "$d" && return 1
+        repo_root "$d" || return 1
+        found=0
     done
-    return 0
+    return "$found"
 }
 
 git_branch_args_are_read() {
@@ -190,90 +191,45 @@ record_deny() {
     [ -n "$VERDICT_REASON" ] || VERDICT_REASON="$1"
 }
 
-CD_PROBLEMS=""
-CD_N=0
-add_problem() {
-    CD_N=$((CD_N + 1))
-    CD_PROBLEMS+="${CD_PROBLEMS:+ }($CD_N) $1"
-}
-
-shown() {
-    printf '%s' "${1//$DYN/<dynamic>}"
-}
-
-collect_cd_problems() {
-    local i=$1 j k tgt dyn frag
-    CD_PROBLEMS=""
-    CD_N=0
-    for ((j = 0; j < i; j++)); do
-        bp_seg "$j"
-        [[ $SEG_FLAGS == *X* ]] && continue
-        case "$SEG_CMD" in
-            pushd|popd|source|.|eval)
-                add_problem "\`$(shown "${SEG_RAW[*]}")\` changes the working directory in a way the guard cannot follow; remove it."
-                continue ;;
-            cd) ;;
-            *) continue ;;
-        esac
-        tgt="" dyn=0
-        for ((k = 1; k < ${#SEG_ARGV[@]}; k++)); do
-            [[ ${SEG_DYN:k:1} == 0 ]] && case "${SEG_ARGV[k]}" in -L|-P|-e|-@|--) continue ;; esac
-            tgt=${SEG_ARGV[k]}
-            dyn=${SEG_DYN:k:1}
-            break
-        done
-        frag="\`$(shown "${SEG_RAW[*]}")\`"
-        if [[ $SEG_FLAGS == *[CFG]* ]]; then
-            add_problem "$frag runs inside an if/for/while/case block, a { } group, or a function, so whether it ran is unknown; never cd inside a branch or loop before a git write."
-        elif [[ $dyn == 1 || $tgt == *"$DYN"* || $tgt == "-" || $tgt == *'$'* ]]; then
-            add_problem "$frag has a dynamic target (variable, \$(...), glob, or cd -) the guard cannot resolve; write the literal absolute path instead."
-        elif [[ -z $tgt ]]; then
-            add_problem "$frag has no target; write the literal absolute path instead."
-        elif [[ $tgt != /* ]]; then
-            add_problem "$frag is a relative cd, so the guard cannot be sure it succeeded or where it landed; use a literal absolute path, never cd .. or cd <subdir>."
-        elif [[ ! -d $tgt ]]; then
-            add_problem "$frag targets a directory that does not exist, so the cd may fail and leave the shell in the base repo; create the worktree first or cd to an existing worktree path."
+git_override_in_base() {
+    local k v next=0
+    local -a dirs=()
+    for v in ${SEG_ENV[@]+"${SEG_ENV[@]}"}; do
+        case "$v" in GIT_DIR=* | GIT_WORK_TREE=*) dirs+=("${v#*=}") ;; esac
+    done
+    for ((k = 1; k < ${#SEG_ARGV[@]}; k++)); do
+        v=${SEG_ARGV[k]}
+        if ((next)); then
+            dirs+=("$v")
+            next=0
+            continue
         fi
+        case "$v" in
+            --git-dir | --work-tree) next=1 ;;
+            --git-dir=* | --work-tree=*) dirs+=("${v#*=}") ;;
+        esac
     done
-    bp_seg "$i"
-}
-
-git_c_problems() {
-    local k v
-    for ((k = 1; k < ${#SEG_RAW[@]}; k++)); do
-        [ "${SEG_RAW[k - 1]}" = "-C" ] || continue
-        v=${SEG_RAW[k]}
-        [[ $v == /* && $v != *"$DYN"* ]] && continue
-        add_problem "\`git -C $(shown "$v")\` is not a literal absolute path; pass the full absolute worktree path."
+    for v in ${dirs[@]+"${dirs[@]}"}; do
+        [[ $v == /* && $v != *"$DYN"* && $v != *'$'* ]] || continue
+        all_in_base "$v" && return 0
     done
+    return 1
 }
 
 check_git() {
-    local dir unsafe=0
     local -a alts
-    git_config_is_unsafe ${SEG_GIT_CONFIG[@]+"${SEG_GIT_CONFIG[@]}"} && unsafe=1
-    if [ "$unsafe" = "1" ]; then
-        dir="$SEG_CWD"
+    if [ "$SEG_GIT_OVERRIDE" = "1" ]; then
+        [ "$SEG_GIT_SUB_DYN" = "1" ] || ! git_subcommand_is_read "$SEG_GIT_SUB" "" ${SEG_GIT_ARGS[@]+"${SEG_GIT_ARGS[@]}"} || return 0
+        git_override_in_base && record_deny "$DENY_GIT_MSG"
+        return 0
+    fi
+    if git_config_is_unsafe ${SEG_GIT_CONFIG[@]+"${SEG_GIT_CONFIG[@]}"}; then
         alts=(${SEG_CWD_ALTS[@]+"${SEG_CWD_ALTS[@]}"})
     else
-        dir="$SEG_GIT_CWD"
+        [ "$SEG_GIT_SUB_DYN" = "1" ] || ! git_subcommand_is_read "$SEG_GIT_SUB" "$SEG_GIT_CWD" ${SEG_GIT_ARGS[@]+"${SEG_GIT_ARGS[@]}"} || return 0
         alts=(${SEG_GIT_CWD_ALTS[@]+"${SEG_GIT_CWD_ALTS[@]}"})
-        [ "$SEG_GIT_SUB_DYN" = "1" ] || ! git_subcommand_is_read "$SEG_GIT_SUB" "$dir" ${SEG_GIT_ARGS[@]+"${SEG_GIT_ARGS[@]}"} || return 0
     fi
-    case "$SEG_FLAGS" in
-        *S*|*X*|*F*|*P*) record_deny "$DENY_GIT_MSG"; return 0 ;;
-    esac
-    if [ "$SEG_GIT_OVERRIDE" = "1" ]; then
-        record_deny "$DENY_GIT_MSG"
-    elif all_outside_base ${alts[@]+"${alts[@]}"}; then
-        return 0
-    elif [ "${#alts[@]}" = "1" ]; then
-        record_deny "$DENY_GIT_MSG"
-    else
-        collect_cd_problems "$seg_i"
-        git_c_problems
-        record_deny "DENIED: the base-dir guard cannot prove which directory \`git $(shown "$SEG_GIT_SUB")\` runs in, and at least one possible directory is outside a worktree. Problems: ${CD_PROBLEMS:-the starting directory could not be determined (a cd chained after a command that may fail, a CDPATH lookup, or a shell function call).} Rewrite: drop every cd before the git write and run each git write as its own Bash call with a literal absolute worktree path, e.g. \`git -C /abs/path/.claude/worktrees/<name> add -A\`, then a separate \`git -C /abs/path/.claude/worktrees/<name> commit -m ...\`, then \`git -C /abs/path/.claude/worktrees/<name> push ...\`. Never use relative cd (cd .., cd subdir), variables, \$(...), ~, or globs in a cd or -C path, and never put a cd inside an if/for/while/case block or after || / && before a git write. Run non-git steps (tests, builds) in a separate Bash call."
-    fi
+    all_in_base ${alts[@]+"${alts[@]}"} && record_deny "$DENY_GIT_MSG"
 }
 
 _resolve_path() {
@@ -323,7 +279,7 @@ check_writes() {
             cands=("$t")
         else
             for p in ${SEG_CWD_ALTS[@]+"${SEG_CWD_ALTS[@]}"}; do
-                cands+=("$p/$t")
+                [ -d "$p" ] && cands+=("$p/$t")
             done
         fi
         ((${#cands[@]} > 0)) || continue
@@ -334,9 +290,6 @@ check_writes() {
         done
         if ((hits > 0 && hits == ${#resolved[@]})); then
             record_deny "$DENY_EDIT_MSG (target: ${resolved[0]})"
-        elif ((hits > 0)); then
-            collect_cd_problems "$seg_i"
-            record_deny "DENIED: the base-dir guard cannot prove where this command writes $t, and one possible location is in the base repo outside a worktree. Problems: ${CD_PROBLEMS:-the starting directory could not be determined (a cd chained after a command that may fail, a CDPATH lookup, or a shell function call).} Rewrite: write to a literal absolute path inside a worktree, e.g. \`... > /abs/path/.claude/worktrees/<name>/$t\`, and drop the cd. Never use relative cd (cd .., cd subdir), variables, \$(...), ~, or globs in a cd target, and never put a cd inside an if/for/while/case block or after || / && before the write."
         fi
     done
 }
