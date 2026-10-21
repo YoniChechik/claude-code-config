@@ -318,11 +318,11 @@ cache_get() {
 cache_put() { printf -v "CACHE_${SNAP_N}_$1" '%s' "$2"; }
 
 workflow_runs_for() {
-    local wid="$1" branch="$2" event="$3" key
-    key="wf_${wid}_$(printf '%s/%s' "$branch" "$event" | cksum | cut -d' ' -f1)"
+    local wid="$1" branch="$2" event="$3" since="$4" key
+    key="wf_${wid}_$(printf '%s/%s/%s' "$branch" "$event" "$since" | cksum | cut -d' ' -f1)"
     cache_get "$key" && return 0
-    gh_call_best_effort gh api --method GET "repos/${OWNER_REPO}/actions/workflows/${wid}/runs" \
-        -f "branch=${branch}" -f "event=${event}" -f per_page=100 \
+    gh_call_best_effort gh api --paginate --method GET "repos/${OWNER_REPO}/actions/workflows/${wid}/runs" \
+        -f "branch=${branch}" -f "event=${event}" -f "created=>=${since}" -f per_page=100 \
         --jq '.workflow_runs[] | {id, status, conclusion, created_at, head_sha} | @json' \
         || return 1
     CACHE_VAL=$GH_OUT
@@ -345,7 +345,7 @@ contains_change() {
 }
 
 resolve_superseders() {
-    local runs_out="$1" cancelled run id wid branch created sha event cands cand best last rc
+    local runs_out="$1" cancelled run id wid branch created sha event cands cand concl best pending failed last rc
     SNAP_N=$((SNAP_N + 1))
     SUPER_LINES=""
     cancelled=$(printf '%s\n' "$runs_out" | jq -c 'select(type == "object" and .conclusion == "cancelled") | {id, workflow_id, head_branch, created_at, head_sha, event}' 2>/dev/null) || cancelled=""
@@ -358,26 +358,35 @@ resolve_superseders() {
         created=$(jq -r '.created_at' <<<"$run")
         sha=$(jq -r '.head_sha' <<<"$run")
         event=$(jq -r '.event' <<<"$run")
-        workflow_runs_for "$wid" "$branch" "$event" || return 1
+        workflow_runs_for "$wid" "$branch" "$event" "$created" || return 1
         cands=$(printf '%s\n' "$CACHE_VAL" | jq -s -c --arg id "$id" --arg c "$created" \
             '[.[] | select((.id | tostring) != $id and .created_at > $c)] | sort_by(.created_at)[]') || return 1
         [[ -n "$cands" ]] || continue
         best=""
+        pending=""
+        failed=""
         last=""
         while IFS= read -r cand; do
             [[ -n "$cand" ]] || continue
-            if [[ "$(jq -r '.conclusion' <<<"$cand")" == "cancelled" ]]; then
+            concl=$(jq -r '.conclusion // ""' <<<"$cand")
+            if [[ "$concl" == "cancelled" ]]; then
                 last=$cand
                 continue
             fi
             contains_change "$sha" "$(jq -r '.head_sha' <<<"$cand")"
             rc=$?
             [[ "$rc" -eq 2 ]] && return 1
-            if [[ "$rc" -eq 0 ]]; then
-                best=$cand
-                break
-            fi
+            [[ "$rc" -eq 0 ]] || continue
+            case "$concl" in
+                success | neutral | skipped)
+                    best=$cand
+                    break
+                    ;;
+                "") [[ -n "$pending" ]] || pending=$cand ;;
+                *) failed=$cand ;;
+            esac
         done <<<"$cands"
+        best=${best:-${pending:-$failed}}
         if [[ -z "$best" && -n "$last" ]]; then
             contains_change "$sha" "$(jq -r '.head_sha' <<<"$last")"
             rc=$?
@@ -387,7 +396,7 @@ resolve_superseders() {
         [[ -n "$best" ]] || continue
         SUPER_LINES+=$(jq -nc --argjson run_id "$id" --argjson c "$best" \
             '{kind: "super", run_id: $run_id, id: $c.id, status: $c.status, conclusion: $c.conclusion}')$'\n'
-        log "run ${id} (${event}) cancelled; its supersede chain ends at run $(jq -r '.id' <<<"$best") ($(jq -r '.conclusion // .status' <<<"$best"))"
+        log "run ${id} (${event}) cancelled; judged by later run $(jq -r '.id' <<<"$best") ($(jq -r '.conclusion // .status' <<<"$best"))"
     done <<<"$cancelled"
     return 0
 }

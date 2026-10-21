@@ -356,10 +356,12 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    run per (app, name), counts, so a failed first attempt fixed by a re-run is
    not a failure; `failure`, `cancelled`, `timed_out`, `action_required` and
    `startup_failure` fail, except that a `cancelled` run of any event is
-   judged by the end of its supersede chain: the oldest later run of the same
-   workflow, branch and event that is not itself cancelled and whose commit
-   contains the merge commit (re-resolved every poll, so a chain run that is
-   cancelled in turn is followed to its new end). At the watch bound, when
+   judged by the later runs of the same workflow, branch and event that are
+   not cancelled and whose commit contains the merge commit, oldest first:
+   the first one that passed clears it, else the oldest still running keeps
+   the watch waiting, else the newest failure fails it (re-resolved every
+   poll, so a run that is cancelled in turn is followed to the next one;
+   with no such run, the newest cancelled one keeps it failed). At the watch bound, when
    nothing failed and only such chains are still pending, the verdict is
    `PENDING-SUPERSEDED` with the cancelled->current run ids, and the staging
    verifier still checks the deploys instead of failing on CI alone;

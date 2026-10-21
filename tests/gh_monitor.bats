@@ -714,7 +714,8 @@ wfruns_fixture() {
     assert_contains "all 3 green" "$output"
     assert_contains "superseded         Mobile Store Status (run 11, attempt 1, workflow_dispatch, superseded by run 12)" "$output"
     assert_contains "superseded         Mobile Store Status (run 13, attempt 1, workflow_dispatch, superseded by run 14)" "$output"
-    assert_contains "-f event=workflow_dispatch" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "api --paginate --method GET repos/o/r/actions/workflows/7/runs -f branch=main -f event=workflow_dispatch -f created=>=c1 -f per_page=100" "$(cat "$GH_STUB_DIR/calls.log")"
+    assert_contains "-f created=>=c3" "$(cat "$GH_STUB_DIR/calls.log")"
     assert_not_contains "-f event=push" "$(cat "$GH_STUB_DIR/calls.log")"
 }
 
@@ -736,6 +737,37 @@ wfruns_fixture() {
     assert_contains "Post-merge CI PASSED" "$output"
     assert_contains "superseded         Backoffice Release (run 11, attempt 1, push, superseded by run 22)" "$output"
     assert_not_contains "run 24" "$output"
+}
+
+@test "merge: a failed chain end is cleared by a later run containing the merge that succeeded" {
+    merged_pr
+    api_runs_fixture "11:Website Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "24:in_progress::aaa444:c5" "23:completed:success:aaa333:c4" "22:completed:cancelled:aaa222:c3" "21:completed:failure:aaa111:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "superseded         Website Release (run 11, attempt 1, push, superseded by run 23)" "$output"
+}
+
+@test "merge: a failed chain end with a later pending run keeps the watcher waiting on that run" {
+    export GH_MONITOR_WATCH_MAX=1
+    merged_pr
+    api_runs_fixture "11:Website Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "23:queued::aaa333:c4" "22:in_progress::aaa222:c3" "21:completed:failure:aaa111:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run timeout 30 bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge verdict PENDING-SUPERSEDED" "$output"
+    assert_contains "(cancelled->current: 11->22)" "$output"
+}
+
+@test "merge: when every later run containing the merge failed, the newest failure fails the verdict" {
+    merged_pr
+    api_runs_fixture "11:Website Release:completed:cancelled:1:push:5:main:abc123:c1"
+    wfruns_fixture "23:completed:cancelled:aaa333:c4" "22:completed:failure:aaa222:c3" "21:completed:failure:aaa111:c2"
+    stub api_compare 0 '{"status":"ahead"}'
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED" "$output"
+    assert_contains "failure            Website Release (run 11, attempt 1, push, superseded by run 22)" "$output"
 }
 
 @test "merge: when the chain's pending run is itself superseded the watcher follows the chain to its new end" {
