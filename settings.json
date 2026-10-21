@@ -225,6 +225,16 @@
       {
         "hooks" : [
           {
+            "async" : true,
+            "command" : "bash $HOME\/.claude\/scripts\/post_tool_use__sync_main_after_merge.sh",
+            "type" : "command"
+          }
+        ],
+        "matcher" : "Bash"
+      },
+      {
+        "hooks" : [
+          {
             "command" : "bash $HOME\/.claude\/hooks\/bash-timeout-post.sh",
             "timeout" : 10,
             "type" : "command"
