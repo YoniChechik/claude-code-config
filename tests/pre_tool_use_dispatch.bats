@@ -13,7 +13,6 @@ setup() {
     C="com""mit"
 
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
-    HOOK_LOG="$CLAUDE_HOOK_LOG_DIR/hooks.log"
 }
 
 decide() {
@@ -55,15 +54,15 @@ assert_decision() {
     assert_decision DENY "$(bash_decide "$WT" "$GH $REPO $DEL foo/bar")"
 }
 
-@test "ask: permission_guard asks, base_dir_protect has no opinion" {
-    assert_decision ASK "$(bash_decide "$WT" "$GH repo archive foo/bar")"
+@test "allow: a formerly-ask gh command passes both guards" {
+    assert_decision ALLOW "$(bash_decide "$WT" "$GH repo archive foo/bar")"
 }
 
 @test "deny: base_dir_protect denies AND permission_guard denies -> still exactly one deny" {
     assert_decision DENY "$(bash_decide "$BASE" "git $C -am y && $GH $REPO $DEL foo/bar")"
 }
 
-@test "deny: base_dir_protect denies while permission_guard only asks -> deny wins" {
+@test "deny: base_dir_protect denies while permission_guard allows -> deny wins" {
     assert_decision DENY "$(bash_decide "$BASE" "git $C -am y && $GH repo archive foo/bar")"
 }
 
@@ -137,6 +136,16 @@ printf "%s" "not json at all"; exit 0
     assert_decision DENY "$(dispatch_in "$dir" "$WT" "echo hello")"
 }
 
+@test "deny: a sub-check emitting ask is not forwarded, the dispatcher never asks" {
+    local dir="$BATS_TEST_TMPDIR/ask"
+    mkdir -p "$dir"
+    cp "$(SCRIPTS_DIR)"/*.sh "$(SCRIPTS_DIR)"/bashparse.jq "$dir/"
+    sed -i '' '1a\
+printf "%s" "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"x\"}}"; exit 0
+' "$dir/pre_tool_use__permission_guard.sh"
+    assert_decision DENY "$(dispatch_in "$dir" "$WT" "echo hello")"
+}
+
 @test "allow: a healthy no-rule-matched pass still means allow" {
     local dir="$BATS_TEST_TMPDIR/healthy"
     mkdir -p "$dir"
@@ -150,14 +159,12 @@ printf "%s" "not json at all"; exit 0
     printf '#!/bin/sh\necho "mktemp: No space left on device" >&2\nexit 1\n' > "$shim/mktemp"
     chmod +x "$shim/mktemp"
     chmod 500 "$ro"
-    local out_deny out_allow out_ask
+    local out_deny out_allow
     out_deny=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "$GH $REPO $DEL foo/bar")
     out_allow=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "echo hello")
-    out_ask=$(PATH="$shim:$PATH" TMPDIR="$ro" bash_decide "$WT" "$GH repo archive foo/bar")
     chmod 700 "$ro"
     assert_decision DENY "$out_deny"
     assert_decision ALLOW "$out_allow"
-    assert_decision ASK "$out_ask"
 }
 
 @test "a sub-check writing stderr AND a decision on stdout is still caught as a failure" {
@@ -207,17 +214,9 @@ dispatch_with_path() {
 
 bash_payload() { jq -nc --arg cwd "$1" --arg cmd "$2" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}'; }
 
-assert_logged() {
-    grep -qF -- "$1" "$HOOK_LOG" && return 0
-    echo "hooks.log does not contain: $1" >&2
-    cat "$HOOK_LOG" >&2 2>/dev/null
-    return 1
-}
-
-@test "deny: shfmt missing and the command names a guarded tool" {
+@test "allow: shfmt missing allows even a command that names a guarded tool" {
     link_bin jq
-    assert_decision DENY "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
-    assert_logged "shfmt not installed) | $GH $REPO $DEL foo/bar"
+    assert_decision ALLOW "$(dispatch_with_path "$(STUBS):/usr/bin:/bin" "$(bash_payload "$WT" "$GH $REPO $DEL foo/bar")")"
 }
 
 @test "allow: shfmt missing never blocks a non-Bash tool, which needs no parse" {

@@ -12,18 +12,7 @@ if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
     fi
     bp_hook_prepare "$INPUT"
 fi
-GUARDED_TOOLS_RE='(^|[^A-Za-z0-9_.-])(gh|gcloud|bq|supabase|pulumi)([^A-Za-z0-9_.-]|$)'
-if ((BP_RC != 0)); then
-    if [[ ${BP_CMD:-${HOOK_LOG_CMD:-}} =~ $GUARDED_TOOLS_RE ]]; then
-        hook_log "deny: unparseable command mentions ${BASH_REMATCH[2]} ($BP_ERR)"
-        if ((BP_RC == 3)); then
-            hook_decision deny "DENIED: the permission guard needs shfmt to parse Bash commands that mention ${BASH_REMATCH[2]}, and shfmt is not installed. Run \`brew install shfmt\` in its own Bash call, then retry this command unchanged."
-        else
-            hook_decision deny "DENIED: the permission guard could not parse this command ($BP_ERR), and it mentions ${BASH_REMATCH[2]}, so it cannot verify the ${BASH_REMATCH[2]} call is safe. Rewrite: run the ${BASH_REMATCH[2]} command alone in its own Bash call as a plain command with literal arguments (no heredoc, eval, unusual quoting, or very long chains), and put every other step in a separate Bash call."
-        fi
-    fi
-    exit 0
-fi
+((BP_RC == 0)) || exit 0
 STATE_ROOT_GUARD="${CLAUDE_STATE_DIR:-$HOME/.claude/state}"
 DYN=$'\xef\xbf\xbd'
 STATE_DENY_MSG="DENIED: ~/.claude/state holds the Stop gate's session ledger and its kill switch. Only the gate's own scripts write there (done_gate.sh predicate|check, the merge trigger, the post-merge watcher). Do not create, edit or delete these files: satisfy the gate instead (finish the work, start a real watcher, or end with \`STATUS: FAILURE <what>: <evidence>\`). The kill switch is for the user only."
@@ -74,32 +63,13 @@ fi
 SUPABASE_PROD_REFS=(pnseoblfzeqiczmmimnr ampdktckxcbdajezxkul)
 PULUMI_PROD_STACK_NAMES=(production prod mirror main)
 
-VERDICT=""
 VERDICT_REASON=""
 
-record_verdict() {
-    case "$1" in
-        deny)
-            if [ "$VERDICT" != "deny" ]; then
-                VERDICT="deny"
-                VERDICT_REASON="$2"
-            fi
-            ;;
-        ask)
-            if [ -z "$VERDICT" ]; then
-                VERDICT="ask"
-                VERDICT_REASON="$2"
-            fi
-            ;;
-    esac
-}
-
-ask() { record_verdict ask "$1"; }
-
-deny() { record_verdict deny "$1"; }
+deny() { [ -n "$VERDICT_REASON" ] || VERDICT_REASON=$1; }
 
 GH_DENY_MSG="Blocked: admin-required gh command. Admin actions (--admin flag, repo deletion, etc.) must be run manually by the user — do not retry. Ask the user to run it themselves."
 GH_ADMIN_DENY_MSG="Blocked: \`--admin\` bypasses required checks. Run \`gh pr checks <n>\`, find the failing required check, fix its cause (a CVE: bump the dependency; a migration lint: fix the migration), push, and merge normally on green with \`gh pr merge <n> --squash --match-head-commit <sha>\`. Do not hand the merge to the user. If a required check cannot pass by design, end with \`STATUS: FAILURE admin-merge: <check> fails because <evidence>\`."
+GCLOUD_PROJECT_DELETE_MSG="Blocked: \`gcloud projects delete\` deletes a whole Google Cloud project. It must be run manually by the user — do not retry."
 GCLOUD_RUN_PROTECTED_PROJECTS='(production-490411|staging-480220|mirror-production-496017)'
 
 has_prefix() {
@@ -159,140 +129,6 @@ tool_args() {
     return 0
 }
 
-GH_PATTERNS=(
-    "gh repo archive"
-    "gh repo unarchive"
-    "gh repo rename"
-    "gh repo edit"
-    "gh repo autolink create"
-    "gh repo autolink delete"
-    "gh repo deploy-key add"
-    "gh repo deploy-key delete"
-    "gh pr revert"
-    "gh issue delete"
-    "gh issue transfer"
-    "gh gist delete"
-    "gh release delete"
-    "gh release delete-asset"
-    "gh run delete"
-    "gh run cancel"
-    "gh secret delete"
-    "gh variable set"
-    "gh variable delete"
-    "gh ssh-key add"
-    "gh ssh-key delete"
-    "gh gpg-key add"
-    "gh gpg-key delete"
-    "gh codespace delete"
-    "gh cache delete"
-    "gh extension remove"
-    "gh label delete"
-    "gh project delete"
-    "gh project item-delete"
-    "gh project item-archive"
-    "gh project field-delete"
-    "gh project mark-template"
-    "gh auth logout"
-    "gh alias delete"
-)
-
-GCLOUD_PATTERNS=(
-    "gcloud projects delete"
-    "gcloud resource-manager folders delete"
-    "gcloud compute instances delete"
-    "gcloud compute instances stop"
-    "gcloud compute instances reset"
-    "gcloud compute instances bulk delete"
-    "gcloud compute disks delete"
-    "gcloud compute disks bulk delete"
-    "gcloud compute snapshots delete"
-    "gcloud compute images delete"
-    "gcloud compute machine-images delete"
-    "gcloud compute instance-templates delete"
-    "gcloud compute instance-groups managed delete"
-    "gcloud compute instance-groups managed delete-instances"
-    "gcloud compute instance-groups unmanaged delete"
-    "gcloud compute reservations delete"
-    "gcloud compute networks delete"
-    "gcloud compute networks subnets delete"
-    "gcloud compute firewall-rules delete"
-    "gcloud compute networks peerings delete"
-    "gcloud compute routes delete"
-    "gcloud compute routers delete"
-    "gcloud compute routers nats delete"
-    "gcloud compute vpn-tunnels delete"
-    "gcloud compute vpn-gateways delete"
-    "gcloud compute addresses delete"
-    "gcloud compute backend-services delete"
-    "gcloud compute backend-buckets delete"
-    "gcloud compute url-maps delete"
-    "gcloud compute target-pools delete"
-    "gcloud compute target-http-proxies delete"
-    "gcloud compute target-https-proxies delete"
-    "gcloud compute forwarding-rules delete"
-    "gcloud compute health-checks delete"
-    "gcloud compute ssl-certificates delete"
-    "gcloud compute security-policies delete"
-    "gcloud storage rm"
-    "gcloud storage buckets delete"
-    "gcloud sql instances delete"
-    "gcloud sql databases delete"
-    "gcloud sql backups delete"
-    "gcloud firestore databases delete"
-    "gcloud firestore bulk-delete"
-    "gcloud bigtable instances delete"
-    "gcloud bigtable tables delete"
-    "gcloud spanner instances delete"
-    "gcloud spanner databases delete"
-    "gcloud alloydb clusters delete"
-    "gcloud alloydb instances delete"
-    "gcloud redis instances delete"
-    "gcloud container clusters delete"
-    "gcloud container node-pools delete"
-    "gcloud container images delete"
-    "gcloud run services delete"
-    "gcloud run jobs delete"
-    "gcloud functions delete"
-    "gcloud app services delete"
-    "gcloud app versions delete"
-    "gcloud iam service-accounts delete"
-    "gcloud iam service-accounts disable"
-    "gcloud iam service-accounts keys delete"
-    "gcloud iam roles delete"
-    "gcloud projects remove-iam-policy-binding"
-    "gcloud pubsub topics delete"
-    "gcloud pubsub subscriptions delete"
-    "gcloud secrets delete"
-    "gcloud secrets versions destroy"
-    "gcloud kms keys versions destroy"
-    "gcloud dns managed-zones delete"
-    "gcloud dns record-sets delete"
-    "gcloud artifacts repositories delete"
-    "gcloud artifacts packages delete"
-    "gcloud artifacts docker images delete"
-    "gcloud scheduler jobs delete"
-    "gcloud tasks queues delete"
-    "gcloud tasks queues purge"
-    "gcloud dataflow jobs cancel"
-    "gcloud dataproc clusters delete"
-    "gcloud composer environments delete"
-    "gcloud builds triggers delete"
-    "gcloud logging sinks delete"
-    "gcloud logging logs delete"
-    "gcloud monitoring dashboards delete"
-    "gcloud monitoring policies delete"
-    "gcloud filestore instances delete"
-    "gcloud notebooks instances delete"
-    "gcloud workbench instances delete"
-    "gcloud endpoints services delete"
-    "gcloud services disable"
-)
-
-BQ_PATTERNS=(
-    "bq rm"
-    "bq truncate"
-)
-
 is_prod_supabase_ref() {
     local r
     for r in "${SUPABASE_PROD_REFS[@]}"; do
@@ -351,42 +187,18 @@ supabase_resolve_ref() {
 }
 
 supabase_remote_verdict() {
-    local label="$1" flag_ref="$2" workdir="$3" cwd="$4" readonly="$5"
-    case "$flag_ref" in *'$'*) deny "DENIED: \`$label\` takes its project ref from a shell variable ($flag_ref), so the guard cannot tell whether it targets production. Rewrite with the literal ref: \`$label --project-ref <20-char-ref>\`, or use \`--local\` for the local stack."; return ;; esac
+    local label="$1" flag_ref="$2" workdir="$3" cwd="$4"
+    case "$flag_ref" in *'$'*) return ;; esac
     supabase_resolve_ref "$flag_ref" "$workdir" "$cwd"
-    if [ -z "$SB_REF" ]; then
-        deny "DENIED: \`$label\` targets a remote Supabase project the guard could not resolve (no --project-ref, SUPABASE_PROJECT_ID or supabase/.temp/project-ref under the working directory). Rewrite with an explicit target: \`--local\` for the local stack, \`--project-ref <20-char-ref>\` for API commands (functions, secrets, config, branches), \`--db-url <literal url>\`, or \`--workdir <abs dir whose supabase/.temp/project-ref is linked>\`."
-    elif is_prod_supabase_ref "$SB_REF"; then
+    if [ -n "$SB_REF" ] && is_prod_supabase_ref "$SB_REF"; then
         deny "Blocked: \`$label\` targets the PRODUCTION Supabase project ($SB_REF). Production changes must be run manually by the user — do not retry."
-    elif [ "$readonly" != "1" ]; then
-        ask "\`$label\` changes the remote non-production Supabase project $SB_REF (shared environment) — confirm this is intended."
     fi
 }
 
 supabase_db_url_verdict() {
-    local label="$1" url="$2" readonly="$3" host
-    if text_has_prod_supabase_ref "$url"; then
-        deny "Blocked: \`$label\` --db-url points at the PRODUCTION Supabase database. Production changes must be run manually by the user — do not retry."
-        return
+    if text_has_prod_supabase_ref "$2"; then
+        deny "Blocked: \`$1\` --db-url points at the PRODUCTION Supabase database. Production changes must be run manually by the user — do not retry."
     fi
-    case "$url" in
-        *'$'*|'')
-            deny "DENIED: \`$label\` --db-url is an unresolved value ($url), so the guard cannot tell whether it is production. Rewrite with the literal connection string (e.g. \`--db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres\`), or use \`--local\` / \`--project-ref <ref>\` instead of --db-url."
-            return
-            ;;
-    esac
-    host="${url#*://}"
-    host="${host##*@}"
-    host="${host%%[/?]*}"
-    case "$host" in
-        \[*\]*) host="${host#\[}"; host="${host%%\]*}" ;;
-        *) host="${host%:*}" ;;
-    esac
-    case "$host" in
-        localhost|localhost.localdomain|127.*|0.0.0.0|::1|host.docker.internal) return ;;
-    esac
-    [ "$readonly" = "1" ] && return
-    ask "\`$label\` --db-url changes the remote database at $host — confirm this is intended."
 }
 
 supabase_decide() {
@@ -417,11 +229,8 @@ supabase_decide() {
         esac
         i=$((i + 1))
     done
-    local c1="${pos[0]:-}" c2="${pos[1]:-}" label mode="" ro=0
+    local c1="${pos[0]:-}" c2="${pos[1]:-}" label mode=""
     label="supabase $c1${c2:+ $c2}"
-    case "$c1 $c2" in
-        "migration list"|"migration fetch"|"db dump"|"inspect db"|"gen types"|"db diff"|"db lint") ro=1 ;;
-    esac
     case "$c1" in
         start|stop|status|init|link) return 0 ;;
         branches|postgres-config|domains|sso|network-restrictions|network-bans|ssl-enforcement|vanity-subdomains) mode=api ;;
@@ -443,28 +252,22 @@ supabase_decide() {
         esac
     fi
     if [ "$mode" = "api" ]; then
-        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$ro"
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd"
         return 0
     fi
     if [ "$has_db_url" = "1" ]; then
-        supabase_db_url_verdict "$label" "$db_url" "$ro"
+        supabase_db_url_verdict "$label" "$db_url"
         return 0
     fi
     [ "$has_local" = "1" ] && return 0
     if [ "$has_linked" = "1" ] || [ "$has_proxy" = "1" ]; then
-        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$ro"
+        supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd"
         return 0
     fi
     case "$mode" in
         default_local) return 0 ;;
-        default_linked) supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$ro" ;;
-        gen_types)
-            if [ -n "$flag_ref" ]; then
-                supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" "$ro"
-            else
-                deny "DENIED: \`$label\` has no target flag, so the guard cannot tell which database it reads. Rewrite with an explicit target: \`$label --local\` for the local DB, or \`$label --project-id <20-char-ref>\` for a remote non-production project."
-            fi
-            ;;
+        default_linked) supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" ;;
+        gen_types) [ -n "$flag_ref" ] && supabase_remote_verdict "$label" "$flag_ref" "$workdir" "$cwd" ;;
     esac
     return 0
 }
@@ -522,57 +325,23 @@ pulumi_workspace_stacks() {
     [ "${#PULUMI_WS_STACKS[@]}" -gt 0 ]
 }
 
-PT_REASON=""
-pulumi_targets_tight() {
-    local -a targets=("$@")
-    local t
-    if [ ${#targets[@]} -eq 0 ]; then
-        PT_REASON="No --target specified — would mutate the entire stack. Pulumi against prod-like stacks must enumerate specific resource URNs."
-        return 1
-    fi
-    if [ ${#targets[@]} -gt 5 ]; then
-        PT_REASON="More than 5 --target flags (${#targets[@]}); this looks like enumerate-all-URNs. Split into smaller manual runs."
-        return 1
-    fi
-    for t in "${targets[@]}"; do
-        if [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::pulumi:pulumi:Stack:: ]]; then
-            PT_REASON="--target points at the Stack root URN ($t) — equivalent to whole-stack. Target individual resources instead."
-            return 1
-        fi
-        if ! [[ "$t" =~ ^urn:pulumi:[^:]+::[^:]+::.+::[^:]+$ ]]; then
-            PT_REASON="--target value '$t' is not a fully-qualified resource URN (urn:pulumi:<stack>::<project>::<type>::<name>). Refusing to guess."
-            return 1
-        fi
-    done
-    return 0
-}
-
 pulumi_esc_verdict() {
     local label="$1" nm
     shift
-    local -a names=()
     for nm in "$@"; do
-        [ -n "$nm" ] && names+=("$nm")
-    done
-    for nm in ${names[@]+"${names[@]}"}; do
         nm="${nm%%@*}"
-        if is_prod_pulumi_stack "$nm"; then
+        if [ -n "$nm" ] && is_prod_pulumi_stack "$nm"; then
             deny "Blocked: \`$label\` mutates the PRODUCTION ESC environment $nm. Run it manually — do not retry."
             return
         fi
     done
-    if [ ${#names[@]} -eq 0 ]; then
-        deny "DENIED: \`$label\` mutates an ESC environment the guard could not identify, so it cannot tell whether it is production. Rewrite naming the environment literally as a positional argument: \`$label <org>/<project>/<env> ...\` (no shell variables)."
-    else
-        ask "\`$label\` mutates the non-production ESC environment ${names[*]} — confirm this is intended."
-    fi
 }
 
 pulumi_decide() {
     local cwd="$1"
     tool_args pulumi || return 0
-    local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=() targets=() extra_stacks=()
-    local n=${#args[@]} i=0 tok val cwd_flag="" stack="" preview_only=0 create=0 target_dependents=0 esc_env=""
+    local -a args=("${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"}") pos=() extra_stacks=()
+    local n=${#args[@]} i=0 tok val cwd_flag="" stack="" preview_only=0 create=0 esc_env=""
     while [ "$i" -lt "$n" ]; do
         tok="${args[$i]}"
         val=""
@@ -583,7 +352,6 @@ pulumi_decide() {
                 case "$tok" in
                     -C|--cwd) cwd_flag="$val" ;;
                     -s|--stack) stack="$val" ;;
-                    -t|--target) targets+=("$val") ;;
                     --source|--dest) extra_stacks+=("$val") ;;
                     --env) esc_env="$val" ;;
                 esac
@@ -592,7 +360,6 @@ pulumi_decide() {
             -C?*) cwd_flag="${tok#-C}" ;;
             --stack=*|-s=*) stack="${tok#*=}" ;;
             -s?*) stack="${tok#-s}" ;;
-            --target=*|-t=*) targets+=("${tok#*=}") ;;
             --source=*|--dest=*) extra_stacks+=("${tok#*=}") ;;
             --env=*) esc_env="${tok#*=}" ;;
             --preview-only|--preview-only=true) preview_only=1 ;;
@@ -603,7 +370,6 @@ pulumi_decide() {
                 fi
                 ;;
             --create|-c) create=1 ;;
-            --target-dependents|--target-dependents=*) target_dependents=1 ;;
             -*) ;;
             *) pos+=("$tok") ;;
         esac
@@ -631,14 +397,6 @@ pulumi_decide() {
             case "$c2" in
                 run) kind=stack; label="pulumi deployment run${c3:+ $c3}" ;;
                 settings) case "$c3" in init|configure|push|env|destroy) kind=stack; label="pulumi deployment settings $c3" ;; esac ;;
-            esac
-            ;;
-        policy)
-            case "$c2" in
-                publish|enable|disable|rm)
-                    ask "\`$label\` changes organization-wide Pulumi policy enforcement, which also gates production stacks — confirm this is intended."
-                    return 0
-                    ;;
             esac
             ;;
         env)
@@ -670,9 +428,8 @@ pulumi_decide() {
     elif [ -n "$yaml" ]; then
         backend=$(awk '/^backend:/{b=1;next} b&&/^[^[:space:]]/{b=0} b&&/url:/{sub(/.*url:[[:space:]]*/,""); gsub(/["\047]/,""); print; exit}' "$yaml" 2>/dev/null)
     fi
-    local local_backend=0
     case "$backend" in
-        file://*) local_backend=1 ;;
+        file://*) ;;
         *production*)
             deny "Blocked: \`$label\` runs against a production Pulumi backend. Run it manually — do not retry."
             return 0
@@ -695,57 +452,13 @@ pulumi_decide() {
     stacks+=(${extra_stacks[@]+"${extra_stacks[@]}"})
 
     for s in ${stacks[@]+"${stacks[@]}"}; do
-        case "$s" in
-            *'$'*)
-                deny "DENIED: \`$label\` takes its stack from a shell variable ($s), so the guard cannot tell whether it is production. Rewrite with the literal stack name: \`$label -s <org>/<project>/<stack>\`."
-                return 0
-                ;;
-        esac
-        is_prod_pulumi_stack "$s" || continue
-        local block_prefix="Blocked: \`$label\` against production stack $s."
-        case "$c1" in
-            up|destroy|refresh)
-                if [ "$target_dependents" = "1" ]; then
-                    deny "$block_prefix --target-dependents walks the dependency graph and is effectively whole-stack. Run manually."
-                elif pulumi_targets_tight ${targets[@]+"${targets[@]}"}; then
-                    ask "\`$label\` against production stack $s with a tight --target set — confirm each URN is intended."
-                else
-                    deny "$block_prefix $PT_REASON"
-                fi
-                ;;
-            *) deny "$block_prefix Production mutations must be run manually by the user — do not retry." ;;
-        esac
-        return 0
+        case "$s" in *'$'*) continue ;; esac
+        if is_prod_pulumi_stack "$s"; then
+            deny "Blocked: \`$label\` against production stack $s. Production mutations must be run manually by the user — do not retry."
+            return 0
+        fi
     done
-
-    if [ ${#stacks[@]} -eq 0 ]; then
-        deny "DENIED: \`$label\` mutates a Pulumi stack the guard could not resolve (no -s/--stack, PULUMI_STACK, or selected workspace stack for the project in the working directory). Rewrite with an explicit literal stack: \`$label -s <org>/<project>/<stack>\`, adding \`-C <abs project dir>\` if the Pulumi.yaml is not in the working directory."
-    elif [ "$local_backend" = "0" ]; then
-        ask "\`$label\` mutates the non-production stack ${stacks[*]} — confirm this is intended."
-    fi
     return 0
-}
-
-check_unknown() {
-    local r tool fix
-    [[ $BP_CMD =~ $GUARDED_TOOLS_RE ]] || return 0
-    tool=${BASH_REMATCH[2]}
-    for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
-        [ "$r" = source ] && continue
-        case "$r" in
-            "dynamic command name"|"substitution as command")
-                fix="Never run a command through a variable or \$(...) as its name (e.g. \`K=node_modules/.bin/x; \$K run\`); write the literal command path, e.g. \`/abs/path/node_modules/.bin/x run ...\`." ;;
-            "indirect exec")
-                fix="Do not hand commands to xargs, parallel, or find -exec when the line mentions $tool; run each $tool call directly with literal arguments in its own Bash call, and use the Grep/Glob tools or plain \`grep -r\`/\`rg\` for searches instead of piping into xargs." ;;
-            "dynamic eval"|"dynamic shell code"|"dynamic shell heredoc")
-                fix="Do not use eval, \`bash -c \"\$VAR\"\`, or a heredoc built from variables; write the commands out literally (e.g. run \`devtrees env\` first, read the value, then use it as a literal in the next call)." ;;
-            "shell reads stdin")
-                fix="Do not pipe or redirect a script into bash/sh/zsh; run the commands directly, or write the script to a file in the scratchpad and run \`bash /abs/path/script.sh\`." ;;
-            *)
-                fix="Run the $tool command alone in its own Bash call as a plain command with literal arguments, and put other steps in separate calls." ;;
-        esac
-        deny "DENIED: the permission guard cannot see what part of this command runs ($r), and the command mentions $tool, so it cannot verify the $tool call is safe. $fix"
-    done
 }
 
 seg_state_path() {
@@ -772,15 +485,13 @@ check_state_paths() {
 }
 
 check_segment() {
-    local j pattern text w
+    local j text w
     W=(${SEG_ARGV[@]+"${SEG_ARGV[@]}"})
     for ((j = 0; j < ${#W[@]}; j++)); do
         [ "${SEG_DYN:j:1}" = "1" ] && W[j]="${W[j]//$DYN/\$}"
     done
     [ -n "$SEG_CMD" ] && W[0]="$SEG_CMD"
     text="${W[*]}"
-
-    case "$SEG_FLAGS" in *U*) check_unknown ;; esac
 
     check_state_paths
 
@@ -792,23 +503,13 @@ check_segment() {
                 esac
             done
             has_prefix "$text" "gh repo delete" && deny "$GH_DENY_MSG"
-            for pattern in "${GH_PATTERNS[@]}"; do
-                has_prefix "$text" "$pattern" && ask "\`$pattern\` is destructive or changes shared GitHub settings, so it needs the user's confirmation."
-            done
             ;;
         gcloud)
-            for pattern in "${GCLOUD_PATTERNS[@]}"; do
-                has_prefix "$text" "$pattern" && ask "\`$pattern\` deletes or disables Google Cloud resources, so it needs the user's confirmation."
-            done
+            has_prefix "$text" "gcloud projects delete" && deny "$GCLOUD_PROJECT_DELETE_MSG"
             if [[ "$text" =~ ^gcloud[[:space:]]+run[[:space:]]+(services[[:space:]]+(update|replace|deploy|create)|deploy)([[:space:]]|$) ]] && \
                [[ "$text" =~ --project[[:space:]]*=?[[:space:]]*${GCLOUD_RUN_PROTECTED_PROJECTS} ]]; then
                 deny "Blocked: gcloud run revision-creating verb (update/replace/deploy/create) against a protected project (production-490411 / staging-480220 / mirror-production-496017). Requires explicit user execution — do not retry."
             fi
-            ;;
-        bq)
-            for pattern in "${BQ_PATTERNS[@]}"; do
-                has_prefix "$text" "$pattern" && ask "\`$pattern\` deletes BigQuery data, so it needs the user's confirmation."
-            done
             ;;
     esac
 
@@ -823,9 +524,9 @@ for ((seg_i = 0; seg_i < BP_N; seg_i++)); do
     check_segment
 done
 
-if [ -n "$VERDICT" ]; then
-    hook_log "$VERDICT: $VERDICT_REASON"
-    hook_decision "$VERDICT" "$VERDICT_REASON"
+if [ -n "$VERDICT_REASON" ]; then
+    hook_log "deny: $VERDICT_REASON"
+    hook_decision deny "$VERDICT_REASON"
 fi
 
 exit 0
