@@ -685,3 +685,188 @@ write_decision() {
     assert_decision DENY "$(decide "touch \"$HOME/.claude/state/override/done_gate.off\"")"
     assert_decision DENY "$(decide_in "$HOME/.claude/skills" "rm -rf ../state/sessions")"
 }
+
+sbq() {
+    decide_in "$1" "supabase db query $2"
+}
+
+sbq_reason() {
+    jq -nc --arg cwd "$1" --arg cmd "supabase db query $2" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' | bash "$HOOK" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'
+}
+
+@test "db query: local stays allowed for any SQL, file and stdin" {
+    for a in "'insert into t values (1)'" "--local 'drop table t'" "-f x.sql" "--local=true 'delete from t'" "--db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres 'truncate t'" "--db-url=postgres://postgres@localhost/postgres 'drop schema x'"; do
+        assert_decision NONE "$(sbq "$SB_PROD" "$a")" || { echo "args: $a" >&2; return 1; }
+    done
+    assert_decision NONE "$(decide_in "$SB_PROD" "supabase db query <<'SQL'
+delete from t;
+SQL")"
+}
+
+@test "db query: read-only transaction forms are allowed against prod, staging and --db-url" {
+    for a in \
+        "--linked 'begin read only; select 1; commit;'" \
+        "--linked 'BEGIN READ ONLY; SELECT * FROM t WHERE a = 1; COMMIT'" \
+        "--linked 'begin transaction read only; select 1; rollback;'" \
+        "--linked 'begin work read only; select 1; commit work;'" \
+        "--linked 'start transaction read only; select 1; commit transaction;'" \
+        "--linked 'start transaction isolation level repeatable read, read only; select 1; commit;'" \
+        "--linked 'set default_transaction_read_only = on; begin read only; select 1; commit;'" \
+        "--linked 'set session characteristics as transaction read only; begin read only; select 1; commit;'" \
+        "--linked 'begin read only; with x as (select 1 as a) select case when a = 1 then 2 end from x; commit;'" \
+        "--linked 'begin read only; select pg_sleep(1); table t; values (1); show search_path; commit;'" \
+        "--linked 'begin read only; explain analyze select 1; explain (analyze, buffers) select 2; commit;'" \
+        "--linked 'begin read only; select \$\$insert into t\$\$, \$q\$drop\$q\$, '\\''delete'\\''; commit;'" \
+        "--linked 'begin read only; /* note */ select 1; -- trailing
+commit; -- done'" \
+        "--linked -o json 'begin read only; select comment from feedback; commit;'" \
+        "--agent yes --linked 'begin read only; select 1; commit;'" \
+        "--db-url postgresql://postgres:pw@db.$PROD_REF.supabase.co:5432/postgres 'begin read only; select 1; commit;'"; do
+        assert_decision NONE "$(sbq "$SB_PROD" "$a")" || { echo "args: $a" >&2; return 1; }
+        assert_decision NONE "$(sbq "$SB_STG" "$a")" || { echo "args: $a" >&2; return 1; }
+    done
+    assert_decision NONE "$(decide_in "$SB_PROD" "npx supabase --workdir . db query --linked 'begin read only; select 1; commit;'")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "bash -c \"supabase db query --linked 'begin read only; select 1; commit;'\"")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "git commit -m 'guard supabase db query --linked'")"
+}
+
+@test "db query: write and escape SQL against --linked is denied (prod, staging, unlinked)" {
+    local s dir
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        for dir in "$SB_PROD" "$SB_STG" "$NOWHERE"; do
+            assert_decision DENY "$(sbq "$dir" "--linked '${s//\'/\'\\\'\'}'")" || { echo "sql: $s ($dir)" >&2; return 1; }
+        done
+    done <"$BATS_TEST_DIRNAME/fixtures/db_query_denied.sql.txt"
+}
+
+@test "db query: a multi-line statement after COMMIT is denied" {
+    assert_decision DENY "$(sbq "$SB_PROD" "--linked 'begin read only; select 1; -- comment
+insert into t values (1); commit;'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--linked 'begin read only; select 1; commit;
+delete from t;'")"
+}
+
+@test "db query: backslashes, psql meta-commands and non-ASCII outside literals are denied" {
+    for a in \
+        "--linked 'begin read only; select 1; commit; \\! rm -rf /'" \
+        "--linked 'begin read only; select E''\\'''' ; commit;'" \
+        "--linked 'begin read only; select ''\\'' ; delete from t; commit;'" \
+        "--linked \$'begin read only; select 1; commit;\\ninsert into t values (1);'" \
+        "--linked 'begin read only; select 1; commit; insert into t values (1);'" \
+        "--linked 'begin read only; select 1$(printf '\302\240'); commit;'" \
+        "--linked 'begin read only; select 1;$(printf '\342\200\250')commit;'" \
+        "--linked 'begin read only; select 1; commit;$(printf '\001')'" \
+        "--linked 'begin read only; selеct 1; commit;'"; do
+        assert_decision DENY "$(sbq "$SB_PROD" "$a")" || { echo "args: $a" >&2; return 1; }
+    done
+}
+
+@test "db query: SQL the guard cannot read statically is denied against a remote target" {
+    for a in \
+        "--linked -f q.sql" \
+        "--linked --file q.sql" \
+        "--linked --file=q.sql" \
+        "--linked -fq.sql" \
+        "--linked" \
+        "--linked \"\$SQL\"" \
+        "--linked \"\$(cat q.sql)\"" \
+        "--linked \"\$(echo YmVnaW4= | base64 -d)\"" \
+        "--linked 'begin read only; select 1; commit;' 'delete from t'" \
+        "--linked begin*" \
+        "--linked 'begin read only; select 1; commit;'{,x}" \
+        "--linked --unknown 'begin read only; select 1; commit;'" \
+        "--linked -x 'begin read only; select 1; commit;'"; do
+        assert_decision DENY "$(sbq "$SB_PROD" "$a")" || { echo "args: $a" >&2; return 1; }
+    done
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase db query --linked <<'SQL'
+begin read only; select 1; commit;
+SQL")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "echo 'begin read only; select 1; commit;' | supabase db query --linked")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase db query --linked <<< 'begin read only; select 1; commit;'")"
+}
+
+@test "db query: remote signals beat --local, and env-based targets are remote" {
+    assert_decision DENY "$(sbq "$SB_PROD" "--local --linked 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--linked --local 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--local=false 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--db-url postgresql://postgres:pw@db.$STG_REF.supabase.co:5432/postgres 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--db-url 'postgresql://postgres@127.0.0.1:54322/postgres?host=db.$PROD_REF.supabase.co' 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--db-url 'host=127.0.0.1 port=5432' 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--db-url \"\$DB\" 'delete from t'")"
+    assert_decision DENY "$(sbq "$SB_PROD" "--db-url postgresql://u@evil@127.0.0.1/postgres 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "SUPABASE_DB_URL=postgresql://x@db.$PROD_REF.supabase.co/postgres supabase db query 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "SUPABASE_LINKED=true supabase db query 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "env SUPABASE_LINKED=1 supabase db query 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase --agent yes db query --linked 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase --linked db query 'delete from t'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "supabase --agent no db push")"
+}
+
+@test "db query: wrappers and nested shells are covered" {
+    for c in \
+        "npx supabase db query --linked 'delete from t'" \
+        "pnpm exec supabase db query --linked 'delete from t'" \
+        "bunx supabase db query --linked 'delete from t'" \
+        "bash -c \"supabase db query --linked 'delete from t'\"" \
+        "eval \"supabase db query --linked 'delete from t'\"" \
+        "cd /tmp && supabase db query --linked 'delete from t'" \
+        "Supabase db query --linked 'delete from t'" \
+        "SUPABASE db query --linked 'delete from t'" \
+        "/opt/homebrew/bin/supabase db query --linked 'delete from t'" \
+        "npx SupaBase db query --linked 'delete from t'" \
+        "pnpx supabase db query --linked 'delete from t'" \
+        "npm exec supabase -- db query --linked 'delete from t'" \
+        "npx -p supabase supabase db query --linked 'delete from t'" \
+        "xargs supabase db query --linked </dev/null" \
+        "echo x | xargs -I{} supabase db query --linked {}" \
+        "find . -exec supabase db query --linked 'delete from t' \\;" \
+        "supabase db query \"\$F\" 'delete from t'" \
+        "supabase db \"\$SUB\" --linked 'delete from t'" \
+        "supabase \$(echo db) query --linked 'delete from t'" \
+        "env -S \"supabase db query --linked 'delete from t'\"" \
+        "env --split-string=\"supabase db query --linked 'delete from t'\"" \
+        "env -S supabase db query --linked 'delete from t'" \
+        "script -q /dev/null \"supabase db query --linked 'delete from t'\"" \
+        "flock /tmp/l -c \"supabase db query --linked 'delete from t'\"" \
+        "git -c \"alias.q=!supabase db query --linked 'delete from t'\" q" \
+        "git -c core.pager=\"supabase db query --linked 'delete from t'\" log" \
+        "git -c \"core.sshCommand supabase db query\" fetch" \
+        "\"\$RUN\" db query --linked 'delete from t'" \
+        "\$(echo supabase) db query --linked 'delete from t'"; do
+        assert_decision DENY "$(decide_in "$SB_PROD" "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "guard: command names are matched case-insensitively (macOS resolves Gh and Supabase)" {
+    assert_decision DENY "$(decide "Gh pr merge 1 --admin")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "SUPABASE db push")"
+}
+
+@test "db query: an unparseable command that mentions supabase query is denied" {
+    local out
+    out=$(jq -nc --arg cmd "supabase db query --linked 'delete from t' \$((" '{tool_name:"Bash",cwd:"/tmp",tool_input:{command:$cmd}}' | bash "$HOOK")
+    assert_decision DENY "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' | tr 'a-z' 'A-Z')"
+    out=$(jq -nc --arg cmd "echo hi \$((" '{tool_name:"Bash",cwd:"/tmp",tool_input:{command:$cmd}}' | bash "$HOOK")
+    [ -z "$out" ]
+}
+
+@test "db query: the deny message tells the agent the exact allowed form" {
+    local r
+    r=$(sbq_reason "$SB_PROD" "--linked 'delete from t'")
+    [[ $r == *"begin read only; select ...; commit;"* ]]
+    [[ $r == *"Rejected because:"* ]]
+    [[ $r == *"writes must be run manually by the user"* ]]
+    r=$(sbq_reason "$SB_PROD" "--linked -f q.sql")
+    [[ $r == *"-f/--file"* ]]
+    r=$(sbq_reason "$SB_PROD" "--linked 'set default_transaction_read_only = on; select 1; commit;'")
+    [[ $r == *"must be BEGIN READ ONLY"* ]]
+}
+
+@test "db query: the guard fails closed when the SQL validator cannot run" {
+    local fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\nexit 127\n' >"$fake/python3"
+    chmod +x "$fake/python3"
+    assert_decision DENY "$(PATH="$fake:$PATH" sbq "$SB_PROD" "--linked 'begin read only; select 1; commit;'")"
+}

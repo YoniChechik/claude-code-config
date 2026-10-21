@@ -12,7 +12,15 @@ if [[ ${BP_READY:-} != 1 ]] || ! declare -F bp_hook_prepare >/dev/null; then
     fi
     bp_hook_prepare "$INPUT"
 fi
-((BP_RC == 0)) || exit 0
+if ((BP_RC != 0)); then
+    unparsed=$(printf '%s' "${INPUT:-}" | jq -r 'select(.tool_name == "Bash") | .tool_input.command // empty | strings' 2>/dev/null)
+    unparsed_lc="${unparsed,,}"
+    if [[ $unparsed_lc == *supabase* && $unparsed_lc == *query* ]]; then
+        hook_log "deny: unparseable command mentioning supabase query (rc=$BP_RC)"
+        hook_decision deny "Blocked: this command mentions \`supabase\` and \`query\` but the permission guard could not parse it, so it cannot prove the SQL is read-only. Split it into one plain command: \`supabase db query --linked 'begin read only; select ...; commit;'\` with the SQL as a single-quoted literal."
+    fi
+    exit 0
+fi
 STATE_ROOT_GUARD="${CLAUDE_STATE_DIR:-$HOME/.claude/state}"
 DYN=$'\xef\xbf\xbd'
 STATE_DENY_MSG="DENIED: ~/.claude/state holds the Stop gate's session ledger and its kill switch. Only the gate's own scripts write there (done_gate.sh predicate|check, the merge trigger, the post-merge watcher). Do not create, edit or delete these files: satisfy the gate instead (finish the work, start a real watcher, or end with \`STATUS: FAILURE <what>: <evidence>\`). The kill switch is for the user only."
@@ -110,11 +118,11 @@ tool_args() {
     local name="$1" i=0 n=${#W[@]} tok
     TOOL_ARGS=()
     case "${W[0]:-}" in
-        npx|bunx|pnpm|yarn|npm)
+        npx|pnpx|bunx|pnpm|yarn|npm)
             i=1
             while [ "$i" -lt "$n" ]; do
                 tok="${W[$i]}"
-                case "$tok" in
+                case "${tok,,}" in
                     "$name"|"$name"@*) break ;;
                     exec|dlx|x|--|-*) i=$((i + 1)) ;;
                     *) return 1 ;;
@@ -201,6 +209,129 @@ supabase_db_url_verdict() {
     fi
 }
 
+SB_QUERY_LOCAL_URL_RE="^postgres(ql)?://([A-Za-z0-9._~%-]+(:[A-Za-z0-9._~%-]*)?@)?(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?(/[A-Za-z0-9_.-]*)?$"
+
+sb_query_deny() {
+    deny "Blocked: \`supabase db query\` against a remote Supabase database ($1) is allowed only as ONE read-only transaction passed as a single-quoted positional argument, e.g. \`supabase db query --linked 'begin read only; select ...; commit;'\` (\`start transaction read only;\` also works; \`set default_transaction_read_only = on;\` may come before the BEGIN but never replaces it). Rejected because: $2. Anything else is denied: -f files, stdin, heredocs, variables, command substitution, writes, DDL, SET/RESET, a second transaction, statements after the final COMMIT/ROLLBACK, side-effect functions. Retry in the allowed form; writes must be run manually by the user."
+}
+
+supabase_query_decide() {
+    local cwd="$1" off="$2" n=${#TOOL_ARGS[@]} k=0 tok dyn remote=0 target="" problem="" out rc
+    local -a pos=() posdyn=()
+    while [ "$k" -lt "$n" ]; do
+        tok="${TOOL_ARGS[$k]}"
+        dyn="${SEG_DYN:off+k:1}"
+        [ "$SBQ_FORCE_DYN" = "1" ] && dyn=1
+        if [ "$dyn" = "1" ]; then
+            remote=1
+            target="${target:-a target that depends on a dynamic argument}"
+            problem="${problem:-an argument is built from a variable, glob or command substitution}"
+        fi
+        case "$tok" in
+            --) ;;
+            --linked|--linked=*) remote=1; target="${target:-the --linked project}" ;;
+            --local|--local=true) ;;
+            --local=*) remote=1; target="${target:-$tok}" ;;
+            --db-url|--db-url=*)
+                if [ "$tok" = "--db-url" ]; then
+                    k=$((k + 1)); tok="${TOOL_ARGS[$k]:-}"
+                    dyn="${SEG_DYN:off+k:1}"
+                    [ "$dyn" = "1" ] && problem="${problem:-the --db-url value is dynamic}"
+                else
+                    tok="${tok#*=}"
+                fi
+                if ! [[ $tok =~ $SB_QUERY_LOCAL_URL_RE ]] || [ "$dyn" = "1" ]; then
+                    remote=1; target="a non-local --db-url"
+                fi
+                ;;
+            -f|--file|-f?*|--file=*) problem="${problem:-SQL from a file (-f/--file) cannot be reviewed}" ;;
+            -o|--output|--workdir|--profile|--network-id|--dns-resolver|--agent)
+                k=$((k + 1))
+                [ "${SEG_DYN:off+k:1}" = "1" ] && problem="${problem:-a flag value is dynamic}"
+                ;;
+            -o?*|--output=*|--workdir=*|--profile=*|--network-id=*|--dns-resolver=*|--agent=*) ;;
+            --debug|--debug=*|--yes|--yes=*|--experimental|--experimental=*|--create-ticket|--create-ticket=*|-h|--help) ;;
+            -*) remote=1; target="${target:-unknown flag $tok}"; problem="${problem:-unrecognised flag $tok}" ;;
+            *) pos+=("$tok"); posdyn+=("$dyn") ;;
+        esac
+        k=$((k + 1))
+    done
+    local e
+    for e in SUPABASE_DB_URL SUPABASE_LINKED SUPABASE_LOCAL; do
+        if env_get "$e"; then
+            remote=1; target="${target:-\$$e in the environment}"
+        fi
+    done
+    { [ "${pos[0]:-}" = "db" ] || [ "${posdyn[0]:-}" = "1" ]; } || return 0
+    { [ "${pos[1]:-}" = "query" ] || [ "${posdyn[1]:-}" = "1" ]; } || return 0
+    [ "$remote" = "1" ] || return 0
+    if [ "${posdyn[0]}${posdyn[1]}" != "00" ]; then
+        problem="the subcommand is built from a variable or command substitution"
+    elif [ "${#pos[@]}" -lt 3 ]; then
+        problem="${problem:-no SQL argument, so the CLI would read stdin, which cannot be reviewed}"
+    elif [ "${#pos[@]}" -gt 3 ]; then
+        problem="${problem:-more than one positional argument}"
+    elif [ "${posdyn[2]}" = "1" ]; then
+        problem="${problem:-the SQL argument is built from a variable, glob or command substitution}"
+    fi
+    if [ -z "$problem" ]; then
+        out=$(printf '%s' "${pos[2]}" | python3 -I "$GUARD_DIR/_sql_readonly.py" 2>&1)
+        rc=$?
+        if [ "$rc" != "0" ]; then
+            problem="${out:-the SQL validator failed to run (rc=$rc)}"
+            problem="${problem%%$'\n'*}"
+        fi
+    fi
+    [ -z "$problem" ] && return 0
+    sb_query_deny "$target" "$problem"
+}
+
+supabase_query_scan() {
+    local i w lw
+    local -a words=(${W[@]+"${W[@]}"})
+    SBQ_FORCE_DYN=0
+    if [[ $SEG_FLAGS == *U* ]] || [ -z "${W[0]:-}" ]; then
+        words=(${SEG_RAW[@]+"${SEG_RAW[@]}"})
+        SBQ_FORCE_DYN=1
+    fi
+    local n=${#words[@]}
+    ((n > 0)) || return 0
+    if [ "${SEG_DYN:0:1}" = "1" ]; then
+        for ((i = 1; i < n; i++)); do
+            if [ "${words[$i],,}" = "query" ]; then
+                sb_query_deny "a command whose name is a variable" "the command name is dynamic and may be \`supabase\`"
+                return 0
+            fi
+        done
+    fi
+    if [ -z "$SEG_CODE" ] || [ "${#SEG_REASONS[@]}" -gt 0 ]; then
+        w="${words[0]##*/}"
+        w="${w,,}"
+        for ((i = 1; i < n; i++)); do
+            lw="${words[$i],,}"
+            if [[ $lw =~ (^|[^a-z0-9_])supabase([^a-z0-9_]|$) && $lw =~ (^|[^a-z0-9_])query([^a-z0-9_]|$) ]]; then
+                case "$w" in
+                    git | gh)
+                        [[ $lw == *[=!]* || ${words[i - 1]} == -c || ${words[i - 1]} == --config-env ]] || continue
+                        ;;
+                esac
+                deny "Blocked: an argument of \`${words[0]}\` holds a \`supabase ... query\` command line that another program may run, so the guard cannot review its SQL. Run \`supabase db query\` directly as its own command, with the SQL as one single-quoted literal: \`supabase db query --linked 'begin read only; select ...; commit;'\`. Writes must be run manually by the user."
+                return 0
+            fi
+        done
+    fi
+    for ((i = 0; i < n; i++)); do
+        w="${words[$i]##*/}"
+        w="${w,,}"
+        case "$w" in
+            supabase | supabase@*) ;;
+            *) continue ;;
+        esac
+        TOOL_ARGS=("${words[@]:i+1}")
+        supabase_query_decide "$1" $((i + 1))
+    done
+}
+
 supabase_decide() {
     local cwd="$1"
     tool_args supabase || return 0
@@ -209,7 +340,7 @@ supabase_decide() {
     while [ "$i" -lt "$n" ]; do
         tok="${args[$i]}"
         case "$tok" in
-            --workdir|--db-url|--project-ref|--project-id|--profile|--network-id|-o|--output|--dns-resolver)
+            --workdir|--db-url|--project-ref|--project-id|--profile|--network-id|-o|--output|--dns-resolver|--agent)
                 i=$((i + 1))
                 case "$tok" in
                     --workdir) workdir="${args[$i]:-}" ;;
@@ -231,6 +362,7 @@ supabase_decide() {
     done
     local c1="${pos[0]:-}" c2="${pos[1]:-}" label mode=""
     label="supabase $c1${c2:+ $c2}"
+    [ "$c1 $c2" = "db query" ] && return 0
     case "$c1" in
         start|stop|status|init|link) return 0 ;;
         branches|postgres-config|domains|sso|network-restrictions|network-bans|ssl-enforcement|vanity-subdomains) mode=api ;;
@@ -238,7 +370,7 @@ supabase_decide() {
     if [ -z "$mode" ]; then
         case "$c1 $c2" in
             "functions serve"|"migration new") return 0 ;;
-            "db reset"|"migration up"|"migration down"|"migration squash"|"db diff"|"db lint"|"db query"|"seed buckets"|"test db") mode=default_local ;;
+            "db reset"|"migration up"|"migration down"|"migration squash"|"db diff"|"db lint"|"seed buckets"|"test db") mode=default_local ;;
             "gen types") mode=gen_types ;;
             "db push"|"migration repair"|"migration list"|"migration fetch"|"db dump"|"db pull"|"storage cp"|"storage mv"|"storage rm"|"inspect db") mode=default_linked ;;
             "functions deploy"|"functions delete"|"secrets set"|"secrets unset"|"config push"|"backups restore"|"encryption update-root-key") mode=api ;;
@@ -491,11 +623,12 @@ check_segment() {
         [ "${SEG_DYN:j:1}" = "1" ] && W[j]="${W[j]//$DYN/\$}"
     done
     [ -n "$SEG_CMD" ] && W[0]="$SEG_CMD"
+    W[0]="${W[0],,}"
     text="${W[*]}"
 
     check_state_paths
 
-    case "$SEG_CMD" in
+    case "${W[0]}" in
         gh)
             for w in "${W[@]:1}"; do
                 case "$w" in
@@ -516,6 +649,7 @@ check_segment() {
     local cwd=""
     [ "$SEG_CWD_KNOWN" = "1" ] && cwd="$SEG_CWD"
     supabase_decide "$cwd"
+    supabase_query_scan "$cwd"
     pulumi_decide "$cwd"
 }
 
