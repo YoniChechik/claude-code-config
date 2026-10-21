@@ -481,7 +481,7 @@ remote_db_scan() {
                 ;;
         esac
     done
-    if [[ $SEG_FLAGS == *U* ]] || ((n == 0)); then
+    if [[ ${SEG_DYN:0:1} != 1 ]] && [[ $SEG_FLAGS == *U* ]] || ((n == 0)); then
         remote_db_raw_scan
         return 0
     fi
