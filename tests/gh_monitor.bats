@@ -880,6 +880,33 @@ wfruns_fixture() {
     assert_contains "waiting            Deploy (run 11, attempt 1, push)" "$output"
 }
 
+@test "merge: runs that finish between the last poll and the bound are judged by a final re-poll, not reported as a timeout" {
+    export GH_MONITOR_WATCH_MAX=0
+    merged_pr
+    api_runs_fixture_n 1 "11:Deploy:in_progress::1:push"
+    api_runs_fixture "11:Deploy:completed:success:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED for PR #3951" "$output"
+    assert_not_contains "UNKNOWN" "$output"
+    assert_eq 2 "$(call_count 'actions/runs')"
+}
+
+@test "merge: a run that failed between the last poll and the bound is reported FAILED by the final re-poll" {
+    export GH_MONITOR_WATCH_MAX=0
+    merged_pr
+    api_runs_fixture_n 1 "11:Deploy:in_progress::1:push"
+    api_runs_fixture "11:Deploy:completed:failure:1:push"
+    run bash "$WATCHER" merge "$BRANCH"
+    assert_contains "Post-merge CI FAILED for PR #3951" "$output"
+    assert_not_contains "UNKNOWN" "$output"
+}
+
+@test "merge: the default watch bound outlasts a 22 minute staging deploy" {
+    run bash -c 'unset GH_MONITOR_WATCH_MAX; sed -n "s/^: \"\${GH_MONITOR_WATCH_MAX:=\([0-9]*\)}\"$/\1/p" "$1"' _ "$WATCHER"
+    [ "$output" -ge 5400 ]
+}
+
 @test "merge: every run cancelled and superseded by completed successes passes" {
     merged_pr
     api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1" "12:Deploy:completed:cancelled:1:push:6:main:abc123:c1"
@@ -1006,6 +1033,18 @@ wfruns_fixture() {
     run timeout 30 bash "$WATCHER" wait "$BRANCH" --repo o/r
     assert_eq 0 "$status"
     assert_contains "Post-merge verdict UNKNOWN (timeout): no result recorded for feat-x on o/r after 2s" "$output"
+}
+
+@test "wait: a cached timeout verdict is discarded and the PR is re-evaluated from the live API" {
+    export GH_MONITOR_WAIT_GRACE=20
+    export GH_MONITOR_WAIT_POLL=1
+    merged_pr
+    api_runs_fixture "11:Deploy:completed:success:1:push"
+    printf 'Post-merge verdict UNKNOWN (timeout): CI watch for PR #3951 on o/r hit the 1320s bound with 1 still pending, 0 failed so far\n' >"$(result_for)"
+    run timeout 60 bash "$WATCHER" wait "$BRANCH" --repo o/r
+    assert_eq 0 "$status"
+    assert_contains "Post-merge CI PASSED for PR #3951" "$output"
+    assert_not_contains "UNKNOWN" "$output"
 }
 
 @test "wait: an existing result is printed immediately" {
