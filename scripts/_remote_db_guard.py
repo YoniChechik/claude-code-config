@@ -485,6 +485,10 @@ def main():
         elif mode == "text":
             for word in words:
                 check_text(word)
+        elif mode == "raw":
+            for word in words:
+                check_text(word)
+            check_text(" ".join(words))
         elif mode == "meta":
             check_meta(words[0])
         else:

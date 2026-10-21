@@ -460,17 +460,31 @@ http_check() {
     deny "Blocked: \`$tool\` $REPLY. The Management API runs arbitrary SQL with no read-only guarantee. $REMOTE_DB_ALLOWED"
 }
 
+remote_db_raw_scan() {
+    local w
+    local -a hits=()
+    for w in ${SEG_RAW[@]+"${SEG_RAW[@]}"}; do
+        [[ ${w,,} =~ $TEXT_HINT_RE ]] && hits+=("$w")
+    done
+    ((${#hits[@]})) || return 0
+    remote_db_py '{"mode":"raw"}' "${SEG_RAW[@]}" && return 0
+    deny "Blocked: \`${SEG_RAW[0]}\` runs a command line the guard cannot unwrap, and it names a Postgres client or the Supabase Management API: $REPLY. Run the Postgres client or HTTP call directly as its own command so the guard can check it. $REMOTE_DB_ALLOWED"
+}
+
 remote_db_scan() {
     local n=${#W[@]} i w first r
-    ((n > 0)) || return 0
     for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
         case "$r" in
             "dynamic eval" | "dynamic shell code" | "dynamic shell heredoc")
-                deny "Blocked: \`${W[0]}\` runs shell code built from a variable or command substitution ($r), so the guard cannot see whether it reaches a production database. Write the command out literally as its own Bash call. $REMOTE_DB_ALLOWED"
+                deny "Blocked: \`${SEG_RAW[0]:-${W[0]:-}}\` runs shell code built from a variable or command substitution ($r), so the guard cannot see whether it reaches a production database. Write the command out literally as its own Bash call. $REMOTE_DB_ALLOWED"
                 return 0
                 ;;
         esac
     done
+    if [[ $SEG_FLAGS == *U* ]] || ((n == 0)); then
+        remote_db_raw_scan
+        return 0
+    fi
     first="${W[0]##*/}"
     if [[ $first =~ $PG_TOOL_RE ]]; then
         pg_client_check 0 true "$first"
@@ -480,7 +494,7 @@ remote_db_scan() {
         http_check 0 "$first"
         return 0
     fi
-    if [[ $first =~ $LAUNCHER_RE || $first =~ $REMOTE_SHELL_RE || ${SEG_DYN:0:1} == 1 ]]; then
+    if [[ $first != git && $first != gh ]]; then
         for ((i = 1; i < n; i++)); do
             w="${W[$i]##*/}"
             w="${w,,}"
@@ -489,16 +503,18 @@ remote_db_scan() {
                     deny "Blocked: \`$first\` runs \`$w\` on another machine, where localhost is not this machine's database. $REMOTE_DB_ALLOWED"
                     return 0
                 fi
-                if [[ ${SEG_DYN:0:1} == 1 ]]; then
-                    pg_client_check "$i" false "$w"
-                else
+                if [[ $first =~ $LAUNCHER_RE && ${SEG_DYN:0:1} != 1 ]]; then
                     pg_client_check "$i" true "$w"
+                else
+                    pg_client_check "$i" false "$w"
                 fi
-                return 0
+                [ -n "$VERDICT_REASON" ] && return 0
+                break
             fi
             if [[ $w =~ $HTTP_TOOL_RE ]]; then
                 http_check "$i" "$w"
-                return 0
+                [ -n "$VERDICT_REASON" ] && return 0
+                break
             fi
         done
     fi

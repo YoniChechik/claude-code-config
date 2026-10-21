@@ -1109,3 +1109,28 @@ EOF"; do
     chmod +x "$fake/python3"
     assert_decision DENY "$(PATH="$fake:$PATH" decide "psql -h 127.0.0.1 -c 'select 1'")"
 }
+
+@test "remote db: any wrapper and env -S around a client or a Management API call are checked" {
+    local c R="db.$PROD_REF.supabase.co" U="https://api.supabase.com/v1/projects/$STG_REF/database/query"
+    for c in \
+        "env -S 'psql -h $R'" \
+        "env -S 'curl -X POST $U'" \
+        "env --split-string='pg_dump postgresql://u@$R/postgres'" \
+        "doas psql -h $R" \
+        "DOAS PSQL -h $R" \
+        "doas curl -X POST $U" \
+        "nice -n 5 psql -h $R" \
+        "time pgcli -h $R" \
+        "stdbuf -oL pg_restore -h $R -d postgres dump.bin"; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in \
+        "env -S 'psql -h 127.0.0.1 -c \"select 1\"'" \
+        "env -S 'echo hi'" \
+        "doas psql -h localhost" \
+        "nice -n 5 pg_dump -h 127.0.0.1 -f out.sql postgres" \
+        "man psql" \
+        "brew install curl"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
