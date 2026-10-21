@@ -318,31 +318,37 @@ cache_get() {
 cache_put() { printf -v "CACHE_${SNAP_N}_$1" '%s' "$2"; }
 
 workflow_runs_for() {
-    local wid="$1" branch="$2" key
-    key="wf_${wid}_$(printf '%s' "$branch" | cksum | cut -d' ' -f1)"
+    local wid="$1" branch="$2" event="$3" since="$4" key
+    key="wf_${wid}_$(printf '%s/%s/%s' "$branch" "$event" "$since" | cksum | cut -d' ' -f1)"
     cache_get "$key" && return 0
-    gh_call_best_effort gh api --method GET "repos/${OWNER_REPO}/actions/workflows/${wid}/runs" \
-        -f "branch=${branch}" -f event=push -f per_page=100 \
+    gh_call_best_effort gh api --paginate --method GET "repos/${OWNER_REPO}/actions/workflows/${wid}/runs" \
+        -f "branch=${branch}" -f "event=${event}" -f "created=>=${since}" -f per_page=100 \
         --jq '.workflow_runs[] | {id, status, conclusion, created_at, head_sha} | @json' \
         || return 1
     CACHE_VAL=$GH_OUT
     cache_put "$key" "$CACHE_VAL"
 }
 
-compare_status() {
-    local base="$1" head="$2" key="cmp_${1}_${2}"
-    cache_get "$key" && return 0
-    gh_call_best_effort gh api "repos/${OWNER_REPO}/compare/${base}...${head}?per_page=1" \
-        --jq '.status' || return 1
-    CACHE_VAL=$(last_line "$GH_OUT")
-    cache_put "$key" "$CACHE_VAL"
+contains_change() {
+    local base="$1" head="$2" var
+    [[ "$base" == "$head" ]] && return 0
+    var="CMP_$(printf '%s_%s' "$base" "$head" | tr -c 'A-Za-z0-9_' '_')"
+    if [[ -z "${!var+x}" ]]; then
+        gh_call_best_effort gh api "repos/${OWNER_REPO}/compare/${base}...${head}?per_page=1" \
+            --jq '.status' || return 2
+        printf -v "$var" '%s' "$(last_line "$GH_OUT")"
+    fi
+    case "${!var}" in
+        ahead | identical) return 0 ;;
+    esac
+    return 1
 }
 
 resolve_superseders() {
-    local runs_out="$1" cancelled run id wid branch created sha cands cand cand_sha cand_id st best best_st
+    local runs_out="$1" cancelled run id wid branch created sha event cands cand concl best pending failed last rc
     SNAP_N=$((SNAP_N + 1))
     SUPER_LINES=""
-    cancelled=$(printf '%s\n' "$runs_out" | jq -c 'select(type == "object" and .conclusion == "cancelled" and .event == "push") | {id, workflow_id, head_branch, created_at, head_sha}' 2>/dev/null) || cancelled=""
+    cancelled=$(printf '%s\n' "$runs_out" | jq -c 'select(type == "object" and .conclusion == "cancelled") | {id, workflow_id, head_branch, created_at, head_sha, event}' 2>/dev/null) || cancelled=""
     [[ -n "$cancelled" ]] || return 0
     while IFS= read -r run; do
         [[ -n "$run" ]] || continue
@@ -351,40 +357,46 @@ resolve_superseders() {
         branch=$(jq -r '.head_branch' <<<"$run")
         created=$(jq -r '.created_at' <<<"$run")
         sha=$(jq -r '.head_sha' <<<"$run")
-        workflow_runs_for "$wid" "$branch" || return 1
+        event=$(jq -r '.event' <<<"$run")
+        workflow_runs_for "$wid" "$branch" "$event" "$created" || return 1
         cands=$(printf '%s\n' "$CACHE_VAL" | jq -s -c --arg id "$id" --arg c "$created" \
-            '[.[] | select((.id | tostring) != $id and .created_at > $c)] | sort_by(.created_at) | reverse | .[:5][]') || return 1
+            '[.[] | select((.id | tostring) != $id and .created_at > $c)] | sort_by(.created_at)[]') || return 1
         [[ -n "$cands" ]] || continue
         best=""
-        best_st=""
+        pending=""
+        failed=""
+        last=""
         while IFS= read -r cand; do
             [[ -n "$cand" ]] || continue
-            cand_sha=$(jq -r '.head_sha' <<<"$cand")
-            if [[ "$cand_sha" == "$sha" ]]; then
-                st=identical
-            else
-                compare_status "$sha" "$cand_sha" || return 1
-                st=$CACHE_VAL
+            concl=$(jq -r '.conclusion // ""' <<<"$cand")
+            if [[ "$concl" == "cancelled" ]]; then
+                last=$cand
+                continue
             fi
-            case "$st" in
-                ahead | identical)
-                    if [[ -z "$best" ]]; then
-                        best=$cand
-                        best_st=$st
-                    fi
-                    if [[ "$(jq -r '.conclusion' <<<"$cand")" != "cancelled" ]]; then
-                        best=$cand
-                        best_st=$st
-                        break
-                    fi
+            contains_change "$sha" "$(jq -r '.head_sha' <<<"$cand")"
+            rc=$?
+            [[ "$rc" -eq 2 ]] && return 1
+            [[ "$rc" -eq 0 ]] || continue
+            case "$concl" in
+                success | neutral | skipped)
+                    best=$cand
+                    break
                     ;;
+                "") [[ -n "$pending" ]] || pending=$cand ;;
+                *) failed=$cand ;;
             esac
         done <<<"$cands"
+        best=${best:-${pending:-$failed}}
+        if [[ -z "$best" && -n "$last" ]]; then
+            contains_change "$sha" "$(jq -r '.head_sha' <<<"$last")"
+            rc=$?
+            [[ "$rc" -eq 2 ]] && return 1
+            [[ "$rc" -eq 0 ]] && best=$last
+        fi
         [[ -n "$best" ]] || continue
-        cand_id=$(jq -r '.id' <<<"$best")
         SUPER_LINES+=$(jq -nc --argjson run_id "$id" --argjson c "$best" \
             '{kind: "super", run_id: $run_id, id: $c.id, status: $c.status, conclusion: $c.conclusion}')$'\n'
-        log "run ${id} cancelled; superseded by run ${cand_id} (${best_st})"
+        log "run ${id} (${event}) cancelled; judged by later run $(jq -r '.id' <<<"$best") ($(jq -r '.conclusion // .status' <<<"$best"))"
     done <<<"$cancelled"
     return 0
 }
@@ -413,6 +425,8 @@ snapshot_sha() {
 EVAL_TOTAL=0
 EVAL_PENDING=0
 EVAL_FAILED=0
+EVAL_CHAIN_PENDING=0
+EVAL_CHAINS=""
 EVAL_SIG=""
 EVAL_DETAILS=""
 evaluate_snapshot() {
@@ -434,6 +448,7 @@ evaluate_snapshot() {
               | if $c == "cancelled" and $s != null then
                   (($s.conclusion // "") as $sc | {
                     sig: "run:\(.id)>\($s.id)",
+                    chain: "\(.id)->\($s.id)",
                     done: ($sc != ""),
                     bad: ($sc != "" and ($failing | index($sc) != null)),
                     state: (if $sc == "" then "superseded-pending" elif ($failing | index($sc) != null) then $sc else "superseded" end),
@@ -461,13 +476,15 @@ evaluate_snapshot() {
                 label: "\(.name) (commit status)"
             })
           ] as $items
-        | "\($items | length) \($items | map(select(.done | not)) | length) \($items | map(select(.done and .bad)) | length) \($items | map(.sig) | sort | join(",") | @base64)",
+        | ($items | map(select((.done | not) and .chain != null))) as $chains
+        | "\($items | length) \($items | map(select(.done | not)) | length) \($items | map(select(.done and .bad)) | length) \($chains | length) \($items | map(.sig) | sort | join(",") | @base64) \($chains | map(.chain) | join(","))",
           ($items | sort_by([(if .bad and .done then 0 elif .done then 2 else 1 end), .label])[]
             | "  \(.state | pad) \(.label)")
     ') || return 1
     head=$(printf '%s\n' "$out" | head -n 1)
-    read -r EVAL_TOTAL EVAL_PENDING EVAL_FAILED EVAL_SIG <<<"$head"
+    read -r EVAL_TOTAL EVAL_PENDING EVAL_FAILED EVAL_CHAIN_PENDING EVAL_SIG EVAL_CHAINS <<<"$head"
     EVAL_SIG=${EVAL_SIG:-}
+    EVAL_CHAINS=${EVAL_CHAINS:-}
     EVAL_DETAILS=$(printf '%s\n' "$out" | tail -n +2)
     return 0
 }
@@ -503,6 +520,13 @@ watch_merge_sha() {
             poll_failed
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
+            if [[ "$have_eval" -eq 1 && "$EVAL_FAILED" -eq 0 && "$EVAL_PENDING" -gt 0 \
+                && "$EVAL_CHAIN_PENDING" -eq "$EVAL_PENDING" ]]; then
+                MERGE_CI=pending-superseded
+                report "Post-merge verdict PENDING-SUPERSEDED: CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound; nothing failed, ${EVAL_PENDING} cancelled run(s) wait on a later run that contains the merge (cancelled->current: ${EVAL_CHAINS//,/, })"
+                report "$EVAL_DETAILS"
+                return 0
+            fi
             MERGE_CI=timeout
             report "Post-merge verdict UNKNOWN (timeout): CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound with ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"

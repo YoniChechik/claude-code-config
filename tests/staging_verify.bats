@@ -240,6 +240,21 @@ STG='"name":"staging","sha_url":"https://stg/version","sha_jq":".sha"'
     assert_eq "post-merge CI fail" "$(field .reason)"
 }
 
+@test "post-merge CI pending only on superseded runs still verifies staging, never fails on CI alone" {
+    config "{\"targets\":[{$STG}]}"
+    serve_sha "${SHA:0:12}"
+    verify pending-superseded
+    assert_contains "Staging verify PASSED for o/r (merge commit $SHA): staging serves ${SHA:0:12}" "$output"
+    assert_eq pass "$(field .result)"
+}
+
+@test "a post-merge CI timeout with real pending runs still records fail" {
+    config "{\"targets\":[{$STG}]}"
+    verify timeout
+    assert_eq fail "$(field .result)"
+    assert_eq "post-merge CI timeout" "$(field .reason)"
+}
+
 @test "an invalid verify config records error" {
     config '{"nope":1}'
     verify
