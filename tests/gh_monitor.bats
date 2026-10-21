@@ -1047,6 +1047,20 @@ wfruns_fixture() {
     assert_not_contains "UNKNOWN" "$output"
 }
 
+@test "wait: a cached timeout verdict is discarded once, then a genuine timeout is printed instead of looping" {
+    export GH_MONITOR_WAIT_GRACE=40
+    export GH_MONITOR_WAIT_MAX=40
+    export GH_MONITOR_WAIT_POLL=1
+    export GH_MONITOR_WATCH_MAX=1
+    merged_pr
+    api_runs_fixture "11:Deploy:in_progress::1:push"
+    printf 'Post-merge verdict UNKNOWN (timeout): CI watch for PR #3951 on o/r hit the 1320s bound with 1 still pending, 0 failed so far\n' >"$(result_for)"
+    run timeout 60 bash "$WATCHER" wait "$BRANCH" --repo o/r
+    assert_eq 0 "$status"
+    assert_contains "verdict UNKNOWN (timeout)" "$output"
+    assert_contains "hit the 1s bound" "$output"
+}
+
 @test "wait: an existing result is printed immediately" {
     printf 'Post-merge CI PASSED for PR #1\n' >"$(result_for)"
     run bash "$WATCHER" wait "$BRANCH"

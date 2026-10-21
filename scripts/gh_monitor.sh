@@ -682,13 +682,14 @@ run_body() {
 }
 
 wait_body() {
-    local waited=0
+    local waited=0 restarted=0
     while :; do
         if [[ -s "$RESULT_FILE" ]]; then
-            if grep -q 'verdict UNKNOWN (timeout)' "$RESULT_FILE" 2>/dev/null; then
+            if [[ "$restarted" -eq 0 ]] && grep -q 'verdict UNKNOWN (timeout)' "$RESULT_FILE" 2>/dev/null; then
                 log "discarding the cached timeout verdict; re-evaluating from the live API"
                 rm -f "$RESULT_FILE"
                 start_detached_watcher || return 1
+                restarted=1
                 waited=0
                 continue
             fi
