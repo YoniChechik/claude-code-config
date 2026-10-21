@@ -728,6 +728,11 @@ commit; -- done'" \
     assert_decision NONE "$(decide_in "$SB_PROD" "npx supabase --workdir . db query --linked 'begin read only; select 1; commit;'")"
     assert_decision NONE "$(decide_in "$SB_PROD" "bash -c \"supabase db query --linked 'begin read only; select 1; commit;'\"")"
     assert_decision NONE "$(decide_in "$SB_PROD" "git commit -m 'guard supabase db query --linked'")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "bash destroy_worktree.sh supabase-db-query-readonly --delete-branch")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "ls /tmp/supabase_query.log")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "$GH pr create --title x --body 'needs \`supabase\` at a boundary (\`=\`), then a later query token'")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "git commit -m 'scan for supabase db query when a=b'")"
+    assert_decision DENY "$(decide_in "$SB_PROD" "git config alias.q '!supabase db query --linked x'")"
 }
 
 @test "db query: write and escape SQL against --linked is denied (prod, staging, unlinked)" {
