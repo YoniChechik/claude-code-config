@@ -355,7 +355,15 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    finished and green); only the LATEST attempt of a run, or the newest check
    run per (app, name), counts, so a failed first attempt fixed by a re-run is
    not a failure; `failure`, `cancelled`, `timed_out`, `action_required` and
-   `startup_failure` fail; Actions check runs are skipped (their workflow run
+   `startup_failure` fail, except that a `cancelled` run of any event is
+   judged by the end of its supersede chain: the oldest later run of the same
+   workflow, branch and event that is not itself cancelled and whose commit
+   contains the merge commit (re-resolved every poll, so a chain run that is
+   cancelled in turn is followed to its new end). At the watch bound, when
+   nothing failed and only such chains are still pending, the verdict is
+   `PENDING-SUPERSEDED` with the cancelled->current run ids, and the staging
+   verifier still checks the deploys instead of failing on CI alone;
+   Actions check runs are skipped (their workflow run
    is authoritative) and runs from unrelated events on the same sha
    (`schedule`, `issue_comment`, …) are ignored. The verdict is declared only
    when nothing is pending, the settle window since the watch started has

@@ -416,6 +416,8 @@ snapshot_sha() {
 EVAL_TOTAL=0
 EVAL_PENDING=0
 EVAL_FAILED=0
+EVAL_CHAIN_PENDING=0
+EVAL_CHAINS=""
 EVAL_SIG=""
 EVAL_DETAILS=""
 evaluate_snapshot() {
@@ -437,6 +439,7 @@ evaluate_snapshot() {
               | if $c == "cancelled" and $s != null then
                   (($s.conclusion // "") as $sc | {
                     sig: "run:\(.id)>\($s.id)",
+                    chain: "\(.id)->\($s.id)",
                     done: ($sc != ""),
                     bad: ($sc != "" and ($failing | index($sc) != null)),
                     state: (if $sc == "" then "superseded-pending" elif ($failing | index($sc) != null) then $sc else "superseded" end),
@@ -464,13 +467,15 @@ evaluate_snapshot() {
                 label: "\(.name) (commit status)"
             })
           ] as $items
-        | "\($items | length) \($items | map(select(.done | not)) | length) \($items | map(select(.done and .bad)) | length) \($items | map(.sig) | sort | join(",") | @base64)",
+        | ($items | map(select((.done | not) and .chain != null))) as $chains
+        | "\($items | length) \($items | map(select(.done | not)) | length) \($items | map(select(.done and .bad)) | length) \($chains | length) \($items | map(.sig) | sort | join(",") | @base64) \($chains | map(.chain) | join(","))",
           ($items | sort_by([(if .bad and .done then 0 elif .done then 2 else 1 end), .label])[]
             | "  \(.state | pad) \(.label)")
     ') || return 1
     head=$(printf '%s\n' "$out" | head -n 1)
-    read -r EVAL_TOTAL EVAL_PENDING EVAL_FAILED EVAL_SIG <<<"$head"
+    read -r EVAL_TOTAL EVAL_PENDING EVAL_FAILED EVAL_CHAIN_PENDING EVAL_SIG EVAL_CHAINS <<<"$head"
     EVAL_SIG=${EVAL_SIG:-}
+    EVAL_CHAINS=${EVAL_CHAINS:-}
     EVAL_DETAILS=$(printf '%s\n' "$out" | tail -n +2)
     return 0
 }
@@ -506,6 +511,13 @@ watch_merge_sha() {
             poll_failed
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
+            if [[ "$have_eval" -eq 1 && "$EVAL_FAILED" -eq 0 && "$EVAL_PENDING" -gt 0 \
+                && "$EVAL_CHAIN_PENDING" -eq "$EVAL_PENDING" ]]; then
+                MERGE_CI=pending-superseded
+                report "Post-merge verdict PENDING-SUPERSEDED: CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound; nothing failed, ${EVAL_PENDING} cancelled run(s) wait on a later run that contains the merge (cancelled->current: ${EVAL_CHAINS//,/, })"
+                report "$EVAL_DETAILS"
+                return 0
+            fi
             MERGE_CI=timeout
             report "Post-merge verdict UNKNOWN (timeout): CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound with ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"
