@@ -88,11 +88,28 @@ _wt_birth() {
     stat -f %B "$1" 2>/dev/null || echo 0
 }
 
+_wt_mtime() {
+    stat -f %m "$1" 2>/dev/null || echo 0
+}
+
 _wt_settled() {
-    local path="$1" recent
-    (( $(_wt_birth "$path") <= $(date +%s) - 3600 )) || return 1
-    recent=$(find "$path" -maxdepth 4 -mmin -60 -print -quit 2>/dev/null) || return 1
-    [[ -z "$recent" ]]
+    local path="$1" mins cutoff recent admin f
+    mins=$(( ${WORKTREE_SWEEP_IDLE_HOURS:-12} * 60 ))
+    cutoff=$(( $(date +%s) - mins * 60 ))
+    (( $(_wt_birth "$path") <= cutoff )) || return 1
+    recent=$(find "$path" -maxdepth 4 -mmin -"$mins" -print -quit 2>/dev/null) || return 1
+    [[ -z "$recent" ]] || return 1
+    admin=$(git -C "$path" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+    for f in "$admin/HEAD" "$admin/logs/HEAD" "$admin/ORIG_HEAD"; do
+        (( $(_wt_mtime "$f") <= cutoff )) || return 1
+    done
+    return 0
+}
+
+_wt_has_unpushed() {
+    local path="$1" n
+    n=$(git -C "$path" rev-list --count HEAD --not --remotes 2>/dev/null) || return 0
+    [[ "$n" != "0" ]]
 }
 
 _wt_lock_pid_alive() {
@@ -149,25 +166,35 @@ _wt_last_touched() {
         [[ -z "$f" ]] && continue
         m=$(stat -f "%m" "${path}/${f}" 2>/dev/null) || continue
         (( m > last_touched )) && last_touched="$m"
-    done < <(git -C "$path" status --porcelain -z 2>/dev/null)
+    done < <(git -C "$path" --no-optional-locks status --porcelain -z 2>/dev/null)
     echo "$last_touched"
 }
 
 _wt_merged_or_abandoned() {
     local git_root="$1" branch="$2" default_branch="$3"
-    local local_sha remote_sha remote_out ahead_count pr_state
+    local local_sha remote_sha remote_out base pr_out pr_state pr_head
     local_sha=$(git -C "$git_root" rev-parse --verify --quiet "refs/heads/$branch" 2>/dev/null) || return 1
     remote_out=$(_wt_timeout "${WT_NET_TIMEOUT:-20}" git -C "$git_root" ls-remote --heads origin "$branch") || return 1
     remote_sha=$(awk -v r="refs/heads/$branch" '$2 == r {print $1; exit}' <<<"$remote_out")
     if [[ -n "$remote_sha" && "$remote_sha" != "$local_sha" ]]; then
         git -C "$git_root" merge-base --is-ancestor "$local_sha" "$remote_sha" 2>/dev/null || return 1
     fi
-    ahead_count=$(git -C "$git_root" rev-list --count "$default_branch".."$branch" 2>/dev/null || echo 0)
-    if [[ "$ahead_count" != "0" ]] && git -C "$git_root" merge-base --is-ancestor "$branch" "$default_branch" 2>/dev/null; then
+    base="origin/$default_branch"
+    git -C "$git_root" rev-parse --verify --quiet "$base" >/dev/null 2>&1 || base="$default_branch"
+    if [[ "$(git -C "$git_root" rev-list --count "$base".."$branch" 2>/dev/null)" != "0" ]] \
+        && git -C "$git_root" merge-base --is-ancestor "$branch" "$base" 2>/dev/null; then
         return 0
     fi
-    pr_state=$(_wt_timeout "${WT_NET_TIMEOUT:-20}" gh pr view "$branch" --json state -q .state) || true
-    [[ "$pr_state" == "MERGED" || "$pr_state" == "CLOSED" ]]
+    pr_out=$(_wt_timeout "${WT_NET_TIMEOUT:-20}" gh pr view "$branch" --json state,headRefOid -q '.state + " " + .headRefOid') || return 1
+    pr_state=${pr_out%% *}
+    pr_head=${pr_out#* }
+    [[ "$pr_state" == "MERGED" || "$pr_state" == "CLOSED" ]] || return 1
+    [[ "$pr_head" =~ ^[0-9a-f]{40}$ ]] || return 1
+    if ! git -C "$git_root" merge-base --is-ancestor "$local_sha" "$pr_head" 2>/dev/null; then
+        hook_log "keep: branch has commits beyond the head of its $pr_state PR" "$branch"
+        return 1
+    fi
+    return 0
 }
 
 _wt_detached_has_nothing_unique() {
@@ -217,7 +244,8 @@ _wt_sweep_one() {
         return 0
     fi
 
-    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && return 0
+    [[ -n "$(git -C "$path" --no-optional-locks status --porcelain 2>/dev/null)" ]] && return 0
+    _wt_settled "$path" || return 0
 
     if [[ -n "$branch" ]]; then
         if _wt_merged_or_abandoned "$git_root" "$branch" "$default_branch"; then
@@ -225,7 +253,6 @@ _wt_sweep_one() {
             return 0
         fi
     elif [[ "$detached" == "1" ]]; then
-        _wt_settled "$path" || return 0
         if _wt_detached_has_nothing_unique "$git_root" "$path" "$default_branch"; then
             _wt_remove "$git_root" "$path" "$locked" "$reason" || true
             return 0
@@ -234,7 +261,7 @@ _wt_sweep_one() {
         return 0
     fi
 
-    _wt_settled "$path" || return 0
+    _wt_has_unpushed "$path" && return 0
     last_touched=$(_wt_last_touched "$path")
     [[ "$last_touched" == "0" ]] && return 0
     (( last_touched > age_cutoff )) && return 0
