@@ -127,9 +127,25 @@ SIZE_BEFORE="$(du -sh "$WT_PATH" 2>/dev/null | cut -f1 || true)"
 # before the directory disappears — an already-removed worktree can't be `cd`'d
 # into to run `devtrees down` afterward, leaving the stack orphaned.
 WT_BASENAME="$(basename "$WT_PATH")"
-if command -v devtrees >/dev/null 2>&1; then
+DOWN_FAILED=0
+if [ -x "$WT_PATH/scripts/sunsay-dev/sunsay-dev" ]; then
+    echo "Stopping sunsay-dev stack for $WT_BASENAME..."
+    (cd "$WT_PATH" && scripts/sunsay-dev/sunsay-dev down --force) 2>&1 | sed 's/^/  /'
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+        DOWN_FAILED=1
+    fi
+elif command -v devtrees >/dev/null 2>&1; then
     echo "Stopping devtrees stack for $WT_BASENAME..."
-    (cd "$WT_PATH" && devtrees down) 2>&1 | sed 's/^/  /' || echo "  (devtrees down failed or no stack running; continuing)"
+    (cd "$WT_PATH" && devtrees down) 2>&1 | sed 's/^/  /'
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+        DOWN_FAILED=1
+    fi
+fi
+
+if [ "$DOWN_FAILED" -eq 1 ] && [ "$FORCE" -ne 1 ]; then
+    echo "Error: stopping the dev stack for $WT_BASENAME failed; removing $WT_PATH would orphan it." >&2
+    echo "Check it with 'sunsay-dev status', or re-run with --force to remove the worktree anyway." >&2
+    exit 1
 fi
 
 # Belt-and-suspenders: some containers (Supabase's in particular) have been seen

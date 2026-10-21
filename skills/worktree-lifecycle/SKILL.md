@@ -111,7 +111,7 @@ a stale local main), `.env*` symlinking from the main repo, and running the
 project's install step (`pnpm install` / `npm install` / `uv venv`) so the
 new worktree is actually usable.
 
-`destroy_worktree.sh` runs `git worktree remove --force`, then `rm -rf`s the
+`destroy_worktree.sh` first stops the worktree's sunsay-dev stack (`sunsay-dev down --force`, or `devtrees down` when the CLI is absent) and refuses to continue when that fails unless `--force` is passed. Then it runs `git worktree remove --force`, then `rm -rf`s the
 directory as a belt-and-suspenders guarantee (in case anything untracked —
 `node_modules`, `.venv`, build output — was left behind), then
 `git worktree prune`s stale administrative metadata. It reports what was
