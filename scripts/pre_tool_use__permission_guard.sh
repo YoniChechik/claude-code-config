@@ -18,6 +18,9 @@ if ((BP_RC != 0)); then
     if [[ $unparsed_lc == *supabase* && $unparsed_lc == *query* ]]; then
         hook_log "deny: unparseable command mentioning supabase query (rc=$BP_RC)"
         hook_decision deny "Blocked: this command mentions \`supabase\` and \`query\` but the permission guard could not parse it, so it cannot prove the SQL is read-only. Split it into one plain command: \`supabase db query --linked 'begin read only; select ...; commit;'\` with the SQL as a single-quoted literal."
+    elif [[ $unparsed_lc =~ (psql|pgcli|pg_dump|pg_restore|api\.supabase\.|/v1/projects/) ]]; then
+        hook_log "deny: unparseable command mentioning a postgres client or the management api (rc=$BP_RC)"
+        hook_decision deny "Blocked: this command mentions a Postgres client or the Supabase Management API but the permission guard could not parse it, so it cannot prove the target is local. Split it into plain commands. Remote SQL goes only through \`supabase db query --linked 'begin read only; select ...; commit;'\`."
     fi
     exit 0
 fi
@@ -407,6 +410,139 @@ supabase_decide() {
     return 0
 }
 
+REMOTE_DB_ALLOWED="Remote Postgres access goes only through \`supabase db query --linked 'begin read only; select ...; commit;'\` (one read-only transaction as a single-quoted literal; see the supabase db query rule). psql, pgcli, pg_dump, pg_dumpall and pg_restore are allowed only against 127.0.0.1, localhost, ::1 or a unix socket. Writes must be run manually by the user."
+PG_TOOL_RE='^(psql|pgcli|pg_dump|pg_dumpall|pg_restore)$'
+HTTP_TOOL_RE='^(curl|wget|wget2|http|https|httpie|xh|xhs|curlie|aria2c)$'
+LAUNCHER_RE='^(docker|podman|nerdctl|kubectl|oc|xargs|parallel|find|flock|script|watch|npx|pnpx|bunx|pnpm|yarn|npm|uvx|uv|keyshelf|op|doppler|dotenv|mise|devbox|nix-shell|caffeinate|unbuffer|setsid|chronic)$'
+REMOTE_SHELL_RE='^(ssh|mosh|autossh)$'
+TEXT_HINT_RE='(psql|pgcli|pg_dump|pg_restore|api\.supabase\.|/v1/projects/|pg-meta|%[0-9a-f]{2})'
+PG_SEEN=0
+
+remote_db_py() {
+    local out rc
+    out=$(python3 -I "$GUARD_DIR/_remote_db_guard.py" "$@" </dev/null 2>&1)
+    rc=$?
+    REPLY="${out%%$'\n'*}"
+    if [ "$rc" = "1" ]; then
+        return 1
+    elif [ "$rc" != "0" ]; then
+        REPLY="the remote-database checker failed to run (rc=$rc): ${REPLY:-no output}"
+        return 1
+    fi
+    return 0
+}
+
+pg_env_json() {
+    local e args=()
+    for e in PGHOST PGHOSTADDR PGSERVICE PGDATABASE; do
+        env_get "$e" && args+=(--arg "$e" "$REPLY")
+    done
+    for e in ${SEG_ENV[@]+"${SEG_ENV[@]}"}; do
+        case "$e" in DATABASE_URL=*) args+=(--arg DATABASE_URL "${e#*=}") ;; esac
+    done
+    REPLY=$(jq -nc ${args[@]+"${args[@]}"} '$ARGS.named')
+}
+
+pg_client_check() {
+    local idx="$1" strict="$2" tool="${3##*/}" label="${4:-}" env_json
+    tool="${tool,,}"
+    PG_SEEN=1
+    pg_env_json
+    env_json="$REPLY"
+    remote_db_py "$(jq -nc --arg tool "$tool" --arg dyn "${SEG_DYN:idx+1}" --argjson strict "$strict" --argjson env "$env_json" \
+        '{mode:"pg",tool:$tool,dyn:($dyn|split("")|map(.=="1")),env:$env,strict:$strict}')" "${SEG_ARGV[@]:idx+1}" && return 0
+    deny "Blocked: \`${label:-$tool}\` may reach a remote database: $REPLY. $REMOTE_DB_ALLOWED"
+}
+
+http_check() {
+    local idx="$1" tool="$2"
+    remote_db_py '{"mode":"http","http_tool":true}' "${SEG_ARGV[@]:idx+1}" && return 0
+    deny "Blocked: \`$tool\` $REPLY. The Management API runs arbitrary SQL with no read-only guarantee. $REMOTE_DB_ALLOWED"
+}
+
+remote_db_raw_scan() {
+    local w
+    local -a hits=()
+    for w in ${SEG_RAW[@]+"${SEG_RAW[@]}"}; do
+        [[ ${w,,} =~ $TEXT_HINT_RE ]] && hits+=("$w")
+    done
+    ((${#hits[@]})) || return 0
+    remote_db_py '{"mode":"raw"}' "${SEG_RAW[@]}" && return 0
+    deny "Blocked: \`${SEG_RAW[0]}\` runs a command line the guard cannot unwrap, and it names a Postgres client or the Supabase Management API: $REPLY. Run the Postgres client or HTTP call directly as its own command so the guard can check it. $REMOTE_DB_ALLOWED"
+}
+
+remote_db_scan() {
+    local n=${#W[@]} i w first r
+    for r in ${SEG_REASONS[@]+"${SEG_REASONS[@]}"}; do
+        case "$r" in
+            "dynamic eval" | "dynamic shell code" | "dynamic shell heredoc")
+                deny "Blocked: \`${SEG_RAW[0]:-${W[0]:-}}\` runs shell code built from a variable or command substitution ($r), so the guard cannot see whether it reaches a production database. Write the command out literally as its own Bash call. $REMOTE_DB_ALLOWED"
+                return 0
+                ;;
+        esac
+    done
+    if [[ ${SEG_DYN:0:1} != 1 ]] && [[ $SEG_FLAGS == *U* ]] || ((n == 0)); then
+        remote_db_raw_scan
+        return 0
+    fi
+    first="${W[0]##*/}"
+    if [[ $first =~ $PG_TOOL_RE ]]; then
+        pg_client_check 0 true "$first"
+        return 0
+    fi
+    if [[ $first =~ $HTTP_TOOL_RE ]] || [[ $first == gh && ${W[1]:-} == api ]]; then
+        http_check 0 "$first"
+        return 0
+    fi
+    if [[ $first != git && $first != gh ]]; then
+        for ((i = 1; i < n; i++)); do
+            w="${W[$i]##*/}"
+            w="${w,,}"
+            if [[ $w =~ $PG_TOOL_RE ]]; then
+                if [[ $first =~ $REMOTE_SHELL_RE ]]; then
+                    deny "Blocked: \`$first\` runs \`$w\` on another machine, where localhost is not this machine's database. $REMOTE_DB_ALLOWED"
+                    return 0
+                fi
+                if [[ $first =~ $LAUNCHER_RE && ${SEG_DYN:0:1} != 1 ]]; then
+                    pg_client_check "$i" true "$w"
+                else
+                    pg_client_check "$i" false "$w"
+                fi
+                [ -n "$VERDICT_REASON" ] && return 0
+                break
+            fi
+            if [[ $w =~ $HTTP_TOOL_RE ]]; then
+                http_check "$i" "$w"
+                [ -n "$VERDICT_REASON" ] && return 0
+                break
+            fi
+        done
+    fi
+    if [[ ${SEG_DYN:0:1} == 1 ]]; then
+        pg_client_check 0 false psql "a command named by a variable"
+        [ -n "$VERDICT_REASON" ] && return 0
+    fi
+    case "$first" in
+        gh) return 0 ;;
+    esac
+    local -a hits=()
+    for ((i = 1; i < n; i++)); do
+        w="${W[$i],,}"
+        [[ $w =~ $TEXT_HINT_RE ]] || continue
+        if [[ $first == git ]]; then
+            [[ $w == *!* || $w == -c* || $w == --config-env* || ${W[i - 1]} == -c || ${W[i - 1]} == --config-env ]] || continue
+        fi
+        if [[ $first =~ $REMOTE_SHELL_RE && $w =~ (psql|pgcli|pg_dump|pg_restore) ]]; then
+            deny "Blocked: \`$first\` runs a Postgres client on another machine, where localhost is not this machine's database. $REMOTE_DB_ALLOWED"
+            return 0
+        fi
+        hits+=("${SEG_ARGV[$i]}")
+    done
+    ((${#hits[@]})) || return 0
+    remote_db_py '{"mode":"text"}' "${hits[@]}" && return 0
+    deny "Blocked: an argument of \`${W[0]}\` holds a command that may reach a remote database: $REPLY. Run the Postgres client or HTTP call directly as its own command so the guard can check it. $REMOTE_DB_ALLOWED"
+}
+
 is_prod_pulumi_stack() {
     local name="${1##*/}" p
     for p in "${PULUMI_PROD_STACK_NAMES[@]}"; do
@@ -654,12 +790,21 @@ check_segment() {
     supabase_decide "$cwd"
     supabase_query_scan "$cwd"
     pulumi_decide "$cwd"
+    remote_db_scan
 }
 
 for ((seg_i = 0; seg_i < BP_N; seg_i++)); do
     bp_seg "$seg_i"
     check_segment
 done
+
+if [ "$PG_SEEN" = "1" ] && [ -z "$VERDICT_REASON" ] && [[ $BP_CMD == *PG* ]] && ! remote_db_py '{"mode":"env"}' "$BP_CMD"; then
+    deny "Blocked: this command runs a Postgres client and sets a libpq connection variable for it: $REPLY. $REMOTE_DB_ALLOWED"
+fi
+
+if [ "$PG_SEEN" = "1" ] && [[ $BP_CMD == *\\* ]] && ! remote_db_py '{"mode":"meta"}' "$BP_CMD"; then
+    deny "Blocked: this command runs a Postgres client and its text holds a psql meta-command that may leave the local database: $REPLY. $REMOTE_DB_ALLOWED"
+fi
 
 if [ -n "$VERDICT_REASON" ]; then
     hook_log "deny: $VERDICT_REASON"
