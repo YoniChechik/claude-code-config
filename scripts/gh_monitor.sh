@@ -13,7 +13,7 @@ exec </dev/null
 : "${GH_MONITOR_MERGE_SETTLE:=300}"
 : "${GH_MONITOR_DEPLOY_POLL:=30}"
 : "${GH_MONITOR_RUN_POLL:=15}"
-: "${GH_MONITOR_WATCH_MAX:=1320}"
+: "${GH_MONITOR_WATCH_MAX:=7200}"
 : "${GH_MONITOR_POLL_FAIL_MAX:=10}"
 : "${GH_MONITOR_IGNORE_EVENTS:=schedule,issue_comment,issues,pull_request_review,pull_request_review_comment,discussion,discussion_comment,label,milestone,project_card,watch,fork,gollum}"
 : "${GH_MONITOR_WAIT_POLL:=10}"
@@ -484,6 +484,18 @@ evaluate_snapshot() {
     return 0
 }
 
+report_merge_verdict() {
+    local sha="$1" label="$2"
+    if [[ "$EVAL_FAILED" -gt 0 ]]; then
+        MERGE_CI=fail
+        report "Post-merge CI FAILED for ${label} on ${OWNER_REPO} (merge commit ${sha}): ${EVAL_FAILED} of ${EVAL_TOTAL} failed"
+    else
+        MERGE_CI=pass
+        report "Post-merge CI PASSED for ${label} on ${OWNER_REPO} (merge commit ${sha}): all ${EVAL_TOTAL} green"
+    fi
+    report "$EVAL_DETAILS"
+}
+
 watch_merge_sha() {
     local sha="$1" label="$2" start prev_sig="" have_eval=0
     start=$(date +%s)
@@ -495,14 +507,7 @@ watch_merge_sha() {
             if [[ "$EVAL_TOTAL" -gt 0 && "$EVAL_PENDING" -eq 0 \
                 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_MERGE_SETTLE" \
                 && "$EVAL_SIG" == "$prev_sig" ]]; then
-                if [[ "$EVAL_FAILED" -gt 0 ]]; then
-                    MERGE_CI=fail
-                    report "Post-merge CI FAILED for ${label} on ${OWNER_REPO} (merge commit ${sha}): ${EVAL_FAILED} of ${EVAL_TOTAL} failed"
-                else
-                    MERGE_CI=pass
-                    report "Post-merge CI PASSED for ${label} on ${OWNER_REPO} (merge commit ${sha}): all ${EVAL_TOTAL} green"
-                fi
-                report "$EVAL_DETAILS"
+                report_merge_verdict "$sha" "$label"
                 return 0
             fi
             if [[ "$EVAL_TOTAL" -eq 0 && "$(elapsed_since "$start")" -ge "$GH_MONITOR_RUN_APPEAR_MAX" ]]; then
@@ -515,6 +520,14 @@ watch_merge_sha() {
             poll_failed
         fi
         if [[ "$(elapsed_since "$start")" -ge "$GH_MONITOR_WATCH_MAX" ]]; then
+            if snapshot_sha "$sha" && evaluate_snapshot; then
+                have_eval=1
+                log "final snapshot at the bound: total=${EVAL_TOTAL} pending=${EVAL_PENDING} failed=${EVAL_FAILED}"
+                if [[ "$EVAL_TOTAL" -gt 0 && "$EVAL_PENDING" -eq 0 ]]; then
+                    report_merge_verdict "$sha" "$label"
+                    return 0
+                fi
+            fi
             MERGE_CI=timeout
             report "Post-merge verdict UNKNOWN (timeout): CI watch for ${label} on ${OWNER_REPO} (merge commit ${sha}) hit the ${GH_MONITOR_WATCH_MAX}s bound with ${EVAL_PENDING} still pending, ${EVAL_FAILED} failed so far"
             [[ "$have_eval" -eq 1 ]] && report "$EVAL_DETAILS"
@@ -669,9 +682,17 @@ run_body() {
 }
 
 wait_body() {
-    local waited=0
+    local waited=0 restarted=0
     while :; do
         if [[ -s "$RESULT_FILE" ]]; then
+            if [[ "$restarted" -eq 0 ]] && grep -q 'verdict UNKNOWN (timeout)' "$RESULT_FILE" 2>/dev/null; then
+                log "discarding the cached timeout verdict; re-evaluating from the live API"
+                rm -f "$RESULT_FILE"
+                start_detached_watcher || return 1
+                restarted=1
+                waited=0
+                continue
+            fi
             cat "$RESULT_FILE"
             return 0
         fi
@@ -760,16 +781,21 @@ write_merge_meta() {
     rm -f "$META_FILE.announced"
 }
 
-detach_merge() {
+start_detached_watcher() {
     rm -f "$RESULT_FILE"
     write_merge_meta || {
         echo "Error: could not write $META_FILE" >&2
-        exit 1
+        return 1
     }
     GH_MONITOR_META_WRITTEN=1 nohup perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exec @ARGV' \
         "$BASH" "$SELF" merge "$TARGET" --repo "$OWNER_REPO" \
         >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null
+    return 0
+}
+
+detach_merge() {
+    start_detached_watcher || exit 1
     printf '%s\n' "$META_FILE"
     exit 0
 }
