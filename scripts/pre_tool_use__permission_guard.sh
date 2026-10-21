@@ -211,6 +211,8 @@ supabase_db_url_verdict() {
 
 SB_QUERY_LOCAL_URL_RE="^postgres(ql)?://([A-Za-z0-9._~%-]+(:[A-Za-z0-9._~%-]*)?@)?(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?(/[A-Za-z0-9_.-]*)?$"
 
+SB_QUERY_EMBEDDED_RE="(^|[[:space:]/=!\"'(;&|\`])supabase(@[^[:space:]]*)?[\"']?[[:space:]](.*[[:space:]\"'])?query([[:space:]\"';)&|\`]|$)"
+
 sb_query_deny() {
     deny "Blocked: \`supabase db query\` against a remote Supabase database ($1) is allowed only as ONE read-only transaction passed as a single-quoted positional argument, e.g. \`supabase db query --linked 'begin read only; select ...; commit;'\` (\`start transaction read only;\` also works; \`set default_transaction_read_only = on;\` may come before the BEGIN but never replaces it). Rejected because: $2. Anything else is denied: -f files, stdin, heredocs, variables, command substitution, writes, DDL, SET/RESET, a second transaction, statements after the final COMMIT/ROLLBACK, side-effect functions. Retry in the allowed form; writes must be run manually by the user."
 }
@@ -309,10 +311,11 @@ supabase_query_scan() {
         w="${w,,}"
         for ((i = 1; i < n; i++)); do
             lw="${words[$i],,}"
-            if [[ $lw =~ (^|[^a-z0-9_])supabase([^a-z0-9_]|$) && $lw =~ (^|[^a-z0-9_])query([^a-z0-9_]|$) ]]; then
+            if [[ $lw =~ $SB_QUERY_EMBEDDED_RE ]]; then
                 case "$w" in
-                    git | gh)
-                        [[ $lw == *[=!]* || ${words[i - 1]} == -c || ${words[i - 1]} == --config-env ]] || continue
+                    gh) continue ;;
+                    git)
+                        [[ $lw == *!* || $lw == -c* || $lw == --config-env* || ${words[i - 1]} == -c || ${words[i - 1]} == --config-env ]] || continue
                         ;;
                 esac
                 deny "Blocked: an argument of \`${words[0]}\` holds a \`supabase ... query\` command line that another program may run, so the guard cannot review its SQL. Run \`supabase db query\` directly as its own command, with the SQL as one single-quoted literal: \`supabase db query --linked 'begin read only; select ...; commit;'\`. Writes must be run manually by the user."
