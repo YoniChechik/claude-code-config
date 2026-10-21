@@ -1,12 +1,4 @@
 #!/usr/bin/env bats
-#
-# Tests for scripts/_git_sync.sh's _sync_primary_checkout_to_origin_main,
-# shared by session_start.sh and post_tool_use__sync_main_after_merge.sh.
-#
-# Uses REAL git repos in BATS_TEST_TMPDIR rather than a PATH-shadowing stub:
-# the function's whole job is real filesystem git state (branch, HEAD,
-# working tree), which a stub would only re-describe, not verify.
-
 
 setup() {
     export CLAUDE_HOOK_LOG_DIR="$BATS_TEST_TMPDIR/logs"
@@ -24,9 +16,6 @@ setup() {
 }
 
 @test "syncs the primary checkout to a new commit pushed to origin/main" {
-    # Simulate a merge landing on origin from elsewhere: a second clone pushes
-    # a new commit, while PRIMARY (this session's base checkout) never fetches
-    # it on its own.
     OTHER="$BATS_TEST_TMPDIR/other"
     git clone --quiet "$ORIGIN" "$OTHER"
     git -C "$OTHER" config user.email "t@example.com"
@@ -50,9 +39,6 @@ setup() {
 }
 
 @test "does nothing when the primary checkout has no local main branch" {
-    # A repo whose only branch is not "main" — checkout -f main must fail, and
-    # the function must not fall through to reset/clean on whatever branch is
-    # actually checked out.
     NOMAIN="$BATS_TEST_TMPDIR/nomain"
     git init --quiet -b trunk "$NOMAIN"
     git -C "$NOMAIN" config user.email "t@example.com"
@@ -72,20 +58,10 @@ setup() {
     [ "$PWD" = "$cwd_before" ]
 }
 
-# =============================================================================
-# _cleanup_worktrees_and_branches — destructive by design (git worktree
-# remove --force, rm -rf, git branch -D), so this matrix is deliberately wide.
-# `gh` is a PATH-shadowing stub keyed by branch name; nothing here touches the
-# network.
-# =============================================================================
-
 write_gh_stub() {
     mkdir -p "$BATS_TEST_TMPDIR/bin" "$GH_STUB_DIR"
     cat >"$BATS_TEST_TMPDIR/bin/gh" <<EOF
 #!/usr/bin/env bash
-# Only "gh pr view <branch> --json state -q .state" is used by the function
-# under test. Canned answer lives in a file keyed by branch name; a missing
-# file means gh itself failed (auth/network), for the fail-closed test.
 if [ "\$1 \$2" = "pr view" ]; then
     f="$GH_STUB_DIR/\$3"
     if [ -f "\$f" ]; then
@@ -104,26 +80,38 @@ age_tree() {
     find "$1" -exec touch -h -t 202001010000 {} +
 }
 
-# add_worktree <branch> [days-old] — creates a worktree off PRIMARY on a new
-# branch with one commit, optionally backdated for the stale-age tests. Shares
-# PRIMARY's object database, so a later `git -C "$PRIMARY" merge --ff-only
-# <branch>` can simulate that commit having already landed on main.
+age_admin() {
+    local admin
+    admin=$(git -C "$1" rev-parse --absolute-git-dir)
+    find "$admin" -exec touch -h -t 202001010000 {} +
+}
+
+age_worktree() {
+    age_tree "$1"
+    age_admin "$1"
+}
+
 add_worktree() {
-    local branch="$1" days_old="${2:-0}" wt date_env
+    local branch="$1" days_old="${2:-1}" fresh="${3:-}" wt date_env
     mkdir -p "$PRIMARY/.claude/worktrees"
     wt="$PRIMARY/.claude/worktrees/wt-$branch"
     git -C "$PRIMARY" worktree add --quiet -b "$branch" "$wt" main
     git -C "$wt" config user.email "t@example.com"
     git -C "$wt" config user.name "t"
-    if [ "$days_old" -gt 0 ]; then
+    if [ "$fresh" = "fresh" ]; then
+        git -C "$wt" commit --quiet --allow-empty -m "commit on $branch"
+    else
         date_env=$(date -v-"${days_old}"d +%Y-%m-%dT%H:%M:%S)
         GIT_AUTHOR_DATE="$date_env" GIT_COMMITTER_DATE="$date_env" \
             git -C "$wt" commit --quiet --allow-empty -m "commit on $branch"
-        age_tree "$wt"
-    else
-        git -C "$wt" commit --quiet --allow-empty -m "commit on $branch"
+        age_worktree "$wt"
     fi
     echo "$wt"
+}
+
+pr_answer() {
+    local head="${3:-$(git -C "$PRIMARY" rev-parse "refs/heads/$1")}"
+    echo "$2 $head" >"$GH_STUB_DIR/$1"
 }
 
 setup_cleanup() {
@@ -159,14 +147,7 @@ setup_cleanup() {
 @test "cleanup: a branch merged into main and gone from origin gets its worktree removed" {
     setup_cleanup
     WT=$(add_worktree feat-merged)
-    echo "MERGED" >"$GH_STUB_DIR/feat-merged"
-    # Deliberately NOT fast-forward-merged into PRIMARY's local main: a real
-    # squash-merge (this repo's actual `gh pr merge --squash` workflow) lands
-    # a brand-new commit on main, so the original branch's commits are never
-    # literally an ancestor of main -- ahead_count/is-ancestor can't shortcut
-    # this, and the function correctly falls through to gh's PR-state
-    # confirmation for the merged case too, not just for the closed-without-
-    # merging case test 9 already covers.
+    pr_answer feat-merged MERGED
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -177,8 +158,6 @@ setup_cleanup() {
 @test "cleanup: an unmerged branch with no PR is retained" {
     setup_cleanup
     WT=$(add_worktree feat-unmerged)
-    # Deliberately NOT merged into primary's main, and no canned gh answer for
-    # this branch -- the stub's "no file" path simulates "no PR found".
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -188,7 +167,7 @@ setup_cleanup() {
 @test "cleanup: an unmerged branch whose PR was closed without merging is removed" {
     setup_cleanup
     WT=$(add_worktree feat-closed)
-    echo "CLOSED" >"$GH_STUB_DIR/feat-closed"
+    pr_answer feat-closed CLOSED
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -198,7 +177,7 @@ setup_cleanup() {
 @test "cleanup: an unmerged branch whose PR is still open is retained" {
     setup_cleanup
     WT=$(add_worktree feat-open)
-    echo "OPEN" >"$GH_STUB_DIR/feat-open"
+    pr_answer feat-open OPEN
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -208,8 +187,6 @@ setup_cleanup() {
 @test "cleanup: a gh failure during the PR-state check fails closed (retains)" {
     setup_cleanup
     WT=$(add_worktree feat-gh-down)
-    # No canned answer AND the stub's own "gh: some error" exit-1 path fires --
-    # simulates gh being unreachable/unauthenticated, not just "no PR".
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -219,8 +196,8 @@ setup_cleanup() {
 @test "cleanup: a clean worktree untouched for over 4 days is removed by the stale pass" {
     setup_cleanup
     WT=$(add_worktree feat-stale 10)
-    # Left unmerged and with no gh answer, so the merged/PR pass retains it --
-    # only the age-based stale pass should remove it.
+    git -C "$WT" push --quiet origin feat-stale
+    age_worktree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -260,7 +237,7 @@ lock_worktree() {
 @test "cleanup: a locked worktree whose lock pid is dead is unlocked and removed" {
     setup_cleanup
     WT=$(add_worktree feat-locked-dead)
-    echo "MERGED" >"$GH_STUB_DIR/feat-locked-dead"
+    pr_answer feat-locked-dead MERGED
     lock_worktree "$WT" "$(dead_pid)"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
@@ -272,7 +249,7 @@ lock_worktree() {
 @test "cleanup: a locked worktree whose lock pid is alive is kept" {
     setup_cleanup
     WT=$(add_worktree feat-locked-live)
-    echo "MERGED" >"$GH_STUB_DIR/feat-locked-live"
+    pr_answer feat-locked-live MERGED
     sleep 300 >/dev/null 2>&1 3>&- &
     live=$!
     lock_worktree "$WT" "$live"
@@ -288,7 +265,7 @@ lock_worktree() {
 @test "cleanup: a locked worktree with a dead pid but a process inside it is kept" {
     setup_cleanup
     WT=$(add_worktree feat-locked-busy)
-    echo "MERGED" >"$GH_STUB_DIR/feat-locked-busy"
+    pr_answer feat-locked-busy MERGED
     lock_worktree "$WT" "$(dead_pid)"
     (cd "$WT" && exec sleep 300) >/dev/null 2>&1 3>&- &
     busy=$!
@@ -302,7 +279,7 @@ lock_worktree() {
 @test "cleanup: a failed removal is logged instead of swallowed" {
     setup_cleanup
     WT=$(add_worktree feat-fail)
-    echo "MERGED" >"$GH_STUB_DIR/feat-fail"
+    pr_answer feat-fail MERGED
     real_git=$(command -v git)
     cat >"$BATS_TEST_TMPDIR/bin/git" <<STUB
 #!/usr/bin/env bash
@@ -323,7 +300,7 @@ STUB
     setup_cleanup
     WT=$(add_worktree feat-on-origin)
     git -C "$WT" push --quiet origin feat-on-origin
-    echo "MERGED" >"$GH_STUB_DIR/feat-on-origin"
+    pr_answer feat-on-origin MERGED
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -334,8 +311,8 @@ STUB
     setup_cleanup
     WT=$(add_worktree feat-unpushed)
     git -C "$WT" push --quiet origin feat-unpushed
+    pr_answer feat-unpushed MERGED
     git -C "$WT" commit --quiet --allow-empty -m "local only"
-    echo "MERGED" >"$GH_STUB_DIR/feat-unpushed"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -346,7 +323,7 @@ STUB
     setup_cleanup
     WT=$(add_worktree feat-open-on-origin)
     git -C "$WT" push --quiet origin feat-open-on-origin
-    echo "OPEN" >"$GH_STUB_DIR/feat-open-on-origin"
+    pr_answer feat-open-on-origin OPEN
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -358,7 +335,7 @@ STUB
     mkdir -p "$PRIMARY/.claude/worktrees"
     WT="$PRIMARY/.claude/worktrees/wt-detached-clean"
     git -C "$PRIMARY" worktree add --quiet --detach "$WT" main
-    age_tree "$WT"
+    age_worktree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -373,14 +350,14 @@ STUB
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     git -C "$WT" commit --quiet --allow-empty -m "unique"
-    age_tree "$WT"
+    age_worktree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
     [ -d "$WT" ]
 }
 
-@test "cleanup: a detached worktree with a unique commit older than 4 days is removed" {
+@test "cleanup: a detached worktree with an unpushed commit older than 4 days is kept" {
     setup_cleanup
     mkdir -p "$PRIMARY/.claude/worktrees"
     WT="$PRIMARY/.claude/worktrees/wt-detached-old"
@@ -389,11 +366,11 @@ STUB
     git -C "$WT" config user.name "t"
     old=$(date -v-10d +%Y-%m-%dT%H:%M:%S)
     GIT_AUTHOR_DATE="$old" GIT_COMMITTER_DATE="$old" git -C "$WT" commit --quiet --allow-empty -m "old unique"
-    age_tree "$WT"
+    age_worktree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
-    [ ! -d "$WT" ]
+    [ -d "$WT" ]
 }
 
 @test "cleanup: an unregistered directory under .claude/worktrees with no process inside is removed" {
@@ -439,7 +416,7 @@ STUB
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     git -C "$WT" commit --quiet --allow-empty -m "work"
-    age_tree "$WT"
+    age_worktree "$WT"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
@@ -510,7 +487,7 @@ STUB
 @test "cleanup: a dirty locked worktree with a dead pid is kept" {
     setup_cleanup
     WT=$(add_worktree feat-dirty-locked)
-    echo "MERGED" >"$GH_STUB_DIR/feat-dirty-locked"
+    pr_answer feat-dirty-locked MERGED
     lock_worktree "$WT" "$(dead_pid)"
     echo "uncommitted" >"$WT/dirty.txt"
 
@@ -536,7 +513,7 @@ STUB
 @test "cleanup: when lsof fails every worktree is treated as in use and kept" {
     setup_cleanup
     WT=$(add_worktree feat-lsof-fail)
-    echo "MERGED" >"$GH_STUB_DIR/feat-lsof-fail"
+    pr_answer feat-lsof-fail MERGED
     printf '#!/usr/bin/env bash\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/lsof"
     chmod +x "$BATS_TEST_TMPDIR/bin/lsof"
 
@@ -550,11 +527,144 @@ STUB
     setup_cleanup
     OUT="$BATS_TEST_TMPDIR/elsewhere-wt"
     git -C "$PRIMARY" worktree add --quiet -b feat-elsewhere "$OUT" main
-    echo "MERGED" >"$GH_STUB_DIR/feat-elsewhere"
+    pr_answer feat-elsewhere MERGED
     mkdir -p "$PRIMARY/.claude/worktrees"
 
     _cleanup_worktrees_and_branches "$PRIMARY"
 
     [ -d "$OUT" ]
     git -C "$PRIMARY" worktree list | grep -qF "elsewhere-wt"
+}
+
+make_old_pr_head() {
+    git -C "$PRIMARY" checkout --quiet -b old-pr-branch
+    git -C "$PRIMARY" commit --quiet --allow-empty -m "old PR work"
+    OLD_HEAD=$(git -C "$PRIMARY" rev-parse HEAD)
+    git -C "$PRIMARY" checkout --quiet main
+    git -C "$PRIMARY" commit --quiet --allow-empty -m "squash of the old PR"
+    git -C "$PRIMARY" push --quiet origin main
+}
+
+@test "cleanup: a reused branch name with commits beyond its old merged PR head is kept" {
+    setup_cleanup
+    make_old_pr_head
+    WT=$(add_worktree feat-reused)
+    pr_answer feat-reused MERGED "$OLD_HEAD"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+    grep -q "keep: branch has commits beyond the head of its MERGED PR" "$CLAUDE_HOOK_LOG_DIR/hooks.log"
+}
+
+@test "cleanup: a reused branch name cut from a newer main with no commits of its own is kept" {
+    setup_cleanup
+    make_old_pr_head
+    mkdir -p "$PRIMARY/.claude/worktrees"
+    WT="$PRIMARY/.claude/worktrees/wt-reused-empty"
+    git -C "$PRIMARY" worktree add --quiet -b feat-reused-empty "$WT" main
+    age_worktree "$WT"
+    pr_answer feat-reused-empty MERGED "$OLD_HEAD"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a reused branch name whose old PR was closed is kept" {
+    setup_cleanup
+    make_old_pr_head
+    WT=$(add_worktree feat-reused-closed)
+    pr_answer feat-reused-closed CLOSED "$OLD_HEAD"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a merged PR whose head commit is unknown locally keeps the worktree" {
+    setup_cleanup
+    WT=$(add_worktree feat-unknown-head)
+    pr_answer feat-unknown-head MERGED 0123456789abcdef0123456789abcdef01234567
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a branch whose tip is behind its merged PR head is removed" {
+    setup_cleanup
+    WT=$(add_worktree feat-behind)
+    tip=$(git -C "$WT" rev-parse HEAD)
+    git -C "$WT" commit --quiet --allow-empty -m "pushed later from elsewhere"
+    head=$(git -C "$WT" rev-parse HEAD)
+    git -C "$WT" reset --quiet --hard "$tip"
+    age_worktree "$WT"
+    pr_answer feat-behind MERGED "$head"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ ! -d "$WT" ]
+}
+
+@test "cleanup: a worktree created moments ago is kept even when its PR is merged" {
+    setup_cleanup
+    WT=$(add_worktree feat-just-made 1 fresh)
+    pr_answer feat-just-made MERGED
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a worktree with a commit inside the idle window is kept even when its PR is merged" {
+    setup_cleanup
+    WT=$(add_worktree feat-recent-commit)
+    git -C "$WT" commit --quiet --allow-empty -m "just now"
+    age_tree "$WT"
+    pr_answer feat-recent-commit MERGED
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: a worktree whose files changed inside the idle window is kept even when its PR is merged" {
+    setup_cleanup
+    WT=$(add_worktree feat-recent-file)
+    pr_answer feat-recent-file MERGED
+    mkdir -p "$WT/sub"
+    touch -t 202001010000 "$WT"
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
+}
+
+@test "cleanup: the idle window is configurable" {
+    setup_cleanup
+    WT=$(add_worktree feat-idle-window 1 fresh)
+    pr_answer feat-idle-window MERGED
+    date_env=$(date -v-3H +%Y%m%d%H%M)
+    find "$WT" "$(git -C "$WT" rev-parse --absolute-git-dir)" -exec touch -h -t "$date_env" {} +
+    old=$(date -v-3H +%Y-%m-%dT%H:%M:%S)
+    git -C "$WT" commit --quiet --amend --allow-empty --no-edit --date="$old"
+    GIT_COMMITTER_DATE="$old" git -C "$WT" commit --quiet --amend --allow-empty --no-edit
+    find "$WT" "$(git -C "$WT" rev-parse --absolute-git-dir)" -exec touch -h -t "$date_env" {} +
+    pr_answer feat-idle-window MERGED
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+    [ -d "$WT" ]
+
+    WORKTREE_SWEEP_IDLE_HOURS=2 _cleanup_worktrees_and_branches "$PRIMARY"
+    [ ! -d "$WT" ]
+}
+
+@test "cleanup: a stale worktree with unpushed commits is kept" {
+    setup_cleanup
+    WT=$(add_worktree feat-stale-unpushed 10)
+
+    _cleanup_worktrees_and_branches "$PRIMARY"
+
+    [ -d "$WT" ]
 }

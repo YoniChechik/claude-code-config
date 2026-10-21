@@ -15,7 +15,7 @@ setup() {
     git -C "$PRIMARY" commit --quiet --allow-empty -m "initial"
     git -C "$PRIMARY" push --quiet origin main
     mkdir -p "$BATS_TEST_TMPDIR/bin"
-    printf '#!/usr/bin/env bash\necho MERGED\n' >"$BATS_TEST_TMPDIR/bin/gh"
+    printf '#!/usr/bin/env bash\necho "MERGED $(git -C %q rev-parse feat-sweep)"\n' "$PRIMARY" >"$BATS_TEST_TMPDIR/bin/gh"
     chmod +x "$BATS_TEST_TMPDIR/bin/gh"
     export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
@@ -27,6 +27,7 @@ setup() {
     git -C "$WT" config user.email "t@example.com"
     git -C "$WT" config user.name "t"
     git -C "$WT" commit --quiet --allow-empty -m "work"
+    find "$WT" "$PRIMARY/.git/worktrees/wt-sweep" -exec touch -h -t 202001010000 {} +
     sleep 0 &
     dead=$!
     wait "$dead"

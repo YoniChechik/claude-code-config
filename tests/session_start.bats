@@ -53,12 +53,11 @@ setup() {
     mkdir -p "$PRIMARY/.claude/worktrees"
     WT="$PRIMARY/.claude/worktrees/wt-feat"
     git -C "$PRIMARY" worktree add --quiet -b feat-merged "$WT" main
-    git -C "$PRIMARY" config user.email "t@example.com"
-    git -C "$PRIMARY" config user.name "t"
+    find "$WT" "$PRIMARY/.git/worktrees/wt-feat" -exec touch -h -t 202001010000 {} +
 
     GH_STUB_DIR="$BATS_TEST_TMPDIR/ghstub"
     mkdir -p "$GH_STUB_DIR" "$BATS_TEST_TMPDIR/bin"
-    echo "MERGED" >"$GH_STUB_DIR/feat-merged"
+    echo "MERGED $(git -C "$PRIMARY" rev-parse feat-merged)" >"$GH_STUB_DIR/feat-merged"
     cat >"$BATS_TEST_TMPDIR/bin/gh" <<EOF
 #!/usr/bin/env bash
 if [ "\$1 \$2" = "pr view" ]; then

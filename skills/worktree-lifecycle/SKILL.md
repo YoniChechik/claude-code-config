@@ -48,6 +48,18 @@ Two real incidents drove this skill:
   down worktrees when asked or the active task needs it; report state only if
   the user explicitly asks.
 
+## What the automatic sweep removes
+
+`scripts/_git_sync.sh` (`session_start.sh` and `worktree_sweep.sh`) never
+removes a worktree that has uncommitted changes, or one touched within the
+idle window (`WORKTREE_SWEEP_IDLE_HOURS`, default 12: directory birth, any
+file up to depth 4, and the worktree's `HEAD`/reflog). Past that window it
+removes a worktree whose branch is merged into `origin/main`, or whose PR is
+`MERGED`/`CLOSED` and the branch tip is the PR head or behind it. A branch
+that reuses the name of an old merged PR has commits the PR never had, so it
+is kept. The 4-day stale pass also keeps any worktree with commits on no
+remote.
+
 ## When to use which script
 
 - **`setup_worktree.sh <feature-name>`** — creating a new worktree for a
