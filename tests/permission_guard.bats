@@ -64,6 +64,10 @@ decide() {
     decide_in "$NOWHERE" "$1"
 }
 
+decide_reason() {
+    jq -nc --arg cwd "$NOWHERE" --arg cmd "$1" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$cmd}}' | bash "$HOOK" | jq -r '.hookSpecificOutput.permissionDecisionReason'
+}
+
 assert_decision() {
     if [ "$1" != "$2" ]; then
         echo "expected=$1 got=$2" >&2
@@ -578,8 +582,8 @@ EOF")"
     assert_decision DENY "$(decide "T=$GH; \$T $REPO $DEL foo/bar")"
 }
 
-@test "none: dynamic code handed to eval fails open" {
-    assert_decision NONE "$(decide "eval \"\$CMD\"")"
+@test "deny: dynamic code handed to eval is denied (the guard cannot see what it runs)" {
+    assert_decision DENY "$(decide "eval \"\$CMD\"")"
 }
 
 @test "none: sourcing a script is treated like running one" {
@@ -608,11 +612,11 @@ EOF")"
     assert_decision NONE "$(decide "bash --version | head -1; bash .github/scripts/x.sh \"\$PWD\"; bats .github/tests/x.bats 2>&1 | tail -20")"
 }
 
-@test "none: shells that read stdin or run dynamic code are allowed" {
+@test "none: shells that read stdin are allowed, dynamic -c code is denied" {
     assert_decision NONE "$(decide "gh api repos/x/y/contents/i.sh | bash")"
     assert_decision NONE "$(decide "bash -s")"
     assert_decision NONE "$(decide "bash")"
-    assert_decision NONE "$(decide "bash -c \"\$X\"")"
+    assert_decision DENY "$(decide "bash -c \"\$X\"")"
     assert_decision NONE "$(decide "bash -n +n")"
 }
 
@@ -874,4 +878,234 @@ SQL")"
     printf '#!/bin/sh\nexit 127\n' >"$fake/python3"
     chmod +x "$fake/python3"
     assert_decision DENY "$(PATH="$fake:$PATH" sbq "$SB_PROD" "--linked 'begin read only; select 1; commit;'")"
+}
+
+@test "remote db: local psql, pg_dump and pgcli stay allowed" {
+    local c
+    for c in \
+        "psql -h 127.0.0.1 -p 54322 -U postgres -c 'select 1'" \
+        "psql -h localhost -d postgres -c 'select 1'" \
+        "psql -h LocalHost -c 'select 1'" \
+        "psql --host=127.0.0.1 postgres" \
+        "psql --host ::1 postgres" \
+        "psql -h /tmp postgres" \
+        "psql -h /var/run/postgresql,localhost postgres" \
+        "psql -Atc 'select 1' -h 127.0.0.1" \
+        "psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -f migration.sql" \
+        "psql postgres" \
+        "psql" \
+        "psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -c 'select 1'" \
+        "psql 'postgres://postgres@localhost/postgres?sslmode=disable'" \
+        "psql 'postgresql://postgres@[::1]:54322/postgres'" \
+        "psql 'postgresql:///postgres?host=/var/run/postgresql'" \
+        "psql 'postgresql://%2Fvar%2Frun%2Fpostgresql/postgres'" \
+        "psql 'host=localhost port=54322 dbname=postgres user=postgres'" \
+        "psql -d 'host=127.0.0.1 dbname=postgres'" \
+        "PGHOST=127.0.0.1 psql -c 'select 1'" \
+        "PGHOST=/tmp PGHOSTADDR=127.0.0.1 psql" \
+        "psql -h 127.0.0.1 -c '\\dt'" \
+        "psql -h 127.0.0.1 -c '\\c otherdb'" \
+        "psql -h 127.0.0.1 -c '\\connect otherdb postgres localhost 54322'" \
+        "psql -h 127.0.0.1 <<'SQL'
+select 1;
+SQL" \
+        "pg_dump -h 127.0.0.1 -p 54322 -U postgres -f out.sql postgres" \
+        "pg_dump -cf out.sql postgresql://postgres@localhost:54322/postgres" \
+        "pg_dumpall -h localhost -f all.sql" \
+        "pg_restore -h 127.0.0.1 -d postgres dump.bin" \
+        "pgcli postgres://postgres@localhost:54322/postgres" \
+        "docker exec supabase_db psql -U postgres -c 'select 1'" \
+        "bash -c 'psql -h 127.0.0.1 -c \"select 1\"'" \
+        "grep -rn psql docs/" \
+        "grep -rn psql \"\$DIR\"" \
+        "which psql pg_dump" \
+        "brew install libpq" \
+        "echo 'use psql against localhost'"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "remote db: psql and friends against a remote host are denied" {
+    local c R="db.$PROD_REF.supabase.co"
+    for c in \
+        "psql -h $R -U postgres -c 'select 1'" \
+        "psql --host $R postgres" \
+        "psql --host=$R postgres" \
+        "psql -h$R postgres" \
+        "psql -Xh $R postgres" \
+        "psql --ho=$R postgres" \
+        "psql --hos $R postgres" \
+        "PSQL -h $R" \
+        "Psql -h $R" \
+        "/opt/homebrew/opt/libpq/bin/psql -h $R" \
+        "psql -h DB.Example.COM" \
+        "psql -h localhost,$R postgres" \
+        "psql -h 127.0.0.2 postgres" \
+        "psql postgresql://postgres:pw@$R:5432/postgres" \
+        "psql POSTGRESQL://postgres:pw@$R:5432/postgres" \
+        "psql PostgreS://postgres@$R/postgres" \
+        "psql 'postgresql://postgres@127.0.0.1@$R/postgres'" \
+        "psql 'postgresql://localhost,$R/postgres'" \
+        "psql 'postgresql://localhost/postgres?host=$R'" \
+        "psql 'postgresql://localhost/postgres?hostaddr=10.0.0.1'" \
+        "psql 'postgresql://%64b.example.com/postgres'" \
+        "psql 'postgresql://localhost/postgres?service=prod'" \
+        "psql 'host=$R dbname=postgres'" \
+        "psql \"dbname=postgres host='$R'\"" \
+        "psql 'HOST=$R'" \
+        "psql 'hostaddr=1.2.3.4 dbname=postgres'" \
+        "psql 'service=prod'" \
+        "psql 'dbname=postgresql://$R/postgres'" \
+        "psql -d 'host=$R'" \
+        "psql --dbname=host=$R" \
+        "psql --dbname 'postgresql://$R/postgres'" \
+        "PGHOST=$R psql -c 'select 1'" \
+        "PGHOSTADDR=1.2.3.4 psql" \
+        "PGSERVICE=prod psql" \
+        "PGDATABASE=postgresql://$R/postgres psql" \
+        "env PGHOST=$R psql" \
+        "DATABASE_URL=postgresql://$R/postgres psql \"\$DATABASE_URL\"" \
+        "psql \"\$DATABASE_URL\" -c 'select 1'" \
+        "psql \"\$DB_URL\"" \
+        "psql -h \"\$PGHOST_REMOTE\" postgres" \
+        "PGHOST=\$H psql" \
+        "psql \$(cat url.txt)" \
+        "psql -h 127.0.0.1 -c \"\$SQL\"" \
+        "pg_dump -h $R -f out.sql postgres" \
+        "pg_dump postgresql://postgres@$R/postgres" \
+        "PG_DUMP --host=$R" \
+        "pg_dumpall -d postgresql://postgres@$R/postgres" \
+        "pg_dumpall -l 'host=$R'" \
+        "pg_restore -d postgresql://postgres@$R/postgres dump.bin" \
+        "pg_restore -h $R -d postgres dump.bin" \
+        "pgcli postgres://postgres@$R/postgres" \
+        "pgcli -h $R" \
+        "pgcli -D prod" \
+        "pgcli --dsn prod" \
+        "pgcli --ssh-tunnel u@bastion postgres://localhost/postgres"; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "remote db: psql meta-commands, wrappers and embedded psql cannot leave localhost" {
+    local c R="db.$PROD_REF.supabase.co"
+    for c in \
+        "psql -h 127.0.0.1 -c '\\c postgresql://postgres@$R/postgres'" \
+        "psql -h 127.0.0.1 -c '\\connect host=$R'" \
+        "psql -h 127.0.0.1 -c '\\c postgres postgres $R'" \
+        "psql -h 127.0.0.1 -c '\\c :target'" \
+        "psql -h 127.0.0.1 -c '\\! psql -h $R'" \
+        "psql -h 127.0.0.1 -c '\\setenv PGHOST $R'" \
+        "psql -h 127.0.0.1 -c 'select 1 \\g | sh'" \
+        "psql -h 127.0.0.1 -c \"\\copy t from program 'curl x'\"" \
+        "psql -h 127.0.0.1 -c '\\set x \`id\`'" \
+        "psql -h 127.0.0.1 <<'SQL'
+\\connect host=$R
+delete from t;
+SQL" \
+        "echo '\\c host=$R' | psql -h 127.0.0.1" \
+        "psql -h 127.0.0.1 <<< '\\c host=$R'" \
+        "bash -c 'psql -h $R'" \
+        "sh -c \"psql -h $R -c 'delete from t'\"" \
+        "eval \"psql -h $R\"" \
+        "docker exec c psql -h $R" \
+        "docker run --rm postgres:17 psql postgresql://postgres@$R/postgres" \
+        "kubectl exec -it pod -- psql -h $R" \
+        "xargs psql -h $R </dev/null" \
+        "npx psql -h $R" \
+        "ssh bastion psql -h localhost" \
+        "ssh bastion 'psql -h localhost'" \
+        "git -c \"alias.p=!psql -h $R\" p" \
+        "git config alias.p '!psql -h $R'" \
+        "python3 -c \"import os; os.system('psql -h $R')\"" \
+        "node -e \"require('child_process').execSync('pg_dump postgresql://u@$R/postgres')\"" \
+        "\$P -h $R postgres" \
+        "psql -h $R \$(("; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "remote db: the Supabase Management API database endpoints are denied" {
+    local c U="https://api.supabase.com/v1/projects/$STG_REF/database/query"
+    for c in \
+        "curl -X POST $U -H 'Authorization: Bearer x' -d '{\"query\":\"select 1\"}'" \
+        "CURL -X POST $U" \
+        "Curl $U" \
+        "/usr/bin/curl --url $U" \
+        "curl \"https://api.supabase.com/v1/projects/\$REF/database/query\"" \
+        "curl \"\$API/v1/projects/x/database/query\"" \
+        "curl \"https://api.supabase.com/\$P\"" \
+        "curl https://API.SUPABASE.COM/v1/projects/x/database/query" \
+        "curl https://api.supabase.com/v1/projects/x/%64atabase/query" \
+        "curl https://api.supabase.com/v1/projects/x/data%2562ase/query" \
+        "curl 'https://api.supabase.com/v1/projects/x/{database}/query'" \
+        "curl 'https://api.supabase.com/v1/projects/x/[d-d]atabase/query'" \
+        "curl https://api.supabase.com//v1//projects/x/database/migrations" \
+        "curl https://api.supabase.com/platform/pg-meta/x/query" \
+        "curl https://api.supabase.io/v1/projects/x/database/query" \
+        "curl --connect-to example.com:443:api.supabase.com:443 https://example.com/v1/projects/x/database/query" \
+        "wget --post-data='{}' $U" \
+        "http POST api.supabase.com/v1/projects/x/database/query query='select 1'" \
+        "xh POST $U query='select 1'" \
+        "gh api $U" \
+        "bash -c 'curl -X POST $U'" \
+        "echo x | xargs curl -X POST $U" \
+        "keyshelf run -- curl -X POST $U" \
+        "python3 -c \"import urllib.request as r; r.urlopen('$U')\""; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in \
+        "curl https://api.supabase.com/v1/projects" \
+        "curl -sS https://api.supabase.com/v1/projects/$STG_REF/api-keys" \
+        "curl https://example.com/database" \
+        "gh api repos/sunsay-ltd/core/pulls" \
+        "git commit -m 'guard curl to /v1/projects/x/database/query'"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "remote db: eval and sh -c of dynamic code are denied, static code is parsed" {
+    local c
+    for c in \
+        "eval \"\$CMD\"" \
+        "eval \$CMD" \
+        "eval \"supabase \$X\"" \
+        "eval \"psql \$ARGS\"" \
+        "eval \"\$(echo cHNxbA== | base64 -d) -h db.x\"" \
+        "X=\$(cat cmd.txt); eval \"\$X\"" \
+        "bash -c \"\$X\"" \
+        "sh -c \"psql -h \$H\"" \
+        "zsh -c \"\$CMD\"" \
+        "bash -lc \"supabase db query --linked \$Q\"" \
+        "bash <<< \"\$X\"" \
+        "bash <<EOF
+psql -h \$H
+EOF"; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in \
+        "eval 'echo hi'" \
+        "bash -c 'echo hi'" \
+        "sh -c 'ls -la'"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
+
+@test "remote db: deny messages point at the allowed supabase db query form" {
+    local r
+    r=$(decide_reason "psql -h db.example.com")
+    [[ $r == *"supabase db query --linked 'begin read only; select ...; commit;'"* ]]
+    [[ $r == *"127.0.0.1, localhost, ::1 or a unix socket"* ]]
+    r=$(decide_reason "curl https://api.supabase.com/v1/projects/x/database/query")
+    [[ $r == *"Management API"* && $r == *"begin read only; select ...; commit;"* ]]
+    r=$(decide_reason "eval \"\$CMD\"")
+    [[ $r == *"Write the command out literally"* && $r == *"begin read only; select ...; commit;"* ]]
+}
+
+@test "remote db: the guard fails closed when the remote-db checker cannot run" {
+    local fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\nexit 127\n' >"$fake/python3"
+    chmod +x "$fake/python3"
+    assert_decision DENY "$(PATH="$fake:$PATH" decide "psql -h 127.0.0.1 -c 'select 1'")"
 }
