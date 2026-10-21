@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_state.sh"
 
 (($# == 5)) || {
-    echo "Usage: staging_verify.sh <owner/repo> <target> <pr-number> <merge-sha> <ci: pass|fail|timeout|none|pending-superseded>" >&2
+    echo "Usage: staging_verify.sh <owner/repo> <target> <pr-number> <merge-sha> <ci: pass|fail|timeout|none>" >&2
     exit 2
 }
 REPO=$1
@@ -33,6 +33,7 @@ record() {
     case "$result" in
         pass) echo "Staging verify PASSED for ${REPO} (merge commit ${SHA}): ${reason}" ;;
         n/a) echo "Staging verify N/A for ${REPO}: ${reason}" ;;
+        unverified) echo "Staging verify NOT VERIFIED for ${REPO} (merge commit ${SHA}): ${reason}" ;;
         no-config) echo "Staging verify NOT CONFIGURED for ${REPO}: ${reason}" ;;
         *) echo "Staging verify FAILED for ${REPO} (merge commit ${SHA}): ${reason}" ;;
     esac
@@ -43,7 +44,8 @@ record() {
 [[ $SHA =~ ^[0-9a-f]{7,40}$ ]] || record error "invalid merge commit '${SHA}'"
 
 case "$CI" in
-    pass | none | pending-superseded) ;;
+    pass | none) ;;
+    timeout) record unverified "post-merge CI timeout" ;;
     *) record fail "post-merge CI ${CI}" ;;
 esac
 
