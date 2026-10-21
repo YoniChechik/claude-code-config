@@ -296,6 +296,14 @@ supabase_query_scan() {
     fi
     local n=${#words[@]}
     ((n > 0)) || return 0
+    if [ "${SEG_DYN:0:1}" = "1" ]; then
+        for ((i = 1; i < n; i++)); do
+            if [ "${words[$i],,}" = "query" ]; then
+                sb_query_deny "a command whose name is a variable" "the command name is dynamic and may be \`supabase\`"
+                return 0
+            fi
+        done
+    fi
     if [ -z "$SEG_CODE" ] || [ "${#SEG_REASONS[@]}" -gt 0 ]; then
         w="${words[0]##*/}"
         w="${w,,}"
