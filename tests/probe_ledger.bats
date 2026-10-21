@@ -265,3 +265,12 @@ ro_of() { bash_event "$1" >/dev/null; last .ro; }
     bash_event "tar xzf a.tgz"
     assert_eq "\`tar\`: not list mode (\`t\` or \`--list\`)" "$(last .ro_reason)"
 }
+
+@test "a command wrapped by the bash-timeout runner is recorded as the inner command" {
+    inner="rtk ls -la /tmp | head -3"
+    wrapped=$(jq -rn --arg c "$inner" '"bash \("/u/.claude/hooks/bash-timeout-run.sh" | @sh) 1785 fg toolu_9 \($c | @sh)"')
+    bash_event "$wrapped" >/dev/null
+    assert_eq ls "$(last .bin)"
+    assert_eq "true" "$(last .ro)"
+    assert_eq "ls /tmp -la | head -3" "$(last .cmd)"
+}

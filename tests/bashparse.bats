@@ -183,6 +183,21 @@ b\"" /s; bp_segments_text' _ "$LIB"
     assert_eq $'git push\ngh pr create --body a\\nb' "$output"
 }
 
+@test "bp_parse_hook unwraps the bash-timeout runner and parses the inner command" {
+    inner="cd w && sha=\$(git rev-parse HEAD) && gh pr merge 3 --match-head-commit \"\$sha\"; echo 'it'\"'\"'s'"
+    wrapped=$(jq -rn --arg c "$inner" '"bash \("/home/u/.claude/hooks/bash-timeout-run.sh" | @sh) 1785 fg toolu_9 \($c | @sh)"')
+    run bash -c 'source "$1"; bp_parse_hook "$(jq -cn --arg c "$2" "{tool_input: {command: \$c}, cwd: \"/repo\"}")" || exit 9
+        bp_find gh pr merge || exit 8; bp_seg "${BP_MATCHES[0]}"; printf "%s|%s|%s" "$BP_CMD" "$SEG_CWD" "${SEG_ARGV[2]}"' _ "$LIB" "$wrapped"
+    assert_eq "$inner|/repo/w|merge" "$output"
+}
+
+@test "bp_parse_hook leaves any other bash script with a quoted argument alone" {
+    cmd="bash '/x/other.sh' 1785 fg toolu_9 'gh pr merge 3'"
+    run bash -c 'source "$1"; bp_parse_hook "$(jq -cn --arg c "$2" "{tool_input: {command: \$c}, cwd: \"/repo\"}")" || exit 9
+        bp_find gh pr merge && exit 7; printf "%s" "$BP_CMD"' _ "$LIB" "$cmd"
+    assert_eq "$cmd" "$output"
+}
+
 @test "bp_parse without a cwd uses PWD and an unknown relative cwd stays unknown" {
     run bash -c 'cd /tmp && source "$1" && bp_parse "git push" && bp_seg 0 && printf "%s|%s" "$SEG_CWD" "$SEG_CWD_KNOWN"' _ "$LIB"
     assert_eq '/tmp|1' "$output"

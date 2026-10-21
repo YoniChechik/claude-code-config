@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-BP_FILTER="${BASH_SOURCE[0]%/*}/bashparse.jq"
+BP_DIR="${BASH_SOURCE[0]%/*}"
+BP_FILTER="$BP_DIR/bashparse.jq"
 BP_TIMEOUT="${BASHPARSE_TIMEOUT:-3}"
 BP_MAX_DEPTH="${BASHPARSE_DEPTH:-4}"
 BP_READY=""
@@ -48,6 +49,9 @@ _bp_pipe() {
     local mode=$1 data=$2 rc cdpath=false text=""
     local -a dirs=()
     [[ -n ${CDPATH:-} ]] && cdpath=true
+    if [[ $mode == hook && $data == *bash-timeout-run.sh* ]]; then
+        data=$(printf '%s' "$data" | jq -c -L "$BP_DIR" 'include "_hook_input"; unwrap_bash_timeout' 2>/dev/null) || data=$2
+    fi
     case $mode in
         hook) text=$(printf '%s' "$data" | jq -j '.tool_input.command | strings' 2>/dev/null) ;;
         plain) text=$data ;;

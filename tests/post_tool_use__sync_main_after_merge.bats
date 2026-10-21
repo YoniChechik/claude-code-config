@@ -131,3 +131,50 @@ fire() {
     [ "$status" -eq 0 ]
     [ ! -s "$HOOK_LOG" ]
 }
+
+wrap() {
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$BATS_TEST_TMPDIR/bin/gtimeout"
+    chmod +x "$BATS_TEST_TMPDIR/bin/gtimeout"
+    jq -nc --arg c "$1" '{tool_name:"Bash",tool_use_id:"toolu_1",tool_input:{command:$c}}' \
+        | PATH="$BATS_TEST_TMPDIR/bin:$PATH" BASH_TIMEOUT_SKIP_RTK=1 bash "${BATS_TEST_DIRNAME}/../hooks/bash-timeout-pre.sh" \
+        | jq -r '.hookSpecificOutput.updatedInput.command'
+}
+
+@test "a compound merge rewritten by the bash-timeout wrapper syncs" {
+    wrapped=$(wrap "cd $WT && sha=\$(git rev-parse HEAD) && gh pr merge 164 --squash --match-head-commit \"\$sha\" 2>&1 | tail -2; gh pr view 164 --json state -q .state")
+    [[ $wrapped == "bash '"*"/hooks/bash-timeout-run.sh' "* ]]
+    run fire "$wrapped" 0 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
+    grep -q "sync: [^ ]*/primary | cd $WT && sha=" "$HOOK_LOG"
+}
+
+@test "a wrapped merge whose command holds single quotes syncs" {
+    wrapped=$(wrap "cd $WT && gh pr merge 5 --squash --subject 'it'\"'\"'s done' && echo 'ok'")
+    run fire "$wrapped" 0 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
+}
+
+@test "a wrapped command that only mentions gh pr merge in a string never syncs" {
+    before="$(git -C "$PRIMARY" rev-parse HEAD)"
+    wrapped=$(wrap "cd $WT && echo 'gh pr merge 5'")
+    run fire "$wrapped" 0 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$before" ]
+}
+
+@test "a wrapped merge whose later step fails still syncs" {
+    wrapped=$(wrap "cd $WT && gh pr merge 7 --squash && false")
+    run fire "$wrapped" 1 "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$PRIMARY" rev-parse HEAD)" = "$MERGED_SHA" ]
+}
+
+@test "settings.json runs the sync hook for Bash on PostToolUse and on PostToolUseFailure" {
+    for event in PostToolUse PostToolUseFailure; do
+        run jq -e --arg e "$event" 'any(.hooks[$e][]; .matcher == "Bash" and any(.hooks[]; .command | endswith("/scripts/post_tool_use__sync_main_after_merge.sh")))' "${BATS_TEST_DIRNAME}/../settings.json"
+        [ "$status" -eq 0 ]
+    done
+}

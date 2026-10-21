@@ -1,4 +1,5 @@
 include "_probe_common";
+include "_hook_input";
 
 def mcp_tool: split("__") | last;
 
@@ -194,5 +195,5 @@ def record:
 if type != "object" then empty
 elif $op == "hash" then out_text
 elif ((.hook_event_name // "") | test("^PostToolUse(Failure)?$")) and ((.tool_name // "") | recorded) and ((.session_id // "") | tostring) != "" then
-  (.session_id | tostring), "\u0000", (record | tojson), "\u0000"
+  (.session_id | tostring), "\u0000", (unwrap_bash_timeout | record | tojson), "\u0000"
 else empty end
