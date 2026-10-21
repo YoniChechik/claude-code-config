@@ -726,6 +726,8 @@ commit; -- done'" \
         assert_decision NONE "$(sbq "$SB_STG" "$a")" || { echo "args: $a" >&2; return 1; }
     done
     assert_decision NONE "$(decide_in "$SB_PROD" "npx supabase --workdir . db query --linked 'begin read only; select 1; commit;'")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "bash -c \"supabase db query --linked 'begin read only; select 1; commit;'\"")"
+    assert_decision NONE "$(decide_in "$SB_PROD" "git commit -m 'guard supabase db query --linked'")"
 }
 
 @test "db query: write and escape SQL against --linked is denied (prod, staging, unlinked)" {
@@ -821,7 +823,12 @@ SQL")"
         "find . -exec supabase db query --linked 'delete from t' \\;" \
         "supabase db query \"\$F\" 'delete from t'" \
         "supabase db \"\$SUB\" --linked 'delete from t'" \
-        "supabase \$(echo db) query --linked 'delete from t'"; do
+        "supabase \$(echo db) query --linked 'delete from t'" \
+        "env -S \"supabase db query --linked 'delete from t'\"" \
+        "env --split-string=\"supabase db query --linked 'delete from t'\"" \
+        "env -S supabase db query --linked 'delete from t'" \
+        "script -q /dev/null \"supabase db query --linked 'delete from t'\"" \
+        "flock /tmp/l -c \"supabase db query --linked 'delete from t'\""; do
         assert_decision DENY "$(decide_in "$SB_PROD" "$c")" || { echo "cmd: $c" >&2; return 1; }
     done
 }

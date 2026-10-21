@@ -221,6 +221,7 @@ supabase_query_decide() {
     while [ "$k" -lt "$n" ]; do
         tok="${TOOL_ARGS[$k]}"
         dyn="${SEG_DYN:off+k:1}"
+        [ "$SBQ_FORCE_DYN" = "1" ] && dyn=1
         if [ "$dyn" = "1" ]; then
             remote=1
             target="${target:-a target that depends on a dynamic argument}"
@@ -286,15 +287,38 @@ supabase_query_decide() {
 }
 
 supabase_query_scan() {
-    local i w n=${#W[@]}
+    local i w lw
+    local -a words=(${W[@]+"${W[@]}"})
+    SBQ_FORCE_DYN=0
+    if [[ $SEG_FLAGS == *U* ]] || [ -z "${W[0]:-}" ]; then
+        words=(${SEG_RAW[@]+"${SEG_RAW[@]}"})
+        SBQ_FORCE_DYN=1
+    fi
+    local n=${#words[@]}
+    ((n > 0)) || return 0
+    if [ -z "$SEG_CODE" ] || [ "${#SEG_REASONS[@]}" -gt 0 ]; then
+        lw="${words[0]##*/}"
+        case "${lw,,}" in
+            git | gh) ;;
+            *)
+                for ((i = 1; i < n; i++)); do
+                    lw="${words[$i],,}"
+                    if [[ $lw =~ (^|[^a-z0-9_])supabase([^a-z0-9_]|$) && $lw =~ (^|[^a-z0-9_])query([^a-z0-9_]|$) ]]; then
+                        deny "Blocked: an argument of \`${words[0]}\` holds a \`supabase ... query\` command line that another program may run, so the guard cannot review its SQL. Run \`supabase db query\` directly as its own command, with the SQL as one single-quoted literal: \`supabase db query --linked 'begin read only; select ...; commit;'\`. Writes must be run manually by the user."
+                        return 0
+                    fi
+                done
+                ;;
+        esac
+    fi
     for ((i = 0; i < n; i++)); do
-        w="${W[$i]##*/}"
+        w="${words[$i]##*/}"
         w="${w,,}"
         case "$w" in
             supabase | supabase@*) ;;
             *) continue ;;
         esac
-        TOOL_ARGS=("${W[@]:i+1}")
+        TOOL_ARGS=("${words[@]:i+1}")
         supabase_query_decide "$1" $((i + 1))
     done
 }

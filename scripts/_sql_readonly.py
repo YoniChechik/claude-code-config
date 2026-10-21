@@ -116,6 +116,13 @@ DENY_PREFIXES = (
     "pg_clear_",
     "pg_restore_",
     "pg_set_",
+    "pg_buffercache_evict",
+    "pg_truncate_",
+    "pg_prewarm",
+    "pg_export_snapshot",
+    "postgres_fdw_",
+    "pg_stat_force_next_flush",
+    "pg_stat_clear_snapshot",
 )
 
 BEGIN_MODE_WORDS = {

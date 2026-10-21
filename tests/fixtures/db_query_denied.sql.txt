@@ -93,3 +93,8 @@ begin read only; select $1; commit;
 begin read only;; select 1; commit;
 begin read only; select 1; commit;;
 begin read only; select 1;; commit;
+begin read only; select pg_prewarm('public.t'); commit;
+begin isolation level repeatable read, read only; select pg_export_snapshot(); commit;
+begin read only; select postgres_fdw_disconnect('server1'); commit;
+begin read only; select pg_stat_force_next_flush(); commit;
+begin read only; select pg_stat_clear_snapshot(); commit;
