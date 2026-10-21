@@ -1134,3 +1134,31 @@ EOF"; do
         assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
     done
 }
+
+@test "remote db: libpq variables set earlier in the command, curl URL globs and no-connect flags" {
+    local c R="db.$PROD_REF.supabase.co"
+    for c in \
+        "export PGHOST=$R; psql" \
+        "PGHOST=$R; export PGHOST; psql -c 'select 1'" \
+        "declare -x PGHOSTADDR=1.2.3.4 && pg_dump postgres" \
+        "export PGSERVICE=prod; psql" \
+        "export PGDATABASE=postgresql://$R/postgres; psql" \
+        "export PGHOST=\"\$H\"; psql" \
+        "read PGHOST <h.txt; psql" \
+        "curl 'https://api.supabase.com/v1/projects/x/{data,foo}base/query'" \
+        "CURL 'https://api.supabase.com/v1/projects/x/[c-e]atabase'" \
+        "curl https://api.supabase.com:443/v1/projects/x/database/query" \
+        "curl https://api.supabase.com./v1/projects/x/database/query"; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in \
+        "export PGHOST=127.0.0.1; psql" \
+        "export PGHOST='/tmp' PGDATABASE=postgres; psql" \
+        "echo \$PGHOST; psql -h localhost" \
+        "psql --version --host=$R" \
+        "pg_dump -V" \
+        "pgcli --help" \
+        "curl https://api.supabase.com.example.org/v1/x"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}

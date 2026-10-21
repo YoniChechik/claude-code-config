@@ -798,6 +798,10 @@ for ((seg_i = 0; seg_i < BP_N; seg_i++)); do
     check_segment
 done
 
+if [ "$PG_SEEN" = "1" ] && [ -z "$VERDICT_REASON" ] && [[ $BP_CMD == *PG* ]] && ! remote_db_py '{"mode":"env"}' "$BP_CMD"; then
+    deny "Blocked: this command runs a Postgres client and sets a libpq connection variable for it: $REPLY. $REMOTE_DB_ALLOWED"
+fi
+
 if [ "$PG_SEEN" = "1" ] && [[ $BP_CMD == *\\* ]] && ! remote_db_py '{"mode":"meta"}' "$BP_CMD"; then
     deny "Blocked: this command runs a Postgres client and its text holds a psql meta-command that may leave the local database: $REPLY. $REMOTE_DB_ALLOWED"
 fi

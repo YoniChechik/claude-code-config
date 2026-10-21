@@ -340,8 +340,14 @@ def resolve_long(spec, name):
     return None
 
 
+NO_CONNECT = {"--help", "--version", "-?"}
+
+
 def check_pg_argv(tool, args, dyn, env, strict):
     spec = SPECS[tool]
+    no_connect = NO_CONNECT if tool == "pgcli" else NO_CONNECT | {"-V"}
+    if any(a in no_connect for a in args):
+        return
     if "PGHOST" in env:
         check_hosts(env["PGHOST"], "$PGHOST", LOCAL_HOSTS)
     if "PGHOSTADDR" in env:
@@ -412,7 +418,33 @@ def check_pg_argv(tool, args, dyn, env, strict):
             check_conn(word)
 
 
-MGMT_HOST = re.compile(r"api\.supabase\.(?:com|io)")
+MGMT_HOST = re.compile(
+    r"(?<![a-z0-9.-])api\.supabase\.(?:com|io)\.?(?=(?::[0-9]*)?(?:[/?#]|$))"
+)
+PG_ENV_NAMES = ("PGHOST", "PGHOSTADDR", "PGSERVICE", "PGDATABASE")
+PG_ENV_ASSIGN = re.compile(
+    r"(?<![A-Za-z0-9_$])(PGHOST|PGHOSTADDR|PGSERVICE|PGDATABASE)=(\"[^\"]*\"|'[^']*'|[^\s;&|)]*)"
+)
+PG_ENV_OTHER = re.compile(
+    r"(?<![A-Za-z0-9_${])(PGHOST|PGHOSTADDR|PGSERVICE|PGDATABASE)(?![A-Za-z0-9_=])"
+)
+
+
+def check_env_assignments(text):
+    for m in PG_ENV_ASSIGN.finditer(text):
+        name, value = m.group(1), m.group(2)
+        if value[:1] in "\"'" and value[-1:] == value[:1] and len(value) >= 2:
+            quote = value[0]
+            value = value[1:-1]
+            if quote == '"' and ("$" in value or "`" in value):
+                raise Deny(f"{name} is set from a variable or command substitution")
+        elif "$" in value or "`" in value:
+            raise Deny(f"{name} is set from a variable or command substitution")
+        check_pg_argv("psql", [], [], {name: value}, True)
+    if PG_ENV_OTHER.search(text):
+        raise Deny(
+            "the command changes PGHOST, PGHOSTADDR, PGSERVICE or PGDATABASE in a way the guard cannot read"
+        )
 
 
 def normalize_url(word):
@@ -433,6 +465,11 @@ def check_http_word(word, http_tool):
     m = MGMT_HOST.search(text)
     if m:
         tail = text[m.end() :]
+        raw_tail = word[word.lower().find("supabase") :] if "supabase" in word.lower() else word
+        if http_tool and re.search(r"[{}\[\]]", raw_tail):
+            raise Deny(
+                "it calls the Supabase Management API with a curl URL glob the guard does not expand"
+            )
         if re.search(r"database|pg-meta|query|sql", tail):
             raise Deny(
                 "it calls the Supabase Management API's database or SQL endpoints"
@@ -489,6 +526,8 @@ def main():
             for word in words:
                 check_text(word)
             check_text(" ".join(words))
+        elif mode == "env":
+            check_env_assignments(words[0])
         elif mode == "meta":
             check_meta(words[0])
         else:
