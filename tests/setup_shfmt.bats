@@ -9,6 +9,7 @@ setup() {
     mkdir -p "$STUBS"
     BREW_LOG="$BATS_TEST_TMPDIR/brew.log"
     export BREW_LOG
+    stub gtimeout 'exit 0'
 }
 
 assert_contains() {
@@ -65,4 +66,14 @@ run_setup() {
     assert_contains "Skipping shfmt install: Homebrew not found." "$output"
     assert_contains "https://github.com/mvdan/sh/releases" "$output"
     assert_contains "Done!" "$output"
+}
+
+@test "gtimeout missing with Homebrew present: installs coreutils after shfmt" {
+    rm "$STUBS/gtimeout"
+    stub brew 'echo "$*" >>"$BREW_LOG"'
+    run_setup
+    assert_eq 0 "$status"
+    assert_contains "Installing coreutils" "$output"
+    assert_eq "install shfmt
+install coreutils" "$(cat "$BREW_LOG")"
 }
