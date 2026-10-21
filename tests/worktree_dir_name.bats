@@ -82,3 +82,38 @@ create() { (cd "$BATS_TEST_TMPDIR/repo" && bash "$CREATE" "$1" 2>/dev/null | tai
     [ "${dir:0:20}" = "${name:0:20}" ]
     [ -d "$BATS_TEST_TMPDIR/repo/$out" ]
 }
+
+stack_repo() {
+    local name="$1" exit_code="$2"
+    local rel
+    rel=$(create "$name")
+    WT="$BATS_TEST_TMPDIR/repo/$rel"
+    mkdir -p "$WT/scripts/sunsay-dev"
+    printf '#!/bin/sh\necho "$@" > "%s/down.args"\nexit %s\n' "$BATS_TEST_TMPDIR" "$exit_code" > "$WT/scripts/sunsay-dev/sunsay-dev"
+    chmod +x "$WT/scripts/sunsay-dev/sunsay-dev"
+    mkdir -p "$BATS_TEST_TMPDIR/repo/.git/info" && echo "scripts/" >> "$BATS_TEST_TMPDIR/repo/.git/info/exclude"
+}
+
+@test "destroy stops the sunsay-dev stack with down --force before removing" {
+    stack_repo stack-ok 0
+    run bash -c "cd '$BATS_TEST_TMPDIR/repo' && bash '$DESTROY' stack-ok --force"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/down.args")" = "down --force" ]
+    [ ! -e "$WT" ]
+}
+
+@test "destroy refuses to remove the worktree when sunsay-dev down fails" {
+    stack_repo stack-bad 3
+    git -C "$WT" push -q -u origin HEAD 2>/dev/null
+    run bash -c "cd '$BATS_TEST_TMPDIR/repo' && bash '$DESTROY' stack-bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"would orphan"* ]]
+    [ -d "$WT" ]
+}
+
+@test "destroy --force removes the worktree even when sunsay-dev down fails" {
+    stack_repo stack-force 3
+    run bash -c "cd '$BATS_TEST_TMPDIR/repo' && bash '$DESTROY' stack-force --force"
+    [ "$status" -eq 0 ]
+    [ ! -e "$WT" ]
+}
