@@ -104,3 +104,6 @@ begin read only; select pg_wait_sampling_reset_profile(); commit;
 begin read only; select cron.unschedule(1); commit;
 begin read only; select pgmq.send('q', '{}'); commit;
 begin read only; select my_flush (); commit;
+begin read only; select * from pg_control_system(); commit;
+set default_transaction_read_only = on; set session characteristics as transaction read only; begin read only; select 1; commit;
+set default_transaction_read_only = on; set default_transaction_read_only = on; begin read only; select 1; commit;

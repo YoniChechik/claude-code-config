@@ -119,6 +119,7 @@ DENY_PREFIXES = (
     "pg_buffercache_evict",
     "pg_truncate_",
     "pg_prewarm",
+    "pg_control_",
     "pg_export_snapshot",
     "postgres_fdw_",
     "pg_stat_force_next_flush",
@@ -382,8 +383,8 @@ def validate(sql):
         )
     stmts = split_statements(tokenize(sql))
     i = 0
-    while i < len(stmts) and is_pre(stmts[i]):
-        i += 1
+    if stmts and is_pre(stmts[0]):
+        i = 1
     if i >= len(stmts) or not is_begin(stmts[i]):
         raise Reject(
             "the first statement (after optional SET default_transaction_read_only = on) must be BEGIN READ ONLY / START TRANSACTION READ ONLY"
