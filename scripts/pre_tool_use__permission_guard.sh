@@ -297,19 +297,20 @@ supabase_query_scan() {
     local n=${#words[@]}
     ((n > 0)) || return 0
     if [ -z "$SEG_CODE" ] || [ "${#SEG_REASONS[@]}" -gt 0 ]; then
-        lw="${words[0]##*/}"
-        case "${lw,,}" in
-            git | gh) ;;
-            *)
-                for ((i = 1; i < n; i++)); do
-                    lw="${words[$i],,}"
-                    if [[ $lw =~ (^|[^a-z0-9_])supabase([^a-z0-9_]|$) && $lw =~ (^|[^a-z0-9_])query([^a-z0-9_]|$) ]]; then
-                        deny "Blocked: an argument of \`${words[0]}\` holds a \`supabase ... query\` command line that another program may run, so the guard cannot review its SQL. Run \`supabase db query\` directly as its own command, with the SQL as one single-quoted literal: \`supabase db query --linked 'begin read only; select ...; commit;'\`. Writes must be run manually by the user."
-                        return 0
-                    fi
-                done
-                ;;
-        esac
+        w="${words[0]##*/}"
+        w="${w,,}"
+        for ((i = 1; i < n; i++)); do
+            lw="${words[$i],,}"
+            if [[ $lw =~ (^|[^a-z0-9_])supabase([^a-z0-9_]|$) && $lw =~ (^|[^a-z0-9_])query([^a-z0-9_]|$) ]]; then
+                case "$w" in
+                    git | gh)
+                        [[ $lw == *[=!]* || ${words[i - 1]} == -c || ${words[i - 1]} == --config-env ]] || continue
+                        ;;
+                esac
+                deny "Blocked: an argument of \`${words[0]}\` holds a \`supabase ... query\` command line that another program may run, so the guard cannot review its SQL. Run \`supabase db query\` directly as its own command, with the SQL as one single-quoted literal: \`supabase db query --linked 'begin read only; select ...; commit;'\`. Writes must be run manually by the user."
+                return 0
+            fi
+        done
     fi
     for ((i = 0; i < n; i++)); do
         w="${words[$i]##*/}"

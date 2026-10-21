@@ -98,3 +98,9 @@ begin isolation level repeatable read, read only; select pg_export_snapshot(); c
 begin read only; select postgres_fdw_disconnect('server1'); commit;
 begin read only; select pg_stat_force_next_flush(); commit;
 begin read only; select pg_stat_clear_snapshot(); commit;
+begin read only; select pg_stat_monitor_reset(); commit;
+begin read only; select pg_stat_kcache_reset(); commit;
+begin read only; select pg_wait_sampling_reset_profile(); commit;
+begin read only; select cron.unschedule(1); commit;
+begin read only; select pgmq.send('q', '{}'); commit;
+begin read only; select my_flush (); commit;

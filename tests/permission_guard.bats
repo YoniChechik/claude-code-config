@@ -828,7 +828,10 @@ SQL")"
         "env --split-string=\"supabase db query --linked 'delete from t'\"" \
         "env -S supabase db query --linked 'delete from t'" \
         "script -q /dev/null \"supabase db query --linked 'delete from t'\"" \
-        "flock /tmp/l -c \"supabase db query --linked 'delete from t'\""; do
+        "flock /tmp/l -c \"supabase db query --linked 'delete from t'\"" \
+        "git -c \"alias.q=!supabase db query --linked 'delete from t'\" q" \
+        "git -c core.pager=\"supabase db query --linked 'delete from t'\" log" \
+        "git -c \"core.sshCommand supabase db query\" fetch"; do
         assert_decision DENY "$(decide_in "$SB_PROD" "$c")" || { echo "cmd: $c" >&2; return 1; }
     done
 }

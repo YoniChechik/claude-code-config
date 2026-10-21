@@ -139,6 +139,13 @@ BEGIN_MODE_WORDS = {
 }
 
 
+SIDE_EFFECT_CALL = re.compile(
+    r"(^|_)(reset|evict|flush|terminate|cancel|signal|kill|notify|lock|unlock|advisory|exec|execute"
+    r"|launch|send|schedule|unschedule|purge|rotate|reload|promote|replay|enqueue|dequeue|publish"
+    r"|request|write|http)(_|$)"
+)
+
+
 class Reject(Exception):
     pass
 
@@ -338,10 +345,19 @@ def check_body(st, idx):
         )
     explain = first[1] == "explain"
     seen_query = False
-    for t in st[1:]:
+    for pos, t in enumerate(st[1:], start=1):
         if t[0] not in ("word", "ident"):
             continue
         name = t[1]
+        if (
+            pos + 1 < len(st)
+            and st[pos + 1] == ("op", "(")
+            and SIDE_EFFECT_CALL.search(name)
+        ):
+            return "`%s(` looks like a function with side effects (statement %d)" % (
+                name,
+                idx,
+            )
         if t[0] == "word" and name in QUERY_WORDS:
             seen_query = True
         if (
