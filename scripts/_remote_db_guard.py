@@ -398,6 +398,18 @@ def check_pg_argv(tool, args, dyn, env, strict):
             continue
         positionals.append(word)
         i += 1
+    global STRICT
+    saved, STRICT = STRICT, True
+    try:
+        check_pg_opts(tool, spec, opts)
+    finally:
+        STRICT = saved
+    if spec["positional_conn"]:
+        for word in positionals:
+            check_conn(word)
+
+
+def check_pg_opts(tool, spec, opts):
     for opt, value in opts:
         if opt == "!" or opt == "ssh-tunnel":
             raise Deny(
@@ -413,9 +425,6 @@ def check_pg_argv(tool, args, dyn, env, strict):
             check_conn(value)
         elif tool == "psql" and opt == "c":
             check_meta(value)
-    if spec["positional_conn"]:
-        for word in positionals:
-            check_conn(word)
 
 
 MGMT_HOST = re.compile(
@@ -426,7 +435,7 @@ PG_ENV_ASSIGN = re.compile(
     r"(?<![A-Za-z0-9_$])(PGHOST|PGHOSTADDR|PGSERVICE|PGDATABASE)=(\"[^\"]*\"|'[^']*'|[^\s;&|)]*)"
 )
 PG_ENV_OTHER = re.compile(
-    r"(?<![A-Za-z0-9_${])(PGHOST|PGHOSTADDR|PGSERVICE|PGDATABASE)(?![A-Za-z0-9_=])"
+    r"(?<![A-Za-z0-9_-])(?:export|declare|typeset|readonly|local|read|printf|mapfile|readarray|getopts)\b[^;&|\n]*(?<![A-Za-z0-9_${])(PGHOST|PGHOSTADDR|PGSERVICE|PGDATABASE)(?![A-Za-z0-9_=])"
 )
 
 
@@ -470,7 +479,7 @@ def check_http_word(word, http_tool):
             raise Deny(
                 "it calls the Supabase Management API with a curl URL glob the guard does not expand"
             )
-        if re.search(r"database|pg-meta|query|sql", tail):
+        if re.search(r"database|pg-meta|query|sql", re.split(r"[?#]", tail, 1)[0]):
             raise Deny(
                 "it calls the Supabase Management API's database or SQL endpoints"
             )
@@ -478,6 +487,10 @@ def check_http_word(word, http_tool):
             raise Deny(
                 "it calls the Supabase Management API with a path built from a variable"
             )
+    if http_tool and "/v1/projects/" in text and is_dynamic(word):
+        raise Deny(
+            "it calls a /v1/projects/ URL built from a variable or command substitution, which may be the Management API's database endpoint"
+        )
     if re.search(r"/v1/projects/.*database", text) or "/platform/pg-meta/" in text:
         raise Deny("it calls the Supabase Management API's database or SQL endpoints")
 

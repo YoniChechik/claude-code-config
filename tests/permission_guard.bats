@@ -1162,3 +1162,21 @@ EOF"; do
         assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
     done
 }
+
+@test "remote db: dynamic -h behind an unknown wrapper, assembled /v1/projects URLs, query strings and PGHOST mentions" {
+    local c
+    for c in \
+        "ionice -c 3 psql -h \"\$(printf db.example.com)\"" \
+        "doas psql --host=\"\$H\"" \
+        "curl \"https://\$(printf api.supabase.com)/v1/projects/x/\$(printf database/query)\"" \
+        "Wget \"https://\$HOST/v1/projects/x/\$P\""; do
+        assert_decision DENY "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+    for c in \
+        "ionice -c 3 psql -h 127.0.0.1" \
+        "grep -rn psql \"\$DIR\"" \
+        "curl 'https://api.supabase.com/v1/projects?search=database'" \
+        "psql -h 127.0.0.1; echo PGHOST"; do
+        assert_decision NONE "$(decide "$c")" || { echo "cmd: $c" >&2; return 1; }
+    done
+}
