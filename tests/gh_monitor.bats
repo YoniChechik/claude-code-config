@@ -616,16 +616,6 @@ wfruns_fixture() {
     assert_not_contains "FAILED" "$output"
 }
 
-@test "merge: a cancelled run whose superseder is still in progress keeps the watcher waiting" {
-    merged_pr
-    api_runs_fixture "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
-    stub api_wfruns.1 0 "$(jq -nc '{workflow_runs:[{id:21,status:"in_progress",conclusion:null,head_sha:"def456",created_at:"c2"}]}')"
-    stub api_wfruns 0 "$(jq -nc '{workflow_runs:[{id:21,status:"completed",conclusion:"success",head_sha:"def456",created_at:"c2"}]}')"
-    stub api_compare 0 '{"status":"ahead"}'
-    run bash "$WATCHER" merge "$BRANCH"
-    assert_contains "Post-merge CI PASSED" "$output"
-    [ "$(call_count 'actions/runs')" -ge 2 ] || { echo "expected a second poll" >&2; return 1; }
-}
 
 @test "merge: a cancelled run whose superseder failed fails the verdict" {
     merged_pr
@@ -749,15 +739,14 @@ wfruns_fixture() {
     assert_contains "superseded         Website Release (run 11, attempt 1, push, superseded by run 23)" "$output"
 }
 
-@test "merge: a failed chain end with a later pending run keeps the watcher waiting on that run" {
-    export GH_MONITOR_WATCH_MAX=1
+@test "merge: a cancelled run whose chain end is a later pending run is terminal superseded-pending" {
     merged_pr
     api_runs_fixture "11:Website Release:completed:cancelled:1:push:5:main:abc123:c1"
     wfruns_fixture "23:queued::aaa333:c4" "22:in_progress::aaa222:c3" "21:completed:failure:aaa111:c2"
     stub api_compare 0 '{"status":"ahead"}'
     run timeout 30 bash "$WATCHER" merge "$BRANCH"
-    assert_contains "Post-merge verdict PENDING-SUPERSEDED" "$output"
-    assert_contains "(cancelled->current: 11->22)" "$output"
+    assert_contains "Post-merge CI PASSED" "$output"
+    assert_contains "superseded-pending Website Release (run 11, attempt 1, push, superseded by run 22)" "$output"
 }
 
 @test "merge: when every later run containing the merge failed, the newest failure fails the verdict" {
@@ -914,8 +903,7 @@ wfruns_fixture() {
     assert_contains "superseded         Release (run 11, attempt 1, push, superseded by run 21)" "$output"
 }
 
-@test "merge: cancelled runs whose chain end never finishes end in a PENDING-SUPERSEDED verdict naming the chain, not a hang" {
-    export GH_MONITOR_WATCH_MAX=1
+@test "merge: cancelled runs whose superseder is still running pass without waiting and still verify staging" {
     merged_pr
     write_verify_stub
     api_runs_fixture "10:Gates:completed:success:1:push:4:main:abc123:c1" "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
@@ -923,13 +911,11 @@ wfruns_fixture() {
     stub api_compare 0 '{"status":"ahead"}'
     run timeout 30 bash "$WATCHER" merge "$BRANCH"
     assert_eq 0 "$status"
-    assert_contains "Post-merge verdict PENDING-SUPERSEDED: CI watch for PR #3951" "$output"
-    assert_contains "nothing failed, 1 cancelled run(s) wait on a later run that contains the merge (cancelled->current: 11->21)" "$output"
+    assert_contains "Post-merge CI PASSED for PR #3951" "$output"
     assert_contains "superseded-pending Release (run 11, attempt 1, push, superseded by run 21)" "$output"
-    assert_eq "o/r $BRANCH 3951 abc123 pending-superseded" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
-    assert_not_contains "PASSED for PR" "$output"
-    assert_not_contains "FAILED" "$output"
+    assert_eq "o/r $BRANCH 3951 abc123 pass" "$(cat "$BATS_TEST_TMPDIR/verify_calls.log")"
     assert_not_contains "UNKNOWN" "$output"
+    assert_not_contains "FAILED" "$output"
 }
 
 @test "merge: a real pending run next to a pending chain still times out UNKNOWN" {
@@ -940,19 +926,16 @@ wfruns_fixture() {
     stub api_compare 0 '{"status":"ahead"}'
     run timeout 30 bash "$WATCHER" merge "$BRANCH"
     assert_contains "Post-merge verdict UNKNOWN (timeout)" "$output"
-    assert_contains "2 still pending, 0 failed so far" "$output"
-    assert_not_contains "PENDING-SUPERSEDED" "$output"
+    assert_contains "1 still pending, 0 failed so far" "$output"
 }
 
-@test "merge: a real failure next to a pending chain is never reported as PENDING-SUPERSEDED" {
-    export GH_MONITOR_WATCH_MAX=1
+@test "merge: a real failure next to a pending superseded run fails the verdict" {
     merged_pr
     api_runs_fixture "10:Deploy:completed:failure:1:push:4:main:abc123:c1" "11:Release:completed:cancelled:1:push:5:main:abc123:c1"
     stub api_wfruns 0 "$(jq -nc '{workflow_runs:[{id:21,status:"in_progress",conclusion:null,head_sha:"def456",created_at:"c2"}]}')"
     stub api_compare 0 '{"status":"ahead"}'
     run timeout 30 bash "$WATCHER" merge "$BRANCH"
-    assert_contains "1 still pending, 1 failed so far" "$output"
-    assert_not_contains "PENDING-SUPERSEDED" "$output"
+    assert_contains "Post-merge CI FAILED for PR #3951" "$output"
 }
 
 @test "merge: a PR closed without merging is reported and never treated as an error" {

@@ -358,13 +358,12 @@ with `sleep` sidesteps the question entirely: the loop simply notices, within
    `startup_failure` fail, except that a `cancelled` run of any event is
    judged by the later runs of the same workflow, branch and event that are
    not cancelled and whose commit contains the merge commit, oldest first:
-   the first one that passed clears it, else the oldest still running keeps
-   the watch waiting, else the newest failure fails it (re-resolved every
-   poll, so a run that is cancelled in turn is followed to the next one;
-   with no such run, the newest cancelled one keeps it failed). At the watch bound, when
-   nothing failed and only such chains are still pending, the verdict is
-   `PENDING-SUPERSEDED` with the cancelled->current run ids, and the staging
-   verifier still checks the deploys instead of failing on CI alone;
+   the first one that passed clears it, else the oldest still running counts
+   as terminal `superseded-pending` (it belongs to a later merge's watch and
+   never holds this one), else the newest failure fails it (re-resolved every
+   poll; with no such run, the newest cancelled one keeps it failed). A watch
+   bound hit with real runs still pending is `UNKNOWN (timeout)`, and the
+   staging verifier then reports `NOT VERIFIED`, not `FAILED`;
    Actions check runs are skipped (their workflow run
    is authoritative) and runs from unrelated events on the same sha
    (`schedule`, `issue_comment`, …) are ignored. The verdict is declared only
