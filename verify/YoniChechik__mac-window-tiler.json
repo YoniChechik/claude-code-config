@@ -1,0 +1,1 @@
+{"targets":[],"reason":"macOS menu-bar desktop app with no deployed staging target; merges are verified by driving the locally built app (see the repo verify skill)"}
